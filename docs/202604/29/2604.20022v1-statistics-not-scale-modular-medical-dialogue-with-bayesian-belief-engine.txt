@@ -1,0 +1,1271 @@
+Title: Statistics, Not Scale: Modular Medical Dialogue with Bayesian Belief Engine
+
+URL Source: https://arxiv.org/pdf/2604.20022v1
+
+Published Time: Thu, 23 Apr 2026 00:15:49 GMT
+
+Number of Pages: 33
+
+Markdown Content:
+# Statistics, Not Scale: Modular Medical Dialogue with Bayesian Belief Engine 
+
+Yusuf Kesmen ∗
+
+LiGHT, EPFL 
+
+Fay Elhassan ∗
+
+LiGHT, EPFL 
+
+Jiayi Ma ∗
+
+University of Bern 
+
+Julien Stalhandske 
+
+LiGHT, EPFL 
+
+David Sasu 
+
+LiGHT, EPFL 
+
+Alexandra Kulinkina 
+
+LiGHT, EPFL 
+
+Akhil Arora †
+
+CLAN, Aarhus University 
+
+Lars Klein †
+
+LiGHT, EPFL 
+
+Mary-Anne Hartley †
+
+LiGHT, EPFL 
+
+## Abstract 
+
+Large language models are increasingly deployed as autonomous diagnostic agents, yet they conflate two fundamentally different capabilities: natural-language commu-nication and probabilistic reasoning. We argue that this conflation is an architectural flaw, not an engineering shortcoming. We introduce BMBE (Bayesian Medical Belief Engine), a modular diagnostic dialogue framework that enforces a strict separation between language and reasoning: an LLM serves only as a sensor, parsing patient utterances into structured evidence and verbalising questions, while all diagnostic inference resides in a deterministic, auditable Bayesian engine. Be-cause patient data never enters the LLM, the architecture is private by construction; because the statistical backend is a standalone module, it can be replaced per target population without retraining. This separation yields three properties no autonomous LLM can offer: calibrated selective diagnosis with a continuously adjustable accuracy–coverage tradeoff, a statistical separation gap where even a cheap sensor paired with the engine outperforms a frontier standalone model from the same family at a fraction of the cost, and robustness to adversarial patient communication styles that cause standalone doctors to collapse. We validate across empirical and LLM-generated knowledge bases against frontier LLMs, confirming the advantage is architectural, not informational. 
+
+## 1 Introduction 
+
+Medical dialog is sequential decision-making under uncertainty. At each turn, a clinician must choose what to ask, update a differential diagnosis in light of the answer, and decide whether enough evidence has been gathered to commit, or whether to seek further context. Large language models are increasingly cast in this role, yet they conflate two fundamentally different capabilities: natural-language communication and probabilistic diagnostic reasoning. The result is systems that sound 
+
+like doctors but lack the probabilistic grounding to reason like one: no explicit belief state, no information-theoretic question selection, uncalibrated confidence, and unauditable reasoning chains. We argue that these are not engineering shortcomings to be patched, they are consequences of a flawed architecture that asks a single model to do everything. What if instead, we could build an AI doctor that knows when it does not know , one that either produces a calibrated answer or defers, with a controllable tradeoff between diagnostic accuracy and patient coverage?  
+
+> ∗Equal contribution. Corresponding author: yusuf.kesmen@epfl.ch
+> †Equal supervision Preprint.
+> arXiv:2604.20022v1 [cs.LG] 21 Apr 2026
+
+This idea is not new in spirit. Classical clinical decision-support systems demonstrated decades ago that structured probabilistic reasoning produces accurate diagnoses ( 1; 2; 3; 4 ; 5). These systems saw limited clinical adoption not because their statistics were wrong, but because of poor integration into clinical workflows, the “Greek Oracle” model that treated clinicians as passive data-entry operators ( 6). Modern LLMs ( 7; 8; 9 ) have greatly improved integration by joining the patient conversation in natural speech. However, in doing so, they have traded epidemiological rigor for fluency: no formal posterior, no principled stopping rules, and no mechanism for calibrated deferral. Recent work attempts to bridge this divide by injecting probabilistic structure into LLM-driven pipelines ( 10 ; 11 ; 12 ; 13 ; 14 ). In every case, however, the LLM still participates in probability estimation, which remains susceptible to hallucination and provides no formal guarantees. An orthogonal line fine-tunes LLMs on clinical data to internalise medical statistics ( 15 ), but this raises concerns about data safety and auditability (no guarantee the model faithfully represents the underlying distributions at inference time). We argue that the right response is not a better hybrid but a strict separation . We introduce BMBE , a modular diagnostic dialogue architecture in which the LLM’s role is confined to two tasks: parsing patient utterances into structured evidence triples and verbalising the questions chosen by an external statistical engine. All diagnostic reasoning, Bayesian belief updates, question selection via expected information gain (EIG) maximisation, stopping rules, and abstention decisions, resides in a belief engine that is fully deterministic, mathematically auditable, and replaceable per target population without retraining the language model. Because patient data never enters the LLM, the architecture is private by construction. Crucially, when the posterior confidence remains below a calibrated threshold, the system abstains rather than guessing, providing a principled, controllable tradeoff between accuracy and coverage. Our main contributions are: • Strict separation of language and reasoning. We propose BMBE, a diagnostic dialogue architecture where the LLM never participates in belief updates or clinical decisions. All inference is deterministic, auditable, and private by construction. The statistical backend can be replaced per target population without retraining. • Controllable selective diagnosis. A single threshold τ traces a continuous accuracy– coverage frontier, from high-throughput triage to safety-critical referral, without retraining. Standalone LLMs have no equivalent mechanism. • Statistical separation gap. Within matched model families, a cheap BMBE sensor outper-forms the corresponding frontier standalone doctor at a fraction of the cost. The advantage persists across adversarial patient personas and grows as the disease space scales. • Architectural validation. A fair-fight experiment on LLM-generated knowledge bases, where BMBE and the standalone doctor share the same clinical knowledge, confirms the advantage is architectural, not informational. 
+
+## 2 Related Work 
+
+Statistical clinical decision support. Early CDSS demonstrated that structured probabilistic reasoning produces clinically useful diagnoses across a range of formalisms. MYCIN ( 1) used certainty-factor rules for antimicrobial therapy, outperforming faculty specialists in blinded evalua-tion ( 16 ). de Dombal et al. (2) showed that even naïve Bayes over abdominal diagnoses surpassed senior clinicians when given structured input. Internist-I/QMR ( 3) scaled heuristic disease-profile scoring to general internal medicine, and DXplain ( 4 ) maintained a disease–finding matrix with modified Bayesian logic over thousands of diseases. Later systems introduced richer representations: Pathfinder ( 5) used full Bayesian belief networks for lymph-node pathology, and CASNET ( 17 )modeled causal pathophysiologic pathways for glaucoma management. Despite strong diagnostic accuracy, adoption remained minimal: all required structured, pre-coded input and treated clinicians as passive data-entry operators, the “Greek Oracle” model ( 6). The bottleneck was interfacing , not reasoning. 
+
+End-to-end LLM-based diagnosis. Large language models eliminated the interfacing bottleneck. Med-PaLM 2 ( 7) achieved expert-level performance on MedQA with physician-preferred answers, 2(a) Standalone      
+
+> LLM Bayesian
+> BMBE
+> "I have a little fever maybe. I did not measure it." Okay! Let me think…
+> LLM - All in One
+> Receives full conversation
+> Internally reasons about differential
+> Decides next question and stopping
+> LLM Bayesian
+> LLM - Prob. Source
+> Generates predictive distribution
+> Statistics
+> Computes EIG from LLM posterior
+> LLM - Question Gen.
+> Generates the selected question
+> BMBE
+> LLM - Parser
+> Generates structured evidence
+> Bayesian Engine
+> Computes EIG from external KB
+> KB
+> P(symptom | disease)
+> LLM - Verb.
+> Ask selected feature
+
+(b) $0.005 $0.01 $0.02 $0.05 $0.1 $0.2 $0.5  
+
+> Estimated cost per patient ($)
+> 55
+> 60
+> 65
+> 70
+> 75
+> 80
+> 85
+> 90
+> 95
+> DHS
+> GPT-5.4
+> GPT-5.4-nano
+> Gemini 3.1 Pro
+> Gemini FL
+> GPT-OSS-120B
+> GPT-OSS-20B
+> Standalone + Bayesian engine
+
+Figure 1: (a) Three paradigms for LLM-based diagnostic dialogue. Standalone : the LLM handles all reasoning, questioning, and diagnosis internally. LLM Bayesian : an external module computes EIG from LLM-derived posteriors, principled question selection, but no grounded knowledge base. BMBE 
+
+(ours): the LLM serves only as a sensor; all diagnostic reasoning is performed by a deterministic Bayesian engine grounded in an explicit KB. (b) The statistical separation gap : by offloading diagnostic reasoning to a proper Bayesian engine, even a small, inexpensive sensor LLM outperforms its larger standalone counterpart from the same model family, at a fraction of the cost. and Med-Gemini ( 8) extended to multimodal inputs, though both remain single-turn with no belief state. In multi-turn dialogue, AMIE ( 9) outperformed primary-care physicians on most evaluation axes via self-play training, DocCHA ( 18 ) decomposes diagnosis into modular subtasks, and Xu et al. (19) align dialogue with clinical abductive reasoning. However, all these systems share a fundamental limitation: no formal probabilistic state , no explicit posterior, no information-theoretic question selection, no calibrated stopping rules, and no principled abstention. The absence of structured reasoning also creates safety risks: LLMs exhibit poor calibration in clinical settings, with verbalized confidence showing minimal variation between correct and incorrect answers ( 20 ), and high hallucination rates on adversarial clinical vignettes ( 21 ). Their medical knowledge is further skewed toward Western populations, propagating race-based medicine (22; 23). 
+
+Bridging probability and language. These shortcomings have motivated several lines of work that inject probabilistic reasoning into LLM-driven pipelines. On the active gathering side, MediQ ( 14 )shows that naive prompting to ask clarifying questions degrades diagnostic accuracy, and that reliable question-asking requires explicit abstention mechanisms the LLM does not possess by default. BED-LLM ( 10 ) embeds Bayesian Experimental Design for question selection but derives its probabilistic model entirely from the LLM’s own predictive distributions, no external knowledge base. APP ( 13 )combines medical guidelines with entropy-based active learning, yet the LLM still generates candidate questions before scoring. On the hybrid planning side, Sun et al. (24) use an RL-trained planner alongside an LLM parser, and general-purpose frameworks such as DeLLMa ( 11 ) and BIRD ( 12 )integrate decision theory and Bayesian inference respectively into LLM reasoning loops. In all cases, the LLM participates in probability estimation, which compromises mathematical guarantees. An orthogonal line fine-tunes LLMs directly on clinical data to internalize medical statistics ( 15 ), but adversarial attacks can extract training data, and there is no guarantee that learned distributions are faithfully represented at inference time. 
+
+Our position: strict separation. No existing system achieves full separation between language and diagnostic reasoning. We propose that the LLM should touch only language, parsing utterances and verbalizing questions, while all belief updates, question selection, stopping rules, and abstention decisions are handled by an external, inspectable statistical engine. This design makes the inference engine replaceable per population without retraining the LLM, directly addressing the geographic bias problem, since adapting to a new disease prevalence requires only swapping the knowledge base, not re-aligning the model. The engine is fully auditable, and ensures that patient data never enters the language model. Table 1 summarizes the landscape. 3Table 1: Comparison of diagnostic dialogue approaches. “Belief state” indicates whether the system maintains an explicit probabilistic posterior. “EIG” indicates information-theoretic question selection. “LLM-free reasoning” indicates that the LLM does not participate in diagnostic computation. 
+
+System Dialogue Belief state EIG Calibrated LLM-free abstention reasoning 
+
+MYCIN / DXplain / QMR ✗ ✓ ✗ ✗ ✓
+
+Med-PaLM 2 / Med-Gemini ✗ ✗ ✗ ✗ ✗
+
+AMIE ✓ ✗ ✗ ✗ ✗
+
+MEDIQ ✓ ✗ ✗ Heuristic ✗
+
+BED-LLM ✓ Approx. LLM-est. ✗ ✗
+
+APP (Zhu et al.) ✓ Partial Entropy ✗ ✗
+
+Sun et al. (RL planner) ✓ ✗ RL-based ✗ ✗
+
+DeLLMa / BIRD ✗ Approx. ✗ ✗ ✗
+
+BMBE (Ours) ✓ ✓ ✓ ✓ ✓
+
+## 3 Method 
+
+We formulate diagnostic dialogue as a sequential Bayesian decision process. Let D = {d1, . . . , d K }
+
+denote the set of K candidate diseases and F = {f1, . . . , f N } the set of N observable clinical features, where each feature fi takes values in a finite set Vfi . At each turn t, the system maintains a posterior belief bt ∈ ∆K−1 over diseases, selects the most informative feature to query, updates its belief from the patient’s response, and decides whether to terminate. The objective is to identify the correct diagnosis with calibrated confidence while minimising the number of questions asked. BMBE decomposes this into a language interface , an LLM that parses patient utterances and ver-balises questions, and a Bayesian reasoning engine that maintains beliefs, selects questions, and renders diagnostic decisions. The two communicate exclusively through structured evidence triples 
+
+(f, v, c ): feature identifier, schema-validated value, and confidence weight. All probabilistic reason-ing is performed by the engine, yielding a fully auditable decision trace. Algorithm 1 summarises the complete procedure. Parser  
+
+> Verbaliser
+> Knowledge Base
+> Belief Update
+> Question Policy
+> Stopping Criterion
+> Diagnosis
+> Symptoms
+> Bayesian Medical Belief Engine (BMBE)
+> Engine
+> Question Generation
+> “I have a little fever maybe. I did not measure it.”
+> Patient
+> LLM Layer Statistics Layer
+> (fever, likely=0.8)
+> (nausea: yes, no)
+> “Any nausea or vomiting?”
+> “Yes, I have it.”
+> Doctor
+> “Have you noticed any abdominal pain or discomfort?"
+> “Yes, I have some cramping pain around my stomach area.”
+> “Have you had any diarrhea in your bowel movements?"
+> “Yes, I’ve had diarrhea a few times since this morning.”
+> “It is likely that you have acute gastroenteritis."
+
+1
+
+2
+
+5
+
+6
+
+3
+
+4 4
+
+Figure 2: Overview of the BMBE architecture. The LLM layer handles only language: parsing patient utterances into structured evidence triples (f, v, c ) and verbalising the questions selected by the engine. All diagnostic reasoning, posterior updates, question selection via expected information gain (EIG), stopping rules, and calibrated abstention, resides in the Bayesian inference engine, which is fully deterministic and auditable. 4Algorithm 1 BMBE Diagnostic Session 
+
+Require: Knowledge base K with prior π, likelihoods {P (Xf =v | d)}, schema; threshold τ ;warm-up Tmin ; budget Tmax 
+
+Ensure: Diagnosis d∗ or ABSTAIN 1: Initialise b0(d) ← π(d) for all d ∈ D  
+
+> 2:
+
+LLM bulk-extracts {(fj , v j , c j )}Jj=1 from chief complaint ▷ §3.4  
+
+> 3:
+
+for j = 1 , . . . , J do  
+
+> 4:
+
+b ← UPDATE BELIEF (b, f j , v j , c j ) ▷ Eq. (3)  
+
+> 5:
+
+end for  
+
+> 6:
+
+for t = 1 , . . . , T max do  
+
+> 7:
+
+f ∗ ← arg max f / ∈A t EIG( f ; bt) ▷ Eq. (5)  
+
+> 8:
+
+LLM verbalises f ∗ as natural-language question  
+
+> 9:
+
+(vt, c t) ← PARSE (patient response , f ∗, Sf ∗ ) 
+
+> 10:
+
+if vt = unknown or vt = clarification then  
+
+> 11:
+
+Re-ask f ∗ with clarification; parse again → (vt, c t) 
+
+> 12:
+
+end if  
+
+> 13:
+
+bt+1 ← UPDATE BELIEF (bt, f ∗, v t, c t) 
+
+> 14:
+
+if t ≥ Tmin and max d bt+1 (d) ≥ τ then  
+
+> 15:
+
+break ▷ sufficient evidence gathered  
+
+> 16:
+
+end if  
+
+> 17:
+
+end for  
+
+> 18:
+
+Decision:  
+
+> 19:
+
+d∗ ← arg max d bT (d) 
+
+> 20:
+
+if bT (d∗) ≥ τ then return d∗ 
+
+> 21:
+
+else return ABSTAIN 22: end if 3.1 Knowledge base Knowledge formats. We construct tabular knowledge bases from training data. For each disease 
+
+d ∈ D and feature f ∈ F with values Vf , we store empirical counts nf,v,d = |{ i : x(f ) 
+
+> i
+
+= v ∧ yi =
+
+d}| . Each conditional is modelled as a Categorical with Dirichlet smoothing: 
+
+P (Xf =v | D=d) = αf,v,d 
+
+P 
+
+> v′∈V f
+
+αf,v ′,d 
+
+, αf,v,d = nf,v,d + 1 (1) The additive smoothing (Laplace prior) ensures P (Xf =v | D=d) > 0 for all triples, preventing zero-likelihood pathologies during sequential inference. The framework is validated on two KB backends (detailed in §4.1): • DDXPlus (Empirical). 49 diseases, 314 features. Derived from 1.03M synthetic patient records (25). Counts scaled to sum to 100 per disease-feature pair. • LLM-Generated. Same schema as DDXPlus, with likelihoods estimated via structured prompting. We generate two variants, one from GPT-5.4 and one from Gemini 3.1, to evaluate zero-shot KB construction and cross-model agreement where labelled training data is unavailable. 
+
+Prior distribution. The initial belief b0(d) = πd is the normalised population-level prevalence from the training set. We optionally support demographic conditioning: b0(d | meta ) ∝ πd ·Q 
+
+> j
+
+wj (d, meta j ), where wj are demographic multipliers estimated from subpopulation base rates. In our main experiments we use the empirical population prior without conditioning; conditional priors are evaluated in Appendix C.4. 
+
+3.2 Bayesian inference engine 
+
+Let C = {c1, . . . , c 5} ⊂ (0 , 1] denote the set of confidence weights and ϕ : L → C the mapping from linguistic labels L = {very_likely , likely , uncertain , unlikely , very_unlikely } to numerical weights. At each turn t, the patient’s response about feature ft is parsed into a tuple (vt, c t) ∈ V ft × C .5Evidence mapping. Patient responses often convey partial or hedged information (“I think I had a fever”). Rather than treating all observations as hard evidence, we apply Jeffrey’s conditioning ( 26 ). For unambiguous responses ( c = 1 ), the standard Bayesian update applies: 
+
+bt+1 (d) ∝ bt(d) · P (Xf =v | d) (2) When patients express uncertainty, the effective likelihood mixes with a neutral vector: 
+
+Leff (d) = c · P (Xf =v | D=d) + (1 − c) · 1 (3) At c=1 this recovers Eq. (2) ; at c→0 the evidence has vanishing effect. The mapping ϕ assigns 
+
+ϕ(very_likely ) = 1 .0, ϕ(likely ) = 0 .8, ϕ(uncertain ) = 0 .5, ϕ(unlikely ) = 0 .25 , ϕ(very_unlikely ) = 0.05 ; see Table 4 in Appendix A.1 for trigger examples. The belief state is maintained in log-space: 
+
+log bt+1 (d) = log bt(d) + log Leff (d) − log Zt, where Zt is the normalising constant computed via log-sum-exp. When Leff ≈ 1 (neutral evidence), the update is skipped entirely. For numeric features (e.g., pain 0–10), a Gaussian-weighted soft-matching replaces the point likelihood before Jeffrey’s conditioning is applied (Appendix A.1). 
+
+Question selection. At each turn, the system selects the unasked feature that maximally reduces expected posterior entropy: 
+
+f ∗ = arg max  
+
+> f∈F\A t
+
+EIG( f ) (4) where At denotes the set of features queried through turn t. The Expected Information Gain (EIG) is: 
+
+EIG( f ) = H(bt) − X
+
+> v∈V f
+
+P (Xf =v | e1: t) · H(bf =vt ) (5) Here H(b) = − P 
+
+> d
+
+b(d) log 2 b(d) is Shannon entropy. The predictive distribution marginalises over the current belief: P (Xf =v | e1: t) = P 
+
+> d
+
+P (Xf =v | d) · bt(d). The counterfactual posterior 
+
+bf =vt is computed without modifying the internal state: bf =vt (d) ∝ bt(d) · P (Xf =v | d). This is the myopic Bayes-optimal policy. The per-turn computational cost is linear in |F| , |V max |, and K
+
+(Appendix A.2). Alternative policies, hierarchical EIG, top-k focused EIG, and a confidence-activated hybrid, are also evaluated there. 
+
+3.3 Orchestration: ending the consultation 
+
+The system must decide not only what to diagnose but whether to diagnose at all. After each belief update, termination conditions are evaluated in strict priority order. 
+
+Warm-up and stopping. Early posteriors are dominated by the prior rather than evidence: a single shared symptom can cause a high-prevalence disease to spike before discriminative features have been queried. To prevent premature commitment, the system enforces a warm-up period of Tmin 
+
+turns during which no stopping is permitted (default Tmin = 12 ; Appendix A.3). After the warm-up, if max d bt(d) ≥ τ , the system commits to d∗ = arg max d bt(d). A hard budget Tmax (default 20) guarantees termination; if no disease crosses τ by Tmax , the system abstains. 
+
+Controllable selective diagnosis. The threshold τ is a deployment parameter that gives providers explicit control over the accuracy–coverage trade-off. A high τ yields near-perfect accuracy on committed cases at the cost of higher abstention; a low τ maximises coverage. Unlike autonomous LLM doctors, which offer no mechanism to tune this trade-off, BMBE allows deployers to set the operating point that matches their clinical risk tolerance, from high-throughput triage ( τ low, high coverage) to safety-critical referral ( τ high, near-zero error on committed cases). We characterise this trade-off in Section 5.4. 
+
+3.4 Patient-facing interface 
+
+The LLM serves as a pure language layer with no access to the posterior distribution or diagnostic state (prompt templates in Appendix B.1). 6Response parsing. Given a patient utterance ut and the queried feature ft with schema Sft =(Vft , C), the parser produces (vt, c t) ∈ V ft × C via a three-tier cascade. First, deterministic pattern matching maps clear affirmative, negative, and hedging expressions to (v, c ) pairs at zero API cost. When this tier abstains on ambiguous input, an LLM-based extractor classifies the response into the schema’s value set with a confidence label from L, mapped to a numerical weight via ϕ.The key design choice is that the LLM performs structured classification into Vf × L , a small, fixed label set, rather than continuous probability estimation. LLMs exhibit strong ordinal judgement ( 11 )but poor calibration for continuous probabilities ( 27 ); the discrete-to-numerical mapping ϕ isolates language understanding from probabilistic calibration. From the engine’s perspective, each (v, c ) pair is a noisy observation; the LLM is a sensor , not a reasoner. 
+
+Question verbalisation. Given the EIG-selected feature f ∗, the LLM receives its name, an-swer schema Sf ∗ , and a discretised confidence indicator κt ∈ { low , medium , high } derived from 
+
+max d bt(d). This signal modulates conversational tone only, the LLM never receives bt, H(bt), or any other internal engine state. 
+
+## 4 Experimental Setup 
+
+4.1 Datasets DDXPlus (empirical KB). DDXPlus ( 25 ) is a large-scale synthetic dataset of ∼1.3M patient records spanning 49 diseases and 314 features (binary and categorical). We aggregate co-occurrence counts from the training split to construct likelihood tables and set priors proportional to disease frequency. We hold out 50 patients stratified by disease for evaluation. The full conversion pipeline (evidence-type handling, multi-choice expansion, absent-filling, count normalisation) is detailed in Appendix B.3. 
+
+LLM-generated KB. To isolate architectural from informational advantages, we construct a KB whose likelihoods are elicited entirely from GPT-5.4 rather than derived from patient records. This puts BMBE and the standalone doctor on equal informational footing: both reason from the same source of clinical knowledge (the LLM’s internal beliefs), differing only in how that knowledge is deployed. Construction follows a two-stage prompting pipeline, feature generation then distribution estimation, with structured JSON output, deduplication, and chunk-level validation; prompts are in Appendix B.1, the full procedure and configuration parameters in Appendix B.3. 
+
+4.2 Patient simulation 
+
+Evaluating a diagnostic dialogue system requires simulated patients that respond realistically to follow-up questions. Several frameworks address this challenge, from multi-facility settings ( 28 ; 29 )to diagnosis-focused simulators ( 30 ; 31 ). Drawing on the persona taxonomy of PatientSim ( 30 ), we parameterise patient behaviour along axes of personality, language proficiency, recall accuracy, and cognitive state to test robustness across diverse communication styles (details in Appendix B.4). Main experiments use a cooperative persona; adversarial persona results are in Appendix C.7. Each simulated patient receives a ground-truth clinical profile and responds accordingly; the simulator LLM never accesses the engine’s internal state or KB. 
+
+4.3 Models and baselines 
+
+We compare two system types, selecting models in different spans (full specifications in Appendix B.5, Table 7). 
+
+BMBE variants. Each variant pairs the Bayesian engine with a different LLM sensor for parsing and verbalisation. Since the LLM serves only as a sensor, extracting structured features from free text, medical-domain specialisation is unnecessary; general instruction-following suffices. We test six inexpensive backends spanning different providers and architectures (Table 7). In all cases the engine, KB, and question-selection policy are identical; only the sensor LLM changes, isolating the effect of sensor quality on downstream accuracy. 7Standalone LLM doctor. The standalone baseline gives the LLM full control over the diagnostic dialogue: it decides what to ask, when to stop, and what to diagnose, with no external reasoning aid (prompt in Appendix B.1; normalisation protocol in Appendix B.2). We evaluate six frontier models (Table 7). 
+
+4.4 Evaluation metrics 
+
+Following the selective prediction framework ( 32 ), a selection function g(x) ∈ { 0, 1} decides whether to commit ( g=1 ) or abstain ( g=0 ) based on posterior confidence exceeding τ . We report two families of metrics. 
+
+Accuracy metrics. Top-k accuracy (k ∈ { 1, 3}) measures diagnostic correctness over all patients, counting abstentions as errors. 
+
+Selective diagnosis metrics. These evaluate the commit-or-abstain trade-off: Selective Accuracy =
+
+P 
+
+> i
+
+g(xi) ⊮[f (xi) = yi]
+
+P 
+
+> i
+
+g(xi) , (6) Coverage = 1
+
+n
+
+X
+
+> i
+
+g(xi). (7) To summarise this trade-off in a single number, we define the Diagnostic Harmonic Score (DHS) , a weighted harmonic mean of selective accuracy and coverage: DHS α = 1
+
+α
+
+Sel. Acc + 1 − α
+
+Coverage 
+
+, (8) where α ∈ [0 , 1] controls the emphasis. At α=0 .5, both metrics contribute equally and DHS 0.5
+
+reduces to the standard harmonic mean. Setting α closer to 1 penalises errors more heavily (safety-critical deployment), while α closer to 0 penalises abstention (high-throughput triage). Throughout this paper we report DHS 0.5 and use it to select the default threshold τ ∗, but emphasise that τ is a 
+
+deployment parameter : providers can shift along the accuracy–coverage curve to match their clinical risk tolerance (Section 5.4). 
+
+## 5 Results 
+
+5.1 Main comparison 
+
+Table 2 compares six BMBE sensor variants against six frontier standalone LLM doctors on DDXPlus. Every BMBE variant outperforms every standalone doctor on DHS. The best sensor achieves the highest DHS at a fraction of the per-token cost of the best standalone doctor. The advantage is architectural: the gap remains consistent across all six sensor backends, confirming it is not merely a matter of model quality. 
+
+5.2 LLM-generated knowledge base 
+
+A natural objection is that BMBE’s advantage stems from access to data-derived statistics unavailable to the standalone doctor. To control for this, we replace the empirical DDXPlus KB with ones generated entirely by LLMs (Section 4.1): one from GPT-5.4 and one from Gemini 3.1. In each ecosystem, BMBE and the standalone doctors operate from the same source of clinical knowledge, the generating model’s own internal beliefs, so any remaining performance gap is purely architectural. Table 3 reports both ecosystems. In both ecosystems, BMBE with an inexpensive sensor matches or approaches the frontier standalone doctor on top-1 accuracy despite costing 10–25 × less per token (Table 3). The advantage is most pronounced on rare diseases, where standalone LLMs struggle with low-prevalence conditions while the Bayesian engine leverages the KB equally regardless of prevalence. Standalone doctors retain an edge on common diseases, where broad training provides strong recall, but this disappears when BMBE is paired with a comparably capable sensor. 8Table 2: System-level comparison on DDXPlus ( n=50 ). BMBE uses DHS-optimal τ ∗ per sensor (Appendix A.4); standalone doctors self-determine abstention. Colour intensity: green = higher, red = lower.                                                                   
+
+> Accuracy Selective Diagnosis System Top-1 Top-3 Sel. Acc Cov. DHS
+> Standalone LLM doctors (frontier)
+> SA GPT-5.4 60 84 64 78 70 SA Gemini 3.1 Pro 60 64 63 96 76 SA Llama-4-Maverick 56 72 57 92 70 SA Qwen 3.6 Plus 48 72 51 94 66 SA Kimi K2.5 42 58 54 74 63 SA GPT-OSS-120B 40 48 41 98 58
+> BMBE + sensor LLM (ours)
+> + GPT-5.4-nano 78 90 81 96 88
+> + Gemini 3.1 Flash Lite 74 90 77 96 86 + GPT-OSS-20B 61 78 70 88 78 + MiniMax M2.5 60 78 64 94 76 + Gemma 4 31B 58 78 60 96 74 + Llama-4-Scout 56 70 61 92 73
+
+Table 3: LLM-generated KB experiments. Each ecosystem uses the generating model’s own clinical knowledge; patients sampled from the KB’s likelihood model. n=50 , Plain persona. Com./Rare: DHS stratified by LLM-estimated ED prevalence ( >1% = common, 7 diseases; ≤1% = rare, 11 diseases).                                                                  
+
+> Accuracy Selective Diagnosis Prevalence System Top-1 Top-3 Sel. Acc Cov. DHS Com. Rare
+> GPT-5.4 ecosystem KB oracle ( c=1 )76 88 —————BMBE + GPT-5.4-nano 70 84 78 90 83 83 84
+> SA GPT-5.4 72 80 81 86 84 95 75 SA GPT-5.4-nano 52 70 72 36 48 70 29
+> Gemini 3.1 ecosystem KB oracle ( c=1 )74 88 —————BMBE + Gemini FL 64 84 66 94 78 69 82
+> SA Gemini 3.1 Pro 70 78 73 96 83 88 79 SA Gemini 3.1 Flash Lite 62 76 63 92 75 82 71
+
+5.3 Cost-effectiveness 
+
+A key advantage of BMBE is that the Bayesian engine performs all diagnostic reasoning determin-istically at zero API cost; the LLM handles only parsing and verbalisation. Figure 3 shows the cost–accuracy tradeoff from two perspectives: per-token API pricing (left) and estimated per-patient cost (right). BMBE sensors cluster in the top-left quadrant (cheap and accurate) in both views, while frontier standalone doctors occupy the bottom-right (expensive and less accurate). Full cost breakdown is in Appendix C.6. Figure 1b isolates this effect within three model families. Each arrow shows the result of replacing a frontier standalone doctor with a cheap BMBE sensor from the same family, every arrow points towards lower cost and higher DHS. 
+
+5.4 Operating point control 
+
+A key property of BMBE is that deployers can choose their operating point along the accuracy, coverage curve by adjusting τ . Figure 4 illustrates the contrast: BMBE traces a continuous curve as 
+
+τ varies, while standalone doctors (×) are locked at a single, uncontrollable point. 9$0.10 $1 $10 
+
+Avg. API cost ($/M tokens) 
+
+55 
+
+60 
+
+65 
+
+70 
+
+75 
+
+80 
+
+85 
+
+90 
+
+95 
+
+> DHS  GPT-OSS-20B
+> Llama-4-Scout
+> Gemma 4 31B
+> MiniMax M2.5
+> GPT-5.4-nano
+> Gemini FL
+> GPT-OSS-120B
+> Llama-4-Maverick
+> Kimi K2.5
+> Qwen 3.6+
+> Gemini 3.1 Pro
+> GPT-5.4
+
+BMBE SA $0.005 
+
+$0.01 
+
+$0.02 
+
+$0.05 
+
+$0.1 
+
+$0.2 
+
+$0.5 
+
+Estimated cost per patient ($) 
+
+55 
+
+60 
+
+65 
+
+70 
+
+75 
+
+80 
+
+85 
+
+90 
+
+95 
+
+> DHS
+> GPT-5.4-nano
+> Gemini FL
+> Llama-4-Scout
+> GPT-OSS-20B
+> Gemma 4 31B
+> MiniMax M2.5
+> GPT-5.4
+> Gemini 3.1 Pro
+> GPT-OSS-120B
+> Llama-4-Maverick
+> Qwen 3.6+
+> Kimi K2.5
+
+BMBE SA Figure 3: Left: DHS vs. API cost per token. Right: DHS vs. estimated cost per patient. In both views, BMBE sensors (circles) achieve higher DHS than standalone doctors (squares) at 10–18 ×
+
+lower cost. 60 70 80 90 100  
+
+> Coverage (%)
+> 40
+> 50
+> 60
+> 70
+> 80
+> 90
+> 100
+> Selective Accuracy (%)  default
+> GPT-5.4 Gemini 3.1 Pro
+> GPT-OSS-120B
+> Llama-4-Maverick
+> Qwen 3.6+
+> Kimi K2.5
+> Triage
+> (τ→0)
+> Balanced
+> (τ=0.50)
+> Safety-critical
+> (τ=0.90)
+> BMBE + Gemini FL
+
+Figure 4: Operating point control. The green curve shows the accuracy, coverage frontier of BMBE + Gemini FL as the confidence threshold τ is swept from 0 (triage: commit on every patient) to 0.90 (safety-critical: commit only when highly confident). Three arrows from SA Gemini 3.1 Pro illustrate the deployment modes a practitioner can target by adjusting τ . Standalone doctors (×) have no such mechanism. This controllability corresponds to shifting the emphasis parameter α in Eq. 8: α towards 1 penalises errors (safety-critical referral), while α towards 0 penalises abstention (high-throughput triage). Standalone LLMs offer no equivalent, they either diagnose or abstain based on the model’s internal, uncalibrated confidence. 
+
+5.5 Additional results 
+
+We report further experiments in the appendix: confidence threshold tuning and accuracy, coverage trade-offs (Appendices A.4, C.5), patient persona robustness under adversarial interaction styles (Appendix C.7), question-selection policy ablations (Appendix C.3), prior distribution sensitivity (Appendix C.4), and disease scaling analysis examining how performance varies with the number of candidate diseases (Appendix C.10). 10 6 Discussion 
+
+Why strict separation works. The central finding of this work is that confining the LLM to a sensor role, parsing and verbalising, nothing more, yields a system that outperforms frontier LLMs acting autonomously. The answer lies in the nature of diagnostic reasoning. Diagnosis is fundamentally a probabilistic inference problem: updating beliefs over diseases given sequential evidence, and deciding when enough evidence has accumulated. LLMs are not designed for this; they lack persistent belief states, cannot compute information-theoretic quantities, and produce uncalibrated confidence. By offloading these tasks to a Bayesian engine, the system gains exact posterior tracking, principled question selection, and calibrated abstention, capabilities that no amount of prompting or scaling can replicate. 
+
+The LLM-generated KB experiment. The “fair fight” experiment (Section 5.2) provides direct evidence for the architectural thesis. When both BMBE and the standalone doctor operate from the 
+
+same LLM-generated clinical knowledge, the only difference is how that knowledge is deployed: as a structured knowledge base with Bayesian inference, or as implicit knowledge accessed through free-form generation. BMBE matches or exceeds the frontier model in both ecosystems, confirming that the advantage is architectural. 
+
+The statistical separation gap. Within matched model families, replacing a frontier standalone doctor with a cheap BMBE sensor consistently improves DHS while reducing cost (Figure 1b). We call this the statistical separation gap : the quality gain that comes from offloading diagnostic reasoning to a proper Bayesian engine. The gap persists across all three model families tested, confirming it is architectural rather than model-specific. From a deployment perspective, this means practitioners can achieve better diagnostic quality at lower API cost by pairing an inexpensive sensor with the Bayesian engine, rather than scaling up to a more expensive standalone model. 
+
+Operating point control. Unlike standalone LLMs, which produce a single take-it-or-leave-it diagnosis, BMBE offers a continuous accuracy-coverage frontier controlled by the threshold τ
+
+(Section 5.4). A deployer targeting high-throughput triage sets τ low (commit on most patients, accept some errors); a safety-critical referral system sets τ high (commit only when confident, abstain otherwise). No retraining is required to shift between these modes. Standalone LLMs have no equivalent mechanism: they either diagnose or abstain based on internal, uncalibrated confidence that cannot be tuned post-deployment. 
+
+Robustness and scaling. The Bayesian backbone provides natural robustness along multiple axes. Across patient personas (Appendix C.7), BMBE maintains stable DHS even under adversarial commu-nication styles (distrustful, dazed), while standalone doctors collapse. Jeffrey’s conditioning (Eq. 3) provides a principled mechanism: uncertain or hedged responses receive lower confidence weights, limiting their impact on the posterior. Across the disease prevalence spectrum (Appendix C.8), BMBE outperforms standalone doctors on both rare and common diseases. As the candidate disease space grows (Appendix C.10), standalone LLMs plateau while BMBE degrades gracefully, because the engine’s complexity scales with the KB structure rather than with the LLM’s ability to juggle candidates in context. This suggests the architectural advantage will only increase as systems move toward real-world deployment with larger disease spaces. 
+
+Limitations. Our evaluation has several limitations. First, BMBE operates under a closed-world assumption : it can only diagnose diseases present in the knowledge base. In practice, patients may present with conditions outside the KB entirely. Standalone LLMs, by contrast, can draw on open-ended medical knowledge and are not bound to a fixed candidate set. This makes KB coverage a critical deployment concern, though the system’s abstention mechanism provides a natural safety valve when no candidate reaches sufficient confidence, and the LLM-generated KB experiment (Section 5.2) shows that constructing a KB does not require clinical training data. Second, we rely on simulated patients rather than real clinical interactions. While the simulator provides diverse personas, it cannot capture the full complexity of real patient communication. Third, the current architecture cannot capture volunteered evidence that falls outside the asked question, a limitation that standalone LLMs handle naturally by reading the full conversation holistically. 11 Broader impact. BMBE is designed for clinical decision support , not autonomous diagnosis. The system’s selective abstention mechanism ensures it declines rather than guesses when uncertain, and the full decision trace (prior, evidence, posterior at each turn) is available for clinician review. The privacy-by-construction property, patient utterances are parsed into structured triples; raw text is never stored or used for belief computation, addresses a key concern in medical AI deployment. We note that the framework is KB-agnostic: deploying it in a new clinical population requires only a local knowledge base, not retraining the LLM, making it more practical for low-resource settings where clinical data may be available but compute infrastructure for LLM fine-tuning is not. 
+
+## 7 Conclusion 
+
+We presented BMBE, a diagnostic dialogue framework built on a strict separation principle: language models handle communication, while a Bayesian engine handles reasoning. The architecture is deterministic, auditable, and private by construction; its statistical backend is a replaceable module that can be swapped per target population without retraining. Calibrated selective diagnosis provides a controllable accuracy–coverage tradeoff, enabling deployers to set the operating point that matches their clinical risk tolerance. Evaluation across two knowledge-base modalities, empirical and LLM-generated, confirms that the advantage over autonomous LLM doctors is architectural rather than informational, and that it grows with diagnostic complexity. Our results suggest a broader principle for medical AI: rather than scaling language models and hoping they learn to reason probabilistically, we should build systems that separate what LLMs are good at , language, from what they are not :calibrated inference under uncertainty. 
+
+## References 
+
+[1] Edward H. Shortliffe. Computer-Based Medical Consultations: MYCIN . Elsevier, 1976. [2] F. T. de Dombal, D. J. Leaper, J. R. Staniland, A. P. McCann, and Jane C. Horrocks. Computer-aided diagnosis of acute abdominal pain. British Medical Journal , 2(5804):9–13, 1972. [3] Randolph A. Miller, Harry E. Pople, and Jack D. Myers. Internist-I, an experimental computer-based diagnostic consultant for general internal medicine. New England Journal of Medicine ,307(8):468–476, 1982. [4] G. Octo Barnett, James J. Cimino, Jon A. Hupp, and Edward P. Hoffer. DXplain: An evolving diagnostic decision-support system. JAMA , 258(1):67–74, 1987. [5] David E. Heckerman, Eric J. Horvitz, and Bharat N. Nathwani. Toward normative expert systems: Part I. The Pathfinder project. Methods of Information in Medicine , 31(2):90–105, 1992. [6] Randolph A. Miller and Fred E. Masarie. The demise of the “Greek Oracle” model for medical diagnostic systems. Methods of Information in Medicine , 29(01):1–2, 1990. [7] Karan Singhal, Shekoofeh Azizi, Tao Tu, S. Sara Mahdavi, Jason Wei, Hyung Won Chung, Nathan Scales, Ajay Tanwani, Heather Cole-Lewis, Stephen Pfohl, et al. Towards expert-level medical question answering with large language models. Nature Medicine , 2025. [8] Khaled Saab, Tao Tu, Wei-Hung Weng, Ryutaro Tanno, David Stutz, Ellery Wulczyn, et al. Capabilities of Gemini models in medicine. arXiv preprint arXiv:2404.18416 , 2024. [9] Tao Tu, Anil Palepu, Mike Schaekermann, Khaled Saab, Jan Freyberg, Ryutaro Tanno, Amy Wang, Brenna Li, Mohamed Amin, Nenad Tober, et al. Towards conversational diagnostic AI. 
+
+Nature , 2025. [10] Subhajit Choudhury, Sinead Williamson, Omar Rivasplata, and Tom Rainforth. BED-LLM: Intelligent information gathering with LLMs and Bayesian experimental design. arXiv preprint arXiv:2508.21184 , 2025. [11] Ollie Liu, Deqing Fu, Dani Levy, Maryam Fazel, Adith Swaminathan, and Willie Neiswanger. DeLLMa: Decision making under uncertainty with large language models. In Proceedings of the International Conference on Learning Representations (ICLR) , 2025. Spotlight. 12 [12] Yu Feng, Ben Zhou, Weidong Lin, and Dan Roth. BIRD: A trustworthy Bayesian inference framework for large language models. arXiv preprint arXiv:2404.12494 , 2024. [13] Jiayuan Zhu, Jiazhen Pan, Yuyuan Liu, Fenglin Liu, and Junde Wu. Ask patients with patience: Enabling LLMs for human-centric medical dialogue with grounded reasoning. In Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing (EMNLP) ,pages 2846–2857, 2025. [14] Shuyue Stella Li, Vidhisha Balachandran, Shangbin Feng, Jonathan S. Ilgen, Emma Pierson, Pang Wei Koh, and Yulia Tsvetkov. MediQ: Question-asking LLMs and a benchmark for reliable interactive clinical reasoning. In Advances in Neural Information Processing Systems (NeurIPS) , 2024. [15] Minkyoung Kim, Yunha Kim, Hee Jun Kang, Hyeram Seo, Heejung Choi, JiYe Han, Gaeun Kee, Seohyun Park, Soyoung Ko, Hyoje Jung, Byeolhee Kim, Tae Joon Jun, and Young-Hak Kim. Fine-tuning large language models with medical data: Can safety be ensured? NEJM AI ,2(1), 2025. doi: 10.1056/AIcs2400390. [16] Victor L. Yu, Lawrence M. Fagan, Sharon M. Wraith, William J. Clancey, A. Carlisle Scott, John Hannigan, Robert L. Blum, Bruce G. Buchanan, and Stanley N. Cohen. Antimicrobial selection by a computer: A blinded evaluation by infectious diseases experts. JAMA , 242(12): 1279–1282, 1979. [17] Sholom M. Weiss, Casimir A. Kulikowski, Saul Amarel, and Aran Safir. A model-based method for computer-aided medical decision-making. Artificial Intelligence , 11(1–2):145–172, 1978. [18] Xinyi Liu, Dachun Sun, Yi Fung, Dilek Hakkani-Tür, and Tarek F. Abdelzaher. DocCHA: Towards LLM-augmented interactive online diagnosis system. In Proceedings of the 26th Annual Meeting of the Special Interest Group on Discourse and Dialogue (SIGDial) , pages 609–619, 2025. [19] Kaishuai Xu, Yi Cheng, Wenjun Hou, Qiaoyu Tan, and Wenjie Li. Reasoning like a doctor: Improving medical dialogue systems via diagnostic reasoning process alignment. In Findings of the Association for Computational Linguistics: ACL 2024 , pages 6796–6814, 2024. [20] Thomas Savage, John Wang, Robert Gallo, Abdessalem Boukil, Vishwesh Patel, Seyed Amir Safavi-Naini, Ali Soroush, and Jonathan H. Chen. Large language model uncertainty proxies: Discrimination and calibration for medical diagnosis and treatment. Journal of the American Medical Informatics Association , 32(1):139–149, 2025. [21] Mahmud Omar, Vera Sorin, Jeremy D. Collins, David Reich, Robert Freeman, and Eyal Klang. Multi-model assurance analysis: LLMs highly vulnerable to adversarial hallucination attacks during clinical decision support. Communications Medicine , 5(1):97, 2025. [22] Jesutofunmi A. Omiye, Jenna C. Lester, Simon Spichak, Veronica Rotemberg, and Roxana Daneshjou. Large language models propagate race-based medicine. npj Digital Medicine , 6(1): 195, 2023. [23] Tobi Olatunji, Charles Nimo, Abraham Owodunni, et al. AfriMed-QA: A pan-African, multi-specialty, medical question-answering benchmark dataset. arXiv preprint arXiv:2411.15640 ,2024. ACL 2025, Best Social Impact Award. [24] Zhoujian Sun, Chenghua Luo, Liangzhi Jiang, Linlin Liu, Xiaohan Yang, Junfan Shi, Tangjie Lv, Benyou Zhang, and Kezhi Mao. Conversational disease diagnosis via external planner-controlled large language models. arXiv preprint arXiv:2404.04292 , 2024. [25] Arsene Fansi Tchango, Rishab Goel, Zhi Wen, Julien Martel, and Joumana Ghosn. DDXPlus: A new dataset for automatic medical diagnosis. In Advances in Neural Information Processing Systems , volume 35, 2022. [26] Richard C. Jeffrey. The Logic of Decision . McGraw-Hill, 1965. 13 [27] Saurav Kadavath, Tom Conerly, Amanda Askell, Tom Henighan, Dawn Drain, Ethan Perez, Nicholas Schiefer, Zac Hatfield-Dodds, Nova DasSarma, Eli Tran-Johnson, et al. Language models (mostly) know what they know. arXiv preprint arXiv:2207.05221 , 2022. [28] Mohammad Almansoori, Komal Kumar, and Hisham Cholakkal. MedAgentSim: Self-Evolving Multi-Agent Simulations for Realistic Clinical Interactions . In proceedings of Medical Image Computing and Computer Assisted Intervention – MICCAI 2025 , volume LNCS 15968. Springer Nature Switzerland, September 2025. [29] Zhihao Fan, Lai Wei, Jialong Tang, Wei Chen, Wang Siyuan, Zhongyu Wei, and Fei Huang. AI hospital: Benchmarking large language models in a multi-agent medical interaction simulator. In Owen Rambow, Leo Wanner, Marianna Apidianaki, Hend Al-Khalifa, Barbara Di Eugenio, and Steven Schockaert, editors, Proceedings of the 31st International Conference on Compu-tational Linguistics , pages 10183–10213, Abu Dhabi, UAE, January 2025. Association for Computational Linguistics. URL https://aclanthology.org/2025.coling-main.680/ .[30] Daeun Kyung, Hyunseung Chung, Seongsu Bae, Jiho Kim, Jae Ho Sohn, Taerim Kim, Soo Kyung Kim, and Edward Choi. PatientSim: A persona-driven simulator for realistic doctor-patient interactions. In Advances in Neural Information Processing Systems , volume 38, 2025. [31] Yusheng Liao, Yutong Meng, Yuhao Wang, Hongcheng Liu, Yanfeng Wang, and Yu Wang. Automatic interactive evaluation for large language models with state aware patient simula-tor. ArXiv , abs/2403.08495, 2024. URL https://api.semanticscholar.org/CorpusID: 268379575 .[32] Yonatan Geifman and Ran El-Yaniv. Selective classification for deep neural networks. In 
+
+Advances in Neural Information Processing Systems , volume 30, 2017. [33] Yifan Zhao, Yixiao Hua, Dan Roth, and Jinhao Chen. Probing the multi-turn planning capa-bilities of LLMs via 20 question games. In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (ACL) , 2024. 14 Appendix overview 
+
+This supplementary material is organized as follows: 
+
+A. Theoretical foundations . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 16 A.1 Jeffrey’s conditioning . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 16 A.2 EIG derivation and question-selection ablations . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 16 A.3 Question budget analysis . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 17 A.4 Confidence threshold tuning . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 17 
+
+B. System details . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 18 B.1 Prompt templates . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 18 B.2 Standalone doctor protocol . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 20 B.3 Knowledge base construction . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 20 B.4 Implementation details . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 24 
+
+C. Extended experimental results . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 25 C.1 Prediction normalisation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 25 C.2 Confidence threshold experiments . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 25 C.3 Question-selection policy ablations . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 25 C.4 Prior distribution sensitivity . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 26 C.5 Accuracy-coverage analysis . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 27 C.6 Computational cost analysis . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .27 C.7 Persona robustness . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 28 C.8 Accuracy by disease prevalence . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 29 C.9 Failure mode analysis . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 30 C.10 Disease scaling analysis . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 31 C.11 Diagnostic session walkthroughs . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 32 15 A Theoretical foundations 
+
+A.1 Jeffrey’s conditioning 
+
+Standard Bayesian conditioning assumes evidence is observed with certainty. In conversational diagnosis, patient responses carry intrinsic uncertainty: “I think I had a fever” is not equivalent to a confirmed temperature reading. Jeffrey’s conditioning ( 26 ) generalises Bayesian updating to 
+
+uncertain evidence by specifying a probability distribution over the evidence partition rather than a point observation. Formally, the confidence weight c induces a soft partition: P new (Xi=v) = c and P new (Xi̸ =v) = 1 −c.The resulting update (Eq. 3 in main text) mixes the standard likelihood with a uniform vector, dampening the evidence proportional to the parser’s extracted confidence. At c = 1 this recovers standard Bayes; at c = 0 the posterior is unchanged. 
+
+Why ordinal labels? The five confidence labels ( very_likely through very_unlikely ) provide a coarse but principled discretisation of patient certainty. This avoids requiring the LLM to output calibrated continuous probabilities. The fixed mapping to numerical weights ( c ∈{1.0, 0.80 , 0.50 , 0.25 , 0.05 }) is auditable and eliminates a potential source of unchecked model influence on diagnostic outcomes. Table 4 lists the complete mapping. Table 4: Jeffrey’s conditioning weights. A three-tier cascade assigns labels: (1) deterministic pattern matching for clear or hedged language, (2) LLM-based extraction for ambiguous responses, (3) heuristic downgrade to uncertain when uncertainty cues are detected.             
+
+> Label cWhen assigned
+> very_likely 1.00 Clear, direct: “yes”, “no”, “definitely”
+> likely 0.80 Requires interpretation or inference
+> uncertain 0.50 “I think so”, “maybe”, “not sure”
+> unlikely 0.25 Tangential or partially related
+> very_unlikely 0.05 Near-zero signal; contradictory
+
+A.2 EIG derivation and question-selection ablations EIG computation details. The EIG policy (Eq. 5 in main text) selects the unasked feature that maximally reduces expected posterior entropy. The predictive distribution over feature values is: 
+
+P (Xf =v | E t) = 
+
+> K
+
+X
+
+> d=1
+
+P (Xf =v | d) bt(d) (9) For each candidate value v ∈ V f , a counterfactual posterior is computed via a standard Bayesian update at full confidence ( c=1 ) without modifying internal state: 
+
+bf =vt (d) = bt(d) · P (Xf =v | d)
+
+P 
+
+> d′
+
+bt(d′) · P (Xf =v | d′) (10) The EIG is the reduction in expected entropy: 
+
+EIG( f ) = H(bt) − X
+
+> v∈V f
+
+P (Xf =v | E t) · H(bf =vt ) (11) where H(b) = − P 
+
+> d
+
+b(d) log 2 b(d). The feature with the highest EIG is selected: f ∗ =arg max f / ∈A t EIG( f ).
+
+Computational cost. At each turn t, the engine evaluates EIG for every unasked feature. Let 
+
+Nt = |F \ A t| denote the remaining features. For each feature f , the inner loop iterates over |V f |
+
+hypothetical values, each requiring a K-dimensional posterior update. The per-turn cost is therefore: 
+
+O(Nt · |V max | · K) , |V max | = max  
+
+> f
+
+|V f | (12) For DDXPlus ( N =314 features, |V max |=10 , K=49 diseases), this yields ∼154 K operations per turn, computed in ∼50 ms on a single CPU core with vectorised NumPy. Since Nt decreases by one each turn, the total session cost is O(N · T · |V max | · K), dominated by the first few turns. 16 Top-k focused EIG. Once the posterior concentrates ( max d bt(d) ≥ τfocus ), an additional EIG term encourages fine-grained discrimination among the most probable hypotheses: 
+
+EIG combined (f ) = EIG global (f ) + λ · EIG top-k(f ) (13) where EIG top-k is computed over only the top-k diseases (renormalised). Ablation results (Table 10) show that focused top-k EIG with k=3 , λ=0 .5, τfocus =0 .3 improves top-1 accuracy by +12 pp over the global baseline. The main experiments use global EIG ( λ=0 ) to keep the default policy parameter-free; focused EIG is available as an optional enhancement. 
+
+A.3 Question budget analysis Ideal lower bound. Under a uniform prior over K diseases, the initial entropy is H0 = log 2 K
+
+bits. A perfectly informative binary question removes at most 1 bit, so at least ⌈log 2 K⌉ questions are required in the noiseless case. 
+
+Effect of Jeffrey’s conditioning. In practice, evidence is soft: the effective likelihood Leff (d) = 
+
+c · P (Xf =v | d) + (1 −c) (Eq. 3) is a convex mixture of the true likelihood with the uniform. This dampening strictly reduces the mutual information between the queried feature and the disease: 
+
+Ic(D; Xf ) ≤ I1(D; Xf ) (14) by the data processing inequality, since the dampened observation is a stochastic degradation of the clean one. The reduction is monotonic in c: at c=1 we recover the full I1; at c=0 the observation is uninformative. While the exact relationship depends on the likelihood structure, the empirical average confidence ¯c ≈ 0.9 on our benchmarks means the information loss per question is modest. 
+
+Budget choice. We set Tmax =20 , inspired by the classic Twenty Questions game ( 33 ), which has also been adopted as a benchmark for multi-turn planning in LLMs. In practice, questions are not perfectly bisecting and evidence is noisy, so the generous budget provides a safety margin. Empirically, BMBE uses ∼17 turns on DDXPlus with forced full-length sessions; when early stopping is enabled (posterior confidence exceeds τ ), sessions terminate earlier. Even under adversarial patient personas (Appendix C.7), where noisy or withheld responses reduce per-turn information, 20 turns suffices for convergence. 
+
+A.4 Confidence threshold tuning 
+
+The confidence threshold τ controls the trade-off between coverage (fraction of patients who receive a diagnosis) and selective accuracy (quality among diagnosed patients). 
+
+DDXPlus. We sweep τ ∈ { 0.00 , 0.05 , . . . , 0.95 } over the posterior confidence max d bT (d). Pa-tients with max d bT (d) < τ are abstained. We select τ ∗ that maximises DHS on a held-out validation split. Results are reported in Appendix C.2. 
+
+LLM-generated KBs. The same procedure applies. Because the candidate set is smaller ( K=18 )and the posterior tends to be less peaked, the optimal thresholds are lower than on DDXPlus ( τ ∗=0 .30 
+
+for both ecosystems). The full sweep is reported in Appendix C.2. 
+
+Global vs. per-disease calibration. We use a global threshold (one τ for all diseases) rather than per-disease thresholds τd because the limited validation set size ( n=50 ) yields too few positive examples per disease for reliable per-disease calibration. The full threshold sweep is reported in Appendix C.2. 17 B System details 
+
+B.1 Prompt templates 
+
+All prompts use temperature 0.0 for deterministic output. The LLM never receives posterior values, entropy, or any internal engine state. 
+
+Parsing prompt. The parsing prompt receives the patient utterance, the feature under inquiry, and the allowed schema values. A deterministic cascade (pattern matching for binary yes/no, emphatic affirmations, numeric ranges, and direct schema substring matches) is applied before the LLM call; the LLM is invoked only as a fallback for ambiguous utterances. The prompt enforces 13 confidence-assignment rules (e.g., prefer unknown over hard negatives when the response is partial or vague) to ensure conservative, faithful extraction. 
+
+Parsing Prompt 
+
+System: You are a medical data extractor. User Response: "{utterance}" Feature to Extract: "{feature}" (Allowed: {schema}) TASK: 1. Classify the user response into one of the Allowed Values. 2. Assess confidence: very_likely, likely, uncertain, unlikely, very_unlikely KEY RULES: – Direct answer ("Yes", "Not really"): map to closest value. – Unrelated response: return "unknown|likely". – Uncertain language ("I think so", "maybe"): use "uncertain". – Prefer "unknown" over hard negative when partial/vague. Return format: "value|confidence_level" Examples: "high|likely", "yes|uncertain", "no|very_likely" 
+
+Verbaliser prompt. The verbaliser receives the feature name, answer schema, and a coarse system-confidence indicator derived from max d bt(d). It modulates conversational tone only; no internal state is exposed. 
+
+Verbaliser Prompt 
+
+System: You are a professional medical diagnostic assistant. Task: Ask the patient a question to check for: {feature}. CONTEXT: – Feature Name: {feature} – Expected Details: {schema} – System Confidence: {low|medium|high} CONSTRAINTS: 1. NEVER use technical IDs (e.g., "f_fever", "d_flu"). 2. Speak naturally and empathetically. 3. Do NOT mention probabilities or internal values. 4. If clarifying a previous confusion, keep it brief. 
+
+Bulk intake prompt. At session start, a single bulk intake call maps the patient’s opening narrative to multiple (f, v, c ) triples simultaneously, reducing the number of follow-up questions needed. 
+
+Bulk Intake Prompt 
+
+System: You are an expert medical intake specialist. User Text: "{narrative}" TASK: Extract any clinical features mentioned in the text. ALLOWED FEATURES: – {feature_id}: {name} (Values: {values}) RULES: 1. Only extract explicitly mentioned or strongly implied features. 
+
+18 2. Extract demographics (age, gender, location) if present. 3. Do NOT infer negatives from silence; omit unlisted features. 4. Assess confidence for each extracted feature. Return JSON: {"feature_id": {"value": "...", "confidence": "likely"}, "demographics": {"age": N, ...}} 
+
+Patient simulator prompt. The patient simulator receives the full clinical profile (demographics, chief complaint, symptoms, medical history, observed findings) and persona instructions. Crucially, the patient must answer faithfully according to its observed findings, including clear denials when the finding is negative, but must say “I’m not sure” for features not listed in its profile, avoiding fabrication. 
+
+Patient Simulator Prompt 
+
+System: You are a patient in an Emergency Department consultation. PATIENT PROFILE: – Age, Gender, Chief Complaint, Symptoms Present – Social History, Family History, Medical History, Pain Level – KNOWN OBSERVED FINDINGS (answer faithfully; do not assume unlisted findings) RULES: 1. Answer based on KNOWN OBSERVED FINDINGS and patient profile. 2. If asked about something listed: answer faithfully (including denials). 3. If NOT listed: say “I’m not sure” or “I don’t know”. Do not invent symptoms. 4. NEVER reveal your diagnosis directly. 5. Keep responses concise (1–3 sentences). PERSONA: – Language: {CEFR level A/B/C} – Personality: {plain | verbose | overanxious | distrustful} – Memory: {high | low recall} – Alertness: {normal | moderate daze | high daze} 
+
+Standalone doctor prompt. The standalone LLM doctor receives no external reasoning support. It conducts the full diagnostic interview and outputs a differential ( [DDX] ) or abstains ( [ABSTAIN] ). 
+
+Standalone Doctor Prompt , Single-Disease (DDXPlus) 
+
+System: You are an emergency department physician conducting a diagnostic interview. Ask focused, one-at-a-time questions to narrow down the diagnosis. After gathering enough information: – Start with [DDX] followed by your top 5 diagnoses (most to least likely), separated by commas. – If not confident, start with [ABSTAIN] + short reason, then [POSSIBLE] + your top 3 possible diagnoses. Guidelines: – Ask one question at a time. – Focus on discriminating features. – Consider common and serious diagnoses. – Do not guess when evidence is insufficient. – Maximum of {max_turns} questions before [DDX]/[ABSTAIN]. 
+
+Disease matching prompt. For standalone LLM baselines, free-text diagnoses must be aligned to the canonical disease list in the knowledge base. We use a matching prompt that maps each predicted disease name to its closest KB entry or NO_MATCH :
+
+Disease Matching Prompt 
+
+Match each diagnosis below to the closest disease from the reference list. If a diagnosis does not match any disease in the list, write NO_MATCH. DIAGNOSES: 
+
+19 1. {prediction_1} 2. {prediction_2} ... REFERENCE DISEASE LIST: – {disease_name_1} – {disease_name_2} ... Output ONLY a numbered list with the matched disease name (exactly as written in the reference list) or NO_MATCH. 
+
+LLM-generated KB prompts. The LLM-generated KB is constructed via two sequential prompts. The feature generation prompt asks the model to propose clinically plausible features for a given disease (with deduplication against an existing catalog). The distribution estimation prompt then elicits P (feature | disease ) for all feature–disease pairs: binary features as a single prob_yes , and continuous features as a discrete distribution over a 0–5 severity scale (where 0 encodes absence). Features are processed in chunks; outputs are validated (distributions must sum to 1) before being added to the KB.       
+
+> Feature Generation Prompt
+> You are helping build a synthetic feature catalog for a conversational diagnostic system. Disease: {disease_id}, {name} Include only features with P(present | disease) > {threshold}. Allowed kinds: symptom_presence, symptom_attribute, medical_history, lifestyle, risk_factor. Before proposing, check the existing catalog and reuse semantically equivalent features. Return: action=reuse|new, estimated_probability, justification.
+> Distribution Estimation Prompt
+> You are generating likelihood parameters for a Bayesian diagnostic model. Disease: {disease_id}, {name} For binary features: return prob_yes. For numerical features (0–5 scale, 0=absent): return probability for each value; must sum to 1. Use medically plausible values; avoid extreme certainty.
+
+B.2 Standalone doctor protocol 
+
+Algorithm 2 summarises the standalone doctor inference loop. The standalone doctor outputs a comma-separated differential ( [DDX] ) or explicitly abstains ([ABSTAIN] ). The prompt requests the top 5 diagnoses, ranked by likelihood. Crucially, the doctor generates free-text disease names without access to the KB disease list , mirroring realistic deployment where a physician names conditions from memory. 
+
+Post-hoc disease name normalisation. Because free-text predictions (e.g., “Acute exacerbation of COPD”) may differ lexically from KB entries (e.g., “Acute COPD exacerbation / infection”), a post-hoc matching step ( MatchToKB ) aligns predictions to the canonical KB disease names. A lightweight LLM (GPT-5.4-nano) receives the predicted names alongside the full KB disease list and maps each prediction to the closest match or NO_MATCH . Unmatched predictions are retained and counted as errors during evaluation, ensuring that predicting a disease outside the KB scope incurs a penalty. In our experiments, we observed no systematic matching failures: the LLM-based matcher reliably aligned free-text predictions to KB entries across all standalone doctors. 
+
+B.3 Knowledge base construction 
+
+Both knowledge bases are clinically grounded, each through a different mechanism: DDXPlus derives likelihoods from physician-designed patient records, and the LLM-generated KB from structured 20 Algorithm 2 Standalone LLM Doctor 
+
+Require: Patient profile p, LLM doctor M, turn budget Tmax 
+
+Ensure: Diagnosis ˆy or A BSTAIN 1: H ← [ ] ▷ dialogue history  
+
+> 2:
+
+H.append (SystemPrompt (M, T max ))  
+
+> 3:
+
+rpatient ← ChiefComplaint (p) 
+
+> 4:
+
+for t = 1 , . . . , T max do  
+
+> 5:
+
+H.append (rpatient ) 
+
+> 6:
+
+rdoctor ← M (H) 
+
+> 7:
+
+H.append (rdoctor ) 
+
+> 8:
+
+if rdoctor contains [DDX] then  
+
+> 9:
+
+Parse comma-separated list → ˆyraw = [ˆ y1, . . . , ˆyk] 
+
+> 10:
+
+ˆy ← MatchToKB (ˆ yraw , DKB ) ▷ LLM-based name matching  
+
+> 11:
+
+return ˆy 
+
+> 12:
+
+else if rdoctor contains [ABSTAIN] then  
+
+> 13:
+
+return ABSTAIN (+ optional [POSSIBLE] list)  
+
+> 14:
+
+end if  
+
+> 15:
+
+rpatient ← PatientSim (p, H) 
+
+> 16:
+
+end for  
+
+> 17:
+
+Inject “provide your final diagnosis now” into H 
+
+> 18:
+
+rdoctor ← M (H) 
+
+> 19:
+
+if rdoctor contains [DDX] then  
+
+> 20:
+
+Parse and ˆy ← MatchToKB (ˆ yraw , DKB ) 
+
+> 21:
+
+return ˆy 
+
+> 22:
+
+else return ABSTAIN 23: end if 
+
+Table 5: Summary statistics of the knowledge bases used in evaluation. 
+
+DDXPlus LLM-KB (GPT) LLM-KB (Gemini) 
+
+Source Empirical GPT-5.4 Gemini 3.1 Diseases 49 18 18 Features 314 160 89 Binary 306 154 85 Categorical / ordinal 8 6 4KB source records ∼1.03M – –Evaluation patients 50 50 50 
+
+elicitation of a frontier model’s medical knowledge. Table 5 provides a summary comparison. Both KBs share the same Dirichlet-Categorical likelihood formulation (Eq. 1): co-occurrence counts are normalised to sum to 100 per (disease, feature) pair and Laplace-smoothed ( α(i) 
+
+> d,v
+
+= n(scaled ,i ) 
+
+> d,v
+
++ 1 ). 
+
+DDXPlus-derived KB. DDXPlus ( 25 ) contains ∼1.03 M training records, each annotated with a ground-truth pathology and a set of observed evidences. We map the 49 pathologies to canonical disease IDs with ICD-10 codes and organise them into 9 chapter-level categories. The 223 original evidences comprise three types: binary, categorical (V-code resolved to readable labels), and multi-choice. Multi-choice evidences are expanded into individual binary sub-features (top-20 values by frequency), yielding 314 features in total. Co-occurrence counts are accumulated per (disease, feature, value) triple across all training patients. Binary evidences absent from a patient’s record are treated as negative, except for a small set of negated features where this default would invert the clinical meaning. Priors are set proportional to empirical disease frequency in the training split. 
+
+LLM-generated KB. To control for informational advantages (Section 4.1), we construct LLM-generated KBs whose likelihoods are elicited entirely from frontier language models. We generate 21 10 20 30 40 
+
+Disease (sorted by prevalence) 
+
+> 0.00
+> 0.02
+> 0.04
+> 0.06
+> Prior probability
+
+DDXPlus prior distribution    
+
+> uniform (1/49) 010 20 30
+
+Positive evidences per patient 
+
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Count
+> DDXPlus (mean 14.0)
+> LLM-KB GPT (mean 7.8)
+> LLM-KB Gemini (mean 5.8)
+
+Figure 5: Left: DDXPlus prior distribution sorted by prevalence. The long tail ( max / min ≈ 200 ×)reflects real-world disease frequency; the dashed line shows the uniform baseline. Right: Distribution of positive evidence count per evaluation patient across KBs. two variants: one using GPT-5.4 and one using Gemini 3.1, enabling a cross-model comparison of zero-shot medical knowledge. Construction proceeds in two stages (prompts in Appendix B.1). In the feature proposal stage, the model generates clinically relevant features for each disease. Proposals reference a growing shared catalog to encourage feature reuse across diseases; a deduplication step removes near-duplicate entries. Features with estimated relevance below a threshold θ are discarded. In the distribution estimation 
+
+stage, the model provides P (feature | disease ) for all retained features: a single probability for binary features, and a discrete distribution over a severity scale for ordinal features. All outputs undergo automated validation (probability constraints, identifier consistency) before inclusion; invalid entries are excluded. The resulting pseudo-counts are normalised identically to the DDXPlus KB. Priors are set to uniform ( 1/K ). 
+
+Synthetic patient generation. Since no real patient data exists for LLM-generated KBs, evaluation patients are sampled from the KB’s own generative model via ancestral sampling. For each disease 
+
+d and each of nper patients (default 30), the feature vector is drawn independently from the KB’s conditional distributions: 
+
+x(i) 
+
+> f
+
+∼ P (Xf | D=d) for each feature f ∈ F d (15) where Fd ⊆ F is the set of features relevant to disease d (those with non-uniform likelihood). For binary features, this is a Bernoulli draw with parameter P (Xf =yes | d); for ordinal features, a categorical draw over the 0–5 severity scale. The chief complaint is constructed from the first three positive symptoms; the full feature map is stored as the patient’s observed findings. Demographics (age, sex) are sampled uniformly at random. This yields K × nper patients (e.g., 18 × 30 = 540 ), from which a stratified subset of n=50 is selected for benchmarking (at least one patient per disease). The sampling procedure ensures a “fair fight”: both BMBE and standalone doctors face patients whose symptom profiles are consistent with the KB’s own beliefs, neither system has an informational advantage. 
+
+Cross-KB transfer analysis. To test KB generalisation, we evaluate each ecosystem’s BMBE on patients generated from the other KB. Let FGPT and FGem denote the feature sets of the two KBs. Features are matched by canonical name: F∩ = {f : name (f ) ∈ names (FGPT ) ∩ names (FGem )}.Of 160 GPT and 89 Gemini features, |F ∩| = 45 share identical names and types (28% of GPT, 51% of Gemini). When a cross-KB patient presents a feature f / ∈ F KB , the engine receives no matching schema entry and skips the update (equivalent to Leff = 1). On average, GPT patients retain 43% of their features when evaluated against the Gemini KB, and Gemini patients retain 59% against the GPT KB. Results are reported in Table 6. 
+
+Inter-model agreement on LLM-generated KBs. We compare the two LLM-generated KBs (GPT-5.4 and Gemini 3.1, same 18 diseases, same generation pipeline) to quantify inter-model 22 Table 6: Cross-KB transfer: each BMBE variant evaluated on patients from the other ecosystem. “Native” rows repeat the in-ecosystem results for reference. Feature coverage indicates the fraction of patient features recognised by the cross-KB.                                         
+
+> System Patients Feat. Cov. Top-1 Top-3 Sel. Acc Cov. DHS
+> BMBE + GPT-nano, KB: GPT GPT (native) 100% 70 84 78 90 83 BMBE + GPT-nano, KB: GPT Gemini (cross) 43% 52 78 54 96 69 BMBE + Gemini FL, KB: Gemini Gemini (native) 100% 64 84 66 94 78 BMBE + Gemini FL, KB: Gemini GPT (cross) 59% 42 66 48 84 61 0.0 0.2 0.4 0.6 0.8 1.0
+
+P(yes ∣ disease)    
+
+> 0
+> 500
+> 1000
+> 1500
+> Count
+> GPT-5.4 (mean 0.12)
+> Gemini 3.1 (mean 0.21) 0.0 0.5 1.0 1.5
+
+KL divergence from uniform 
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> CDF (fraction of pairs)
+> DDXPlus
+> LLM-KB GPT
+> LLM-KB Gemini
+
+Figure 6: Left: Distribution of LLM-elicited binary likelihoods P (yes | d) for both GPT and Gemini KBs; the strong left skew indicates that most disease–feature associations are weak. Right: CDF of per-pair KL divergence from uniform across all three KBs; DDXPlus (empirical) has the highest informativeness, while both LLM-KBs are comparable despite being synthetically generated. agreement on medical knowledge. GPT generated 160 binary features; Gemini produced 89. Only 45 share identical names (Jaccard J=0 .22 ), yet downstream agreement on likelihoods is high: on the 45 shared features across 18 diseases (810 pairs; Figure 7), Pearson r=0 .931 with MAE =0 .071 .A systematic bias exists: Gemini assigns likelihoods 0.055 higher on average (Figure 7). Gemini’s features are 1.7× more discriminative (cross-disease variance 0.041 vs 0.024; Figure 8), consistent with a smaller but more targeted feature set. Despite no shared weights, the two KBs converge on what matters, suggesting that frontier LLMs encode broadly consistent medical knowledge when prompted with structured elicitation. 
+
+B.4 Patient simulation 
+
+We simulate patients using an LLM-based conversational agent that receives a ground-truth clinical profile (demographics, chief complaint, symptom findings) and responds to doctor questions in character. The simulator is inspired by the persona taxonomy of PatientSim ( 30 ), which parameterises patient behaviour along four axes: personality archetype (cooperative, anxious, distrustful, etc.), 
+
+language proficiency , recall accuracy (high/low), and cognitive confusion (none/moderate/high). We select five personas by varying these axes (full definitions in Table 14): Plain (cooperative baseline), Overanxious (high anxiety, over-reports), Distrustful (withholds information), Dazed (low recall, moderate confusion), and Verbose (tangential, low recall). The simulator LLM (GPT-5.4-nano) is shared across all experiments to ensure consistent patient behaviour. It sees only the clinical profile and persona instructions; it never accesses the diagnostic engine’s internal state, posterior, or knowledge base. The simulator is instructed to answer faithfully for features listed in its profile and to express uncertainty for unlisted features, though we observe that LLMs occasionally infer plausible but ungrounded responses from profile context (see Appendix C.9 for the impact on diagnostic accuracy). 23 0.0 0.2 0.4 0.6 0.8 1.0 
+
+P(yes ∣ d) — GPT-5.4            
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> P(yes ∣  d) — Gemini 2.5 Flash
+> r= 0.931
+> MAE = 0.071
+> n= 810 −0.4 −0.2 0.0 0.2 0.4
+> P(yes ∣ d)GPT −P(yes ∣ d)Gemini
+> 0
+> 25
+> 50
+> 75
+> 100
+> 125
+> 150
+> 175
+> Count
+> Mean = -0.055
+
+Figure 7: Left: Scatter plot of P (yes | d) for 45 shared features across 18 diseases ( n=810 pairs); dashed line is perfect agreement. Right: Distribution of pairwise likelihood differences; the left-skewed distribution (mean = −0.055 ) confirms Gemini’s systematically higher assignments. 0.00 0.02 0.04 0.06 0.08 0.10 0.12            
+
+> Variance of P(yes ∣ d)across diseases
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> Number of features
+> GPT-5.4
+> Gemini 2.5 Flash
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> Range of P(yes ∣ d)across diseases
+> GPT-5.4
+> Gemini 2.5 Flash
+
+Figure 8: Feature discriminativeness (left: cross-disease variance; right: cross-disease range) for GPT-5.4 (154 features) and Gemini 3.1 (85 features). Gemini’s features are more discriminative on average, reflecting both targeted feature selection and more extreme likelihood assignments. 
+
+B.5 Implementation details 
+
+Table 7: Models used in experiments. All models accessed via API (OpenAI direct or OpenRouter). The patient simulator (GPT-5.4-nano) is shared across all experiments. 
+
+BMBE sensors Standalone doctors 
+
+GPT-5.4-nano GPT-5.4 Gemini 3.1 Flash Lite Gemini 3.1 Pro Llama-4-Scout Llama-4-Maverick GPT-OSS-20B GPT-OSS-120B Gemma 4 31B Qwen 3.6 Plus MiniMax M2.5 Kimi K2.5 
+
+All models are accessed via API. OpenAI models (GPT-5.4, GPT-5.4-nano) are called directly; all other models are routed through OpenRouter. BMBE components use temperature 0 for deterministic parsing and question generation. The dialogue budget is capped at Tmax = 20 turns for both BMBE and standalone configurations. 24 C Extended experimental results 
+
+C.1 Prediction normalisation 
+
+All standalone doctor predictions undergo post-hoc normalisation to KB disease names via the MatchToKB procedure (Section B.2). The doctor never sees the KB disease list during the dialogue; normalisation is applied only after the doctor commits to a diagnosis. This ensures a fair comparison: the standalone doctor relies solely on its internal medical knowledge, while BMBE relies on the structured KB. 
+
+C.2 Confidence threshold experiments 
+
+Table 8 reports the DDXPlus confidence threshold sweep across all six BMBE sensor backends. Table 8: Confidence threshold τ sweep on DDXPlus ( n=50 , Plain persona) for all BMBE sensor backends. Sel. Acc. = selective Top-1 accuracy among committed cases; Cov. = fraction committed; DHS = harmonic mean of Sel. Acc. and Cov. (Eq. 8). Bold: DHS-optimal τ ∗ per sensor, used in Table 2.                                                                                                                                                                                                                          
+
+> GPT-5.4-n Gemini FL Llama-4-Sc GPT-OSS-20B Gemma 4 MiniMax
+> τSA CDHS SA CDHS SA CDHS SA CDHS SA CDHS SA CDHS
+> 0.00 78 100 88 74 100 85 56 100 72 61 100 76 64 100 78 60 100 75 0.10 78 100 88 74 100 85 56 100 72 61 100 76 64 100 78 60 100 75
+> 0.20 81 96 88 77 96 86 57 98 72 61 100 76 64 100 78 60 100 75
+> 0.30 81 94 87 77 94 84 58 96 73 65 94 77 69 93 79 64 94 76 0.40 83 92 87 78 92 85 61 92 73 71 84 77 71 86 78 69 78 73 0.50 82 90 86 79 86 82 62 84 71 70 76 73 77 79 78 71 76 73 0.60 81 86 84 81 74 77 64 78 70 74 71 73 81 75 78 77 68 72 0.70 80 80 80 88 66 75 73 66 69 79 67 73 80 71 76 79 66 72 0.80 86 72 78 88 64 74 74 62 68 87 61 72 84 68 75 83 58 68 0.90 85 68 76 93 60 73 85 54 66 90 59 71 83 64 73 89 52 66 0.95 88 64 74 97 58 73 85 52 65 90 59 71 83 64 73 88 50 64
+
+LLM-generated KB threshold sweep. Table 9 reports the confidence threshold sweep for both LLM-generated KB ecosystems, including native and cross-KB transfer configurations. The optimal 
+
+τ is selected by maximising DHS on the evaluation set. Table 9: Confidence threshold sweep for LLM-generated KB experiments ( n=50 , Plain persona). Bold: DHS-optimal operating point. Cross-KB rows evaluate on patients generated from the other ecosystem’s KB.                                                                                                                                    
+
+> GPT KB (native) GPT KB →Gem. pat. Gem. KB (native) Gem. KB →GPT pat.
+> τSA Cov DHS SA Cov DHS SA Cov DHS SA Cov DHS 0.00 70 100 82 52 100 68 64 100 78 42 100 59 0.10 70 100 82 52 100 68 64 100 78 42 100 59
+> 0.20 73 96 83 54 96 69 64 100 78 42 100 59
+> 0.30 78 90 83 61 76 67 66 94 78 48 84 61
+> 0.40 83 72 77 70 60 65 79 76 77 57 56 57 0.50 89 52 66 68 56 61 84 62 71 67 42 52 0.60 96 44 60 68 50 58 88 50 64 73 30 43 0.70 100 40 57 68 44 54 90 40 55 75 24 36 0.80 100 38 55 77 34 47 88 32 47 80 20 32 0.90 100 32 49 80 30 44 100 16 28 78 18 29
+
+C.3 Question-selection policy ablations 
+
+Table 10 compares question-selection policies on DDXPlus (policy descriptions in Appendix A.2). Focused top-k EIG improves accuracy over the global baseline by concentrating discriminative questions on the most probable diseases once the posterior begins to concentrate. The optimal configuration uses moderate focus strength applied early; too-strong focus degrades performance, likely because the model commits prematurely and stops exploring alternative hypotheses. Wider focus ( k=5 ) is slightly worse than k=3 , suggesting that a tighter candidate set produces more targeted 25 Table 10: Question-selection policy ablation on DDXPlus ( n=25 , BMBE + GPT-5.4-nano, Plain persona). Global EIG selects the most informative question across all diseases; Focused top-k
+
+EIG adds a discrimination term over the k most probable diseases, weighted by λ, activated once 
+
+max d bt(d) ≥ θ. DHS uses DHS-optimal τ ∗. The main experiments (Table 2) use Global EIG; focused EIG can improve DHS by up to +7 pp. Colour intensity: green = higher, red = lower.                                            
+
+> Accuracy Selective Diagnosis Policy Params Top-1 Top-3 Sel. Acc Cov. DHS
+> Global EIG (baseline) λ=0 76 88 83 92 87 Focused top-3 EIG λ=0 .3, θ =0 .380 88 87 92 89 Focused top-3 EIG λ=0 .5, θ =0 .388 92 96 92 94
+> Focused top-3 EIG λ=0 .3, θ =0 .584 88 88 96 92 Focused top-3 EIG λ=1 .0, θ =0 .372 80 86 84 85 Focused top-5 EIG λ=0 .3, θ =0 .384 92 88 96 92
+
+questions. The main experiments (Table 2) use global EIG ( λ=0 ) to keep the default policy simple and parameter-free; focused EIG is available as an optional enhancement. 
+
+C.4 Prior distribution sensitivity 
+
+We compare three prior initialisation strategies b0(d) on DDXPlus ( n=50 , BMBE + GPT-5.4-nano): • Empirical. b0(d) = ˆ p(d), the maximum-likelihood prevalence estimated from the DDXPlus training split. • Uniform. b0(d) = 1 /K , assigning equal mass to all K diseases. • Conditional. b0(d | a, s ) ∝ ˆp(d, a, s ), prevalence stratified by age group a and sex s (six demographic bins), estimated from training counts. Table 11 reports results at each prior’s DHS-optimal threshold. Table 11: Prior distribution ablation on DDXPlus ( n=50 , BMBE + GPT-5.4-nano). DHS-optimal τ ∗
+
+selected per prior. Colour intensity: green = higher, red = lower.                           
+
+> Accuracy Selective Diagnosis Prior τ∗Top-1 Top-3 Sel. Acc Cov. DHS
+> Empirical 0.25 70 88 71 98 83 Uniform 0.30 70 92 71 98 83 Conditional 0.45 74 90 79 94 86
+
+Empirical and uniform priors achieve identical DHS despite assigning very different initial mass to diseases. This insensitivity is expected given the minimum-question threshold Tmin =12 : the engine collects enough evidence to wash out the prior before making a decision. The conditional prior achieves the highest DHS by starting closer to the true posterior for each demographic group, reducing the evidence burden. As the disease space scales and symptom overlap increases, however, prior choice is likely to matter more: with many competing hypotheses sharing similar features, a well-calibrated prior can break ties that evidence alone cannot resolve within the question budget. 
+
+Per-prevalence breakdown. Table 12 stratifies the empirical vs. uniform comparison by prevalence tercile (Appendix C.8). The uniform prior improves accuracy on rare diseases at the cost of medium-prevalence diseases. This trade-off arises because the empirical prior assigns disproportionately high mass to common diseases, which helps conditions sharing features with frequent diagnoses but hinders rare diseases that must overcome a strong prior disadvantage. Under the uniform prior, the posterior is driven entirely by evidence, benefiting rare diseases whose distinctive symptom profiles are otherwise masked by prior dominance. 26 Table 12: Effect of prior choice on Top-1 accuracy by disease prevalence ( n=50 , BMBE + GPT-5.4-nano). Diseases ranked by training-set prevalence and split into terciles. ∆: uniform − empirical. 
+
+Prevalence group n Empirical Uniform ∆
+
+Common (top 16) 20 70 70 ±0Medium (mid 17) 17 76 65 −11 Rare (bottom 16) 13 62 77 +15 All 50 70 70 ±0
+
+C.5 Accuracy-coverage analysis 
+
+A selective classifier’s quality is best assessed not at a single threshold but across the full accuracy– coverage frontier. Figure 9 plots selective accuracy as a function of coverage for all six BMBE sensors on DDXPlus, with standalone doctors shown as fixed points. 50 60 70 80 90 100  
+
+> Coverage (%)
+> 40
+> 50
+> 60
+> 70
+> 80
+> 90
+> 100
+> Selective Accuracy (%)
+> GPT-5.4 Gemini 3.1 Pro
+> GPT-OSS-120B
+> Llama-4-Maverick
+> Qwen 3.6+
+> Kimi K2.5
+> GPT-5.4-nano
+> Gemini FL
+> Llama-4-Scout
+> GPT-OSS-20B
+> Gemma 4 31B
+> MiniMax M2.5
+> BMBE range
+
+Figure 9: DDXPlus selective accuracy vs. coverage ( n=50 ). Each BMBE curve is swept over the posterior confidence threshold τ ∈ [0 , 0.95] and smoothed via spline interpolation; standalone doctors (×) operate at a single abstention-determined point. The shaded region spans the BMBE envelope. At any matched coverage level, BMBE achieves higher accuracy than all standalone doctors. At matched coverage, every BMBE sensor dominates every standalone doctor: the BMBE envelope lies entirely above the cluster of standalone points. This gap widens as coverage decreases, because BMBE’s calibrated posterior allows it to selectively abstain on genuinely uncertain cases, whereas standalone doctors lack a reliable confidence signal for threshold-based abstention. The result is that BMBE offers strictly better accuracy at every operating point a deployer might choose. 
+
+C.6 Computational cost analysis 
+
+Table 13 reports per-model API pricing and estimated per-patient cost on DDXPlus. The cost– accuracy tradeoff is visualised in Figure 3 (main text). 27 Table 13: API pricing and per-patient cost on DDXPlus. Listed prices as of April 2026 from each model’s OpenRouter page (OpenAI models via direct API). Actual cost may vary by provider and routing. Cost/pat is the mean estimated spend per diagnostic session. Colour intensity: green = better, red = worse.                                                                   
+
+> Pricing ($/M) Performance System In Out Sel. Acc DHS Cost/pat
+> BMBE + sensor LLM (ours)
+> + GPT-5.4-nano 0.20 1.25 81 88 1.4 + Gemini 3.1 FL 0.25 1.50 77 86 1.6 + GPT-OSS-20B 0.03 0.14 70 78 0.9 + MiniMax M2.5 0.12 0.99 64 76 2.0 + Gemma 4 31B 0.13 0.38 60 74 0.9 + Llama-4-Scout 0.08 0.30 61 73 1.0
+> Standalone LLM doctors
+> SA GPT-5.4 2.50 15.00 64 70 19.6 SA Gemini 3.1 Pro 2.00 12.00 63 76 25.0 SA Qwen 3.6+ 0.33 1.95 51 66 4.2 SA Kimi K2.5 0.38 1.72 54 63 2.7 SA GPT-OSS-120B 0.04 0.19 41 58 1.0 SA Llama-4-Maverick 0.15 0.60 57 70 0.9
+> Cost/pat in US cents per diagnostic session.
+
+C.7 Persona robustness 
+
+A clinically useful system must handle diverse patient communication styles. We evaluate robustness across five patient personas that vary personality, language proficiency, recall accuracy, and cognitive state (Table 14). Table 14: Patient personas used for robustness evaluation. Each persona varies the simulated patient along four axes from PatientSim (30).                                   
+
+> Persona Proficiency Recall Confusion Personality Effect on dialogue
+> Plain BHigh None Cooperative Baseline. Answers directly. Overanxious BHigh None Anxious Over-reports symptoms, adds false positives. Distrustful BHigh None Skeptical Withholds information, terse an-swers. Dazed ALow Moderate Confused Inconsistent responses across turns. Verbose BLow None Talkative Buries relevant info in tangential detail.
+
+We test BMBE and standalone GPT-5.4-nano across four adversarial personas in addition to the cooperative baseline. Table 15 reports the complete breakdown. BMBE maintains high coverage and stable DHS across all adversarial personas, degrading only moderately from the plain baseline. In contrast, the standalone doctor’s coverage collapses under adversarial conditions: when patients are evasive or confused, the model abstains on the majority of cases, producing low DHS despite sometimes achieving high selective accuracy on the few cases it does commit to. The BMBE advantage widens under adversarial conditions because the Bayesian backbone accumulates evidence independently of the patient’s communication style, even noisy or incomplete responses contribute partial information through Jeffrey’s conditioning. The distrustful persona yields the highest BMBE DHS because both systems achieve comparable selective accuracy on committed cases, the difference is coverage: the standalone doctor becomes too uncertain to commit on most patients, while BMBE still accumulates sufficient posterior confidence through Bayesian updating even from partial evidence. 28 Table 15: Per-persona results on DDXPlus (GPT-5.4-nano as sensor/doctor). BMBE uses DHS-optimal τ ∗; SA uses self-determined abstention. ∆: BMBE − SA. Colour intensity: green = higher, red = lower. 
+
+BMBE Standalone Persona Sel. Acc Cov. DHS Sel. Acc Cov. DHS ∆DHS 
+
+Plain 81 96 88 64 78 70 +18 Overanxious 79 96 87 80 40 53 +34 Distrustful 88 96 92 89 36 51 +41 Dazed 71 96 82 50 48 49 +33 Verbose 72 100 84 56 64 60 +24 
+
+Mean (adv.) 78 97 86 69 47 53 +33 
+
+Figure 10 visualises the consistent gap across all personas. Plain Overanxious Distrustful Dazed Verbose   
+
+> 40
+> 50
+> 60
+> 70
+> 80
+> 90
+> 100
+> DHS
+> Baseline Adversarial
+> +18
+> +33 +40
+> +33
+> +24
+> BMBE + GPT-5.4-nano
+> SA GPT-5.4
+> SA degradation
+> BMBE degradation
+
+Figure 10: DHS across patient personas. Shaded areas show degradation from the plain baseline (dotted lines). BMBE (blue) remains near its baseline under all adversarial conditions; the standalone doctor (orange) collapses. The contrast between the two shaded areas illustrates the robustness advantage of structured Bayesian reasoning over end-to-end LLM inference. 
+
+C.8 Accuracy by disease prevalence 
+
+A clinically important question is whether the system maintains accuracy across the full prevalence spectrum. We stratify the 49 DDXPlus diseases into three groups by rank-ordering their population prevalence and splitting into equal-sized terciles: common (top 16), medium (middle 17), and rare 
+
+(bottom 16). Table 16 reports Top-1 accuracy, selective accuracy, coverage, and DHS for the strongest BMBE configuration (GPT-5.4-nano) and the strongest standalone doctor (SA GPT-5.4). BMBE maintains a nearly flat DHS profile across the prevalence spectrum, whereas the standalone doctor degrades sharply on rare diseases. This gap arises from two complementary effects. First, the Bayesian engine conditions on a knowledge base whose likelihood tables are prevalence-agnostic: the Dirichlet counts encode symptom–disease associations regardless of how common a disease is. Second, the standalone doctor inherits the frequency bias of its LLM training corpus, diseases that appear more often in medical text receive disproportionate probability mass, systematically disadvantaging rare conditions. 29 Table 16: Diagnostic performance stratified by disease prevalence tercile on DDXPlus ( n=50 ). BMBE uses DHS-optimal τ ∗; SA uses self-determined abstention. Diseases rank-ordered by popula-tion prevalence and split into equal-sized groups.                                                   
+
+> Selective Diagnosis Prevalence Model Top-1 Top-3 Sel. Acc Cov. DHS
+> Common ( n=20 )BMBE + nano 90 100 90 100 95
+> SA GPT-5.4 55 85 60 75 67 Medium ( n=17 )BMBE + nano 71 88 75 94 84
+> SA GPT-5.4 71 88 79 82 80 Rare ( n=13 )BMBE + nano 69 77 75 92 83
+> SA GPT-5.4 54 77 50 77 61 All ( n=50 )BMBE + nano 78 90 81 96 88
+> SA GPT-5.4 60 84 64 78 70
+
+The coverage column reinforces this distinction. BMBE rarely abstains regardless of prevalence, while the standalone doctor abstains more aggressively on rare cases yet still achieves lower accuracy among the cases it does diagnose. In clinical terms, the Bayesian architecture provides both higher reliability and higher willingness to commit on the long tail of the disease distribution. 
+
+C.9 Failure mode analysis 
+
+We classify every committed misdiagnosis (confidence ≥ τ ∗, top-1 incorrect) along three independent axes. A case may be tagged with multiple failure modes simultaneously. 1. KB Failure. We run an oracle test: all ground-truth features are supplied at confidence c=1 .0.We then measure the posterior gap between the oracle’s top-1 and top-2 diseases. If this gap falls below a threshold γ (γ=0 .80 ), the KB cannot reliably discriminate the disease pair. 2. LLM Failure. The LLM pipeline (verbaliser + patient simulator + parser) injected incorrect evidence into the engine. Two subtypes: • False Positive (FP) : the engine asks about a feature absent from the patient’s ground-truth profile; the pipeline returns yes . If more than 2 such turns occur in a session, the case is flagged. The threshold reflects the empirical separation between successful sessions (mean 1.3 FP) and failure sessions (mean 3.5 FP). • Wrong Evidence (WE) : the engine asks about a feature present in the ground-truth profile, but the extracted value contradicts the ground truth. Any occurrence triggers the flag. This taxonomy is conservative : it captures only detectable errors. Cases where the parser maps an uncertain response to no for an absent feature are not flagged, nor are confidence miscalibrations. 3. Inference Failure. The KB is adequate and the evidence pipeline introduced no detectable errors, yet the engine converged to the wrong diagnosis. Two subtypes: • Close : the ground truth remains in the top-3 posterior at session end, but the question budget or EIG policy did not resolve the differential. • Diverged : the ground truth is not in the top-3. The engine committed confidently to a wrong hypothesis. 
+
+Results. Table 17 reports the analysis across all six BMBE sensors on DDXPlus (committed failures only, τ ∗ per sensor). 
+
+KB failures are patient-specific, not sensor-specific. The KB failure count varies across sensors (1–4) not because the KB changes, but because stronger sensors resolve cases that weaker ones cannot. The same patients trigger oracle failure regardless of sensor. However, a capable sensor may still overcome a marginal KB gap through better evidence collection, while a weaker sensor fails on those cases and gets counted. 30 Table 17: Failure mode analysis on DDXPlus (committed misdiagnoses only). Axes are non-exclusive: a case may trigger multiple failure modes. Colour intensity: red = more failures. 
+
+LLM Inference Sensor Fail KB FP WE Close Div. 
+
+GPT-5.4-nano 9 1 6 0 2 0Gemini FL 11 2 4 1 2 2Llama-4-Scout 17 2 6 2 3 4GPT-OSS-20B 13 4 5 0 2 2Gemma 4 31B 18 4 11 0 1 2MiniMax M2.5 15 3 9 1 2 0
+
+Total 83 16 41 4 12 10 % 19% 49% 5% 14% 12% 
+
+LLM failure dominates and scales with sensor quality. The LLM pipeline accounts for the majority of committed errors, with false positives as the dominant subtype. Critically, this failure mode scales with sensor capability: frontier sensors produce substantially fewer false positives than smaller models (Table 17). This suggests that scaling the sensor LLM, without changing the Bayesian engine, directly reduces the dominant failure mode. 
+
+Inference failures confirm the architectural thesis. The strongest sensors have zero diverged inference failures: every committed error is either a KB limitation or an evidence collection problem. When the LLM pipeline delivers accurate evidence, the Bayesian engine reliably converges to the correct diagnosis. Weaker sensors produce noisier evidence that steers the EIG policy toward unproductive questions, causing the engine to commit to wrong hypotheses even when the KB contains sufficient information. 
+
+C.10 Disease scaling analysis 
+
+We evaluate how diagnostic performance scales with the size of the candidate disease space. Random subsets of K ∈ { 10 , 20 , 30 , 40 } diseases are sampled from DDXPlus, and one patient per disease is evaluated for both BMBE and the standalone doctor. 10 20 30 40 
+
+> Number of diseases (K)
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Top-1 accuracy (%)
+> BMBE + GPT-5.4-nano
+> SA GPT-5.4-nano
+
+Figure 11: Top-1 accuracy vs. KB size K.BMBE remains stable across a 4× increase in disease space; the standalone doctor is flat re-gardless of K.Table 18: Disease scaling: Top-1 accuracy on DDXPlus random subsets (3 seeds, N = K
+
+patients). ∆: BMBE − SA. 
+
+K BMBE SA ∆
+
+10 82 41 +41 20 86 34 +52 30 79 41 +38 40 78 39 +39 
+
+BMBE maintains stable accuracy as the disease space quadruples, because its inference complexity scales with the KB structure rather than with the LLM’s reasoning capacity. The standalone doctor, by contrast, operates over its own implicit disease space regardless of K—it does not know how many candidates the KB contains—and its performance remains flat. Providing the candidate list explicitly would likely degrade the standalone doctor further at higher K, as a longer list introduces confusion without a structured mechanism to leverage it. 31 C.11 Diagnostic session walkthroughs 
+
+Figure 12 illustrates the engine’s belief dynamics. The left panel tracks the posterior of the ground-truth disease across turns for a representative case: competing hypotheses rise and fall as evidence accumulates. The right panel aggregates entropy trajectories across all sessions, separating correct and incorrect diagnoses: correct cases exhibit steady entropy collapse, while incorrect cases plateau at elevated uncertainty. 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 
+
+Turn   
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Posterior Probability
+> d_allergic_sinusitis
+> Others 510 15
+
+Turn 
+
+> 0.0
+> 0.5
+> 1.0
+> 1.5
+> 2.0
+> Entropy (bits)
+> Correct (Top-1)
+> Incorrect
+
+Figure 12: Left: Posterior trajectory for a single session (Allergic sinusitis, GPT-5.4-nano). The ground-truth disease (green) starts at 9%, competes with alternatives, and converges to near-certainty. 
+
+Right: Mean entropy trajectories across all DDXPlus sessions ( n=50 ). Correct diagnoses (green) converge rapidly; incorrect ones (red) remain uncertain throughout. We present an example session below. 32 Case 1: Spontaneous pneumothorax Correct, confidence = 0 .999 
+
+“I have chest pain even at rest, upper chest pain, and pleuritic chest pain” 
+
+T1 Dr: Does your thoracic pain spread or radiate to another area, such as your chest, ribs, shoulder, or around to the front of your body? 
+
+Pt: “No. My pain is in my upper chest and both breasts, and it doesn’t spread or radiate to other areas.” 
+
+T2 Dr: Do you have chronic obstructive pulmonary disease (COPD), such as chronic bronchitis or emphysema? 
+
+Pt: “No. I don’t have COPD or chronic bronchitis/emphysema that I know of.” 
+
+T3 Dr: What color is the rash? For example, is it red, pink, dark, pale, or yellow, or is there no rash? 
+
+Pt: “There is no rash.” 
+
+T4 Dr: Do you feel any pain in the upper middle part of your abdomen (the area just below your breastbone)? 
+
+Pt: “No. My pain is in my upper chest area, not in the upper middle abdomen below the breastbone.” 
+
+T5 Dr: Have you had any surgery or a procedure that required anesthesia within the last month? 
+
+Pt: “No. I haven’t had any surgery or anesthesia within the last month.” 
+
+T6 Dr: Do you feel your heart beating fast, irregularly, or having palpitations right now? 
+
+Pt: “No. I don’t feel my heart racing or having palpitations right now.” 
+
+T7 Dr: Do you currently smoke cigarettes? 
+
+Pt: “Yes. I currently smoke cigarettes.” 
+
+T8 Dr: Do you consider yourself significantly overweight compared to other people of the same height? 
+
+Pt: “No. I don’t consider myself significantly overweight.” 
+
+T9 Dr: Do you constantly feel fatigued, or do you have sleep that doesn’t leave you feeling rested? 
+
+Pt: “No. I’m not constantly fatigued, and I don’t have sleep that never leaves me rested.” 
+
+T10 Dr: Do you drink alcohol excessively, or do you feel you have an addiction to alcohol? 
+
+Pt: “No. I don’t drink excessively and I don’t feel addicted to alcohol.” 
+
+T11 Dr: Have you ever smoked cigarettes in the past, but you don’t smoke now (a former smoker)? 
+
+Pt: “No. I’m still smoking cigarettes now, so I’m not a former smoker.” 
+
+T12 Dr: When you feel the pain, does it feel like a tugging or pulling sensation? 
+
+Pt: “No. It feels more like a knife-stroke, heartbreaking pain, not tugging or pulling.” 
+
+T13 Dr: Does your pain feel exhausting, like it wears you out or drains your energy? 
+
+Pt: “No. It’s very severe, but it doesn’t feel exhausting or like it drains my energy.” 
+
+T14 Dr: Have you ever had a spontaneous pneumothorax (a collapsed lung that happened without a clear injury or accident)? 
+
+Pt: “Yes. I’ve had a spontaneous pneumothorax before.” 
+
+T15 Dr: Is your pain heartbreaking or emotionally overwhelming in a way that feels hard to bear? 
+
+Pt: “Yes. It’s heartbreaking and hard to bear.”                
+
+> Posterior (Sp. pneumo)
+> T1: .219
+> T2: .118
+> T3: .137
+> T4: .162
+> T5: .186
+> T6: .205
+> T7: .404 T8: .442
+> T9: .462
+> T10: .472
+> T11: .480
+> T12: .485
+> T13: .488
+> T14: .976 T15: .999
+
+33

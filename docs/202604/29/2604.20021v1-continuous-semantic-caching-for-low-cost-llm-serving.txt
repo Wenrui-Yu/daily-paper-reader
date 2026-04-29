@@ -1,0 +1,4067 @@
+Title: Continuous Semantic Caching for Low-Cost LLM Serving
+
+URL Source: https://arxiv.org/pdf/2604.20021v1
+
+Published Time: Thu, 23 Apr 2026 00:15:49 GMT
+
+Number of Pages: 24
+
+Markdown Content:
+# Continuous Semantic Caching for Low-Cost LLM Serving 
+
+## Baran Atalar 
+
+Carnegie Mellon University Pittsburgh, Pennsylvania, USA batalar@andrew.cmu.edu 
+
+## Xutong Liu 
+
+University of Washington Tacoma Tacoma, Washington, USA xutongl@uw.edu 
+
+## Jinhang Zuo 
+
+City University of Hong Kong China jinhang.zuo@cityu.edu.hk 
+
+## Siwei Wang 
+
+Microsoft Research Asia China siweiwang@microsoft.com 
+
+## Wei Chen 
+
+Microsoft Research Asia China weic@microsoft.com 
+
+## Carlee Joe-Wong 
+
+Carnegie Mellon University Pittsburgh, Pennsylvania, USA cjoewong@andrew.cmu.edu 
+
+## Abstract 
+
+As Large Language Models (LLMs) become increasingly popular, caching responses so that they can be reused by users with se-mantically similar queries has become a vital strategy for reducing inference costs and latency. Existing caching frameworks have proposed to decide which query responses to cache by assuming a finite, known universe of discrete queries and learning their serving costs and arrival probabilities. As LLMs’ pool of users and queries expands, however, such an assumption becomes increasingly un-tenable: real-world LLM queries reside in an infinite, continuous embedding space. In this paper, we establish the first rigorous theo-retical framework for semantic LLM response caching in continuous query space under uncertainty. To bridge the gap between discrete optimization and continuous representation spaces, we introduce dynamic 𝜖 -net discretization coupled with Kernel Ridge Regression. This design enables the system to formally quantify estimation uncertainty and generalize partial feedback on LLM query costs across continuous semantic query neighborhoods. We develop both offline learning and online adaptive algorithms optimized to reduce switching costs incurred by changing the cached responses. We prove that our online algorithm achieves a sublinear regret bound against an optimal continuous oracle, which reduces to existing bounds for discrete query models. Extensive empirical evaluations demonstrate that our framework approximates the continuous op-timal cache well while also reducing computational and switching overhead compared to existing methods. 
+
+## Keywords 
+
+Large Language Models, Semantic Caching, Online learning 
+
+ACM Reference Format: 
+
+Baran Atalar, Xutong Liu, Jinhang Zuo, Siwei Wang, Wei Chen, and Carlee Joe-Wong. 2026. Continuous Semantic Caching for Low-Cost LLM Serving. In . ACM, New York, NY, USA, 24 pages. https://doi.org/10.1145/nnnnnnn. nnnnnnn  
+
+> Permission to make digital or hard copies of all or part of this work for personal or classroom use is granted without fee provided that copies are not made or distributed for profit or commercial advantage and that copies bear this notice and the full citation on the first page. Copyrights for components of this work owned by others than the author(s) must be honored. Abstracting with credit is permitted. To copy otherwise, or republish, to post on servers or to redistribute to lists, requires prior specific permission and/or a fee. Request permissions from permissions@acm.org.
+> Conference’17, Washington, DC, USA
+> ©2026 Copyright held by the owner/author(s). Publication rights licensed to ACM. ACM ISBN 978-1-4503-XXXX-X/2018/06 https://doi.org/10.1145/nnnnnnn.nnnnnnn
+
+## 1 Introduction 
+
+Large language models (LLMs) have recently exploded in popular-ity, with ChatGPT reportedly reaching 700 million users in July 2025 [ 4]. LLM queries, however, are expensive [ 25 ]: not only can they have seconds-level response latencies, but LLM inference can have significant energy costs and compute utilization, costs that will only grow with query volume. Prior work has suggested caching 
+
+query responses to reduce these costs: cached responses can then be returned directly for semantically similar queries, eliminating the need for a LLM inference pass. Caching is particularly effective for queries that seek factual, non-user-specific information, which make up a significant portion of ChatGPT usage [4]. While caching presents a natural solution to reducing LLM in-ference costs, deciding which queries and responses to cache , which we refer to as the cache design problem, presents a significant re-search challenge : cache sizes are limited, so the most frequently arriving and/or most expensive query-response pairs should be pri-oritized for caching. These costs and arrival probabilities are often unknown and stochastic, and thus must be estimated from offline data or online experience. Prior work has addressed such challenges in other caching settings [ 18 , 21 ], but the LLM setting raises novel challenges. Firstly, we should relate semantically similar queries in order to reduce cache misses, instead of relying on exact query matches like some existing LLM frameworks [ 33 ]. Indeed, some recent work has found that more than 30% of LLM queries are se-mantically similar [ 9]. Secondly, initial work on semantic caching for LLMs relies on the assumption that query-response caching candidates are drawn from a known, finite list [ 3, 9, 17 , 29 ]. One can then apply online or offline learning methods to estimate the cost of serving each query, as well as its arrival probability, and choose what to cache accordingly [ 19 , 20 ]. As LLMs grow more popular and their queries and users more diverse, it becomes almost impossible to enumerate such a finite set of queries and responses. We address these challenges by considering semantic caching over continuous query space . Learning query costs and arrival prob-abilities is thus significantly harder: since future queries can come from anywhere in the continuous query space, the cost and arrival probability of each query must be inferred from those of other queries 
+
+instead of directly estimated from the history of the same query. Even if these parameters can be inferred, we must now optimize over an infinite space of possible query-response cache candidates, potentially introducing significant suboptimality into the cache design. To the best of our knowledge, ours is the first work to  
+
+> arXiv:2604.20021v1 [cs.LG] 21 Apr 2026 Conference’17, July 2017, Washington, DC, USA Baran Atalar, Xutong Liu, Jinhang Zuo, Siwei Wang, Wei Chen, and Carlee Joe-Wong
+
+propose a semantic caching framework for low-cost LLM serving in continuous query space with theoretical perfor-mance guarantees .
+
+## 1.1 Related Work 
+
+Low-Cost LLM Serving. As the deployment of LLM models scales, lowering their high inference costs has become an important re-search direction. While optimization techniques such as quanti-zation [ 8 , 31 ] and speculative decoding [ 16 , 28 ] reduce compute overhead, caching has emerged as a highly effective method to reduce redundant computations entirely. Previous works have in-vestigated caching at multiple levels, from reusing internal KV-states [ 14 , 22 , 26 ] to routing API requests [ 7, 23 ]. At the query level, earlier works relied on exact-text matching [ 20 , 33 ], which is restrictive for natural language prompts. This limitation led to the development of semantic caching [ 9, 10 , 17 ], allowing similar queries to share responses. While recent systems extend semantic caching to richer settings such as multi-turn contexts [ 32 ] and tiered architectures [ 27 ], they remain fundamentally heuristic based and assume knowledge of query costs or arrival distributions or do not generalize across a continuous query space. Our work tackles the more complex and realistic scenario of caching over an unbounded, continuous query space with uncertain query costs and arrivals. 
+
+Learning-Based Cache Optimization. Traditional caching methods, such as LFU (least frequently used) and LRU (least re-cently used) [ 15 ], are simple online heuristics that adapt to observed request patterns without explicitly modeling system parameters. In contrast, cost-aware variants such as LEC [ 2] estimate quanti-ties like request probabilities and retrieval costs to guide caching decisions. In our previous work [ 19 ], we introduced an online adap-tation framework for semantic caching, but it remained restricted to a finite, discrete query set. Transitioning to a continuous do-main inherently changes the mathematical structure of the problem. Specifically, our continuous caching framework can be modeled as a variant of the Combinatorial Multi-Armed Bandit (CMAB) problem [ 5]. Unlike standard CMAB settings, our environment introduces a "reverse feedback" challenge: when a query is served from the cache, the true cost of its execution on the LLM remains unobserved. 
+
+## 1.2 Our Contributions 
+
+Our work makes the following contributions: 
+
+(1) Continuous Semantic Caching Model (Section 2) We model a sequence of queries, each drawn from an a priori unknown prob-ability distribution over the continuous query space, arriving at a LLM operator (Figure 1). Upon arrival, a query is either served from the cache or from the LLM, depending on whether the mismatch 
+
+cost of serving the cached response of a semantically similar query exceeds the serving cost of LLM inference on this query. To han-dle infinite query space, we introduce the notion of an 𝜖 -net that partitions the query space into Voronoi regions with semantically similar queries. Given an 𝜖 -net, one can then discretize the cache design problem by caching at most one representative query per region. Importantly, we do not assume a pre-defined 𝜖 -net , as cov-ering the entire query space is likely intractable. We then face the challenge that solely working with these 𝜖 -net query candidates introduces not only discretization errors in choosing the optimal cached queries but also additional errors in estimating query costs, as semantically similar queries may still have distinct serving costs. We address these in our theoretical analysis below. 
+
+(2) Algorithm Design: We consider three cache design settings. First, in the oracle setting (Section 3) with full information of query costs and arrivals, we use our 𝜖 -net definition to provide the Reverse Greedy algorithm with provable approximation and discretization guarantees. We then consider the offline setting (Section 4), where historical serving and arrival data is available (e.g., from deploy-ment logs [ 20 , 33 ]). We use this data to build an 𝜖 -net and introduce a pessimistic learning algorithm, CUCB-SC-Cont , that uses kernel ridge regression (KRR) to estimate the serving cost and query ar-rival probability for a given query from those of other queries in the historical data. Finally, in the online adaptive setting (Section 5), we propose CLCB-SC-LS-Cont , which adaptively constructs an 𝜖 -net on online query arrivals. The online setting further introduces a low-switching constraint not present in traditional CMAB: changing the cache may require re-running some queries to get their responses to cache. We thus design adaptive thresholds that minimize such cache switching along with traditional algorithm regret. 
+
+(3) Theoretical Guarantees: After deriving an approximation guarantee for the oracle setting, we provide a suboptimality guaran-tee for CUCB-SC-Cont in the offline setting. To do so, we introduce a novel method to quantify the KRR estimation error for the model parameters and the resulting cache suboptimality. We then use these results to analyze the optimal choice of 𝜖 , trading off between a lower discretization and estimation errors. Finally, we derive a regret upper bound for CLCB-SC-LS-Cont , despite the continuous space from which our queries are drawn. 
+
+(4) Performance Evaluation (Section 6): We conduct extensive ex-periments on synthetic and real-world datasets for offline and online settings. We show that CUCB-SC-Cont achieves the lowest subopti-mality gap in the offline setting, yielding up to a 73.32% improve-ment over prior methods. In the online setting, CLCB-SC-LS-Cont 
+
+outperforms baselines regarding final average regret, with up to 72.41% and 43.14% reductions observed on synthetic and bursty real-world query streams, respectively. In addition, our algorithm maintains these strong regret results while keeping runtime highly competitive with existing semantic caching baselines. Due to space constraints, we defer all theoretical proofs and additional experimental results to our extended technical report [ 1]. 
+
+## 2 System Model 
+
+In this section, we present the system model of the continuous semantic caching problem for low-cost LLM serving (Fig. 1). 
+
+## 2.1 LLM Serving System 
+
+We formalize our LLM serving system as follows. 
+
+Queries and Embeddings. We assume queries, which each repre-sent a natural language prompt, are independently drawn from a probability density function 𝑓 : X → R+ over a continuous space 
+
+X ⊂ R𝑑 𝑒 such that ∫ 
+
+> X
+
+𝑓 (𝑥 ) 𝑑𝑥 = 1. We assume that X inherits a metric structure through a distance function 𝑑 : X × X → R+
+
+(e.g., Euclidean distance in the embedding space). We let 𝑝 ≤ 𝑑 𝑒 de-note the intrinsic (metric) dimension of X. Specifically, we assume that there exists a constant 𝑐 0 > 0 such that for any 𝑥 ∈ X and Continuous Semantic Caching for Low-Cost LLM Serving Conference’17, July 2017, Washington, DC, USA 
+
+Figure 1: Continuous semantic caching system for low-cost LLM serving, showing query arrivals, service from the cache or LLM, and cache updates. 
+
+any sufficiently small radius 𝑟 > 0, ∫   
+
+> 𝐵 (𝑥,𝑟 )
+
+𝑓 (𝑥 ′)𝑑𝑥 ′ ≥ 𝑐 0𝑟 𝑝 where 
+
+𝐵 (𝑥, 𝑟 ) = {𝑥 ′ ∈ X : 𝑑 (𝑥, 𝑥 ′) ≤ 𝑟 }.
+
+Serving Costs and Partial Observations. Each query 𝑥 ∈ X is as-sociated with an unknown expected serving cost 𝑐 (𝑥 ) ∈ ( 0, 1], rep-resenting, for example, latency or computational cost of invoking the LLM. When the system queries the LLM with input 𝑥 , it observes a noisy realization 𝐶 𝑡 (𝑥 ) = 𝑐 (𝑥 ) + 𝜂 𝑡 (𝑥 ), where the noise sequence 
+
+𝜂 𝑡 (𝑥 ) is conditionally 𝑅 -sub-Gaussian given the history F𝑡 −1 (i.e., 
+
+E[𝜂 𝑡 (𝑥 )|F 𝑡 −1] = 0 and E[exp (𝜉𝜂 𝑡 (𝑥 ))|F 𝑡 −1] ≤ exp (𝜉 2𝑅 2/2) for all 
+
+𝜉 ∈ R). This cost is only observed when the LLM is invoked. 
+
+Similarity and Mismatch Costs. For a semantic cache of at most 𝑘 
+
+query-response pairs M = {( 𝑢 1, 𝑎 (𝑢 1)) , . . . , (𝑢 𝑘 , 𝑎 (𝑢 𝑘 ))} , 𝑢 𝑖 ∈ X ,we define the distance from a query 𝑥 to the cache as 𝑑 (𝑥, M) :=
+
+min 𝑢 ∈ M 𝑑 (𝑥, 𝑢 ), and denote the closest cached query by 𝑠 (𝑥, M) :=
+
+argmin 𝑢 ∈ M 𝑑 (𝑥, 𝑢 ). Note that to satisfy the Lipschitz continuity re-quired for our theoretical guarantees, 𝑑 must be a well-defined metric space distance (e.g., the Euclidean distance between 𝐿 2-normalized embeddings). If a query 𝑥 is served using the cached response corresponding to 𝑢 ∈ M , it incurs an expected mismatch cost 𝜙 (𝑑 (𝑥, 𝑢 )) , where 𝜙 : R+ → [ 0, 1] is a non-decreasing function. Because queries arrive from an infinite continuous space, a user prompt can be significantly different from all previously cached items, potentially yielding an arbitrarily large geometric distance. Bounding the mismatch penalty to a maximum of 1 explicitly caps the cost of these extreme outliers, ensuring the cache penalty never outscales the normalized cost of querying the LLM, while providing the strict upper bounds required for our theoretical regret guaran-tees. For example, 𝜙 could be selected as a clipped linear function, 
+
+𝜙 (𝑑 ) = min (𝜁𝑑, 1) for some scaling parameter 𝜁 > 0. On the other hand, querying the LLM directly on 𝑥 incurs no mismatch cost. 
+
+## 2.2 Semantic Caching 
+
+The system maintains a semantic cache M defined before. At each round 𝑡 , a query 𝑥 ∼ 𝑓 arrives. The system chooses between: 
+
+• Cache Lookup: Serve using 𝑠 (𝑥, M) and incur mismatch cost 𝜙 (𝑑 (𝑥, M)) ;
+
+• LLM Query: Query the LLM, incur and observe cost 𝑐 (𝑥 ).The optimal decision rule compares the two costs: 
+
+𝑎 𝑡 =
+
+(
+
+LLM (𝑥 ) if 𝑐 (𝑥 ) ≤ 𝜙 (𝑑 (𝑥, M)) ,𝑎 (𝑠 (𝑥, M)) otherwise . (1) This raises the central question: how should we construct the cache M in a continuous query space? 
+
+Discretization via 𝜖 -Net and Voronoi Regions. Optimizing directly over the continuous space X is intractable. To obtain a finite representation, we approximate X using an 𝜖 -net S = {𝑥 1, . . . , 𝑥 𝑚 } ⊆ X such that for every 𝑥 ∈ X , there exists 𝑥 𝑖 ∈ S with 𝑑 (𝑥, 𝑥 𝑖 ) ≤ 𝜖 .The set S induces a partition of the space into 𝑚 regions {𝑉 𝑖 }𝑚 𝑖 =1,defined as Voronoi regions: 
+
+𝑉 𝑖 := {𝑥 ∈ X : 𝑑 (𝑥, 𝑥 𝑖 ) ≤ 𝑑 (𝑥, 𝑥 𝑗 ), ∀𝑗 ≠ 𝑖 }.
+
+Each region 𝑉 𝑖 contains all queries whose closest representative in S is 𝑥 𝑖 . This induces a finite partition of the continuous query space. We define the weight of each region 𝑉 𝑖 as 
+
+𝑤 𝑖 :=
+
+∫
+
+> 𝑉 𝑖
+
+𝑓 (𝑥 ) 𝑑𝑥, 
+
+i.e., the probability mass of queries in this region. 
+
+Loss Function over Continuous Query Space. The expected loss of a cache M under density 𝑓 is 
+
+L(M ; 𝑓 , 𝑐, 𝑑 ) =
+
+∫
+
+> X
+
+𝑓 (𝑥 ) min {𝑐 (𝑥 ), 𝜙 (𝑑 (𝑥, M))} 𝑑𝑥 . (2) The cache design problem aims to find: 
+
+M∗ = argmin M ⊆ X ,| M | ≤ 𝑘 L(M ; 𝑓 , 𝑐, 𝑑 ) (3) Using the 𝜖 -net approximation, we obtain the discretized loss: 
+
+bL(M ; S, 𝒘 , 𝑐 ) = Í𝑚 𝑖 =1 𝑤 𝑖 min {𝑐 (𝑥 𝑖 ), 𝜙 (𝑑 (𝑥 𝑖 , M))} . (4) In our formal theoretical approach, which we detail in the next sections, we bound the approximation error between Equation (2) and Equation (4), which enables us to derive guarantees on the discretized loss and relate it to the expected loss under density 𝑓 .
+
+## 3 Approximate Solution for Continuous Semantic Caching with Known Parameters 
+
+In this section, we study the semantic caching problem under the as-sumption that the arrival distribution and cost function are known .Our formulation builds on the discrete semantic caching frame-work of [ 19 ], which considers a finite query set and derives a dis-crete reverse-greedy approximation algorithm. However, since our queries are drawn from a continuous space X ⊂ R𝑑 𝑒 , we replace [ 19 ]’s finite sum objective with Equation 2’s integral loss function. We first show that the cache design problem for the optimal solution over this continuous space is computationally intractable: 
+
+Lemma 3.1 (NP-hardness). The continuous semantic caching problem shown in Equation 3 is NP-hard. 
+
+This lemma shows that our formulation is a strict generalization of the discrete setting. In particular, if X is finite and 𝑓 is discrete, we recover the setting in [ 19 ] exactly. Our problem inherits the NP-hardness but introduces additional complexity due to the infinite Conference’17, July 2017, Washington, DC, USA Baran Atalar, Xutong Liu, Jinhang Zuo, Siwei Wang, Wei Chen, and Carlee Joe-Wong 
+
+Algorithm 1 Continuous Reverse Greedy [ 19 ]: Removing Least Beneficial Cache Items  
+
+> 1:
+
+Input: candidates S, weights 𝒘 , costs 𝒄 , 𝑑 , 𝑘 , 𝜙  
+
+> 2:
+
+Initialize: M0 ← S , 𝑚 = |S| . If 𝑚 ≤ 𝑘 , Return M = S. 
+
+> 3:
+
+for 𝑖 = 1 to 𝑚 − 𝑘 do  
+
+> 4:
+
+𝑞 𝑖 = argmin 𝑞 ∈ M 𝑖 −1
+
+bL(M 𝑖 −1 \ { 𝑞 }; S, 𝒘 , 𝒄 ) 
+
+> 5:
+
+Update M𝑖 ← M 𝑖 −1 \ { 𝑞 𝑖 } 
+
+> 6:
+
+end for  
+
+> 7:
+
+Return: M = M𝑚 −𝑘 
+
+decision space induced by continuous query space. To address this challenge, we use Section 2.2’s continuous-to-discrete reduction via an 𝜖 −net. Next, we bound the resulting discretization error. 
+
+Assumption 1 (Lipschitz Continuity of the Expected Cost) . Define 
+
+𝑔 M (𝑥 ) = min {𝑐 (𝑥 ), 𝜙 (𝑑 (𝑥, M))} ∈ [ 0, 1]. Assume there is a con-stant 𝐿 𝑔 > 0 such that for all cache M, 𝑥 → 𝑔 M (𝑥 ) is 𝐿 𝑔 -Lipschitz: 
+
+|𝑔 M (𝑥 ) − 𝑔 M (𝑦 )| ≤ 𝐿 𝑔 𝑑 (𝑥, 𝑦 ) ∀𝑥, 𝑦 ∈ X 
+
+Note that a sufficient condition for Assumption 1 to hold is that both 𝑐 (𝑥 ) and 𝜙 (·) are themselves Lipschitz continuous. 
+
+Lemma 3.2 (Continuous-to-discrete approximation via 𝜀 -net). 
+
+Let S be a static 𝜖 -net covering the space X and suppose that Assump-tion 1 holds. Then for every M with |M| ≤ 𝑘 :
+
+|L(M) − bL(M ; S)| ≤ 𝐿 𝑔 𝜖 
+
+This lemma shows that the continuous objective can be well approximated by its discrete counterpart. The approximation error scales linearly with the covering radius 𝜖 and with this bound, the problem reduces to a finite optimization problem over S.We directly apply Lemma 2 from [ 19 ] to design Algorithm 1. This lemma shows that our discretized loss function is supermodular and non-increasing regarding the set M. Theorem 3.3 provides a guar-antee on the performance of Alg. 1 following [ 11 ] and combining this result with Lemma 3.2. 
+
+Theorem 3.3 (Approximation Guarantee [ 11 ]). Let M be the solution returned by Algorithm 1. Then, bL(M ; S, 𝒘 , 𝒄 ) ≤ 𝛼 ·
+
+bL(M ∗; S, 𝒘 , 𝒄 ), where 𝛼 = 𝑒 Γ −1 
+
+> Γ
+
+, Γ = 𝑠  
+
+> 1−𝑠
+
+and 𝑠 ∈ [ 0, 1] is the cur-vature and L(M ; S, 𝒘 , 𝒄 ) − 𝛼 · L(M ∗; S, 𝒘 , 𝒄 ) ≤ bL(M ; S, 𝒘 , 𝒄 ) − 
+
+𝛼 · bL(M ∗; S, 𝒘 , 𝒄 ) + ( 1 + 𝛼 )𝐿 𝑔 𝜖 .
+
+## 4 Offline Learning for Continuous Semantic Caching Problem with Unknown Parameters 
+
+In this section, we consider the semantic caching problem when the cost function 𝑐 (𝑥 ) and density 𝑓 are unknown and must be learned from an offline dataset. Unlike the setting in Section 3, where 𝑓 
+
+and 𝑐 are assumed known, we are given a dataset of observations 
+
+{(M 𝑡 , 𝑥 𝑡 , 𝐶 𝑡 )} 𝑛 𝑡 =1, where 𝐶 𝑡 denotes the cost incurred when serving query 𝑥 𝑡 and M𝑡 is the selected cache at round 𝑡 . If 𝐶 𝑡 = ∅, it indicates that the cached response from the nearest neighbor in 
+
+M𝑡 was used and no cost was observed. If 𝐶 𝑡 > 0, the LLM was invoked and the cost feedback was recorded. Our formulation extends the discrete semantic caching frame-work of [ 19 ], which assumes a finite query set and estimates costs using empirical means. The key difference from [ 19 ] is that their 
+
+Algorithm 2 CUCB-SC-Cont : Combinatorial Upper Confidence Bound Algorithm for the Semantic Caching Problem  
+
+> 1:
+
+Input: D = {(M 𝑡 , 𝑥 𝑡 , 𝐶 𝑡 )} 𝑛 𝑡 =1 , 𝑑 , kernel 𝜅 , confidence 𝛿 , 𝜙 , 𝑘 ,
+
+𝜖 , ridge 𝜆 . 
+
+> 2:
+
+Build 𝜖 -net S ⊂ { 𝑥 𝑡 }, covering every observed 𝑥 𝑡  
+
+> 3:
+
+Weights : Define cells {𝑉 𝑖 }, set ˆ𝑤 𝑖 = 1
+
+> 𝑛
+
+Í𝑡 1{𝑥 𝑡 ∈ 𝑉 𝑖 } ∀ 𝑖 ∈ [ 𝑚 ] 
+
+> 4:
+
+KRR fit of 𝑐 : Gather all cost observations (𝑥 𝑡 , 𝐶 𝑡 ) where LLM was queried, form 𝐾, 𝑦 , and compute ˆ𝑐 (𝑥 ) = 𝜅 𝑇 𝑥 (𝐾 + ℓ𝜆𝐼 )−1𝑦 
+
+and 𝜎 2 
+
+> ℓ,𝜆
+
+= 𝜅 (𝑥, 𝑥 ) − 𝜅 𝑇 𝑥 (𝐾 + ℓ𝜆𝐼 )−1𝜅 𝑥  
+
+> 5:
+
+Set pessimistic costs : ∀𝑥 ∈ S , calculate confidence radius 
+
+Δ(𝑥 ) =
+
+
+
+𝐵 +√︃ log (2𝑚 /𝛿 )
+
+> ℓ𝜆
+
+
+
+𝜎 ℓ,𝜆 (𝑥 ) and set ¯𝑐 (𝑥 ) = ˆ𝑐 (𝑥 ) + Δ(𝑥 ) 
+
+> 6:
+
+Compute ˆA = Cont_Reverse_Greedy (S , ˆ𝒘 , ¯𝒄 , 𝑑, 𝑘, 𝜙 ) and query LLM for 𝑢 ∈ ˆA 
+
+> 7:
+
+Return: ˆM = {𝑢, 𝑎 (𝑢 )} 𝑢 ∈ ˆA
+
+framework does not require generalization across inputs. In con-trast, our setting requires learning the cost function over a continu-ous space and making predictions for previously unseen queries. This introduces two key challenges: (i) estimating 𝑐 (𝑥 ) over a con-tinuous domain, and (ii) incorporating estimation uncertainty into the cache optimization problem. To address these challenges, we model 𝑐 (𝑥 ) using kernel ridge regression (KRR) in a reproducing kernel Hilbert space (RKHS). Building on established kernelized bandit frameworks [ 6], KRR pro-vides both the non-parametric flexibility to learn complex serving cost functions and the closed form posterior variance necessary to construct confidence bounds that enable optimal cache selection. Since computing the optimal cache is NP-hard even when the parameters are known (Lemma 3.1), we instead aim to learn an approximate solution that competes with the 𝛼 -approximate oracle returned by the Continuous Reverse Greedy algorithm (Alg. 1). This algorithm is consistent with prior work on discrete semantic caching [ 19 ], where the same approximation notion is adopted due to computational intractability. Accordingly, our goal is to minimize the approximate suboptimality defined with respect to this oracle: SubOpt (M) = L(M) − 𝛼 · L(M ∗), (5) Before proceeding with the CUCB-SC-Cont algorithm (shown in Algorithm 2), we provide the following definitions. For a query 𝑥 ,we define the kernel vector 𝜅 𝑥 = [𝜅 (𝑥 𝑡 1 , 𝑥 ), . . . , 𝜅 (𝑥 𝑡 ℓ , 𝑥 )] ⊤, where 
+
+{( 𝑥 𝑡 𝑖 , 𝐶 𝑡 𝑖 )} ℓ𝑖 =1 are the subset of queries for which the LLM was in-voked and the cost was observed and {𝑡 1, ..., 𝑡 ℓ } ⊆ { 1, ..., 𝑛 } are the indices where the LLM was actually queried. Note that 𝜅 (𝑥, 𝑥 ) is a scalar measuring self-similarity, whereas 𝜅 𝑥 is a vector of similari-ties between 𝑥 and the observed data. We define the kernel (Gram) matrix 𝐾 ∈ Rℓ ×ℓ as 𝐾 𝑖 𝑗 = 𝜅 (𝑥 𝑡 𝑖 , 𝑥 𝑡 𝑗 ), ∀𝑖, 𝑗 ∈ [ ℓ] and the vector of observed costs as 𝑦 = [𝐶 𝑡 1 , ..., 𝐶 𝑡 ℓ ]⊤.Algorithm 2 presents our offline learning procedure for the con-tinuous semantic caching problem with unknown parameters. The algorithm first constructs an 𝜖 -net S over the observed embeddings (Line 2), which serves as a finite discretization of the continuous space. Each point in S represents a local region, and we estimate its arrival weight ˆ𝑤 𝑖 by computing the empirical fraction of queries that fall into its corresponding cell (i.e., region) (Line 3). To learn the Continuous Semantic Caching for Low-Cost LLM Serving Conference’17, July 2017, Washington, DC, USA 
+
+unknown serving cost function 𝑐 (𝑥 ), we apply kernel KRR using only the subset of queries for which the LLM was actually invoked (non-empty cost values), yielding an estimate ˆ𝑐 (𝑥 ) along with an uncertainty term 𝜎 ℓ,𝜆 (𝑥 ) (Line 4). Based on this, we construct a confidence radius Δ(𝑥 ) and define pessimistic cost estimates ¯𝑐 (𝑥 ),which upper bound the true cost with high probability (Line 5). Finally, we apply the reverse greedy oracle on (M , S, ˆ𝒘 , ¯𝒄 ) to com-pute an approximate optimal cache (Lines 6-7). We directly estimate 
+
+𝒘 using empirical frequencies in the 𝜖 −net because every incoming query is observed. In contrast, cost feedback is sparse and recorded only when the LLM is invoked, which necessitates using KRR to generalize across the continuous space. We now present its perfor-mance guarantee: 
+
+Theorem 4.1 (Suboptimality Gap Bound for Algorithm 2). 
+
+Let D be an offline dataset of 𝑛 ≥ 8 log (𝑚 /𝛿 )   
+
+> min 𝑖 𝑤 𝑖 𝜈 𝑖
+
+samples. Then with prob-ability of at least 1−𝛿 , the cache ˆM returned by CUCB-SC-Cont satis-fies the following where ℓ𝑘 is the parameter of the RBF kernel, 𝐶 𝜈 > 0
+
+is a constant and 𝜈 𝑖 is the query propensity of cell 𝑖 (the probability that we observe the cost of an arriving query in cell 𝑖 ): SubOpt ( ˆM) ≤ ( 𝛼 + 1) √︂ 2𝑚 ln (2/𝛿 )
+
+𝑛 
+
+| {z }
+
+> Arrival
+
++ 𝐿 𝑔 
+
+2√𝑑 𝑒 
+
+𝑚 1/𝑑 𝑒 
+
+| {z }
+
+> Discretization
+
+!
+
++ 4𝛼 𝐵 +√︂ log (2𝑚 /𝛿 )
+
+2ℓ𝜆 
+
+!√︄ 2√𝑑 𝑒 
+
+ Í 𝑖 𝜈 −1
+
+> 𝑖
+
+1/𝑝 
+
+ℓ𝑘 𝐶 𝜈 𝑚 1/𝑑 𝑒 
+
+ 2 log (1/𝛿 )
+
+𝑛 
+
+1/𝑝 
+
+| {z }
+
+> Cost
+
+.
+
+While the covering number 𝑚 scales exponentially with the em-bedding dimension 𝑑 𝑒 , creating a potential bottleneck, we explicitly manage this dependency in Remark 2 in our technical report [ 1 ] by deriving an optimal discretization radius 𝜖 ∗ that balances 𝑚 against the sample size 𝑛 to ensure the suboptimality gap converges to 0. Our proposed algorithm and analysis can be viewed as a con-tinuous analogue of the offline CUCB-SC algorithm in [ 19 ], but introduce several key differences that also drive our technical con-tributions. Unlike the discrete setting, we do not assume a known fi-nite query universe and instead approximate the arrival distribution via an 𝜖 -net over the embedding space, incurring a discretization error absent in the discrete case. Moreover, rather than estimating costs independently per query, we learn a continuous cost function 
+
+𝑐 (𝑥 ) using KRR, leading to confidence bounds for each candidate query that depend on the number of observed cost samples ℓ rather than the total number of queries 𝑛 . These differences require jointly addressing geometric approximation and nonparametric function estimation, yielding three main contributions: (i) quantifying the discretization error induced by the 𝜖 -net, (ii) replacing per-query empirical estimates with KRR-based cost learning and uncertainty quantification, and (iii) deriving geometry-aware bounds on the KRR posterior width by linking local sample counts within Voronoi cells to nearest-neighbor radii and RKHS distances under the RBF kernel. Together, these elements translate continuous-space uncer-tainty into a suboptimality bound that decomposes into arrival-estimation, cost-estimation, and discretization errors. The bound in Theorem 4.1 decomposes into three terms corre-sponding to distinct sources of error in the continuous semantic caching setting. (i) Arrival estimation error: The term O
+
+√︁ 𝑚 𝑛 
+
+
+
+arises from estimating the arrival weights 𝒘 from 𝑛 samples, and matches the concentration rate in the discrete setting [ 19 ]. (ii) Cost estimation error: Reflects the difficulty of learning a continuous cost function 𝑐 (𝑥 ) from partial observations. Unlike the discrete case, where the estimation error scales as O( 𝑛 −1/2), the continuous setting incurs a slower rate O( 𝑛 −1/( 2𝑝 ) ) due to the nonparametric nature of the problem and the need to generalize across nearby queries. This term captures the interaction between kernel smooth-ness (through ℓ𝑘 ), intrinsic dimension 𝑝 , and the local observation propensities 𝜈 𝑖 . (iii) Discretization error: The term O
+
+
+
+𝑚 −1/𝑑 𝑒 
+
+
+
+arises from approximating the continuous space X using an 𝜖 -net of size 𝑚 , and vanishes as the discretization becomes finer. This term has no analogue in the discrete setting, where the query space is finite and known. 
+
+Comparison to the Discrete Case and Reduction. In the dis-crete setting [ 20 ], the suboptimality gap scales as O
+
+√︃ Í𝑞 𝜈 (𝑞 ) −1
+
+> 𝑛
+
+
+
+,
+
+reflecting finite-arm estimation with no geometric structure. In contrast, our bound generalizes this result to continuous spaces by introducing both geometric approximation and functional estima-tion terms. Specifically, while the dependence on 𝜈 𝑖 is preserved, it is attenuated through the dimension-dependent exponent 1/( 2𝑝 ),and the rate in 𝑛 degrades from 𝑛 −1/2 to 𝑛 −1/( 2𝑝 ) due to the nonpara-metric nature of learning the continuous cost function. Additionally, new dependencies on the kernel parameter ℓ𝑘 and discretization level 𝑚 arise. At the same time, our result recovers the discrete case as a special instance. When the query space is finite and coincides with the 𝜖 -net (i.e., 𝜖 = 0 and 𝑚 = |Q| ), and when the kernel does not induce smoothing across distinct queries, the geometric and discretization terms vanish. In this regime, cost estimation reduces to per-query empirical estimation, and the bound recovers the same qualitative O( 𝑛 −1/2) scaling as in the discrete CUCB-SC analysis. This demonstrates that our result is a strict generalization of the discrete setting. 
+
+Proof Sketch. The full proof may be found in [ 1]. To establish the result in Theorem 4.1, we use the following lemma with the concentration bound guarantees. 
+
+Lemma 4.2 (Concentration of Estimates). For any 𝛿 > 0, de-fine the following events: Earvl :=
+
+n
+
+∥ ˆ𝒘 −𝒘 ∥1 ≤√︃ 2𝑚 ln (2/𝛿 )
+
+> 𝑛
+
+o
+
+, Ecost :=
+
+
+
+|¯𝑐 (𝑥 )− 𝑐 (𝑥 )| ≤ 2√2
+
+
+
+𝐵 +√︃ log (2𝑚 /𝛿 )
+
+> 2ℓ𝜆
+
+
+
+min 
+
+
+
+1, 2𝜖 ℓ𝑘 
+
+ 2 log (1/𝛿 )  
+
+> 𝑛𝑤 𝑖 𝜈 𝑖 𝜈 𝑖
+
+1/𝑝 
+
+∀𝑥 ∈S
+
+
+
+, Ecounter :=
+
+n
+
+𝑁 𝑖 ≥ 𝑛 ·𝑤 𝑖 𝜈 𝑖  
+
+> 2
+
+, ∀𝑖 ∈ [ 𝑚 ]
+
+o
+
+where 𝑁 𝑖 is the number of observed cost samples in cell 𝑉 𝑖 , 𝜈 𝑖 > 0 is a constant and ℓ𝑘 is the kernel parameter, 𝑐 ∈ H 𝑘 (RKHS) with ∥𝑐 ∥H𝑘 ≤ 𝐵 . Then, assuming 
+
+𝑛 ≥ 8 log (𝑚 /𝛿 )   
+
+> min 𝑖 𝑤 𝑖 𝜈 𝑖
+
+, all three events occur with probability at least 1 − 𝛿 .
+
+Lemma 4.2 characterizes a high-probability event under which both arrival weights and costs are accurately estimated. While Earvl 
+
+and Ecounter follow from standard concentration arguments, the event Ecost captures the main technical challenge in the continu-ous setting. It combines kernel ridge regression confidence with geometric control of the posterior variance, where Lemma A.1 bounds the local sample density via nearest-neighbor radius and Conference’17, July 2017, Washington, DC, USA Baran Atalar, Xutong Liu, Jinhang Zuo, Siwei Wang, Wei Chen, and Carlee Joe-Wong 
+
+Lemma A.2 converts this into a bound on the KRR uncertainty. This yields an explicit cost estimation error that depends on the intrinsic dimension, kernel bandwidth, and local observation probabilities. 
+
+Generality of the Kernel Choice. We derive our geometric bounds (Lemma A.2) using the RBF kernel because it is one of the standard choices for continuous embedding spaces. However, our mathematical framework easily extends to other kernels. The idea of bounding the model’s uncertainty based on the distance to the nearest observed neighbor applies to any distance-based kernel, such as the Matérn or Laplacian kernels. Specifically, adapting our proof to these alternatives simply requires updating the specific distance to error formula in Lemma A.2. 
+
+Optimal 𝜖 Value. We derive the optimal covering radius 𝜖 ∗ in Remark 2, defined as the specific radius that minimizes the algo-rithm’s proved suboptimality gap in Theorem 4.1. We use the fact that 𝑚 = O( 𝜖 −𝑑 𝑒 ) in this derivation. Our analysis shows that this optimal radius shifts based on the total number of samples 𝑛 , embed-ding dimension 𝑑 𝑒 and the intrinsic dimension 𝑝 . As we collect more data ( 𝑛 increases), we can shrink 𝜖 ∗ to create a finer discretization. However, the geometry of the space also introduces some depen-dencies: if 𝑑 𝑒 is large, this requires us to use a corresponding large radius to cover the space. Similarly, if the queries are highly varied rather than tightly clustered ( 𝑝 increases), the data becomes sparser, again requiring a larger radius. When the embedding dimension is greater than the intrinsic dimension (𝑑 𝑒 ≫ 𝑝 ), the local cost estimation becomes the primary bottleneck and 𝜖 ∗ = O
+
+
+
+𝑛 − 12𝑑𝑒 +𝑝 
+
+
+
+becomes the optimal radius. 
+
+## 5 Online Adaptive Learning for the Continuous Semantic Caching Problem 
+
+Having developed an offline learning algorithm for the continuous semantic caching problem, we now turn to the online setting, where the system must learn the optimal cache dynamically from a stream of queries without access to a pre-collected dataset. Queries arrive sequentially, drawn from a continuous embedding space, and the algorithm must simultaneously estimate the arrival distribution and the cost function while making caching decisions in real time. We thus face the challenge of partial feedback: the serving cost is observed only when the LLM is queried. The goal is to adaptively update the cache to minimize long-term serving and mismatch cost while balancing exploration (querying the LLM to improve estimates) and exploitation (serving from the cache using current knowledge). To achieve this, we develop two distinct algorithms. Our primary method, which we introduce in this section, dynami-cally constructs and expands a representative set of queries on the fly to continuously adapt to new semantic regions. In contrast, we also introduce an alternative algorithm in the technical report [1], 
+
+CLCB-Frozen-Cont , which restricts learning to a fixed frozen can-didate pool over stable, discrete stages to provide stricter control over cache updates. Next, we introduce the online learning setup, present the proposed algorithm CLCB-SC-LS-Cont in Algorithm 3, and finally provide theoretical guarantees and analysis. 
+
+## 5.1 Online Learning Setup 
+
+We consider a 𝑇 -round sequential decision-making problem over a continuous embedding space X ⊂ R𝑑 𝑒 . At the beginning of each round 𝑡 ∈ [ 𝑇 ], the system maintains a semantic cache M𝑡 of size 𝑘 
+
+and a user with query 𝑥 𝑡 ∈ X arrives. As described in Section 2.2, the agent either serves the cached response of the nearest neighbor or queries the LLM for a fresh response and observes the cost. At the end of round 𝑡 , the agent decides whether to update the cache. If M𝑡 ≠ M𝑡 −1, the agent incurs a switching cost for fetching and storing the updated queries in M𝑡 \ M 𝑡 −1.
+
+Learning Objective. The objective is to minimize the cumu-lative regret relative to the best fixed 𝛼 -approximate cache over the time horizon, while accounting for both serving and switching costs. We define our comparator as M∗N𝑇 , the optimal cache of size 
+
+𝑘 selected from the set of all observed queries N𝑇 . This definition is necessary because, in a practical serving system, we can only populate the cache with query-response pairs that we have actually observed. Formally, letting M0 = ∅, the expected cumulative regret with switching costs is defined as: Reg (𝑇 ) = E
+
+
+
+> 𝑇
+
+∑︁  
+
+> 𝑡 =1
+
+[L(M 𝑡 ) − 𝛼 L(M ∗N𝑇 )] + ∑︁    
+
+> 𝑥 ∈ M 𝑡 \M 𝑡 −1
+
+𝑐 (𝑥 )
+
+
+
+where the expectation is taken over the randomness of the contin-uous query arrivals, the serving costs, and the cache selection. 
+
+## 5.2 Algorithm Design of CLCB-SC-LS-Cont 
+
+In this section, we present CLCB-SC-LS-Cont , an online learning algorithm designed for semantic caching over continuous spaces with low switching costs. The pseudocode is provided in Algo-rithm 3, with subroutines Switch Cache Continuous in Algo-rithm 4 and Serve and Update Continuous in Algorithm 5. 
+
+CLCB-SC-LS-Cont proceeds in four main phases: (i) dynamically constructing a representative discrete state space from prior arrivals, (ii) determining when to switch the cache by defining observation thresholds, (iii) actively exploring unknown serving costs using KRR, and (iv) serving queries while refining the kernel dataset. 
+
+Dynamic Representative Set Construction (Algorithm 3, Lines 5-11). As each query 𝑥 𝑡 ∼ 𝑓 (𝑥 ) arrives, the algorithm builds an empirical representative set S𝑡 on the fly. If 𝑥 𝑡 is further than the covering radius 𝜖 from all existing centers in S𝑡 −1, it is added as a new center (S 𝑡 = S𝑡 −1 ∪ { 𝑥 𝑡 }) , its counters are initialized, and a cache switched is forced to account for this new region of the space. Otherwise, 𝑥 𝑡 is mapped to its nearest existing center 𝑢 𝑡 , and the representative set remains unchanged. 
+
+Stage-Based Cache Switching (Algorithm 3, Lines 12-18). To control switching frequency while ensuring sufficient exploration over the expanding set S𝑡 , we utilize a stage-based switching mech-anism. For each center 𝑢 ∈ S 𝑡 , we maintain a local stage index 
+
+𝜏 𝑢 . A new stage is triggered and the Switch flag is set to true, when the number of mapped to 𝑢 in the current stage exceeds 
+
+1 +√︃ 𝑇 𝑚 𝑡 
+
+Í𝜏 <𝜏 𝑢 |T ( 𝑢, 𝜏 )| . Crucially, this threshold dynamically ad-justs based on the current number of active centers 𝑚 𝑡 = |S 𝑡 |. Asimilar global stage threshold 𝜏 𝑓 is maintained to track the arrivals in the current stage. 
+
+Active Exploration via KRR Optimism (Algorithm 4, Lines 3-18). When a switch is triggered, the agent must estimate the unknown serving costs to rebuild the cache. To efficiently explore Continuous Semantic Caching for Low-Cost LLM Serving Conference’17, July 2017, Washington, DC, USA 
+
+Algorithm 3 CLCB-SC-LS-Cont : Continuous Semantic Caching with Low Switching  
+
+> 1:
+
+Input: Kernel 𝜅 , ridge 𝜆 , confidence 𝛿 , 𝑘 , 𝜙 , distance 𝑑 , radius 𝜖  
+
+> 2:
+
+Initialize: S0, ˆM0, 𝑂 0 ← ∅ , ℓ0 ← 0, global stage 𝜏 𝑓 ← 1,
+
+T ( 𝑓 , 𝜏 𝑓 ) ← ∅  
+
+> 3:
+
+for 𝑡 = 1, . . . ,𝑇 do  
+
+> 4:
+
+Receive query 𝑥 𝑡 ∈ X . Switch ← False  
+
+> 5:
+
+if S𝑡 −1 = ∅ or min 𝑢 ∈ S 𝑡 −1 𝑑 (𝑥 𝑡 , 𝑢 ) > 𝜖 then  
+
+> 6:
+
+S𝑡 ← S 𝑡 −1 ∪ { 𝑥 𝑡 }, set 𝑢 𝑡 ← 𝑥 𝑡  
+
+> 7:
+
+Init counters: 𝑁 𝑓 ,𝑡 −1 (𝑢 𝑡 ), 𝑁 𝑐,𝑡 −1 (𝑢 𝑡 ), 𝐿 𝑐,𝑡 −1 (𝑢 𝑡 ) ← 0 
+
+> 8:
+
+Init local stage: 𝜏 𝑢 𝑡 ← 1, T ( 𝑢 𝑡 , 𝜏 𝑢 𝑡 ) ← ∅ . Switch ←
+
+True  
+
+> 9:
+
+else  
+
+> 10:
+
+S𝑡 ← S 𝑡 −1, set 𝑢 𝑡 ← arg min 𝑢 ∈ S 𝑡 𝑑 (𝑥 𝑡 , 𝑢 ) 
+
+> 11:
+
+end if  
+
+> 12:
+
+Let 𝑚 𝑡 ← |S 𝑡 |. Check local stage limits for all 𝑢 ∈ S 𝑡 : 
+
+> 13:
+
+if ∃𝑢 ∈ S 𝑡 s.t. |T ( 𝑢, 𝜏 𝑢 )| ≥ 1 +√︃ 𝑇 𝑚 𝑡 
+
+Í𝜏 <𝜏 𝑢 |T ( 𝑢, 𝜏 )| then  
+
+> 14:
+
+𝜏 𝑢 ← 𝜏 𝑢 + 1, T ( 𝑢, 𝜏 𝑢 ) ← ∅ , Switch ← True  
+
+> 15:
+
+end if  
+
+> 16:
+
+if |T ( 𝑓 , 𝜏 𝑓 )| ≥ 1 +√︃ 𝑇 Í𝜏 <𝜏 𝑓 |T ( 𝑓 , 𝜏 )| then  
+
+> 17:
+
+𝜏 𝑓 ← 𝜏 𝑓 + 1, T ( 𝑓 , 𝜏 𝑓 ) ← ∅ , Switch ← True  
+
+> 18:
+
+end if  
+
+> 19:
+
+if Switch then  
+
+> 20:
+
+ˆM𝑡 ← Switch_Cache_Continuous  
+
+> 21:
+
+else  
+
+> 22:
+
+ˆM𝑡 ← ˆM𝑡 −1 
+
+> 23:
+
+end if  
+
+> 24:
+
+Call Serve_and_Update_Continuous  
+
+> 25:
+
+end for  
+
+> 26:
+
+Return: { ˆM𝑡 }𝑇 𝑡 =1
+
+the continuous cost space, we apply the principle of optimism in the face of uncertainty using KRR. For each center 𝑢 ∈ S 𝑡 , the algorithm evaluates the Gram matrix 𝐾 𝑡 −1 over the exact historically observed query-cost pairs 𝑂 𝑡 −1. It computes the KRR posterior mean ˆ𝑐 𝑡 −1 and subtracts a confidence radius Δ𝑡 −1 which scales with the posterior standard deviation 𝜎 𝑡 −1,𝜆 to obtain the optimistic lower confidence bound 𝑐 𝑡 −1 (Lines 8-11). The algorithm then calls the Cont_Reverse_Greedy oracle using these optimistic costs and empirical weights ˆ𝑤 𝑡 −1 to construct the new cache ˆM𝑡 and queries the LLM to store the responses not existent in the previous cache 
+
+ˆM𝑡 −1 (Lines 17-18). 
+
+Serving and Updating (Algorithm 5, Lines 6-15). After the cache is determined, the agent routes the incoming query 𝑥 𝑡 (mapped to center 𝑢 𝑡 ). It compares the optimistic cost of querying the LLM 
+
+𝑐 𝑡 −1 (𝑢 𝑡 ), against the mismatch cost 𝜙 (𝑑 (𝑥 𝑡 , ˆM)) of serving the query from the cache (Line 6). If 𝑐 𝑡 −1 (𝑢 𝑡 ) < 𝜙 (𝑑 (𝑥 𝑡 , ˆM𝑡 )) , the agent queries the LLM and observes the exact realized cost 𝐶 𝑡 (𝑥 𝑡 ) and appends the tuple (𝑥 𝑡 , 𝐶 𝑡 (𝑥 𝑡 )) to the observation set 𝑂 𝑡 (Lines 7-10). This LCB based routing ensures the algorithm actively collects cost feedback in uncertain regions of the continuous space. Otherwise, it serves the user from the cache without incurring LLM costs or updating the KRR dataset (Lines 12-14). 
+
+Algorithm 4 Switch Cache Continuous  
+
+> 1:
+
+Input: S𝑡 , {𝑁 𝑓 ,𝑡 −1 (𝑢 )} , 𝑂 𝑡 −1, ℓ𝑡 −1, 𝜅 , 𝜆 , 𝛿 , 𝑘  
+
+> 2:
+
+Weights: ∀𝑢 ∈ S 𝑡 , set ˆ𝑤 𝑡 −1 (𝑢 ) = 𝑁 𝑓 ,𝑡 −1 (𝑢 )  
+
+> max {1,𝑡 −1}
+
+. 
+
+> 3:
+
+if ℓ𝑡 −1 ≥ 1 then  
+
+> 4:
+
+Let 𝑂 𝑡 −1 = {( 𝑧 𝑗 , 𝑦 𝑗 )} ℓ𝑡 −1 
+
+> 𝑗 =1
+
+. Form 𝑦 𝑡 −1 = [𝑦 1, . . . , 𝑦 ℓ𝑡 −1 ]⊤ 
+
+> 5:
+
+Form Gram matrix 𝐾 𝑡 −1 = [𝜅 (𝑧 𝑖 , 𝑧 𝑗 )] ℓ𝑡 −1 
+
+> 𝑖,𝑗 =1
+> 6:
+
+for each 𝑢 ∈ S 𝑡 do  
+
+> 7:
+
+Define 𝑘 𝑢,𝑡 −1 = [𝜅 (𝑧 1, 𝑢 ), . . . , 𝜅 (𝑧 ℓ𝑡 −1 , 𝑢 )] ⊤ 
+
+> 8:
+
+Compute KRR mean and variance:  
+
+> 9:
+
+ˆ𝑐 𝑡 −1 (𝑢 ) = 𝑘 ⊤  
+
+> 𝑢,𝑡 −1
+
+(𝐾 𝑡 −1 + 𝜆𝐼 )−1𝑦 𝑡 −1 
+
+> 10:
+
+𝜎 2  
+
+> 𝑡 −1,𝜆
+
+(𝑢 ) = 𝜅 (𝑢, 𝑢 ) − 𝑘 ⊤  
+
+> 𝑢,𝑡 −1
+
+(𝐾 𝑡 −1 + 𝜆𝐼 )−1𝑘 𝑢,𝑡 −1 
+
+> 11:
+
+Set optimistic LCB: 𝑐 𝑡 −1 (𝑢 ) = ˆ𝑐 𝑡 −1 (𝑢 ) −
+
+𝐵 + 𝑅 √︁ 2(𝛾 𝑡 + ln (2/𝛿 )) 
+
+
+
+𝜎 𝑡 −1,𝜆 (𝑢 ) 
+
+> 12:
+
+end for  
+
+> 13:
+
+else  
+
+> 14:
+
+Prior: ∀𝑢 ∈ S 𝑡 , set ˆ𝑐 𝑡 −1 (𝑢 ) ← 0, 𝜎 𝑡 −1,𝜆 (𝑢 ) ← √︁ 𝜅 (𝑢, 𝑢 ) 
+
+> 15:
+
+Set 𝑐 𝑡 −1 (𝑢 ) ← − 𝐵 · 𝜎 𝑡 −1,𝜆 (𝑢 ) 
+
+> 16:
+
+end if  
+
+> 17:
+
+ˆA𝑡 ← Cont_Reverse_Greedy (S 𝑡 , ˆ𝒘 𝑡 −1, 𝒄 𝑡 −1, 𝑘 ) 
+
+> 18:
+
+Query LLM for 𝑢 ∈ ˆA𝑡 \ ˆM𝑡 −1 and store responses  
+
+> 19:
+
+Return: ˆM𝑡 = ˆA𝑡 
+
+Algorithm 5 Serve and Update Continuous  
+
+> 1:
+
+Input: Query 𝑥 𝑡 , center 𝑢 𝑡 , cache ˆM𝑡 , S𝑡 , 𝑂 𝑡 −1, ℓ 𝑡 −1, counters  
+
+> 2:
+
+Update global arrival: 𝑁 𝑓 ,𝑡 (𝑢 𝑡 ) ← 𝑁 𝑓 ,𝑡 −1 (𝑢 𝑡 ) + 1, add 𝑡 to 
+
+T ( 𝑓 , 𝜏 𝑓 ) 
+
+> 3:
+
+Keep 𝑁 𝑓 ,𝑡 (𝑢 ) ← 𝑁 𝑓 ,𝑡 −1 (𝑢 ) for all other 𝑢 ∈ S 𝑡 \ { 𝑢 𝑡 } 
+
+> 4:
+
+Compute current 𝑐 𝑡 −1 (𝑢 𝑡 ) via KRR on 𝑂 𝑡 −1 (as in Alg. 4)  
+
+> 5:
+
+Let 𝑑 (𝑥 𝑡 , ˆM𝑡 ) = min 𝑢 ∈ ˆM𝑡 𝑑 (𝑥 𝑡 , 𝑢 ) (where 𝑑 (𝑥 𝑡 , ∅) = ∞).  
+
+> 6:
+
+if 𝑐 𝑡 −1 (𝑢 𝑡 ) ≤ 𝜙 (𝑑 (𝑥 𝑡 , ˆM𝑡 )) then  
+
+> 7:
+
+Query LLM on 𝑥 𝑡 to get 𝑎 𝑡 , observe true cost 𝐶 𝑡 (𝑥 𝑡 ) 
+
+> 8:
+
+𝑂 𝑡 ← 𝑂 𝑡 −1 ∪ {( 𝑥 𝑡 , 𝐶 𝑡 (𝑥 𝑡 ))} , ℓ𝑡 ← ℓ𝑡 −1 + 1 
+
+> 9:
+
+𝑁 𝑐,𝑡 (𝑢 𝑡 ) ← 𝑁 𝑐,𝑡 −1 (𝑢 𝑡 ) + 1, 𝐿 𝑐,𝑡 (𝑢 𝑡 ) ← 𝐿 𝑐,𝑡 −1 (𝑢 𝑡 ) + 𝐶 𝑡 (𝑥 𝑡 ) 
+
+> 10:
+
+Add 𝑡 to local stage T ( 𝑢 𝑡 , 𝜏 𝑢 𝑡 ) 
+
+> 11:
+
+else  
+
+> 12:
+
+Serve cached response: 𝑎 𝑡 ← 𝑎 (𝑠 (𝑥 𝑡 , ˆM𝑡 ))  
+
+> 13:
+
+Carry over unmodified: 𝑂 𝑡 ← 𝑂 𝑡 −1, ℓ𝑡 ← ℓ𝑡 −1 
+
+> 14:
+
+Carry over unmodified: 𝑁 𝑐,𝑡 (𝑢 ) ← 𝑁 𝑐,𝑡 −1 (𝑢 ), 𝐿 𝑐,𝑡 (𝑢 ) ← 
+
+𝐿 𝑐,𝑡 −1 (𝑢 ) 
+
+> 15:
+
+end if  
+
+> 16:
+
+Return: (𝑎 𝑡 , 𝑂 𝑡 , ℓ 𝑡 , {𝑁 𝑓 ,𝑡 }, {𝑁 𝑐,𝑡 }, {𝐿 𝑐,𝑡 }, {T ( 𝑢, 𝜏 𝑢 )} , T ( 𝑓 , 𝜏 𝑓 )) 
+
+Novelty Compared to the Discrete Case. While CLCB-SC-LS-Cont 
+
+shares the high-level exploration-exploitation and low-switching logic of its discrete counterpart [ 19 ], it introduces fundamental algorithmic changes to handle continuous domains. First, rather than operating over a fixed finite set of 𝑚 queries, it dynamically constructs an expanding 𝜖 −net (S 𝑡 ), smoothly adapting its stage-switching thresholds to the growing dimension 𝑚 𝑡 . Second, while the discrete algorithm relies on independent empirical means to estimate costs, our algorithm leverages KRR to share information across the space. By utilizing a kernel 𝜅 (· , ·) , the observation of a Conference’17, July 2017, Washington, DC, USA Baran Atalar, Xutong Liu, Jinhang Zuo, Siwei Wang, Wei Chen, and Carlee Joe-Wong 
+
+cost at 𝑥 𝑡 reduces the uncertainty 𝜎 𝑡,𝜆 (𝑢 ) for all nearby centers 𝑢, 
+
+thus generalizing the feedback to unobserved regions. Finally, the optimistic confidence intervals transition from standard Hoeffd-ing/Chernoff bounds based strictly on local hit counts to posterior variance, similarly to Theorem 4.1 in the offline case. 
+
+## 5.3 Theoretical Results for CLCB-SC-LS-Cont 
+
+In this section, we present our assumption and the main theoretical result characterizing the performance of CLCB-SC-LS-Cont .
+
+Assumption 2 (Cluster-Based Arrival Distribution) . We assume the continuous query arrival distribution 𝑓 (𝑥 ) is highly concentrated, such that the queries naturally cluster around a finite set of optimal semantic cache points M∗. Specifically, the maximum distance between any query generated near an optimal cache point and its nearest center in S𝑡 decays as 𝜀 𝑡 = O( 1/√𝑡 ), while the total number of active 𝜖 -net centers required to cover the high-probability regions of 𝑓 (𝑥 ) remains bounded by a constant 𝑚 eff .
+
+Justification of Assumption 2. In a worst-case uniform continu-ous space, achieving a sublinear discretization error would require an 𝜖 -net of size 𝑚 max ≈ O( 𝑇 𝑑 𝑒 /2). This exponentially large number of centers would blow up the estimation regret, leading to a rate of O( 𝑇 𝑑𝑒 +1  
+
+> 𝑑𝑒 +2
+
+). However, Assumption 2 relies on the practical reality that real-world user queries do not spread out evenly or randomly; instead, they naturally group together around common themes and popular subjects. We empirically validate this behavior in our exper-imental datasets: as shown in the PCA projection of our synthetic stream (Figure 3 in the technical report [ 1]) and the UMAP visual-ization of the combined Natural Questions and TriviaQA datasets (Figure 4 in the technical report [ 1]), incoming queries strictly con-centrate into dense, distinct semantic regions rather than filling the continuous embedding space uniformly. Because of this clustering, the algorithm forms centers within these dense regions. Therefore, the effective number of generated centers, 𝑚 eff , remains bounded by the geometry of the clusters, and is smaller than the theoretical maximum ( 𝑚 eff ≤ 𝑚 max ). 
+
+Theorem 5.1 (Regret of CLCB-SC-LS-Cont ). Let N𝑇 be the set of all unique queries observed up to horizon 𝑇 , and let M∗N𝑇 be the optimal cache of size 𝑘 selected from N𝑇 . Under Assumption 2, and setting the failure probability to 𝛿 = 1/𝑇 , the cumulative regret of the 
+
+CLCB-SC-LS-Cont algorithm is upper bounded by: Reg (𝑇 ) ≤ O 𝛽 𝑇 √︁ 𝑇𝛾 𝑇 
+
+| {z }
+
+> Cost
+
++√︃ 𝑚 eff 𝑇 log 𝑇 
+
+| {z }
+
+> Arrival
+
+!
+
++ O (1 + 2𝛼 )𝐿 𝑔 
+
+√𝑇 
+
+| {z }
+
+> Discretization
+
++ 𝑘𝑚 max log log 𝑇 
+
+| {z }
+
+> Switching
+
+!
+
+which achieves a strictly sublinear regret of ˜O( √𝑇 ). 𝛽 𝑇 is the KRR confidence multiplier, 𝛾 𝑇 is the maximum information gain, and 𝛼 is the approximation ratio of the Reverse Greedy oracle. 
+
+Comparison to the Discrete Regret Bound. Theorem 5.1 estab-lishes that CLCB-SC-LS-Cont achieves a sublinear regret of ˜O( √𝑇 )
+
+in the continuous domain. This result is nontrivial when compared to the discrete semantic caching bound of O
+
+√︁ 
+
+𝑚𝑇 log (𝑚𝑇 ) log log 𝑇 
+
+
+
+derived by [ 19 ]. In the discrete setting, the regret scales with the known, finite number of unique queries 𝑚 . However, in our con-tinuous setting, the query space is infinite. We replace the depen-dence on 𝑚 with two continuous analogues: the maximum RKHS information gain 𝛾 𝑇 , and the effective covering number 𝑚 𝑒 𝑓 𝑓 of the arrival clusters. While the discrete algorithm [ 19 ] relies on in-dependent arm estimation, our bound isolates the discretization penalty O( 𝐿 𝑔 
+
+√𝑇 ) from the generalization capability of the KRR model, matching the √𝑇 time-scaling of [ 19 ] despite operating in an infinite-dimensional action space. 
+
+Proof Sketch. The full proof may be found in [ 1 ]. To prove the main theorem, we establish the following lemmas, which overcome specific technical challenges in the continuous domain. The following confidence bound for the cost relies on the result established in [ 6]. For any 𝑡 ≥ 1 and regularization 𝜆 > 0, let ˆ𝑐 𝑡 (𝑥 ) =
+
+𝜅 𝑡 (𝑥 )⊤ (𝐾 𝑡 +𝜆𝐼 )−1𝑦 1: 𝑡 and 𝜎 2 
+
+> 𝑡,𝜆
+
+(𝑥 ) = 𝜅 (𝑥, 𝑥 )− 𝜅 𝑡 (𝑥 )⊤ (𝐾 𝑡 +𝜆𝐼 )−1𝜅 𝑡 (𝑥 )
+
+denote the standard KRR posterior mean and variance, respectively. We define the information gain as 𝛾 𝑡 = 12 log det (𝐼 + 1 
+
+> 𝜆
+
+𝐾 𝑡 ).
+
+Lemma 5.2 (Any-time concentration of cost and probabil-ity estimates). Assume the true cost 𝑐 ∈ H 𝑘 with ∥𝑐 ∥H𝑘 ≤ 𝐵 ,and the noise sequence is conditionally 𝑅 -sub-Gaussian. Let 𝑚 eff 
+
+be the effective covering number of X at radius 𝜖 . For any 𝛿 ∈(0, 1) and horizon 𝑇 ≥ 1, define the confidence radius 𝛽 𝑡 (𝑥 ) =
+
+𝐵 + 𝑅 √︁ 2(𝛾 𝑡 + ln (2/𝛿 )) 
+
+
+
+𝜎 𝑡,𝜆 (𝑥 ). The joint event E = Earr ∩ E cost 
+
+holds with probability at least 1 − 𝛿 , where for all 𝑡 ∈ [ 𝑇 ] and 𝑥 ∈ X :
+
+Earr :=
+
+
+
+∥ ˆ𝒘 𝑡 − 𝒘 ∥1 ≤√︄ 2𝑚 eff ln (2𝑇 2/𝛿 )
+
+𝑡 
+
+
+
+,
+
+Ecost := {| ˆ𝑐 𝑡 −1 (𝑥 ) − 𝑐 (𝑥 )| ≤ 𝛽 𝑡 −1 (𝑥 )} .
+
+Consequently, the lower confidence bound 𝑐 𝑡 (𝑥 ) = ˆ𝑐 𝑡 (𝑥 ) − 𝛽 𝑡 (𝑥 )
+
+satisfies 𝑐 𝑡 (𝑥 ) ≤ 𝑐 (𝑥 ) with high probability. 
+
+Lemma 5.2 highlights a fundamental departure from discrete caching. It allows us to construct valid, any-time optimistic lower bounds 𝑐 that generalize across the continuous space based on ker-nel similarity, forming the basis of our active exploration strategy. We also use Lemma 6 from [ 19 ] in the proof of Theorem 5.1, which bounds the sensitivity of the loss under optimistic cost estimates, as Lemma 5.2 establishes the anytime LCB of 𝑐 𝑡 .
+
+Lemma 5.3 (Number of cache switches). Let 𝑚 max be the max-imum covering number of the compact query space X at radius 𝜖 ,such that 𝑚 max ≤ ( 𝐷 √𝑑 𝑒 /𝜖 )𝑑 𝑒 , where 𝐷 is the diameter in the em-bedding space. The total number of cache switches triggered by the 
+
+CLCB-SC-LS-Cont algorithm up to horizon 𝑇 is bounded by: 
+
+E
+
+"∑︁  
+
+> 𝑢 ∈𝑆 𝑇
+
+𝜏 𝑢 (𝑇 )
+
+#
+
+≤ O( 𝑚 max log log 𝑇 ),
+
+E[𝜏 𝑓 (𝑇 )] ≤ O( log log 𝑇 ).
+
+Finally, Lemma 5.3 shows how our algorithm avoids excessive cache updates, even as new query clusters are discovered on the fly. In a continuous space, we cannot rely on a fixed set of update rules because the cluster centers are generated dynamically as queries Continuous Semantic Caching for Low-Cost LLM Serving Conference’17, July 2017, Washington, DC, USA 
+
+arrive. To solve this, we tie the cache update thresholds to the geometric limits of the space, i.e., the max covering number 𝑚 max .
+
+## 6 Experiments 
+
+In this section, we present the experiments for our Alg. 2 and 3. Additional results including ablations may be found in [1]. 
+
+Experimental Setup. We consider two types of query universes. The first is a synthetic benchmark consisting of a fixed collection of natural-language prompts (𝑚 = 50 ) spanning diverse domains and a broad range of prompt lengths, from short keyword-like requests to long conversational questions (similar to the dataset used in [ 19 ] with prompts that are more varied in their token length) with added Gaussian noise to the embeddings of the sampled prompts to better simulate a continuous query space. The second is a real-data benchmark we formed by combining 2,500 queries from Natural Questions (NQ) [ 13 ] and 2,500 queries from TriviaQA [ 12 ] datasets into a single universe of 5,000 real queries. In both settings, query embeddings 𝑥 are obtained using sentence-transformer models [ 24 ]that map queries to a 384-dimensional (𝑑 𝑒 ) vector representation, and semantic similarity 𝑑 is measured using Euclidean distance after normalization of embeddings, with distances further normalized to lie in 0 to 1. Serving costs are derived from GPT-2 tokenizer lengths. For both benchmarks, the expected serving cost 𝑐 (𝑥 ) is the min-max normalized token length of each query 𝑥 .We consider a diverse arrival process across synthetic and real-world datasets. In the synthetic setting, arrivals are generated by first uniformly sampling a query from the discrete query universe and then perturbing its embedding with Gaussian noise. This pro-duces semantically nearby but non-identical arrivals and allows the benchmark to model a continuous query space rather than a purely discrete one. In contrast, in the NQ+TriviaQA setting, each arrival is drawn directly from the pool of real dataset queries, so the stream consists of actual queries from NQ and TriviaQA rather than syn-thetically perturbed embeddings. To make the real data stream more challenging, the sampling process is bursty and non-uniform where bursts alternate between the two datasets, and within each dataset, queries are sampled from a heavy-tailed popularity distribution governed by a log-normal distribution (details in [1]). 
+
+Offline Setting. In the offline setting, we evaluate Algorithm 2 on the synthetic dataset for two ablations using cache size 𝑘 = 5:an 𝜖 ablation for a fixed stream length of 𝑡 = 1000 , and a stream length ablation where 𝜖 is fixed at 0.4 (Figure 2 (a)-(b)). Results are averaged across 20 different seeds for both ablations. We compare against CUCB-SC [ 19 ], Greedy , Epsilon-Greedy , and LFU [15 ]. 
+
+Greedy selects the cache using the empirical frequency-cost score as Epsilon-Greedy but always exploits, whereas LFU ignores cost entirely and caches only the most frequently observed queries. In the 𝜖 −ablation, CUCB-SC-Cont achieves the lowest suboptimal-ity gap for small and moderate 𝜖 , but degrades when 𝜖 becomes too large and the discretization becomes too coarse, showing the value of tuning this parameter. CUCB-SC-Cont displays a 52.95% improvement in suboptimality gap over CUCB-SC when 𝜖 = 0.4. In the stream length ablation, CUCB-SC-Cont remains the strongest method overall, while CUCB-SC improves steadily with more of-fline data and eventually becomes competitive, the other baselines do not show consistent improvement with the increase in stream length. CUCB-SC-Cont achieves significantly better performance than the other baselines when the stream length is small, show-ing the benefit of generalization via 𝜖 −net construction and KRR (73.32% improvement over CUCB-SC when stream length = 100 ).
+
+Online Setting. In the online setting, the CLCB-SC-LS-Cont 
+
+algorithm demonstrates superior performance in minimizing aver-age regret across both synthetic and real datasets. For the synthetic online dataset, CLCB-SC-LS-Cont achieves the lowest final average regret at 0.0083, which is a 72.41% decrease compared to the most competitive baseline, CLCB-SC-LS [ 19 ], with a runtime increase of 47.8%. Figure 2 (c) illustrates that while traditional baselines like 
+
+LFU [15 ] and Epsilon-Greedy exhibit much higher regret peaks and slower convergence, the CLCB-SC-LS-Cont variant converges rapidly. On the combined NQ + TriviaQA dataset, the algorithm maintains this advantage with a final average regret of 0.0061, rep-resenting a 63.27% reduction over Greedy . While Figure 2 (f) shows a more significant runtime trade-off for the real combined dataset, the algorithm still outperforms the CLCB-SC-LS baseline by 43.14% in regret while maintaining a nearly identical latency of approxi-mately 250 seconds. The increase in runtime when comparing plots (d) and (f) stems from the fact that for the real dataset, the CLCB-SC-LS-Cont and CLCB-SC-LS trigger more frequent switches. 
+
+## 7 Conclusion 
+
+In this paper, we established the first theoretical framework for semantic caching in a continuous query space under uncertainty for low-cost LLM serving. By introducing 𝜖 −net discretization and KRR, we studied the caching problem across oracle, offline and online settings. Our theoretical analysis establishes suboptimality and sublinear regret guarantees, coupled with empirical evaluations demonstrating significant reduction in regret. Future work includes establishing lower bounds on the semantic LLM caching problem and finer characterization of realistic query distributions, which we can use to improve our caching strategies. 
+
+## References                           
+
+> [1] Baran Atalar, Xutong Liu, Jinhang Zuo, Siwei Wang, Wei Chen, and Carlee Joe-Wong. 2026. Continuous Semantic Caching for Low-Cost LLM Serving . Technical Report. Carnegie Mellon University. https://research.ece.cmu.edu/lions/Papers/ Semantic_LLM_Caching.pdf. [2] Hyokyung Bahn. 2005. Web cache management based on the expected cost of web objects. Information and Software Technology 47, 9 (2005), 609–621. [3] Fu Bang. 2023. GPTCache: An Open-Source Semantic Cache for LLM Applications Enabling Faster Answers and Cost Savings. Proceedings of the 3rd Workshop for Natural Language Processing Open Source Software (NLP-OSS 2023) (2023). [4] Aaron Chatterji, Thomas Cunningham, David J Deming, Zoe Hitzig, Christopher Ong, Carl Yan Shan, and Kevin Wadman. 2025. How people use chatgpt . Technical Report. National Bureau of Economic Research. [5] Wei Chen, Yajun Wang, and Yang Yuan. 2013. Combinatorial multi-armed bandit: General framework and applications. In ICML . PMLR, 151–159. [6] Sayak Ray Chowdhury and Aditya Gopalan. 2017. On Kernelized Multi-armed Bandits. arXiv:1704.00445 [cs.LG] https://arxiv.org/abs/1704.00445 [7] Xiangxiang Dai, Jin Li, Xutong Liu, Anqi Yu, and John C. S. Lui. 2024. Cost-Effective Online Multi-LLM Selection with Versatile Reward Models. ArXiv
+> abs/2405.16587 (2024). https://api.semanticscholar.org/CorpusID:270063595 [8] Tim Dettmers, Mike Lewis, Younes Belkada, and Luke Zettlemoyer. 2022. Gpt3. int8 (): 8-bit matrix multiplication for transformers at scale. Advances in neural information processing systems 35 (2022), 30318–30332. [9] Waris Gill, Mohamed Elidrisi, Pallavi Kalapatapu, Ammar Ahmed, Ali Anwar, and Muhammad Ali Gulzar. 2024. MeanCache: User-Centric Semantic Cache for Large Language Model Based Web Services. arXiv:2403.02694 (2024). [10] In Gim, Guojun Chen, Seung seob Lee, Nikhil Sarda, Anurag Khandelwal, and Lin Zhong. 2023. Prompt Cache: Modular Attention Reuse for Low-Latency Inference. ArXiv abs/2311.04934 (2023).
+
+Conference’17, July 2017, Washington, DC, USA Baran Atalar, Xutong Liu, Jinhang Zuo, Siwei Wang, Wei Chen, and Carlee Joe-Wong 0 500 1000 1500 2000 2500                              
+
+> Stream Length
+> 0.00
+> 0.01
+> 0.02
+> 0.03
+> 0.04
+> 0.05
+> 0.06
+> Suboptimality Gap
+> (a) Suboptimality Gap vs Stream Length
+> 050 100 150 200 250 300
+> Rounds
+> 0.00
+> 0.05
+> 0.10
+> 0.15
+> 0.20
+> 0.25
+> Average Regret
+> (c) Synthetic Online: Average Regret vs Rounds
+> 050 100 150 200 250 300
+> Rounds
+> 0.00
+> 0.05
+> 0.10
+> 0.15
+> 0.20
+> 0.25
+> 0.30
+> 0.35
+> Average Regret
+> (e) Combined NQ + TriviaQA: Average Regret vs Rounds
+> 0.2 0.4 0.6 0.8 1.0 1.2
+> 0.00
+> 0.01
+> 0.02
+> 0.03
+> 0.04
+> 0.05
+> 0.06
+> 0.07
+> 0.08
+> Suboptimality Gap
+> (b) Suboptimality Gap vs
+> 0.5 1.0 1.5 2.0 2.5 3.0 3.5 4.0
+> Runtime (sec)
+> 0.01
+> 0.02
+> 0.03
+> 0.04
+> 0.05
+> 0.06
+> 0.07
+> 0.08
+> Final Average Regret
+> CLCB-SC-LS-Cont
+> Greedy
+> Epsilon-Greedy
+> LFU
+> CLCB-SC-LS
+> (d) Synthetic Online: Runtime vs Final Avg Regret
+> 050 100 150 200 250
+> Runtime (sec)
+> 0.00
+> 0.02
+> 0.04
+> 0.06
+> 0.08
+> Final Average Regret
+> CLCB-SC-LS-Cont
+> LFU
+> Greedy
+> Epsilon-Greedy
+> CLCB-SC-LS
+> (f) Combined NQ + TriviaQA: Runtime vs Final Avg Regret
+> CUCB-SC
+> CUCB-SC-Cont
+> Epsilon-Greedy
+> Greedy
+> LFU
+> CLCB-SC-LS-Cont
+> CLCB-SC-LS
+
+Figure 2: (a) Variation of the suboptimality gap versus stream length in the offline setting (b) Sensitivity analysis showing the variation of the suboptimality gap with respect to the 𝜖 -net radius 𝜖 (c) Online performance on the synthetic dataset showing the average regret across rounds (d) Efficiency trade-off for synthetic experiments, showing total runtime against the final average regret (e) Online performance on the combined dataset showing the average regret across rounds (f) Efficiency trade-off for real dataset experiments, showing total runtime against the final average regret 
+
+[11] Victor P Il’ev. 2001. An approximation guarantee of the greedy descent algorithm for minimizing a supermodular set function. Discrete Applied Mathematics 114, 1-3 (2001), 131–146. [12] Mandar Joshi, Eunsol Choi, Daniel Weld, and Luke Zettlemoyer. 2017. TriviaQA: A Large Scale Distantly Supervised Challenge Dataset for Reading Comprehension. In Proceedings of the 55th Annual Meeting of the ACL , Regina Barzilay and Min-Yen Kan (Eds.). ACL, Vancouver, Canada, 1601–1611. doi:10.18653/v1/P17-1147 [13] Tom Kwiatkowski, Jennimaria Palomaki, Olivia Redfield, Michael Collins, Ankur Parikh, Chris Alberti, Danielle Epstein, Illia Polosukhin, Jacob Devlin, Kenton Lee, Kristina Toutanova, Llion Jones, Matthew Kelcey, Ming-Wei Chang, Andrew M. Dai, Jakob Uszkoreit, Quoc Le, and Slav Petrov. 2019. Natural Questions: A Benchmark for Question Answering Research. ACL 7 (2019), 452–466. [14] Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng, Cody Hao Yu, Joseph E. Gonzalez, Haotong Zhang, and Ion Stoica. 2023. Efficient Memory Management for Large Language Model Serving with PagedAttention. 
+
+Proceedings of the 29th Symposium on Operating Systems Principles (2023). [15] Donghee Lee, Jongmoo Choi, Jong-Hun Kim, Sam H Noh, Sang Lyul Min, Yookun Cho, and Chong Sang Kim. 2001. LRFU: A spectrum of policies that subsumes the least recently used and least frequently used policies. IEEE transactions on Computers 50, 12 (2001), 1352–1361. [16] Yaniv Leviathan, Matan Kalman, and Yossi Matias. 2023. Fast inference from transformers via speculative decoding. In International Conference on Machine Learning . PMLR, 19274–19286. [17] Jiaxing Li, Chi Xu, Feng Wang, Isaac M von Riedemann, Cong Zhang, and Jiangchuan Liu. 2024. Scalm: Towards semantic caching for automated chat services with large language models. In 2024 IEEE/ACM 32nd IWQoS . IEEE, 1–10. [18] Evan Zheran Liu, Milad Hashemi, Kevin Swersky, Parthasarathy Ranganathan, and Junwhan Ahn. 2020. An Imitation Learning Approach for Cache Replacement. 
+
+CoRR abs/2006.16239 (2020). arXiv:2006.16239 https://arxiv.org/abs/2006.16239 [19] Xutong Liu, Baran Atalar, Xiangxiang Dai, Jinhang Zuo, Siwei Wang, John C. S. Lui, Wei Chen, and Carlee Joe-Wong. 2026. Semantic Caching for Low-Cost LLM Serving: From Offline Learning to Online Adaptation. arXiv:2508.07675 [cs.LG] [20] Xutong Liu, Xiangxiang Dai, Jinhang Zuo, Siwei Wang, Carlee Joe-Wong, John Lui, and Wei Chen. 2025. Offline learning for combinatorial multi-armed bandits. 
+
+arXiv preprint arXiv:2501.19300 (2025). [21] Georgios S. Paschos, Apostolos Destounis, Luigi Vigneri, and George Iosifidis. 2019. Learning to Cache With No Regrets. CoRR (2019). arXiv:1904.09849 [22] Reiner Pope, Sholto Douglas, Aakanksha Chowdhery, Jacob Devlin, James Brad-bury, Anselm Levskaya, Jonathan Heek, Kefan Xiao, Shivani Agrawal, and Jeff Dean. 2022. Efficiently Scaling Transformer Inference. ArXiv 2211.05102 (2022). [23] Guanqiao Qu, Qiyuan Chen, Wei Wei, Zhengyi Lin, Xianhao Chen, and Kaibin Huang. 2024. Mobile Edge Intelligence for Large Language Models: A Contem-porary Survey. ArXiv abs/2407.18921 (2024). [24] Nils Reimers and Iryna Gurevych. 2019. Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks. In Proceedings of EMNLP 2019 Conference . ACL. [25] Siddharth Samsi, Dan Zhao, Joseph McDonald, Baolin Li, Adam Michaleas, Michael Jones, William Bergeron, Jeremy Kepner, Devesh Tiwari, and Vijay Gadepally. 2023. From words to watts: Benchmarking the energy costs of large language model inference. In 2023 IEEE High Performance Extreme Computing Conference (HPEC) . IEEE, 1–9. [26] Ying Sheng, Lianmin Zheng, Binhang Yuan, Zhuohan Li, Max Ryabinin, Daniel Y. Fu, Zhiqiang Xie, Beidi Chen, Clark W. Barrett, Joseph Gonzalez, Percy Liang, Christopher Ré, Ion Stoica, and Ce Zhang. 2023. High-throughput Generative Inference of Large Language Models with a Single GPU. In ICML .[27] Asmit Kumar Singh, Haozhe Wang, Laxmi Naga Santosh Attaluri, Tak Chiam, and Weihua Zhu. 2026. Asynchronous verified semantic caching for tiered LLM architectures. arXiv preprint arXiv:2602.13165 (2026). [28] Benjamin Spector and Chris Re. 2023. Accelerating llm inference with staged speculative decoding. arXiv preprint arXiv:2308.04623 (2023). [29] Ilias Stogiannidis, Stavros Vassos, Prodromos Malakasiotis, and Ion Androut-sopoulos. 2023. Cache me if you can: An online cost-aware teacher-student framework to reduce the calls to large language models. arXiv:2310.13395 (2023). [30] Tsachy Weissman, Erik Ordentlich, Gadiel Seroussi, Sergio Verdu, and Marcelo J Weinberger. 2003. Inequalities for the L1 deviation of the empirical distribution. 
+
+Hewlett-Packard Labs, Tech. Rep (2003). [31] Guangxuan Xiao, Ji Lin, Mickael Seznec, Hao Wu, Julien Demouth, and Song Han. 2023. Smoothquant: Accurate and efficient post-training quantization for large language models. In ICML . PMLR, 38087–38099. [32] Jianxin Yan, Wangze Ni, Lei Chen, Xuemin Lin, Peng Cheng, Zhan Qin, and Kui Ren. 2025. Contextcache: Context-aware semantic cache for multi-turn queries in large language models. arXiv preprint arXiv:2506.22791 (2025). [33] Banghua Zhu, Ying Sheng, Lianmin Zheng, Clark Barrett, Michael Jordan, and Jiantao Jiao. 2023. Towards Optimal Caching and Model Selection for Large Model Inference. 36 (2023), 59062–59094. Continuous Semantic Caching for Low-Cost LLM Serving Conference’17, July 2017, Washington, DC, USA 
+
+## A Appendix 
+
+Here we provide the missing proofs in the main body for the pre-sented algorithms as well as additional empirical results. We also introduce our Frozen algorithm and its corresponding proofs and empirical results. 
+
+## A.1 Proofs for CUCB-SC-Cont and 
+
+## CLCB-SC-LS-Cont 
+
+Proof of Lemma 3.1. We prove NP-hardness by reduction from the discrete semantic caching problem studied in [ 19 ], which is NP-hard. Consider an arbitrary instance of the discrete problem with a finite query set 𝑄 = {𝑞 1, . . . , 𝑞 𝑛 } ⊂ X , query probabilities 
+
+𝑝 (𝑞 ), recomputation costs 𝑐 (𝑞 ), and mismatch penalty 𝜙 (𝑑 (𝑞, 𝑀 )) .Construct an instance of the continuous problem by defining the arrival distribution 𝑓 as a discrete measure supported on 𝑄 : 𝑓 (𝑥 ) =
+
+Í𝑞 ∈𝑄 𝑝 (𝑞 ) 𝛿 (𝑥 − 𝑞 ), where 𝛿 (·) denotes the Dirac delta function. Substituting this choice of 𝑓 into the continuous loss in (2), we obtain 
+
+L(M ; 𝑓 , 𝑐, 𝑑 ) =
+
+∫
+
+> X
+
+𝑓 (𝑥 ) min {𝑐 (𝑥 ), 𝜙 (𝑑 (𝑥, M))} 𝑑𝑥 
+
+=∑︁ 
+
+> 𝑞 ∈𝑄
+
+𝑝 (𝑞 ) min {𝑐 (𝑞 ), 𝜙 (𝑑 (𝑞, M))} 
+
+Thus, on this restricted class of instances, the continuous se-mantic caching problem reduces exactly to the discrete semantic caching problem of [ 19 ]. Therefore, if we could solve the contin-uous problem in polynomial time, then we could also solve the discrete problem in polynomial time. Since the latter is NP-hard, the continuous semantic caching problem is also NP-hard. □
+
+Proof of Lemma 3.2. Fix an 𝜖 −net S = {𝑥 𝑖 }𝑚 𝑖 =1 ⊂ X and its Voronoi partition {𝑉 𝑖 }𝑚 𝑖 =1. Define true cell masses 𝑤 𝑖 = ∫ 
+
+> 𝑉 𝑖
+
+𝑓 (𝑥 )𝑑𝑥 .For any cache M with |M| ≤ 𝑘 , given the definition of 𝑔 M (𝑥 ) we have 
+
+L(M) =
+
+∫
+
+> X
+
+𝑓 (𝑥 )𝑔 M (𝑥 )𝑑𝑥, bL(M) =
+
+> 𝑚
+
+∑︁ 
+
+> 𝑖 =1
+
+𝑤 𝑖 𝑔 M (𝑥 𝑖 )
+
+Given that 𝑔 M (𝑥 ) is 𝐿 𝑔 −Lipschitz, if 𝑐 is 𝐿 𝑐 −Lipschitz and 𝜙 ◦
+
+𝑑 (· , 𝑢 ) is 𝐿 𝜙 −Lipschitz in 𝑢 , then 𝐿 𝑔 = max (𝐿 𝑐 , 𝐿 𝜙 ). For each cell 𝑉 𝑖 ,every 𝑥 ∈ 𝑉 𝑖 satisfies 𝑑 (𝑥, 𝑥 𝑖 ) ≤ 𝜖 , hence |𝑔 M (𝑥 ) − 𝑔 M (𝑥 𝑖 )| ≤ 𝐿 𝑔 𝜖. 
+
+Integrating over 𝑉 𝑖 and summing over 𝑖 yields |L(M) − bL(M)| ≤ 
+
+𝐿 𝑔 𝜖 . □
+
+Proof of Theorem 3.3. The approximation guarantee follows from [ 19 ] and the guarantee relating the continuous loss to the discrete loss is obtained as follows: 
+
+L(M) − 𝛼 L(M ∗) = [L(M) − bL(M)] + [ bL(M) − 𝛼 bL(M ∗)] +𝛼 [ bL(M ∗) − L(M ∗)] L(M) − 𝛼 L(M ∗) ≤ [ bL(M) − 𝛼 bL(M ∗)] + ( 1 + 𝛼 )𝐿 𝑔 𝜖 
+
+where the inequality follows from Lemma 3.2. □
+
+Proof of Lemma 4.2. Assume a fixed finite partition of the query space X into {𝑉 1, .., 𝑉 𝑚 }. The true weights are defined as 𝑤 𝑖 =
+
+𝑃 𝑋 ∼𝑓 (𝑋 ∈ 𝑉 𝑖 ) = ∫ 
+
+> 𝑉 𝑖
+
+𝑓 (𝑥 )𝑑𝑥 . Hence we also have Í𝑖 𝑤 𝑖 = 1. From 
+
+𝑛 i.i.d. draws 𝑋 1, ..., 𝑋 𝑛 ∼ 𝑓 we have the empirical weights ˆ𝑤 𝑖 =
+
+> 1
+> 𝑛
+
+Í𝑛 𝑡 =1 1{𝑋 𝑡 ∈ 𝑉 𝑖 } for 𝑖 = 1, ..., 𝑚 .
+
+∥ ˆ𝒘 𝑖 − 𝒘 𝑖 ∥1 =
+
+> 𝑚
+
+∑︁ 
+
+> 𝑖 =1
+
+| ˆ𝑤 𝑖 − 𝑤 𝑖 |
+
+Δ𝑖 = ˆ𝑤 𝑖 − 𝑤 𝑖 
+
+Δ+ =∑︁  
+
+> 𝑖 :Δ𝑖 ≥0
+
+Δ𝑖 
+
+Δ− =∑︁  
+
+> 𝑖 :Δ𝑖 <0
+
+(− Δ𝑖 )
+
+Given these definitions it follows that Í𝑖 Δ𝑖 = 0 since the weights are normalized. From which it follows that Δ+ = Δ− and ∥ ˆ𝒘 𝑖 −
+
+𝒘 𝑖 ∥1 = Í𝑖 |Δ𝑖 | = 2Δ+. So the event is ∥ ˆ𝒘 𝑖 − 𝒘 𝑖 ∥1 ≥ 𝜖 𝑏 which means 
+
+Δ+ ≥ 𝜖 𝑏 /2. Define 𝐴 : {𝑖 : Δ𝑖 ≥ 0}, then Δ+ = Í𝑖 ∈𝐴 ( ˆ𝑤 𝑖 − 𝑤 𝑖 ) =
+
+b𝑊 (𝐴 ) − 𝑊 (𝐴 ) where b𝑊 (𝐴 ) = Í𝑖 ∈𝐴 ˆ𝑤 𝑖 and 𝑊 (𝐴 ) = Í𝑖 ∈𝐴 𝑤 𝑖 . So the event || ˆw𝑖 − w𝑖 || 1 ≥ 𝜖 𝑏 is equivalent to ∃𝐴 ⊆ [ 𝑚 ] s.t. b𝑊 (𝐴 ) − 
+
+𝑊 (𝐴 ) ≥ 𝜖 𝑏 /2. There are 2𝑚 possible subsets of [𝑚 ]. Two of them are trivial, i.e. if 𝐴 = ∅ or 𝐴 = [𝑚 ] which means there is no deviation. So we can union bound over 2𝑚 − 2 sets. b𝑊 (𝐴 ) is the empirical frequency of the binary event {𝑋 ∈ Ð𝑖 ∈𝐴 𝑉 𝑖 }, it is a mean of i.i.d. Bernoulli variables (𝑊 (𝐴 )) . Hence by Hoeffding’s inequality we have: 
+
+P( b𝑊 (𝐴 ) − 𝑊 (𝐴 ) ≥ 𝑡 ) ≤ exp (− 2𝑛𝑡 2)
+
+P(∥ ˆ𝒘 𝑖 − 𝒘 𝑖 ∥1 ≥ 𝜖 𝑏 ) ≤ ( 2𝑚 − 2)exp −𝑛𝜖 2
+
+> 𝑏
+
+2
+
+!
+
+This result directly implies that 
+
+∥ ˆ𝒘 𝑖 − 𝒘 𝑖 ∥1 ≤√︂ 2 ln (2𝑚 /𝛿 )
+
+𝑛 w.p. ≥ 1 − 𝛿 
+
+Now we proceed with the proof for the cost function 𝑐. We use Ker-nel Ridge Regression with regularization to learn the cost function. We assume a kernel 𝜅 : X × X → R with RKHS H𝑘 . We assume realizability so that ∥𝑐 ∥H𝑘 ≤ 𝐵 . Assuming some observations on the candidate set S : 𝑦 𝑖 = 𝑐 (𝑥 𝑖 ) + 𝜂 𝑖 where 𝜂 is 0 mean and 𝑅 -sub Gaussian noise. We have a regularization parameter 𝜆 > 0 and 
+
+𝐾, ˆ𝑐 (𝑥 ) and 𝜎 ℓ,𝜆 are as defined in Algorithm 2. Now let y = f + 𝜂 
+
+with f = [𝑐 (𝑥 𝑡 1 ), ..., 𝑐 (𝑥 𝑡 ℓ )] ⊤.
+
+𝑐 (𝑥 ) − ˆ𝑐 (𝑥 ) = 𝑐 (𝑥 ) − 𝜅 ⊤ 
+
+> 𝑥
+
+(𝐾 + ℓ𝜆𝐼 )−1f
+
+| {z }
+
+> bias term
+
+− 𝜅 ⊤ 
+
+> 𝑥
+
+(𝐾 + ℓ𝜆𝐼 )−1𝜂 
+
+| {z }
+
+> noise term
+
+Now lets look at the bias term. Let ℎ𝑥 = (𝐾 + ℓ𝜆𝐼 )−1𝜅 𝑥 ∈ Rℓ . By RKHS representer property and Cauchy Schwarz inequality: 
+
+𝑐 (𝑥 ) − 𝜅 ⊤ 
+
+> 𝑥
+
+(𝐾 + ℓ𝜆𝐼 )−1f = ⟨𝑐, 𝜅 (𝑥, ·) − 
+
+> 𝑛
+
+∑︁ 
+
+> 𝑖 =1
+
+ℎ𝑥,𝑖 𝜅 (𝑥 𝑖 , ·)⟩ H𝑘 
+
+≤ ∥ 𝑐 ∥H𝑘 ∥𝜅 (𝑥, ·) − ∑︁ 
+
+> 𝑖
+
+ℎ𝑥,𝑖 𝜅 (𝑥 𝑖 , ·)∥ H𝑘 Conference’17, July 2017, Washington, DC, USA Baran Atalar, Xutong Liu, Jinhang Zuo, Siwei Wang, Wei Chen, and Carlee Joe-Wong 
+
+Given that 𝜅 ⊤ 
+
+> 𝑥
+
+ℎ𝑥 = ℎ⊤ 
+
+> 𝑥
+
+𝐾ℎ 𝑥 + ℓ𝜆ℎ ⊤ 
+
+> 𝑥
+
+ℎ𝑥 and now looking at 
+
+∥𝜅 (𝑥, ·) − ∑︁ 
+
+> 𝑖
+
+ℎ𝑥,𝑖 𝜅 (𝑥 𝑖 , ·)∥ 2 
+
+> H𝑘
+
+= 𝜅 (𝑥, 𝑥 ) − 2𝜅 ⊤ 
+
+> 𝑥
+
+ℎ𝑥 + ℎ⊤ 
+
+> 𝑥
+
+𝐾ℎ 𝑥 
+
+𝜅 (𝑥, 𝑥 ) − 2𝜅 ⊤ 
+
+> 𝑥
+
+ℎ𝑥 + ℎ⊤ 
+
+> 𝑥
+
+𝐾ℎ 𝑥 = 𝜅 (𝑥, 𝑥 ) − ℎ⊤ 
+
+> 𝑥
+
+𝜅 𝑥 − ℓ𝜆ℎ ⊤ 
+
+> 𝑥
+
+ℎ𝑥 
+
+= 𝜎 2 
+
+> ℓ,𝜆
+
+(𝑥 ) − ℓ𝜆ℎ ⊤ 
+
+> 𝑥
+
+ℎ𝑥 
+
+|bias term | ≤ 𝐵 √︃ 𝜎 2 
+
+> ℓ,𝜆
+
+(𝑥 ) − ℓ𝜆 ∥ℎ𝑥 ∥22 ≤ 𝐵 √︃ 𝜎 2 
+
+> ℓ,𝜆
+
+(𝑥 ) = 𝐵𝜎 ℓ,𝜆 (𝑥 )
+
+Now looking at the noise term we can first define 𝑍 𝑥 = 𝜅 ⊤ 
+
+> 𝑥
+
+(𝐾 +
+
+𝑛𝜆𝐼 )−1𝜂 = ℎ⊤ 
+
+> 𝑥
+
+𝜂 where 𝜂 = [𝜂 1, ..., 𝜂 ℓ ]⊤ is sub-Gaussian noise with 0 mean. For any 𝑥 , 𝑍 𝑥 is sub-Gaussian with parameter 𝑅 || ℎ𝑥 || 2 hence by the sub-Gaussian tail we have for any 𝑡 > 0:
+
+P(| 𝑍 𝑥 | ≥ 𝑡 |𝑋 ) ≤ 2exp 
+
+
+
+− 𝑡 2
+
+2𝜎 2 || ℎ𝑥 || 22
+
+
+
+The residual was defined as ∥𝑟 𝑥 ∥2 
+
+> H𝑘
+
+= 𝜎 2 
+
+> ℓ,𝜆
+
+(𝑥 ) − ℓ𝜆 ∥ℎ𝑥 ∥22 ≥ 0 hence 
+
+∥ℎ𝑥 ∥2 ≤ 𝜎 ℓ,𝜆 (𝑥 )√ℓ𝜆 . Therefore if we choose 𝑡 = 𝑅 √︃ 2 log (2/𝛿 ) 
+
+> ℓ𝜆
+
+𝜎 ℓ,𝜆 (𝑥 )
+
+then if we apply union bound we get 
+
+|𝑍 𝑥 | ≤ 𝑅 √︂ 2 log (2|S|/ 𝛿 )
+
+ℓ𝜆 𝜎 ℓ,𝜆 (𝑥 )
+
+for all 𝑥 ∈ 𝑆. If costs are bounded/normalized to [0, 1] then 
+
+|𝑍 𝑥 | ≤ √︂ log (2|S|/ 𝛿 )
+
+2ℓ𝜆 𝜎 ℓ,𝜆 (𝑥 )
+
+Combining the bias term and noise term bounds we get 
+
+| ˆ𝑐 (𝑥 𝑖 ) − 𝑐 (𝑥 𝑖 )| ≤ 𝐵 +√︂ log (2𝑚 /𝛿 )
+
+2ℓ𝜆 
+
+!
+
+𝜎 ℓ,𝜆 (𝑥 𝑖 ) w.p. 1 − 𝛿 
+
+| ˆ𝑐 (𝑥 𝑖 ) − 𝑐 (𝑥 𝑖 )| ≤ ( 𝐵 + 𝑐 𝜆 ) min 
+
+√2,
+
+√2
+
+ℓ𝑘 
+
+· 2𝜖 2 log (1/𝛿 )
+
+𝑛𝑤 𝑖 𝜈 𝑖 𝜈 𝑖 
+
+!1/𝑝 
+
+|¯𝑐 (𝑥 𝑖 ) − 𝑐 (𝑥 𝑖 )| ≤ | ˆ𝑐 (𝑥 𝑖 ) − 𝑐 (𝑥 𝑖 )| + Δ(𝑥 𝑖 ) = 2Δ(𝑥 𝑖 )|¯𝑐 (𝑥 𝑖 ) − 𝑐 (𝑥 𝑖 )| ≤ 2√2 (𝐵 + 𝑐 𝜆 ) min 
+
+
+
+1, 2𝜖 ℓ𝑘 
+
+· 2 log (1/𝛿 )
+
+𝑛𝑤 𝑖 𝜈 𝑖 𝜈 𝑖 
+
+!1/𝑝 
+
+where 𝑐 𝜆 =√︃ log (2𝑚 /𝛿 ) 
+
+> 2ℓ𝜆
+
+. To bound the KRR width 𝜎 ℓ,𝜆 (𝑥 𝑖 ) we make geometry based arguments based on the 𝜖 −net and nearest-neighbor radius from the local sample count in the Voronoi cells 𝑉 𝑖 
+
+in Lemmas A.1 and A.2 which yields the final result in Corollary A.3 and Remark A.1.1. We also use the lower bound on 𝑁 𝑖 to obtain the final bound above which we derive next. Now moving on to the proof regarding 𝑁 𝑖 , for round 𝑡 , let 𝑋 𝑡 be the arrived query and 𝑍 𝑡 ∈ { 0, 1} indicate whether you queried the LLM (observed cost that round). Arrival count per cell: 𝐴 𝑖 =
+
+> 𝑛
+
+∑︁ 
+
+> 𝑡 =1
+
+1{𝑋 𝑡 ∈ 𝑉 𝑖 }
+
+Cost observation count per cell: 𝑁 𝑖 =
+
+> 𝑛
+
+∑︁ 
+
+> 𝑡 =1
+
+1{𝑋 𝑡 ∈ 𝑉 𝑖 }𝑍 𝑡 
+
+Query propensity per cell: 𝜈 𝑖 = P(𝑍 𝑡 = 1|𝑋 𝑡 ∈ 𝑉 𝑖 )
+
+𝑋 𝑡 ∼ 𝑓 and conditional on 𝑋 𝑡 ∈ 𝑉 𝑖 , 𝑍 𝑡 ∼ Bernoulli (𝜈 𝑖 ) then 𝑁 𝑖 ∼
+
+Binomial (𝑛, 𝑤 𝑖 𝜈 𝑖 ) and E[𝑁 𝑖 ] = 𝑛𝑤 𝑖 𝜈 𝑖 . For 𝑋 ∼ Binomial (𝑛, 𝑝 ) the standard lower tail Chernoff bound states that 
+
+P(𝑋 ≤ ( 1 − 𝛿 )𝜇 ) ≤ exp (− 𝛿 2𝜇 /2)
+
+Then applying this to 𝑁 𝑖 we have 
+
+P(𝑁 𝑖 ≤ ( 1 − 𝜂 )𝑛𝑤 𝑖 𝜈 𝑖 ) ≤ exp (− 𝜂 2𝑛𝑤 𝑖 𝜈 𝑖 /2)
+
+If we let 𝜂 = 1/2 and union bound over 𝑖 ∈ [ 𝑚 ]
+
+P(𝑁 𝑖 ≤ 12𝑛𝑤 𝑖 𝜈 𝑖 ) ≤ 𝑚 exp 
+
+
+
+−𝑛𝑤 𝑖 𝜈 𝑖 
+
+8
+
+
+
+then it follows that given 𝑛 ≥ 8min 𝑖 𝑤 𝑖 𝜈 𝑖 log 𝑚 𝛿 then 𝑁 𝑖 ≥ 12 𝑛𝑤 𝑖 𝜈 𝑖 
+
+∀𝑖 ∈ [ 𝑚 ] with probability ≥ 1 − 𝛿 □
+
+Proof of Lemma 5.2. We allocate a failure probability of 𝛿 /2 to each of the three events to satisfy a global union bound. 
+
+1. Arrival Concentration ( Earr ): 
+
+Following the exact derivation using Hoeffding’s inequality and the 2𝑚 subsets from the proof of Lemma 4.2, for a fixed round 
+
+𝑡 and an 𝜖 -net of size up to 𝑚 eff , the variation distance satisfies 
+
+P(∥ ˆ𝒘 𝑡 − 𝒘 ∥1 ≥ 𝜖 𝑏 ) ≤ 2𝑚 eff exp (− 𝑡𝜖 2 
+
+> 𝑏
+
+/2). To ensure this holds uni-formly over all 𝑡 ∈ [ 𝑇 ], we apply a union bound over 𝑇 rounds. Assigning a failure probability of 𝛿   
+
+> 2𝑇 2
+
+≤ 𝛿  
+
+> 2𝑇
+
+to each round 𝑡 , we set 
+
+2𝑚 max exp (− 𝑡𝜖 2 
+
+> 𝑏
+
+/2) = 𝛿   
+
+> 2𝑇 2
+
+. Solving for 𝜖 𝑏 yields the bound in Earr ,which holds with probability at least 1 − 𝛿 /2.
+
+2. Cost Concentration ( Ecost ): 
+
+Instead of analyzing the fixed-sample KRR bias and noise terms as in Lemma 4.2, the online setting requires an any-time bound. This follows directly from Theorem 2 in [ 6]. Applying this result with a failure probability of 𝛿 /2 directly yields Ecost . By the union bound, the two events hold simultaneously with probability at least 1 − 𝛿 .
+
+□
+
+Lemma A.1 (Nearest-neighbor radius from local sample count). Let 𝐵 (𝑧, 𝜐 ) := {𝑥 ∈ R𝑑 𝑒 : ∥𝑥 −𝑧 ∥2 ≤ 𝜐 } denote the Euclidean ball of radius 𝜐 centered at 𝑧 . Fix a cell 𝑉 𝑖 ⊂ R𝑑 𝑒 with Euclidean diameter 
+
+𝐷 𝑖 := sup  
+
+> 𝑥,𝑦 ∈𝑉 𝑖
+
+∥𝑥 − 𝑦 ∥2.
+
+Let 𝑂 𝑖 = {𝑧 𝑖, 1, . . . , 𝑧 𝑖,𝑁 𝑖 } ⊂ 𝑉 𝑖 be 𝑁 𝑖 ≥ 1 i.i.d. samples drawn from a probability measure 𝜇 𝑖 supported on 𝑉 𝑖 . Assume there exists a constant 
+
+𝜈 𝑖 > 0 such that for every 𝑧 ∈ 𝑉 𝑖 and every 𝜐 ∈ ( 0, 𝐷 𝑖 ] with 𝐵 (𝑧, 𝜐 ) ∩ 
+
+𝑉 𝑖 ≠ ∅,
+
+𝜇 𝑖 
+
+ 𝐵 (𝑧, 𝜐 ) ∩ 𝑉 𝑖 
+
+ ≥ 𝜈 𝑖 
+
+ 𝜐 𝐷 𝑖 
+
+𝑝 
+
+.
+
+Let 𝑥 𝑖 ∈ 𝑉 𝑖 be the representative of the cell, and define the nearest-neighbor radius 
+
+𝑟 𝑖 := min   
+
+> 1≤𝑗 ≤𝑁 𝑖
+
+∥𝑥 𝑖 − 𝑧 𝑖,𝑗 ∥2.
+
+Then for any 𝛿 ∈ ( 0, 1), with probability at least 1 − 𝛿 ,
+
+𝑟 𝑖 ≤ 𝐷 𝑖 
+
+ log (1/𝛿 )
+
+𝜈 𝑖 𝑁 𝑖 
+
+1/𝑝 
+
+.
+
+Proof. Fix 𝜐 ∈ ( 0, 𝐷 𝑖 ]. By the lower-mass assumption applied at the point 𝑥 𝑖 ,
+
+𝜇 𝑖 
+
+ 𝐵 (𝑥 𝑖 , 𝜐 ) ∩ 𝑉 𝑖 
+
+ ≥ 𝜈 𝑖 
+
+ 𝜐 𝐷 𝑖 
+
+𝑝 
+
+.Continuous Semantic Caching for Low-Cost LLM Serving Conference’17, July 2017, Washington, DC, USA 
+
+The event {𝑟 𝑖 > 𝜐 } is exactly the event that none of the 𝑁 𝑖 i.i.d. samples falls in 𝐵 (𝑥 𝑖 , 𝜐 ) ∩ 𝑉 𝑖 . Hence 
+
+P(𝑟 𝑖 > 𝜐 ) = (1 − 𝜇 𝑖 (𝐵 (𝑥 𝑖 , 𝜐 ) ∩ 𝑉 𝑖 )) 𝑁 𝑖 
+
+≤ exp (− 𝑁 𝑖 𝜇 𝑖 (𝐵 (𝑥 𝑖 , 𝜐 ) ∩ 𝑉 𝑖 )) ,
+
+where we used 1 − 𝑢 ≤ 𝑒 −𝑢 for 𝑢 ∈ [ 0, 1]. Therefore, 
+
+P(𝑟 𝑖 > 𝜐 ) ≤ exp 
+
+
+
+−𝜈 𝑖 𝑁 𝑖 
+
+ 𝜐 𝐷 𝑖 
+
+𝑝 
+
+.
+
+Now choose 
+
+𝜐 = 𝐷 𝑖 
+
+ log (1/𝛿 )
+
+𝜈 𝑖 𝑁 𝑖 
+
+1/𝑝 
+
+.
+
+Then 
+
+P(𝑟 𝑖 > 𝜐 ) ≤ 𝛿, 
+
+which proves the claim. □
+
+Remark 1. The lower-mass condition is a standard regularity as-sumption in non-parametric estimation and nearest-neighbor anal-ysis. In the specific setting of semantic caching for LLM serving, user queries are mapped into a high-dimensional embedding space 
+
+R𝑑 𝑒 , but the actual data distribution concentrates on a much lower-dimensional manifold dictated by semantic similarity. This assump-tion is reasonable here as it simply states that within any localized semantic neighborhood (a cell 𝑉 𝑖 ), the distribution of user queries is dense and well-behaved. It ensures that the probability of en-countering a prompt within a radius 𝜈 scales consistently with the intrinsic dimenion 𝑝 of that semantic cluster, reflecting the natural clustering tendencies of real-world text embeddings. 
+
+Lemma A.2 (Geometry-based upper bound on the KRR width). 
+
+Let 𝜅 be the unit-variance RBF kernel 
+
+𝜅 (𝑥, 𝑥 ′) = exp − ∥𝑥 − 𝑥 ′ ∥22
+
+2ℓ2
+
+> 𝑘
+
+!
+
+,
+
+and let 𝑂 = {𝑧 1, . . . , 𝑧 ℓ } be the set of inputs on which the serving cost is observed. For a fixed representative 𝑥 𝑖 ∈ S , let 
+
+𝑂 𝑖 := 𝑂 ∩ 𝑉 𝑖 , 𝑟 𝑖 := min  
+
+> 𝑧 ∈𝑂 𝑖
+
+∥𝑥 𝑖 − 𝑧 ∥2,
+
+with the convention 𝑟 𝑖 = ∞ if 𝑂 𝑖 = ∅. Then, whenever 𝑂 𝑖 ≠ ∅,
+
+𝜎 ℓ,𝜆 (𝑥 𝑖 ) ≤ √︂ 2
+
+
+
+1 − 𝑒 −𝑟 2   
+
+> 𝑖 /( 2ℓ2
+> 𝑘 )
+
+
+
+≤ min 
+
+(√2,
+
+√2
+
+ℓ𝑘 
+
+𝑟 𝑖 
+
+)
+
+.
+
+Proof. Let 𝑧 ★ 
+
+> 𝑖
+
+∈ 𝑂 𝑖 attain the minimum in the definition of 
+
+𝑟 𝑖 . The posterior width 𝜎 ℓ,𝜆 (𝑥 𝑖 ) is the RKHS norm of the residual after projecting 𝜅 (𝑥 𝑖 , ·) onto the span of the observed kernel atoms. Projecting onto a larger span can only decrease the residual norm, hence 
+
+𝜎 ℓ,𝜆 (𝑥 𝑖 ) ≤ 𝜅 (𝑥 𝑖 , ·) − Πspan {𝜅 (𝑧 ★ 
+
+> 𝑖 ,·) }
+
+𝜅 (𝑥 𝑖 , ·) H .
+
+Since the orthogonal projection error onto any subspace is bounded by the error of any particular element in that subspace, and 𝜅 (𝑧 ★ 
+
+> 𝑖
+
+, ·) ∈ 
+
+span {𝜅 (𝑧 ★ 
+
+> 𝑖
+
+, ·)} , we further have 
+
+𝜅 (𝑥 𝑖 , ·) − Πspan {𝜅 (𝑧 ★ 
+
+> 𝑖 ,·) }
+
+𝜅 (𝑥 𝑖 , ·) H ≤ ∥ 𝜅 (𝑥 𝑖 , ·) − 𝜅 (𝑧 ★ 
+
+> 𝑖
+
+, ·)∥ H .
+
+For the RBF kernel, 
+
+∥𝜅 (𝑥 𝑖 , ·) − 𝜅 (𝑧 ★ 
+
+> 𝑖
+
+, ·)∥ 2 
+
+> H
+
+= 𝜅 (𝑥 𝑖 , 𝑥 𝑖 ) + 𝜅 (𝑧 ★ 
+
+> 𝑖
+
+, 𝑧 ★ 
+
+> 𝑖
+
+) − 2𝜅 (𝑥 𝑖 , 𝑧 ★ 
+
+> 𝑖
+
+)
+
+= 2 1 − exp − ∥𝑥 𝑖 − 𝑧 ★ 
+
+> 𝑖
+
+∥22
+
+2ℓ2
+
+> 𝑘
+
+!! 
+
+= 2 1 − exp − 𝑟 2
+
+> 𝑖
+
+2ℓ2
+
+> 𝑘
+
+!! 
+
+.
+
+Taking square roots gives the first inequality. For the second in-equality, use 
+
+1 − 𝑒 −𝑢 ≤ min {1, 𝑢 }, 𝑢 ≥ 0.
+
+Substituting 𝑢 = 𝑟 2 
+
+> 𝑖
+
+/( 2ℓ2 
+
+> 𝑘
+
+) yields √︂ 
+
+2
+
+
+
+1 − 𝑒 −𝑟 2   
+
+> 𝑖 /( 2ℓ2
+> 𝑘 )
+
+
+
+≤ min 
+
+(√2,
+
+√2
+
+ℓ𝑘 
+
+𝑟 𝑖 
+
+)
+
+. □
+
+Corollary A.3 (Per-cell geometric control of the poste-rior width). Under the assumptions of Lemmas A.1 and A.2, for any 𝛿 ∈ ( 0, 1), with probability at least 1 − 𝛿 ,
+
+𝜎 ℓ,𝜆 (𝑥 𝑖 ) ≤ min 
+
+(√2,
+
+√2𝐷 𝑖 
+
+ℓ𝑘 
+
+ log (1/𝛿 )
+
+𝜈 𝑖 𝑁 𝑖 
+
+1/𝑝 )
+
+.
+
+Proof. Combine Lemma A.1 with Lemma A.2. □
+
+A.1.1 Using the 𝜖 -net radius. If 𝑉 𝑖 is the Voronoi cell of an 𝜖 -net representative 𝑥 𝑖 , then every point in 𝑉 𝑖 lies within distance 𝜖 of 𝑥 𝑖 ,hence 
+
+𝐷 𝑖 ≤ 2𝜖. 
+
+Therefore Corollary A.3 implies 
+
+𝜎 ℓ,𝜆 (𝑥 𝑖 ) ≤ min 
+
+(√2, 2√2𝜖 ℓ𝑘 
+
+ log (1/𝛿 )
+
+𝜈 𝑖 𝑁 𝑖 
+
+1/𝑝 )
+
+.
+
+Proof of Theorem 4.1. We ignore S in the loss function bL(M ; S, 𝒘 , 𝒄 ) =
+
+bL(M ;𝒘 , 𝒄 ) when contexts are clear. Under the events of Earvl , Ecost , Ecounter ,
+
+bL( ˆM;𝒘 , 𝒄 ) − 𝛼 bL(M ∗;𝒘 , 𝒄 ) = 𝛼 bL(M ∗; ˆ 𝒘 , ¯𝒄 ) − 𝛼 bL(M ∗;𝒘 , 𝒄 )
+
+| {z }
+
+> estimation gap
+
++
+
+bL( ˆM; ˆ 𝒘 , ¯𝒄 ) − 𝛼 bL(M ∗; ˆ 𝒘 , ¯𝒄 )
+
+| {z }
+
+> greedy gap
+
++ bL( ˆM;𝒘 , 𝒄 ) − bL( ˆM; ˆ 𝒘 , ¯𝒄 )
+
+| {z }
+
+> pessimism gap
+
+≤ 𝛼 bL(M ∗; ˆ𝒘 , ¯𝒄 )− 
+
+𝛼 bL(M ∗;𝒘 , 𝒄 ) + bL( ˆM;𝒘 , ¯𝒄 ) − bL( ˆM; ˆ𝒘 , ¯𝒄 ) ≤ 𝛼 Í𝑥 𝑖 ∈ S 𝑤 𝑖 |¯𝑐 (𝑥 𝑖 ) − 
+
+𝑐 (𝑥 𝑖 )|+( 𝛼 +1) ∥ ˆ𝒘 − 𝒘 ∥1 ≤ 𝛼 Í𝑥 𝑖 ∈ S 𝑤 𝑖 |¯𝑐 (𝑥 𝑖 )− 𝑐 (𝑥 𝑖 )|+( 𝛼 +1)√︃ 2𝑚 ln (2/𝛿 ) 
+
+> 𝑛
+
+,
+
+where the equality is due to adding and subtracting 𝛼 bL(M ∗; ˆ𝒘 , ¯𝒄 )
+
+and bL( ˆM; ˆ𝒘 , ¯𝒄 ), the first inequality is due to the greedy gap ≤ 0 by the approximation ratio guarantee of the Cont_Reverse_Greedy ,
+
+¯𝒄 ≥ 𝒄 by Lemma 4.2, and bL(M ;𝒘 , 𝒄 ) is monotone regarding 𝒄 , the second inequality is due to Lemma 4 in [ 19 ], and the last inequality is due to Lemma 4.2. Then we have for the first term: ∑︁  
+
+> 𝑥 𝑖 ∈ S
+
+𝑤 𝑖 |¯𝑐 (𝑥 𝑖 ) − 𝑐 (𝑥 𝑖 )| ≤ ∑︁  
+
+> 𝑥 𝑖 ∈ S
+
+2𝑤 𝑖 (𝐵 + 𝑐 𝜆 ) min 
+
+√2, 𝑏 
+
+
+
+= 2(𝐵 + 𝑐 𝜆 )√2
+
+> 𝑚
+
+∑︁ 
+
+> 𝑖 =1
+
+𝑤 𝑖 min 
+
+
+
+1, 2𝜖 ℓ𝑘 
+
+2 log (1/𝛿 )
+
+𝑛𝑤 𝑖 𝜈 𝑖 𝜈 𝑖 
+
+!1/𝑝 Conference’17, July 2017, Washington, DC, USA Baran Atalar, Xutong Liu, Jinhang Zuo, Siwei Wang, Wei Chen, and Carlee Joe-Wong 
+
+where 𝑐 𝜆 =√︁ log (2𝑚 /𝛿 )/( 2ℓ𝜆 ). Now using 𝑃 = Í𝑖 𝑤 𝑖 min {𝐴 𝑖 , 𝐵 𝑖 } ≤ 
+
+Í𝑖 𝑤 𝑖 
+
+√𝐴 𝑖 𝐵 𝑖 = Í𝑖 
+
+√𝑤 𝑖 𝐴 𝑖 
+
+√𝑤 𝑖 𝐵 𝑖 ≤√︁ Í𝑖 𝑤 𝑖 𝐴 𝑖 √︁ Í𝑖 𝑤 𝑖 𝐵 𝑖 =√︁ 𝐴 Í𝑖 𝑤 𝑖 𝐵 𝑖 
+
+where the second inequality follows through Cauchy-Schwarz in-equality and the last equality is assuming that 𝐴 𝑖 = 𝐴 for all 𝑖 and that Í𝑖 𝑤 𝑖 = 1. Now using 𝐴 𝑖 = 𝐴 = 1 and 𝐵 𝑖 = 2𝜖 ℓ𝑘 
+
+ 2 log (1/𝛿 )  
+
+> 𝑛𝑤 𝑖 𝜈 𝑖 𝜈 𝑖
+
+1/𝑝 
+
+=
+
+(𝑤 𝑖 𝜈 𝑖 )−1/𝑝 2𝜖 ℓ𝑘 
+
+ 2 log (1/𝛿 )
+
+> 𝑛𝜈 𝑖
+
+1/𝑝 
+
+then looking at ∑︁ 
+
+> 𝑖
+
+𝑤 𝑖 (𝑤 𝑖 𝜈 𝑖 )−1/𝑝 =∑︁ 
+
+> 𝑖
+
+𝑎 𝑖 𝑏 𝑖 ≤ ∑︁ 
+
+> 𝑖
+
+𝑎 𝑢 𝑖 
+
+!1/𝑢  ∑︁ 
+
+> 𝑖
+
+𝑏 𝑞 𝑖 
+
+!1/𝑞 
+
+=∑︁ 
+
+> 𝑖
+
+𝑤 𝑖  ∑︁ 𝑖 
+
+𝜈 −1
+
+> 𝑖
+
+!1/𝑝 
+
+= ∑︁ 
+
+> 𝑖
+
+𝜈 −1
+
+> 𝑖
+
+!1/𝑝 
+
+where we use Hölder inequality above and select 𝑢 = 𝑝 /( 𝑝 − 1),
+
+𝑞 = 𝑝 and 𝑎 𝑖 = 𝑤 (𝑝 −1)/ 𝑝 𝑖 and 𝑏 𝑖 = 𝜈 −1/𝑝 𝑖 then we have that 
+
+𝑃 ≤
+
+vut∑︁ 
+
+> 𝑖
+
+𝑤 𝑖 (𝑤 𝑖 𝜈 𝑖 )−1/𝑝 2𝜖 ℓ𝑘 
+
+2 log (1/𝛿 )
+
+𝑛𝜈 𝑖 
+
+!1/𝑝 
+
+=
+
+vut
+
+2𝜖 ℓ𝑘 
+
+2 log (1/𝛿 )
+
+𝑛𝜈 𝑖 
+
+!1/𝑝  ∑︁ 
+
+> 𝑖
+
+𝜈 −1
+
+> 𝑖
+
+!1/𝑝 
+
+Hence it follows that ∑︁  
+
+> 𝑥 𝑖 ∈ S
+
+𝑤 𝑖 |¯𝑐 (𝑥 𝑖 ) − 𝑐 (𝑥 𝑖 )| ≤ 2(𝐵 + 𝑐 𝜆 )√2𝑃 
+
+≤ 4 𝐵 +√︂ log (2𝑚 /𝛿 )
+
+2ℓ𝜆 
+
+!
+
+·
+
+vut
+
+𝜖 ℓ𝑘 
+
+2 log (1/𝛿 )
+
+𝑛𝜈 𝑖 
+
+!1/𝑝  ∑︁ 
+
+> 𝑖
+
+𝜈 −1
+
+> 𝑖
+
+!1/𝑝 
+
+Letting 𝐶 𝜈 = (min 𝑖 𝜈 𝑖 )1/𝑝 and combining all results we get 
+
+bL( ˆM;𝒘 , 𝒄 ) − 𝛼 bL(M ∗;𝒘 , 𝒄 ) ≤ 
+
+4𝛼 𝐵 +√︂ log (2𝑚 /𝛿 )
+
+2ℓ𝜆 
+
+!
+
+·
+
+vut
+
+𝜖 ℓ𝑘 𝐶 𝜈 
+
+ 2 log (1/𝛿 )
+
+𝑛 
+
+1/𝑝  ∑︁ 
+
+> 𝑖
+
+𝜈 −1
+
+> 𝑖
+
+!1/𝑝 
+
++(𝛼 + 1)√︂ 2𝑚 ln (2/𝛿 )
+
+𝑛 
+
+We can also relate 𝜖 to 𝑚 to get a bound independent of 𝜖 . Let’s define the diameter of the query space (X , 𝑑 ) as 𝐷 . Assuming we are using Euclidean distance with unit norm embeddings, it follows that 𝐷 ≤ 2. The following relation is known for an 𝜖 −net’s covering number, which we defined as 𝑚 .
+
+𝑚 ≤
+
+ 𝐷 √𝑑 𝑒 
+
+𝜖 
+
+𝑑 𝑒 
+
+from which it follows that 
+
+𝜖 ≤ 𝐷 √𝑑 𝑒 
+
+𝑚 1/𝑑 𝑒 ≤ 2√𝑑 𝑒 
+
+𝑚 1/𝑑 𝑒 
+
+hence we get 
+
+bL( ˆM;𝒘 , 𝒄 ) − 𝛼 bL(M ∗;𝒘 , 𝒄 ) ≤ 
+
+4𝛼 𝐵 +√︂ log (2𝑚 /𝛿 )
+
+2ℓ𝜆 
+
+!
+
+·
+
+vut
+
+2√𝑑 𝑒 
+
+ℓ𝑘 𝐶 𝜈 𝑚 1/𝑑 𝑒 
+
+ 2 log (1/𝛿 )
+
+𝑛 
+
+1/𝑝  ∑︁ 
+
+> 𝑖
+
+𝜈 −1
+
+> 𝑖
+
+!1/𝑝 
+
++(𝛼 + 1)√︂ 2𝑚 ln (2/𝛿 )
+
+𝑛 
+
+To finalise the proof, we need to relate the empirical objective loss guarantee for bL to a guarantee for the expected loss L using Theorem 3.3 as follows: 
+
+L( ˆM) − 𝛼 L(M ∗) ≤ 
+
+4𝛼 𝐵 +√︂ log (2𝑚 /𝛿 )
+
+2ℓ𝜆 
+
+!
+
+·
+
+vut
+
+2√𝑑 𝑒 
+
+ℓ𝑘 𝐶 𝜈 𝑚 1/𝑑 𝑒 
+
+ 2 log (1/𝛿 )
+
+𝑛 
+
+1/𝑝  ∑︁ 
+
+> 𝑖
+
+𝜈 −1
+
+> 𝑖
+
+!1/𝑝 
+
++(𝛼 + 1) √︂ 2𝑚 ln (2/𝛿 )
+
+𝑛 + 𝐿 𝑔 
+
+2√𝑑 𝑒 
+
+𝑚 1/𝑑 𝑒 
+
+!
+
+□
+
+Remark 2. To determine the optimal value of the discretization radius 𝜖 ∗, we analyze the asymptotic behavior of the suboptimality gap bound derived in the offline setting. First we substitute the covering number relation 𝑚 = O( 𝜖 −𝑑 𝑒 ) into the three main error terms of the bound. If we assume the data distribution is relatively uniform across the paritions such that 𝜈 𝑖 = 𝑂 (1/𝑚 ), it follows that 
+
+Í𝑚 𝑖 =1 𝜈 −1 
+
+> 𝑖
+
+= O( 𝑚 2). The term due to discretization error scales lin-early with 𝜖 so it is O( 𝜖 ). The generalization gap term arising from the weight concentration scales as O
+
+√︁ 
+
+𝑚 /𝑛 
+
+
+
+= O( 𝜖 −𝑑 𝑒 /2𝑛 −1/2)
+
+and the cost estimation gap arising from the estimation of the cost function within partitions scales as O
+
+√𝜖 · 𝑛 −1/𝑝 · 𝑚 2/𝑝 
+
+
+
+=
+
+O( 𝜖 1/2−𝑑 𝑒 /𝑝 · 𝑛 −1/( 2𝑝 ) ).To minimize the overall bound, we must balance the growing terms with the shrinking terms with 𝜖 . Due to the exponents of 
+
+𝑑 𝑒 /2 and 𝑑 𝑒 /𝑝 − 1/2, there is a phase transition governed by the relationship between the embedding dimension 𝑑 𝑒 and the intrinsic dimension 𝑝 . The generalization gap dominates when 𝑑 𝑒 /2 ≥ 𝑑 𝑒 /𝑝 −
+
+1/2, which simplifies to 𝑝 ≥ 2𝑑 𝑒   
+
+> 𝑑 𝑒 +1
+
+. However, this also introduces the condition 𝑝 ≥ 𝑑 𝑒 − 2. Hence, there are two regions for the optimal 
+
+𝜖 ∗.For case 1 when 𝑝 ≥ 𝑑 𝑒 − 2, the generalization gap acts as the main bottleneck and we find the optimal 𝜖 ∗ by balancing the discretization gap with the generalization gap: 
+
+𝜖 ≈ 𝜖 − 𝑑𝑒  
+
+> 2
+
+𝑛 − 12 ⇒ 𝜖 𝑑𝑒 +22 ≈ 𝑛 − 12
+
+Solving for 𝜖 yields the optimal radius of 
+
+𝜖 ∗ = O
+
+
+
+𝑛 − 1 
+
+> 𝑑𝑒 +2
+
+Continuous Semantic Caching for Low-Cost LLM Serving Conference’17, July 2017, Washington, DC, USA 
+
+Substituting this 𝜖 ∗ into the cost estimation gap yields O
+
+
+
+𝑛 𝑑𝑒 −𝑝 −22𝑝 (𝑑𝑒 +2)
+
+
+
+and since 𝑝 ≥ 𝑑 𝑒 − 2, this term safely decays to 0 as 𝑛 → ∞ .For case 2 where 𝑝 ≤ 𝑑 𝑒 − 2, the cost estimation gap becomes the dominant bottleneck and we balance the terms as follows: 
+
+𝜖 ≈ 𝜖 12 − 𝑑𝑒 𝑝 𝑛 − 12𝑝 ⇒ 𝜖 𝑝 +2𝑑𝑒  
+
+> 2𝑝
+
+≈ 𝑛 − 12𝑝 
+
+𝜖 ∗ = O
+
+
+
+𝑛 − 12𝑑𝑒 +𝑝 
+
+
+
+Substituting this 𝜖 ∗ into the generalization gap yields O
+
+
+
+𝑛 − 𝑑𝑒 +𝑝  
+
+> 4𝑑𝑒 +2𝑝
+
+
+
+which decays to 0 because 𝑑 𝑒 , 𝑝 > 0.The optimal discretization radius 𝜖 ∗ that minimizes the expected suboptimality gap is given by the following piecewise function: 
+
+𝜖 ∗ =
+
+
+
+O
+
+
+
+𝑛 − 1 
+
+> 𝑑𝑒 +2
+
+
+
+if 𝑝 ≥ 𝑑 𝑒 − 2
+
+O
+
+
+
+𝑛 − 12𝑑𝑒 +𝑝 
+
+
+
+if 𝑝 < 𝑑 𝑒 − 2
+
+Proof of Lemma 5.3. At any round 𝑡 ∈ [ 𝑇 ], the algorithm main-tains a dynamically growing representative set S𝑡 . By the definition of an 𝜖 -net over a compact metric space X with diameter 𝐷 and intrinsic dimension 𝑝 , the maximum number of 𝜖 -balls required to cover the space is strictly finite. Therefore, the number of centers 
+
+𝑚 𝑡 = |S 𝑡 | is monotonically non-decreasing but upper-bounded by the maximum covering number 𝑚 max for all 𝑡 :
+
+𝑚 𝑡 ≤ 𝑚 max ≤
+
+ 𝐷 √𝑑 𝑒 
+
+𝜖 
+
+𝑑 𝑒 
+
+. (6) According to the CLCB-SC-LS-Cont algorithm, a new stage 𝜏 𝑢 →
+
+𝜏 𝑢 + 1 is triggered for a specific center 𝑢 ∈ S 𝑡 if and only if the number of new observations in the current stage satisfies: 
+
+|T ( 𝑢, 𝜏 𝑢 )| ≥ 1 +
+
+vut 𝑇 𝑚 𝑡 𝜏 𝑢 −1∑︁ 
+
+> 𝜏 =1
+
+|T ( 𝑢, 𝜏 )| . (7) Because the denominator 𝑚 𝑡 is bounded such that 𝑚 𝑡 ≤ 𝑚 max ,the ratio 𝑇 𝑚 𝑡 is strictly bounded below by 𝑇 𝑚 max . We can therefore establish a strict necessary condition for a cache switch: 
+
+|T ( 𝑢, 𝜏 𝑢 )| ≥ 1 +
+
+vut 𝑇 𝑚 max  
+
+> 𝜏 𝑢 −1
+
+∑︁ 
+
+> 𝜏 =1
+
+|T ( 𝑢, 𝜏 )| . (8) At this point, the continuous trigger condition is mathematically identical to the static trigger condition analyzed in the discrete 
+
+CLCB-SC-LS algorithm in [ 19 ], with the dynamic variable 𝑚 𝑡 re-placed by the constant 𝑚 max .Because the recurrence relation is now structurally identical, the remainder of the proof follows identically to the proof of the discrete low-switching lemma. For the global arrival probability stages 𝜏 𝑝 , the update rule relies on a single global tracker, making it equivalent to the discrete proof [ 19 ] where the number of arms is 1, yielding E[𝜏 𝑝 (𝑇 )] ≤ O( log log 𝑇 ). □
+
+Proof of Theorem 5.1. By Assumption 2, the continuous queries are highly concentrated. The maximum distance between any query 
+
+𝑥 generated from these clusters and its nearest empirical center in S𝑡 is bounded by a dynamic radius 𝜀 𝑡 = O( 1/√𝑡 ). Integrating this over the probability mass of the clusters, the instantaneous discretization error satisfies |L(M) − bL(M)| 𝑡 ≤ 𝐿 𝑔 𝜀 𝑡 .Next, we bound the regret against the optimal observed cache 
+
+M∗N𝑇 . Let M∗S𝑡 be the optimal cache restricted to the centers in S𝑡 .By mapping each item in M∗N𝑇 to its nearest neighbor in S𝑡 , the mismatch cost increases by at most 𝐿 𝜙 𝜀 𝑡 . Because the loss function evaluates the minimum over the cache, this error does not scale with 𝑘 and applies only when the cache is hit. The instantaneous comparator gap is bounded by 𝐿 𝑔 𝜀 𝑡 . Therefore, at any round 𝑡 :
+
+bL(M ∗S𝑡 ) ≤ bL(M ∗N𝑇 ) + 𝐿 𝑔 𝜀 𝑡 (9) The expected cumulative regret decomposes into the discrete proxy regret, the dynamic discretization penalties, and the switching cost: Reg (𝑇 ) ≤ E
+
+" 𝑇 ∑︁ 
+
+> 𝑡 =1
+
+ bL(M 𝑡 ; w, 𝑐 ) − 𝛼 bL(M ∗S𝑡 ; w, 𝑐 )
+
+#
+
++
+
+> 𝑇
+
+∑︁  
+
+> 𝑡 =1
+
+(1 + 𝛼 )𝐿 𝑔 𝜀 𝑡 +
+
+> 𝑇
+
+∑︁ 
+
+> 𝑡 =1
+
+𝛼𝐿 𝑔 𝜀 𝑡 + E[𝐶 𝑠𝑤𝑖𝑡𝑐ℎ ]
+
+Since 𝜀 𝑡 = O( 1/√𝑡 ), summing these penalties over 𝑇 yields Í𝑇 𝑡 =1 
+
+> 𝐿 𝑔
+> √𝑡
+
+≤
+
+2𝐿 𝑔 
+
+√𝑇 = O( √𝑇 ).We condition on the high-probability event E = Earr ∩ E cost 
+
+from Lemma 5.2, which holds with probability at least 1 − 1/𝑇 .Adding and subtracting intermediate proxy losses evaluated on the estimated weights ˆ𝒘 𝑡 and LCB costs 𝑐 𝑡 −1 yields: 
+
+bL(M 𝑡 ;𝒘 , 𝑐 ) − 𝛼 bL(M ∗S𝑡 ;𝒘 , 𝑐 )
+
+=
+
+h bL(M 𝑡 ;𝒘 , 𝑐 ) − bL(M 𝑡 ;𝒘 , 𝑐 𝑡 −1)
+
+i
+
+(Optimistic Gap) 
+
++
+
+h bL(M 𝑡 ;𝒘 , 𝑐 𝑡 −1) − bL(M 𝑡 ; ˆ 𝒘 𝑡 , 𝑐 𝑡 −1)
+
+i
+
+(Arrival Gap 1) 
+
++
+
+h bL(M 𝑡 ; ˆ 𝒘 𝑡 , 𝑐 𝑡 −1) − 𝛼 bL(M ∗S𝑡 ; ˆ 𝒘 𝑡 , 𝑐 𝑡 −1)
+
+i
+
+(Greedy Gap) 
+
++ 𝛼 
+
+h bL(M ∗S𝑡 ; ˆ 𝒘 𝑡 , 𝑐 𝑡 −1) − bL(M ∗S𝑡 ; ˆ 𝒘 𝑡 , 𝑐 )
+
+i
+
+(LCB Gap) 
+
++ 𝛼 
+
+h bL(M ∗S𝑡 ; ˆ 𝒘 𝑡 , 𝑐 ) − bL(M ∗S𝑡 ;𝒘 , 𝑐 )
+
+i
+
+(Arrival Gap 2) By the approximation guarantee of Cont_Reverse_Greedy , the Greedy Gap is ≤ 0. Under Ecost , 𝑐 𝑡 −1 (𝑢 ) ≤ 𝑐 (𝑢 ), making the LCB Gap ≤ 0. By the weight sensitivity bound (Lemma 4 in [ 19 ]), the Arrival Gaps are bounded by (1 + 𝛼 )∥ ˆ𝒘 𝑡 −𝒘 ∥1. By the sensitivity of optimistic costs (Lemma 6 from [ 19 ]), the Optimistic Gap is bounded by Í𝑖 : 𝑐 𝑡 −1 (𝑢 𝑖 ) ≤ 𝜙 (𝑑 (𝑢 𝑖 ,M𝑡 ) ) 𝑤 𝑖 (𝑐 (𝑢 𝑖 ) − 𝑐 𝑡 −1 (𝑢 𝑖 )) .Under Assumption 2, the number of active centers is bounded by 𝑚 eff . Summing the bound provided by Earr over 𝑇 rounds: 
+
+E
+
+" 𝑇 ∑︁  
+
+> 𝑡 =1
+
+(1 + 𝛼 )∥ ˆ𝒘 𝑡 − 𝒘 ∥1
+
+#
+
+≤ ( 1 + 𝛼 )
+
+> 𝑇
+
+∑︁  
+
+> 𝑡 =1
+
+√︂ 
+
+2𝑚 eff ln (2𝑇 3)
+
+𝑡 
+
+≤ O 
+
+√︁ 
+
+𝑚 eff 𝑇 log 𝑇 
+
+
+
+For the Optimistic Gap, under event E, 𝑐 (𝑢 𝑖 )− 𝑐 𝑡 −1 (𝑢 𝑖 ) ≤ 2𝛽 𝑡 −1𝜎 𝑡 −1,𝜆 (𝑢 𝑖 ).Let I𝑖,𝑡 indicate that cell 𝑖 is chosen and the LLM is queried. Given the history F𝑡 −1, E[I𝑖,𝑡 | F 𝑡 −1] = 𝑤 𝑖 I{𝑐 𝑡 −1 (𝑢 𝑖 ) ≤ 𝜙 (𝑑 (𝑢 𝑖 , M𝑡 ))} . By the triggering probability equivalence trick, the expected sum maps Conference’17, July 2017, Washington, DC, USA Baran Atalar, Xutong Liu, Jinhang Zuo, Siwei Wang, Wei Chen, and Carlee Joe-Wong 6 4 2 0 2 4
+
+> Principal Component 1
+> 2
+> 0
+> 2
+> 4
+> Principal Component 2
+> PCA Projection: Verifying Cluster-Based Stream Arrivals
+> Stream Points (Jittered)
+> Universe Points (Centers)
+
+Figure 3: PCA on the synthetic dataset 0.0 2.5 5.0 7.5 10.0 12.5 15.0 17.5 
+
+> UMAP Dimension 1
+> 7.5
+> 5.0
+> 2.5
+> 0.0
+> 2.5
+> 5.0
+> 7.5
+> 10.0
+> 12.5
+> UMAP Dimension 2
+> UMAP Projection: NQ vs TriviaQA Clustering & Stream Arrivals
+> Universe: NQ
+> Universe: TriviaQA
+> Stream: NQ
+> Stream: TriviaQA
+
+Figure 4: UMAP on the NQ+TriviaQA dataset 
+
+to the ℓ𝑇 queries where the LLM was actually invoked ( 𝑧 𝑗 ): 
+
+E
+
+" 𝑇 ∑︁ 
+
+𝑡 =1
+
+Optimistic Gap 
+
+#
+
+≤ E
+
+" ℓ𝑇 ∑︁ 
+
+𝑗 =1
+
+2𝛽 𝑡 𝑗 −1𝜎 𝑗 −1,𝜆 (𝑧 𝑗 )
+
+#
+
+(10) Since 𝛽 𝑡 ≤ 𝛽 𝑇 , applying the Cauchy-Schwarz inequality and the Elliptical Potential Lemma for RKHS yields: 
+
+ℓ𝑇 ∑︁ 
+
+𝑗 =1
+
+𝜎 𝑗 −1,𝜆 (𝑧 𝑗 ) ≤ 
+
+vut
+
+ℓ𝑇 ℓ𝑇 ∑︁ 
+
+𝑗 =1
+
+𝜎 2
+
+𝑗 −1,𝜆 (𝑧 𝑗 ) ≤ √︂ 𝑇 2ln (1 + 1/𝜆 ) 𝛾 𝑇 
+
+= O
+
+√︁ 
+
+𝑇𝛾 𝑇 
+
+
+
+By Lemma 5.3, maintaining the effective centers triggers at most 
+
+O( 𝑚 max log log 𝑇 ) cache switches. At a maximum cost of 1 for 𝑘 
+
+items, E[𝐶 𝑠𝑤𝑖𝑡𝑐ℎ ] ≤ O( 𝑘𝑚 max log log 𝑇 ).If the high-probability event E fails (probability ≤ 1/𝑇 ), the maxi-mum regret per round is bounded by 1, adding a constant penalty of 
+
+(1/𝑇 ) × 𝑇 = 1. Combining the Arrival Gap, Optimistic Gap, switch-ing costs, and the dynamically integrated O( √𝑇 ) discretization penalties from Step 1 yields the final stated bound. □
+
+## A.2 CLCB-Frozen-Cont algorithm 
+
+The CLCB-Frozen-Cont algorithm is designed to optimize contin-uous semantic caching by operating in discrete, stable stages to balance learning query costs with exploiting the cache. Algorithm 6 processes incoming queries and relies on Algorithm 8 to track empriical query frequencies against a fixed frozen candidate pool. This subroutine maps incoming queries to their nearest neighbors within a membership radius (𝜌 ) (Algorithm 8, lines 2-6) and com-putes confidence bounds on these weights. It triggers a cache up-date (SWITCH) only when the uncertainty of the empirical esti-mates falls below exponentially decaying stage tolerances (Algo-rithm 8, lines 15-16), which limits the number of updates. Here 
+
+𝛽 𝑡 = 𝐵 + 𝑅 √︁ 2(𝛾 𝑡 + ln (1/𝛿 𝑡 )) and 𝛾 𝑡 := 12 log det  𝐼 + 𝐾 𝑡 /𝜆  is the standard information gain. When a switch occurs, the algorithm updates the frozen pool and determines the new optimal cache sub-set of size 𝑘 . It does this by utilizing KRR to estimate the LCB of the costs and feeding those into Cont_Reverse_Greedy . Finally for the actual routing of each query Algorithm 7 makes an optimistic online decision: it queries the LLM if the LCB of the cost is lower than the mismatch penalty of utilizing the nearest cached item, otherwise, it serves the response directly from the cache. 
+
+A.2.1 Theoretical Guarantees for CLCB-Frozen-Cont .
+
+Lemma A.4 (Stage-frozen arrival-weight concentration). 
+
+Fix a stage 𝑠 and let its start time be 𝑡 𝑠 . Let the frozen candidate pool be ¯𝑈 𝑠 and define the stage alphabet 
+
+A𝑠 ≜ ¯𝑈 𝑠 ∪ {⊥} , 𝑚 𝑠 ≜ |A 𝑠 | = | ¯𝑈 𝑠 | + 1.
+
+For each round 𝑡 ≥ 𝑡 𝑠 in stage 𝑠 , define the (measurable) symbol assignment 𝑧 𝑡 ∈ A 𝑠 by 
+
+𝑧 𝑡 =
+
+(
+
+arg min 𝑢 ∈ ¯𝑈 𝑠 𝑑 (𝑥 𝑡 , 𝑢 ), if min 𝑢 ∈ ¯𝑈 𝑠 𝑑 (𝑥 𝑡 , 𝑢 ) ≤ 𝜌, 
+
+⊥, otherwise ,
+
+and assume {𝑧 𝑡 }𝑡 𝑠 +1 −1
+
+𝑡 =𝑡 𝑠 are i.i.d. with distribution 𝑤 ★
+
+𝑠 ∈ Δ(A 𝑠 ). That is Pr (𝑧 𝑡 = 𝑎 ) = 𝑤 ∗
+
+𝑠 (𝑎 ) for all 𝑎 ∈ 𝐴 𝑠 and all 𝑡 ∈ [ 𝑡 𝑠 , 𝑡 𝑠 +1). Let 
+
+𝑛 ≜ 𝑡 − 𝑡 𝑠 + 1 be the number of arrivals observed in stage 𝑠 up to time 
+
+𝑡 , and define the empirical distribution 
+
+ˆ𝑤 𝑠,𝑡 (𝑎 ) ≜ 1
+
+𝑛 
+
+𝑡 ∑︁ 
+
+𝜏 =𝑡 𝑠 
+
+1{𝑧 𝜏 = 𝑎 }, 𝑎 ∈ A 𝑠 .
+
+Then, assume the algorithm uses a confidence schedule 𝛿 𝑡 = 𝑂 (1/𝑡 2),then there exists a constant 𝐶 > 0 such that with probability at least 
+
+1 − 𝑂 (𝛿 ), for all stages 𝑠 and for all times 𝑡 ≥ 𝑡 𝑠 :
+
+ˆ𝑤 𝑠,𝑡 − 𝑤 ★
+
+𝑠 1 ≤ 𝐶 √︄ 𝑚 𝑠 log 2 − log  𝛿  + log 𝑡 𝑡 − 𝑡 𝑠 + 1 .
+
+Proof. For any fixed 𝑛 ≥ 1 and 𝜀 > 0, a classical bound for empirical distributions on a finite alphabet (from Theorem 2.1 in [30]) states that for i.i.d. samples on an alphabet of size 𝑚 𝑠 ,
+
+Pr 
+
+
+
+ˆ𝑤 𝑠,𝑡 − 𝑤 ★
+
+𝑠 1 ≥ 𝜀 
+
+
+
+≤ 2𝑚 𝑠 exp 
+
+
+
+−𝑛𝜀 2
+
+2
+
+
+
+. (11) where 𝑛 = 𝑡 − 𝑡 𝑠 + 1 (Here 𝑧 𝑡 𝑠 , . . . , 𝑧 𝑡 𝑠 +𝑛 −1 are i.i.d. on A𝑠 , so (11) applies directly.) Continuous Semantic Caching for Low-Cost LLM Serving Conference’17, July 2017, Washington, DC, USA 
+
+Solving for 𝜖 , this implies that for any failure probability Υ > 0,
+
+ˆ𝑤 𝑠,𝑡 − 𝑤 ★  
+
+> 𝑠 1
+
+≤√︄ 2 𝑚 𝑠 log 2 + log (1/Υ)
+
+𝑛 .
+
+Now to have the bound hold simultaneously for all times 𝑡 ≥ 𝑡 𝑠 
+
+within a stage, we allocate a time-dependent failure budget: 
+
+Υ𝑡 = 𝛿 
+
+2𝑡 2
+
+a union bound over all 𝑡 ≥ 𝑡 𝑠 implies that with probability at least 
+
+1 − 𝑂 (𝛿 ) the inequality above holds for all 𝑡 ≥ 𝑡 𝑠 simultaneously with Υ = Υ𝑡 . Substituting Υ𝑡 into the bound yields 
+
+ˆ𝑤 𝑠,𝑡 − 𝑤 ★  
+
+> 𝑠 1
+
+≤√︄ 2 𝑚 𝑠 log 2 + log (2𝑡 2/𝛿 )
+
+𝑡 − 𝑡 𝑠 + 1 .
+
+using log (𝑡 2) = 2 log 𝑡 and absorbing constants gives the bound. Finally we can apply a union bound across stages. Since the al-gorithm uses a low-switching schedule, the number of stages up to time 𝑇 is at most logarithmic in 𝑇 . Alternatively, assigning a summable stage-level failure budget such as 𝛿 𝑡 := 𝛿 /( 2𝑠 2) gives that with probability at least 1 − 𝑂 (𝛿 ) the stated inequality holds for all stages 𝑠 and all times 𝑡 . □
+
+Assumption 3 (Random Cover) . Let ¯𝑈 𝑠 denote a frozen pool of 𝑛 total 
+
+> 𝑠
+
+unique queries drawn i.i.d from 𝑓 . By standard 𝜖 −net arguments for metric spaces, there exists a universal constant 𝐶 𝑐𝑜𝑣 > 0 such that, with high probability, the outlier probability mass 𝑝 ⊥,𝑠 −defined as the probability of drawing a query outside the union of balls of radius 𝜌 centered at the points in ¯𝑈 𝑠 −is bounded by: 
+
+𝑝 ⊥,𝑠 ≤ ˜O
+
+
+
+𝐶 𝑐𝑜𝑣 
+
+(1/𝜌 )𝑝 
+
+𝑛 total 
+
+> 𝑠
+
+
+
+Lemma A.5 (Tolerance-Bounded Quantization Error). Let 
+
+L(M) = E𝑥 ∼𝑓 [𝑔 M (𝑥 )] denote the true expected continuous loss where and let L𝑠 (M) = E𝑧 ∼𝑤 ∗ 
+
+> 𝑠
+
+[𝑔 M (𝑧 )] denote the empirical proxy loss evaluated over the frozen pool ¯𝑈 𝑠 , where the loss function 𝑔 is 
+
+𝐿 𝑔 −Lipschitz as established before and bounded by 1. Assume the algorithm defines a dynamic membership radius parameterized by the stage tolerance 𝑒 𝑠 > 0:
+
+𝜌 𝑠 ≜ 𝑒 𝑠 
+
+2𝐿 𝑔 
+
+Furthermore, assume that at the beginning of stage 𝑠 , the total number of unique historical queries 𝑛 total  
+
+> 𝑠
+
+= | ¯𝑈 𝑠 | satisfies the following lower bound: 
+
+𝑛 total  
+
+> 𝑠
+
+≥ ˜O 2𝐶 𝑐𝑜𝑣 (2𝐿 𝑔 )𝑝 
+
+𝑒 𝑝 +1
+
+> 𝑠
+
+!
+
+Then, with high probability, the quantization bias for any cache M
+
+is strictly upper bounded by the stage tolerance: 
+
+sup 
+
+> M
+
+|L(M) − L 𝑠 (M)| ≤ 𝑒 𝑠 
+
+Proof. We begin by establishing a uniform upper bound on the quantization bias. By definition, the deviation between the continu-ous expected loss and the empirical proxy loss can be bounded by moving the absolute value inside the expectation: 
+
+|L(M) − L 𝑠 (M)| = E𝑥 ∼𝑓 [ℓ (𝑥 ; M)] − E𝑧 ∼𝑤 ★ 
+
+> 𝑠
+
+[ℓ (𝑧 ; M)] 
+
+≤ E𝑥 ∼𝑓 [| ℓ (𝑥 ; M) − ℓ (𝑧 (𝑥 ); M)|] 
+
+By applying the Law of Total Expectation, we partition the inte-gration space into an anchored region where the queries are mapped to a nearest neighbor within 𝜌 𝑠 , bounded by the 𝐿 𝑔 −Lipschitz prop-erty and an outlier region where the queries are unmapped, denoted by ⊥ and bounded by 1. Taking the supremum over all caches M
+
+yields: 
+
+sup 
+
+> M
+
+|L(M) − 𝐿 𝑠 (M)| ≤ 𝐿 𝑔 𝜌 𝑠 · ( 1−𝑝 ⊥,𝑠 ) + 1·𝑝 ⊥,𝑠 ≤ 𝐿 𝑔 𝜌 𝑠 +𝑝 ⊥,𝑠 (12) Now we bound each of these two additive terms by 𝑒 𝑠 /2.By the definition of our dynamic radius schedule, we substitute 
+
+𝜌 𝑠 = 𝑒 𝑠  
+
+> 2𝐿 𝑔
+
+directly into the anchored error term, yielding: 
+
+𝐿 𝑔 𝜌 𝑠 = 𝐿 𝑔 
+
+ 𝑒 𝑠 
+
+2𝐿 𝑔 
+
+
+
+= 𝑒 𝑠 
+
+2
+
+To bound the outlier error term, using Assumption 3, the outlier probability 𝑝 ⊥,𝑠 for the frozen pool ¯𝑈 𝑠 evaluated at the scheduled radius 𝜌 𝑠 is given by: 
+
+𝑝 ⊥,𝑠 ≤ ˜O
+
+
+
+𝐶 𝑐𝑜𝑣 
+
+(1/𝜌 )𝑝 
+
+𝑛 total 
+
+> 𝑠
+
+
+
+= ˜O
+
+
+
+𝐶 𝑐𝑜𝑣 
+
+(2𝐿 𝑔 /𝑒 𝑠 )𝑝 
+
+𝑛 total 
+
+> 𝑠
+
+
+
+To ensure this error satisfies 𝑝 ⊥,𝑠 ≤ 𝑒 𝑠  
+
+> 2
+
+, we impose the following inequality: 
+
+˜O
+
+
+
+𝐶 𝑐𝑜𝑣 
+
+(2𝐿 𝑔 /𝑒 𝑠 )𝑝 
+
+𝑛 total 
+
+> 𝑠
+
+
+
+≤ 𝑒 𝑠 
+
+2
+
+Rearranging this inequality to solve for the threshold of the pool size 𝑛 total  
+
+> 𝑠
+
+, we obtain: 
+
+𝑛 total  
+
+> 𝑠
+
+≥ ˜O 2𝐶 𝑐𝑜𝑣 (2𝐿 𝑔 )𝑝 
+
+𝑒 𝑝 +1
+
+> 𝑠
+
+!
+
+By the premise of the lemma, 𝑛 total  
+
+> 𝑠
+
+explicitly satisfies this threshold at the start of stage 𝑠 . Hence, the condition 𝑝 ⊥,𝑠 ≤ 𝑒 𝑠  
+
+> 2
+
+holds with high probability. Therefore 
+
+𝐿 𝑔 𝜌 𝑠 + 𝑝 ⊥,𝑠 ≤ 𝑒 𝑠 
+
+□
+
+Lemma A.6 (Low-Switching from Decaying Uncertainty). 
+
+Let the stage tolerance be defined by the schedule 𝑒 𝑠 = 2−2𝑠 
+
+for 𝑠 ≥ 1.A stage 𝑠 ends at the first time step 𝑡 such that the joint uncertainty envelope satisfies 𝑈 𝑡 ≤ 𝑒 𝑠 , where 𝑈 𝑡 = max {𝑈 (𝑝 ) 
+
+> 𝑡
+
+, 𝑈 (𝑐 ) 
+
+> 𝑡
+
+}. Assume the algorithm’s pool and continuous uncertainties satisfy the following upper bounds for some constant 𝑗 ≥ 1:
+
+𝑈 (𝑝 ) 
+
+> 𝑡
+
+≤ 𝐶 𝑝 √︄ log 𝑇 𝑡 − 𝑡 𝑠 + 1 , and 𝑈 (𝑐 ) 
+
+> 𝑡
+
+≤ 𝐶 𝑐 
+
+(log 𝑇 ) 𝑗 
+
+√𝑡 
+
+where 𝑡 𝑠 is the start time of stage 𝑠 . Then the total number of stage switches up to time 𝑇 , denoted 𝑆 (𝑇 ), is bounded by O( log log 𝑇 ).
+
+Proof. For the algorithm to trigger a switch and end stage 𝑠 , the joint uncertainty must satisfy 𝑈 𝑡 ≤ 𝑒 𝑠 . Because 𝑈 𝑡 = max {𝑈 (𝑝 ) 
+
+> 𝑡
+
+, 𝑈 (𝑐 ) 
+
+> 𝑡
+
+},Conference’17, July 2017, Washington, DC, USA Baran Atalar, Xutong Liu, Jinhang Zuo, Siwei Wang, Wei Chen, and Carlee Joe-Wong 
+
+this strict threshold requires both conditions to hold simultane-ously: 
+
+𝑈 (𝑝 ) 
+
+> 𝑡
+
+≤ 𝑒 𝑠 and 𝑈 (𝑐 ) 
+
+> 𝑡
+
+≤ 𝑒 𝑠 
+
+Let 𝑛 𝑠 denote the total number of rounds spent in stage 𝑠 . The uncertainty condition requires that 𝐶 𝑝 √︃ log 𝑇 𝑡 −𝑡 𝑠 +1 ≤ 𝑒 𝑠 . Since 𝑡 − 𝑡 𝑠 + 1
+
+measures the time elapsed within the current stage, this implies the stage cannot end until at least: 
+
+𝑛 𝑠 ≥ 𝐶 2 
+
+> 𝑝
+
+log 𝑇 𝑒 2
+
+> 𝑠
+
+While the continuous uncertainty 𝑈 (𝑐 ) 
+
+> 𝑡
+
+may require the absolute time 𝑡 to be large, the stage duration 𝑛 𝑠 is strictly lower-bounded by the time required for the pool uncertainty to decay. If 𝑈 (𝑐 ) 
+
+> 𝑡
+
+decays slower than 𝑈 (𝑝 ) 
+
+> 𝑡
+
+, it only forces the stage to last longer, which would further decrease the total number of switches. Therefore, taking the minimum required duration is a valid conservative bound. Substituting the tolerance schedule 𝑒 𝑠 = 2−2𝑠 
+
+, we get 𝑒 2 
+
+> 𝑠
+
+= 2−2𝑠 +1
+
+,yields the lower bound: 
+
+𝑛 𝑠 ≥ 𝐶 2 
+
+> 𝑝
+
+(log 𝑇 )22𝑠 +1
+
+Let 𝑆 be the total number of stages initiated up to time 𝑇 . The total time horizon 𝑇 is the sum of the lengths of all completed stages, plus the final incomplete stage. Therefore, 𝑇 is strictly lower bounded by the duration of the second-to-last stage, 𝑛 𝑆 −1:
+
+𝑇 =
+
+> 𝑆
+
+∑︁ 
+
+> 𝑠 =1
+
+𝑛 𝑠 ≥ 𝑛 𝑆 −1 ≥ 𝐶 2 
+
+> 𝑝
+
+(log 𝑇 )22𝑆 
+
+Rearranging to isolate 𝑆 :
+
+22𝑆 
+
+≤ 𝑇 𝐶 2 
+
+> 𝑝
+
+log 𝑇 ≤ 𝑇 
+
+Taking the logarithm of both sides yields 2𝑆 ≤ log 2 𝑇 . Taking the logarithm a second time gives: 
+
+𝑆 ≤ log 2 log 2 𝑇 
+
+Hence, the total number of switches by time 𝑇 is bounded by 
+
+O( log log 𝑇 ). □
+
+Theorem A.7 (Regret Bound for CLCB-Frozen-Cont). Sup-pose the algorithm is run for 𝑇 rounds with a cache size 𝑘 and a maximum item cost 𝑐 max ≤ 1. Let the stage tolerance follow the schedule 𝑒 𝑠 = 2−2𝑠 
+
+. Assume the pool uncertainty decays as 𝑈 (𝑝 ) 
+
+> 𝑡
+
+=
+
+O( √︁ (log 𝑇 )/ 𝑛 ) where 𝑛 is the time elapsed in the current stage, and the continuous cost function satisfies a kernel growth condition with information gain 𝛾 𝑡 ≤ 𝐶 𝛾 (log (1 + 𝑡 /𝜆 )) 𝑗 for some 𝑗 ≥ 1. Let 𝛼 be the approximation ratio of the Continuous Reverse Greedy subroutine, and M∗ 
+
+> 𝑡
+
+denote the optimal cache in hindsight at time 𝑡 .Then, with high probability, the cumulative 𝛼 -regret of the algo-rithm according to the definition in section 5.1 is: Regret (𝑇 ) = ˜O
+
+√𝑇 
+
+
+
+Proof. We prove the claimed bound by (i) controlling per round 
+
+𝛼 −suboptimality within each stage via the stage envelope, and (ii) summing the resulting stage regrets. Fix a stage index 𝑠 and consider any round 𝑡 that belongs to stage 𝑠 , by construction of the low-switching scheme, the cache is constant within the stage 
+
+M𝑡 = M𝑠 for all such 𝑡 . By definition of stage 𝑠 , we have for all 𝑡 
+
+in stage 𝑠 ,
+
+𝑈 (𝑐 ) 
+
+> 𝑡
+
+≤ 𝑒 𝑠 , 𝑈 (𝑝 ) 
+
+> 𝑡
+
+≤ 𝑒 𝑠 ⇒ 𝑈 𝑡 ≤ 𝑒 𝑠 (StageBound) where 𝑈 𝑡 ≜ max {𝑈 (𝑝 ) 
+
+> 𝑡
+
+, 𝑈 (𝑐 ) 
+
+> 𝑡
+
+}. bL(M ; U, 𝒘 , 𝑐 ) is the discretized loss evaluates on the candidate pool U with weights 𝒘 and costs 𝑐 . Let-ting 𝒘 ∗ denote the true arrival weights and ˆ𝒘 𝑡 denote the estimated weights used at time 𝑡 . By Lemma 4 in [ 19 ], we have that for any cache M and any cost 𝑐 :
+
+| bL(M ;𝒘 ∗, 𝑐 ) − bL(M ; ˆ 𝒘 𝑡 , 𝑐 )| ≤ ∥ 𝒘 ∗ − ˆ𝒘 𝑡 ∥1 ≤ 𝑈 (𝑝 ) 
+
+> 𝑡
+
+≤ 𝑒 𝑠 (S1) Defining ˆ𝑐 𝑡 −1 as in Algorithm 4 and working under the high proba-bility event on which for all 𝑡 and all 𝑢 ∈ U 𝑡 and defining 𝑐 LCB   
+
+> 𝑡 −1
+
+(𝑢 ) ≜
+
+ˆ𝑐 𝑡 −1 (𝑢 ) − 𝛽 𝑡 𝜎 𝑡 −1 (𝑢 ) for all 𝑢 ∈ U then: 
+
+|𝑐 (𝑢 ) − ˆ𝑐 𝑡 −1 (𝑢 )| ≤ 𝛽 𝑡 𝜎 𝑡 −1 (𝑢 )
+
+On this event, we have 𝑐 LCB   
+
+> 𝑡 −1
+
+(𝑢 ) ≤ 𝑐 (𝑢 ) and 
+
+0 ≤ 𝑐 (𝑢 ) − 𝑐 LCB   
+
+> 𝑡 −1
+
+(𝑢 ) = 𝑐 (𝑢 ) − ˆ𝑐 𝑡 −1 (𝑢 ) + 𝛽 𝑡 𝜎 𝑡 −1 (𝑢 ) ≤ 2𝛽 𝑡 𝜎 𝑡 −1 (𝑢 )
+
+Using Lemma 4 from [19] again, we get 
+
+| bL(M ; ˆ 𝒘 𝑡 , 𝑐 ) − bL(M ; ˆ 𝒘 𝑡 , 𝑐 LCB   
+
+> 𝑡 −1
+
+)| ≤ ∑︁  
+
+> 𝑢 ∈ U
+
+ˆ𝑤 𝑡 (𝑢 ) 𝑐 (𝑢 ) − 𝑐 LCB   
+
+> 𝑡 −1
+
+(𝑢 )
+
+=∑︁  
+
+> 𝑢 ∈ U
+
+ˆ𝑤 𝑡 (𝑢 )  𝑐 (𝑢 ) − 𝑐 LCB   
+
+> 𝑡 −1
+
+(𝑢 )
+
+≤ 2𝛽 𝑡 ∑︁  
+
+> 𝑢 ∈ U
+
+ˆ𝑤 𝑡 (𝑢 )𝜎 𝑡 −1 (𝑢 ) ≜ 𝑈 𝑐 𝑡 ≤ 𝑒 𝑠 .
+
+(S2) Combining (S1)-(S2) and applying the triangle inequality yields for any cache M
+
+bL(M , 𝒘 ∗, 𝑐 ) ≤ bL(M , ˆ𝒘 𝑡 , 𝑐 LCB   
+
+> 𝑡 −1
+
+) + 2𝑒 𝑠 
+
+bL(M , ˆ𝒘 𝑡 , 𝑐 LCB   
+
+> 𝑡 −1
+
+) ≤ bL(M , 𝒘 ∗, 𝑐 ) + 2𝑒 𝑠 
+
+At the beginning of stage 𝑠 , the algorithm computes M𝑠 by ap-plying Continuous Reverse Greedy to the estimated problem with 
+
+( ˆ𝒘 𝑡 , 𝑐 LCB   
+
+> 𝑡 −1
+
+), hence by the 𝛼 −approximation guarantee, 
+
+bL(M 𝑠 , ˆ𝒘 𝑡 , 𝑐 LCB   
+
+> 𝑡 −1
+
+) ≤ 𝛼 min 
+
+> | M | ≤ 𝑘
+
+bL(M ; ˆ 𝒘 𝑡 , 𝑐 LCB   
+
+> 𝑡 −1
+
+) (RG) Let M∗ 
+
+> 𝑡
+
+denote the optimal cache for the true objective (from the queries observed up to time 𝑡 ). Since M∗ is feasible for hthe mini-mization in (RG), 
+
+bL(M 𝑠 , ˆ𝒘 𝑡 , 𝑐 LCB   
+
+> 𝑡 −1
+
+) ≤ 𝛼 bL(M ∗, ˆ𝒘 𝑡 , 𝑐 LCB   
+
+> 𝑡 −1
+
+) (RG2) Since the set we use to compute M∗ 
+
+> 𝑡
+
+is smaller than that of M∗ we have that bL(M ∗;𝒘 ∗, 𝑐 ) ≤ bL(M ∗ 
+
+> 𝑡
+
+;𝒘 ∗, 𝑐 ). Hence 
+
+bL(M ∗, ˆ𝒘 𝑡 , 𝑐 LCB   
+
+> 𝑡 −1
+
+) ≤ bL(M ∗, 𝒘 ∗, 𝑐 ) + 2𝑒 𝑠 ≤ bL(M ∗ 
+
+> 𝑡
+
+, 𝒘 ∗, 𝑐 ) + 2𝑒 𝑠 
+
+≤ bL(M ∗ 
+
+> 𝑡
+
+, ˆ𝒘 𝑡 , 𝑐 LCB   
+
+> 𝑡 −1
+
+) + 4𝑒 𝑠 
+
+Now combine this result with (RG2) to get: 
+
+bL(M 𝑠 ; ˆ 𝒘 𝑡 , 𝑐 LCB   
+
+> 𝑡 −1
+
+) ≤ 𝛼 ( bL(M ∗ 
+
+> 𝑡
+
+, ˆ𝒘 𝑡 , 𝑐 LCB   
+
+> 𝑡 −1
+
+) + 4𝑒 𝑠 )
+
+Using this result we obtain 
+
+bL(M 𝑠 , 𝒘 ∗, 𝑐 ) ≤ 𝛼 bL(M ∗ 
+
+> 𝑡
+
+, 𝒘 ∗, 𝑐 ) + ( 6𝛼 + 2)𝑒 𝑠 (StageOpt) Recall from Lemma A.5 that L𝑠 (M) = E𝑧 ∼𝑤 ∗ 
+
+> 𝑠
+
+[𝑔 M (𝑧 )] represents the empirical proxy loss on the frozen pool ¯𝑈 𝑠 under true weights. Continuous Semantic Caching for Low-Cost LLM Serving Conference’17, July 2017, Washington, DC, USA 
+
+This is notationally equivalent to our pool evaluated loss bL(M ;𝒘 ∗, 𝑐 ).Therefore we can rewrite StageOpt in terms of the proxy loss as 
+
+L𝑠 (M 𝑠 ) ≤ 𝛼 L𝑠 (M ∗ 
+
+> 𝑡
+
+) + ( 6𝛼 + 2)𝑒 𝑠 
+
+We now bound the instantaneous 𝛼 -suboptimality gap on the true continuous loss L. By adding and subtracting the proxy losses 
+
+L𝑠 , we decompose the true gap into the empirical proxy gap and the quantization biases for both the chosen cache and the optimal cache: 
+
+L(M 𝑠 ) − 𝛼 L(M ∗ 
+
+> 𝑡
+
+) = (L(M 𝑠 ) − L 𝑠 (M 𝑠 )) 
+
+| {z }  
+
+> Quantization Bias ( M 𝑠 )
+
++ (L 𝑠 (M 𝑠 ) − 𝛼 L𝑠 (M ∗ 
+
+> 𝑡
+
+)) 
+
+| {z }
+
+> Empirical Proxy Gap
+
++ 𝛼 (L 𝑠 (M ∗ 
+
+> 𝑡
+
+) − L(M ∗ 
+
+> 𝑡
+
+)) 
+
+| {z }  
+
+> Quantization Bias ( M ∗
+> 𝑡 )
+
+From our rewritten (StageOpt), the Empirical Proxy Gap is bounded by (6𝛼 +2)𝑒 𝑠 . By the Tolerance-Bounded Quantization Error lemma, we have sup M |L(M) − L 𝑠 (M)| ≤ 𝑒 𝑠 . Applying this uniform bound to both M𝑠 and M∗ 
+
+> 𝑡
+
+yields: 
+
+L(M 𝑠 ) − L 𝑠 (M 𝑠 ) ≤ 𝑒 𝑠 
+
+𝛼 (L 𝑠 (M ∗ 
+
+> 𝑡
+
+) − L(M ∗ 
+
+> 𝑡
+
+)) ≤ 𝛼𝑒 𝑠 
+
+Summing these components, the per-round true 𝛼 -regret is bounded by: 
+
+L(M 𝑠 ) − 𝛼 L(M ∗ 
+
+> 𝑡
+
+) ≤ 𝑒 𝑠 + ( 6𝛼 + 2)𝑒 𝑠 + 𝛼𝑒 𝑠 = (7𝛼 + 3)𝑒 𝑠 
+
+This yields the per-round 𝛼 -gap bound on the true continuous loss. Defining 𝐶 0 ≜ 7𝛼 + 3, we now sum across all rounds 𝑡 in stage 
+
+𝑠 . Letting stage 𝑠 contain 𝑛 𝑠 rounds, we obtain: ∑︁   
+
+> 𝑡 ∈stage 𝑠
+
+(L(M 𝑠 ) − 𝛼 L(M ∗ 
+
+> 𝑡
+
+)) ≤ 𝐶 0𝑛 𝑠 𝑒 𝑠 (StageReg) Now it remains to upper bound 𝑛 𝑠 as a function of 𝑒 𝑠 . By defini-tion, stage 𝑠 ends at the first time 𝑡 such that that joint envelope satisfies 𝑈 𝑡 ≤ 𝑒 𝑠 . We know from Lemma A.4 that with high proba-bility 
+
+𝑈 (𝑝 ) 
+
+> 𝑡
+
+≤ 𝐶 𝑝 √︄ log 𝑇 𝑡 − 𝑡 𝑠 + 1 ∀𝑡 ∈ [ 𝑡 𝑠 , 𝑡 𝑠 +1)
+
+To end stage 𝑠 , it suffices that 𝑈 (𝑝 ) 
+
+> 𝑡
+
+≤ 𝑒 𝑠 . A sufficient condition then is 
+
+𝑈 (𝑝 ) 
+
+> 𝑡
+
+≤ 𝐶 𝑝 √︄ log 𝑇 𝑡 − 𝑡 𝑠 + 1 ≤ 𝑒 𝑠 ⇒ 𝑛 ≥ 𝑛 (𝑝 ) 
+
+> 𝑠
+
+:= 𝐶 2 
+
+> 𝑝
+
+log 𝑇 𝑒 2
+
+> 𝑠
+
+which implies the bound 𝑛 𝑠 ≤ 𝑛 (𝑝 ) 
+
+> 𝑠
+
+. We also require 𝑈 (𝑐 ) 
+
+> 𝑡
+
+≤ 𝑒 𝑠 to end the stage. Next, we prove a bound on 𝑈 (𝑐 ) 
+
+> 𝑡
+
+.Let 𝑥 1, . . . , 𝑥 𝑡 be the (distinct) contexts at which the learner queried the LLM and observed costs, and let 𝐾 𝑡 ∈ R𝑡 ×𝑡 be the Gram matrix with entries [𝐾 𝑡 ]𝑖 𝑗 = 𝑘 (𝑥 𝑖 , 𝑥 𝑗 ). Define the standard information gain 
+
+𝛾 𝑡 := 12 log det  𝐼 + 𝐾 𝑡 /𝜆 .
+
+For a kernelized ridge-regression / GP-style confidence radius, a standard upper bound can be written as 
+
+𝑈 (𝑐 ) 
+
+> 𝑡
+
+= 𝛽 𝑡 √︂ 2𝛾 𝑡 
+
+𝑡 , (13) where 𝛽 𝑡 = 𝐵 + 𝑅 √︁ 2(𝛾 𝑡 + ln (1/𝛿 𝑡 )) is the exploration factor as de-fined before. Assume the kernel class satisfies the growth condition: 
+
+𝛾 𝑡 ≤ 𝐶 𝛾 
+
+  log (1 + 𝑡 /𝜆 ) 𝑗 ∀𝑡 ≥ 1, (14) for some kernel-dependent constants 𝐶 𝛾 > 0 and 𝑗 ≥ 1. Let 𝐿 𝑡 :=
+
+log (1 + 𝑡 /𝜆 ). Then √𝛾 𝑡 ≤√︁ 𝐶 𝛾 𝐿 𝑗 /2 
+
+> 𝑡
+
+. Moreover, for the usual choice 
+
+𝛿 𝑡 = 𝑂 (1/𝑡 2), one has log (1/𝛿 𝑡 ) = 𝑂 (log 𝑡 ) = 𝑂 (𝐿 𝑡 ), so 𝛽 𝑡 is at most polynomial in 𝐿 𝑡 . Plugging into (13) and collecting the largest exponent in 𝐿 𝑡 gives that there exists a constant 𝐶 𝑐 > 0 such that for all 𝑡 ≥ 2,
+
+𝑈 (𝑐 ) 
+
+> 𝑡
+
+≤ 𝐶 𝑐 
+
+𝐿 𝑗 𝑡 
+
+√𝑡 ≤ 𝐶 𝑐 
+
+(log 𝑡 ) 𝑗 
+
+√𝑡 . (15) then 𝑈 (𝑐 ) 
+
+> 𝑡
+
+≤ 𝑒 𝑠 holds once 
+
+𝐶 𝑐 
+
+(log 𝑇 ) 𝑗 
+
+√𝑡 ≤ 𝑒 𝑠 ⇒ 𝑡 ≥
+
+𝐶 𝑐 (log 𝑇 ) 𝑗 
+
+𝑒 𝑠 
+
+2
+
+which again implies that 
+
+𝑛 𝑠 ≤ 𝑛 (𝑐 ) 
+
+> 𝑠
+
+:=
+
+𝐶 𝑐 (log 𝑇 ) 𝑗 
+
+𝑒 𝑠 
+
+2
+
+Since we need both to be ≤ 𝑒 𝑠 we take 𝑛 𝑠 ≤ max {𝑛 (𝑝 ) 
+
+> 𝑠
+
+, 𝑛 (𝑐 ) 
+
+> 𝑠
+
+}. Hence for some constant ˜𝐶 1
+
+𝑛 𝑠 ≤ ˜𝐶 1
+
+(log 𝑇 )2𝑗 
+
+𝑒 2
+
+> 𝑠
+
+We have from (StageReg) that Regret 𝑠 ≤ 𝐶 0𝑛 𝑠 𝑒 𝑠 ≤ 𝐶 2
+
+(log 𝑇 )2𝑗 
+
+𝑒 𝑠 
+
+Now summing over stages 𝑠 = 1, ..., 𝑆 where 𝑆 is the final stage index by time 𝑇 :Regret (𝑇 ) =
+
+> 𝑆
+
+∑︁ 
+
+> 𝑠 =1
+
+Regret 𝑠 ≤ 𝐶 2 (log 𝑇 )2𝑗 𝑆 ∑︁ 
+
+> 𝑠 =1
+
+1
+
+𝑒 𝑠 
+
+Now relate 𝑒 𝑠 to 𝑇 using the fact that the total time is 𝑇 :
+
+𝑇 =
+
+> 𝑆
+
+∑︁ 
+
+> 𝑠 =1
+
+𝑛 𝑠 ≤
+
+> 𝑆
+
+∑︁ 
+
+> 𝑠 =1
+
+˜𝐶 1
+
+(log 𝑇 )2𝑗 
+
+𝑒 2
+
+> 𝑠
+
+and since 𝑒 𝑠 = 2−2𝑠 
+
+which is a fast decrease, the sum is dominated by the stage hence 
+
+𝑇 ≲ ˜𝐶 1
+
+(log 𝑇 )2𝑗 
+
+𝑒 2
+
+> 𝑆
+
+⇒ 𝑒 𝑆 ≲√︄ ˜𝐶 1 (log 𝑇 )2𝑗 
+
+𝑇 
+
+Similarly Í𝑠 ≤𝑆 1/𝑒 𝑠 is dominated by 1/𝑒 𝑆 𝑆 ∑︁ 
+
+> 𝑠 =1
+
+1
+
+𝑒 𝑠 
+
+≲ 1
+
+𝑒 𝑆 
+
+≲√︄ 𝑇 
+
+˜𝐶 1 (log 𝑇 )2𝑗 
+
+Hence we have the following bound on the regret over 𝑇 rounds: Regret (𝑇 ) ≤ 𝐶 2 (log 𝑇 )2𝑗 √︄ 𝑇 
+
+˜𝐶 1 (log 𝑇 )2𝑗 = ˜𝑂 (√𝑇 )Conference’17, July 2017, Washington, DC, USA Baran Atalar, Xutong Liu, Jinhang Zuo, Siwei Wang, Wei Chen, and Carlee Joe-Wong 
+
+Algorithm 6 CLCB-Frozen-Cont 
+
+Require: Cache size 𝑘 , kernel 𝑘 (· , ·) , ridge 𝜆 , distance 𝑑 (· , ·) , mis-match factor 𝜙 , horizon 𝑇 , confidence schedule {𝛿 𝑡 }, Lipschitz constant 𝐿 𝑔 , constant 𝐶 𝑝  
+
+> 1:
+
+Initialize: 𝑋 obs , 𝑌 obs , U, ¯U, M0 ← ∅ ; Stage 𝑠 ← 1; Length 
+
+𝑛 ← 0; SWITCH ← True  
+
+> 2:
+
+Tolerances and Radius: 𝑒 𝑠 ← 2−2𝑠 
+
+; 𝜌 𝑠 ← 𝑒 𝑠 /( 2𝐿 𝑔 );
+
+Counts: ∀𝑢 ∈ ¯U, 𝑁 (𝑢 ) ← 0, 𝑁 (⊥) ← 0 
+
+> 3:
+
+for 𝑡 = 1, 2, . . . ,𝑇 do  
+
+> 4:
+
+Receive query 𝑥 𝑡 ; U ← U ∪ { 𝑥 𝑡 } 
+
+> 5:
+
+(𝑁 (·) , 𝑛, ˆ𝑤 𝑡 (·) , SWITCH , 𝑈 (𝑝 ) 
+
+> 𝑡
+
+) ←  
+
+> 6:
+
+Handle_Stage_Frozen (𝑥 𝑡 , ¯U, 𝑛, 𝑒 𝑠 , 𝑡, 𝛿, 𝜌 𝑠 , 𝐶 𝑝 , 𝑁 (·) ) 
+
+> 7:
+
+if SWITCH then ⊲ Switch_Cache_Continuous  
+
+> 8:
+
+¯U ← U ; ∀𝑢 ∈ ¯U, 𝑤 opt (𝑢 ) ← ˆ𝑤 𝑡 (𝑢 )/( Í𝑣 ∈ ¯U ˆ𝑤 𝑡 (𝑣 ))  
+
+> 9:
+
+M𝑡 ← Cont_Reverse_Greedy ( ¯U, 𝑤 opt , ˆ𝑐 LCB  
+
+> 𝑡
+
+, 𝑘, 𝑑, 𝜙 ) 
+
+> 10:
+
+Query LLM for 𝑢 ∈ M 𝑡 \ M 𝑡 −1 and store responses  
+
+> 11:
+
+𝑠 ← 𝑠 + 1; 𝑒 𝑠 ← 2−2𝑠 
+
+; 𝜌 𝑠 ← 𝑒 𝑠 /( 2𝐿 𝑔 ); 𝑛 ← 0;
+
+SWITCH ← False  
+
+> 12:
+
+Reset counts: ∀𝑢 ∈ ¯U, 𝑁 (𝑢 ) ← 0; 𝑁 (⊥) ← 0 
+
+> 13:
+
+else  
+
+> 14:
+
+M𝑡 ← M 𝑡 −1 
+
+> 15:
+
+end if  
+
+> 16:
+
+𝑋 obs , 𝑌 obs ← Execute_Frozen_Action (𝑥 𝑡 , M𝑡 , ˆ𝑐 LCB   
+
+> 𝑡 −1
+
+, 𝜙, 𝑑, 𝑋 obs , 𝑌 obs ) 
+
+> 17:
+
+end for 
+
+Finally, we account for the algorithmic switching costs. Let 𝑐 max ≤ 1
+
+denote the maximum cost of querying a single item, and let 𝑘 be the cache capacity. During each stage switch, updating the cache from M𝑠 −1 to M𝑠 incurs a maximum switching cost of 𝑘 · 𝑐 max . By Lemma A.6, the algorithm performs at most 𝑆 (𝑇 ) = O( log log 𝑇 )
+
+switches. Thus, the cumulative switching cost over 𝑇 rounds is bounded by: Total Switching Cost ≤ 𝑆 (𝑇 ) · 𝑘 · 𝑐 max = O( 𝑘 log log 𝑇 )
+
+Adding this to our instantaneous regret bound yields the final cumulative regret: Regret (𝑇 ) ≤ ˜O( √𝑇 ) + O( 𝑘 log log 𝑇 ) = ˜O( √𝑇 )
+
+□
+
+Algorithm 7 Execute_Frozen_Action 
+
+Require: Query 𝑥 𝑡 , Current Cache M𝑡 , LCB costs ˆ𝑐 LCB  
+
+> 𝑡
+
+, mismatch factor 𝜙 , distance 𝑑 , Observations 𝑋 obs , 𝑌 obs  
+
+> 1:
+
+Let 𝑑 (𝑥 𝑡 , M𝑡 ) = min 𝑢 ∈ M 𝑡 𝑑 (𝑥 𝑡 , 𝑢 ) (where 𝑑 (𝑥 𝑡 , ∅) = ∞) 
+
+> 2:
+
+if ˆ𝑐 LCB  
+
+> 𝑡
+
+(𝑥 𝑡 ) ≤ 𝜙 (𝑑 (𝑥 𝑡 , M𝑡 )) then  
+
+> 3:
+
+Query LLM on 𝑥 𝑡 , observe true cost 𝐶 𝑡 (𝑥 𝑡 ) 
+
+> 4:
+
+𝑋 obs ← 𝑋 obs ∪ { 𝑥 𝑡 } 
+
+> 5:
+
+𝑌 obs ← 𝑌 obs ∪ { 𝐶 𝑡 (𝑥 𝑡 )}  
+
+> 6:
+
+else  
+
+> 7:
+
+Serve cached response at 𝑠 (𝑥 𝑡 , M𝑡 ) = arg min 𝑢 ∈ M 𝑡 𝑑 (𝑥 𝑡 , 𝑢 ) 
+
+> 8:
+
+Carry over unmodified: 𝑋 obs ← 𝑋 obs , 𝑌 obs ← 𝑌 obs  
+
+> 9:
+
+end if  
+
+> 10:
+
+return 𝑋 obs , 𝑌 obs 
+
+Algorithm 8 Handle_Stage_Frozen 
+
+Require: Query 𝑥 𝑡 , Frozen pool ¯U, stage length 𝑛 , round 𝑡 , stage tolerance 𝑒 𝑠 , confidence 𝛿 , dynamic radius 𝜌 𝑠 , constant 𝐶 𝑝 ,boundary counts 𝑁 (·)  
+
+> 1:
+
+𝑛 ← 𝑛 + 1 
+
+> 2:
+
+if ¯U ≠ ∅ and min 𝑢 ∈ ¯U 𝑑 (𝑥 𝑡 , 𝑢 ) ≤ 𝜌 𝑠 then  
+
+> 3:
+
+𝑧 𝑡 ← arg min 𝑢 ∈ ¯U 𝑑 (𝑥 𝑡 , 𝑢 ) 
+
+> 4:
+
+else  
+
+> 5:
+
+𝑧 𝑡 ← ⊥  
+
+> 6:
+
+end if  
+
+> 7:
+
+Update count: 𝑁 (𝑧 𝑡 ) ← 𝑁 (𝑧 𝑡 ) + 1 
+
+> 8:
+
+Compute empirical weights: ∀𝑢 ∈ ¯U, ˆ𝑤 𝑡 (𝑢 ) ← 𝑁 (𝑢 )/ 𝑛 ;
+
+ˆ𝑤 𝑡 (⊥) ← 𝑁 (⊥)/ 𝑛  
+
+> 9:
+
+Compute local stage bounds: 𝑚 𝑠 ← | ¯U| + 1 
+
+> 10:
+
+𝑈 (𝑝 ) 
+
+> 𝑡
+
+← 𝐶 𝑝 √︃ 𝑚 𝑠 log 2 +log (2𝑡 2/𝛿 ) 
+
+> 𝑛
+> 11:
+
+SWITCH ← False  
+
+> 12:
+
+𝑈 (𝑐 ) 
+
+> 𝑡
+
+← 𝛽 𝑡 √︃ 2𝛾 𝑡  
+
+> 𝑡
+> 13:
+
+if 𝑈 (𝑐 ) 
+
+> 𝑡
+
+≤ 𝑒 𝑠 and 𝑈 (𝑝 ) 
+
+> 𝑡
+
+≤ 𝑒 𝑠 then  
+
+> 14:
+
+SWITCH ← True  
+
+> 15:
+
+end if  
+
+> 16:
+
+return 𝑁 (·) , 𝑛, ˆ𝑤 𝑡 (·) , SWITCH 
+
+## A.3 Additional Experimental Results 
+
+In this section, we include and discuss additional empirical results we omitted from the main paper due to a lack of space. We first give about the stream generation we applied for the NQ+TriviaQA dataset. To accurately simulate the non-uniform, heavy-tailed arrival patterns often observed in real LLM systems, we introduced a skewed popularity distribution when sampling from the combined dataset. Let Q𝐷 denote the set of all queries in dataset 𝐷 , where 
+
+𝐷 ∈ { NQ, TriviaQA }. For each query 𝑞 𝑖 ∈ Q 𝐷 , we independently sample a raw popularity score 𝑠 𝑖 from a standard log-normal distri-bution: 
+
+𝑠 𝑖 ∼ Lognormal (𝜇 = 0, 𝜎 = 1)
+
+These raw scores are then normalized over the respective dataset to obtain the final sampling probability 𝑝 𝑖 for each query 𝑞 𝑖 :
+
+𝑝 𝑖 = 𝑠 𝑖 
+
+Í𝑞 𝑗 ∈ Q 𝐷 𝑠 𝑗 
+
+During the stream generation, when a burst is assigned to dataset 
+
+𝐷 , the next arriving query is sampled with replacement from Q𝐷 
+
+according to the probability mass function defined by 𝑝 𝑖 . This log-normal formulation ensures that a small subset of queries appears with high frequency, while the long tail of the dataset consists of unique or rare queries, presenting a rigorous challenge for the caching algorithms. To evaluate our incoming data stream generation, we applied two dimensionality reduction techniques to visualize the incoming data streams in Fig. 3 and Fig. 4. Principal Component Analysis (PCA) was used to map synthetic cluster centers and simulated stream points onto a two-dimensional manifold. The generated stream points remain closely grouped around their designated uni-verse cluster centers (marked with an ’X’), which verifies that the Continuous Semantic Caching for Low-Cost LLM Serving Conference’17, July 2017, Washington, DC, USA 2.5 5.0 7.5 10.0 12.5 15.0 17.5 20.0 
+
+> Cache Size (k)
+> 0.00
+> 0.02
+> 0.04
+> 0.06
+> 0.08
+> 0.10
+> 0.12
+> Suboptimality Gap
+> CUCB-SC
+> CUCB-SC-Cont
+> Epsilon-Greedy
+> Greedy
+> LFU
+
+Figure 5: Cache size vs Suboptimality Gap Ablation for the Offline setting 
+
+incoming data behaves as expected without drifting. Second, Uni-form Manifold Approximation and Projection (UMAP) was utilized to map the more complex structures of the combined dataset. The UMAP visualization shows a clear separation between the two sources, naturally separating the NQ data into one distinct region and the TriviaQA data into another. Importantly, both figures are demonstrating that the sampled stream data accurately overlaps with the underlying background data. This provides strong verifi-cation that our streaming code successfully maintains the original structural patterns of the datasets and these two plots also show that our Assumption 2 is justified. To evaluate how cache size affects system performance in the offline, we conducted an ablation study by varying the cache size (𝑘 ) from 3 to 20 items. The experiment simulated a stream of data over 500 time steps ( 𝑡 = 500 ) for the synthetic dataset. For a fair comparison, we held hyperparameters constant across the trials. The results of this study are illustrated in Fig. 5 and Fig. 6. The True Loss figure shows that as the cache size increases, the overall loss drops consistently for all methods. This is an expected result, as a larger cache can hold more items simultaneously, which natu-rally lowers the penalty of missing a needed item. CUCB-SC-Cont maintains the lowest absolute loss across every tested cache size. The Suboptimality Gap figure provides deeper insight into how efficiently each method uses this extra capacity. As the cache grows, the task of selecting the best set of items to cache becomes much harder. Consequently, the gap between the algorithms and the theo-retical Oracle increases across the board. However, CUCB-SC-Cont proves to be much more robust to this increasing complexity. Its suboptimality gap grows at a significantly slower rate compared to other baselines. Now, we present again the results in Fig. 2 by adding the perfor-mance of the CLCB-Frozen-Cont algorithm in the online setting for the synthetic and combined datasets which can be seen in Fig. 7. Subplots (c) and (d) show that the Frozen algorithm is highly com-petitive with the discrete baseline in the synthetic setting both in terms of final average regret and runtime, while achieving a higher final average regret but a much lower runtime in the combined NQ+TriviaQA dataset. Notably, the Frozen baseline also has much lower variance in its final average regret compared to the other baselines, indicated by the small vertical error bars. 2.5 5.0 7.5 10.0 12.5 15.0 17.5 20.0 
+
+> Cache Size (k)
+> 0.10
+> 0.15
+> 0.20
+> 0.25
+> 0.30
+> True Loss L(M)
+> CUCB-SC-Cont
+> CUCB-SC
+> Greedy
+> Epsilon-Greedy
+> LFU
+
+Figure 6: Cache size vs Absolute Loss Ablation for the Offline setting 
+
+To better understand the geometry of the embedding space for the simulated synthetic dataset, we analyze several distance distri-butions between query embeddings. We simulate a stream by sam-pling queries from the original query universe and perturbing their embeddings with Gaussian noise, thereby creating semantically similar but previously unseen inputs. We then compute pairwise distances among stream queries (Fig. 8), pairwise distances in the original query universe (Fig. 9), nearest-neighbor distances within the stream (Fig. 10), and the distance from each stream query to its closest point in the universe (Fig. 11). The resulting distribu-tions reveal the structure that while global pairwise distances in both the stream and universe are large and concentrated (median ≈
+
+0.88), indicating that most queries are well-separated in the embed-ding space, local distances are significantly smaller, with median nearest-neighbor distances around 0.074. Moreover, the distance from unseen queries to their nearest universe neighbor shows a similar scale (median ≈ 0.074), confirming that the jittered queries remain close to existing semantic clusters. This contrast between large global distances and small local neighborhoods justifies the use for 𝜖 -net–based discretization: a moderate 𝜖 can effectively cover local neighborhoods while still preserving global diversity. Next, we consider the how the cost prediction error evolves over time for the synthetic dataset, measured using RMSE, MAE, and maximum absolute error in Fig. 12. Initially, all error metrics are relatively high due to limited observations, but they decrease rapidly as more data is collected and the model learns the underlying cost function. After this phase, the errors stabilize at low levels, indicating that the model has converged to accurate predictions. The RMSE and MAE remain consistently small, reflecting good average performance, while the maximum error exhibits larger fluctuations early on before settling, suggesting that worst-case predictions improve more slowly but eventually stabilize. The cost estimation error plateaus instead of converging to 0 because the target cost per center is itself evolving over time (since as more arrivals are assigned to a cluster, the cost is the average of all the points in the cluster and these points have slightly different true costs due to different token lengths) and new centers are introduced online. Next, we look at the token distribution for the synthetic dataset as displayed in Fig. 13 and Fig. 14. We can see that the CDF hits Conference’17, July 2017, Washington, DC, USA Baran Atalar, Xutong Liu, Jinhang Zuo, Siwei Wang, Wei Chen, and Carlee Joe-Wong 0 500 1000 1500 2000 2500                               
+
+> Stream Length
+> 0.00
+> 0.01
+> 0.02
+> 0.03
+> 0.04
+> 0.05
+> 0.06
+> Suboptimality Gap
+> (a) Suboptimality Gap vs Stream Length
+> 050 100 150 200 250 300
+> Rounds
+> 0.00
+> 0.05
+> 0.10
+> 0.15
+> 0.20
+> 0.25
+> Average Regret
+> (c) Synthetic Online: Average Regret vs Rounds
+> 050 100 150 200 250 300
+> Rounds
+> 0.00
+> 0.05
+> 0.10
+> 0.15
+> 0.20
+> 0.25
+> 0.30
+> 0.35
+> Average Regret
+> (e) Combined NQ + TriviaQA: Average Regret vs Rounds
+> 0.2 0.4 0.6 0.8 1.0 1.2
+> 0.00
+> 0.01
+> 0.02
+> 0.03
+> 0.04
+> 0.05
+> 0.06
+> 0.07
+> 0.08
+> Suboptimality Gap
+> (b) Suboptimality Gap vs
+> 0.5 1.0 1.5 2.0 2.5 3.0 3.5 4.0
+> Runtime (sec)
+> 0.01
+> 0.02
+> 0.03
+> 0.04
+> 0.05
+> 0.06
+> 0.07
+> 0.08
+> Final Average Regret
+> CLCB-SC-LS-Cont
+> Greedy
+> Epsilon-Greedy
+> LFU
+> CLCB-SC-LS CLCB-Frozen-Cont
+> (d) Synthetic Online: Runtime vs Final Avg Regret
+> 050 100 150 200 250
+> Runtime (sec)
+> 0.00
+> 0.02
+> 0.04
+> 0.06
+> 0.08
+> Final Average Regret
+> CLCB-SC-LS-Cont
+> LFU
+> Greedy
+> Epsilon-Greedy
+> CLCB-SC-LS
+> CLCB-Frozen-Cont
+> (f) Combined NQ + TriviaQA: Runtime vs Final Avg Regret
+> CUCB-SC
+> CUCB-SC-Cont
+> Epsilon-Greedy
+> Greedy
+> LFU
+> CLCB-SC-LS-Cont
+> CLCB-SC-LS
+> CLCB-Frozen-Cont
+
+Figure 7: (a) Variation of the suboptimality gap versus stream length in the offline setting (b) Sensitivity analysis showing the variation of the suboptimality gap with respect to the 𝜖 -net radius 𝜖 (c) Online performance on the synthetic dataset showing the average regret across rounds (d) Efficiency trade-off for synthetic experiments, showing total runtime against the final average regret (e) Online performance on the combined dataset showing the average regret across rounds (f) Efficiency trade-off for real dataset experiments, showing total runtime against the final average regret 0.0 0.2 0.4 0.6 0.8 1.0 
+
+Distance 
+
+> 0
+> 50000
+> 100000
+> 150000
+> 200000
+> 250000
+> 300000
+> 350000
+> Frequency
+
+Stream Pairwise Distances 
+
+> Median: 0.879
+> 25%: 0.840
+> 75%: 0.910
+
+Figure 8: Distribution of pairwise distances among stream queries for the synthetic dataset. 
+
+0.5 around 10 tokens and reaches 1 around 40 tokens. The CDF figure shows that there seems to be two main clusters for the token lengths, concentrated around approximately 0-15 tokens and 25-40 tokens. The token-length plots (Fig. 15 and Fig. 16) for the combined dataset show a clear difference in query length between the two datasets. Natural Questions queries are substantially longer and 0.4 0.5 0.6 0.7 0.8 0.9 1.0 
+
+Distance 
+
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> 120
+> Frequency
+
+Universe Pairwise Distances 
+
+> Median: 0.885
+
+Figure 9: Distribution of pairwise distances in the original query universe for the synthetic dataset. 
+
+more spread out, while TriviaQA queries are shorter and more con-centrated as expected since TriviaQA is a reading comprehension dataset whereas Natural Questions is formed by real user questions issued to Google search. This separation is visible both in the his-togram and in the CDF, where the combined curve lies between the two dataset curves and reflects the heterogeneous cost structure caused by mixing the two sources. Continuous Semantic Caching for Low-Cost LLM Serving Conference’17, July 2017, Washington, DC, USA 0.00 0.02 0.04 0.06 0.08 0.10 0.12 0.14 0.16 
+
+> Distance
+> 0
+> 100
+> 200
+> 300
+> 400
+> 500
+> 600
+> 700
+> 800
+> Frequency
+
+Stream Nearest Neighbor Distances 
+
+> Median: 0.074
+
+Figure 10: Nearest-neighbor distance distribution within the stream queries for the synthetic dataset. 0.00 0.02 0.04 0.06 0.08 0.10 0.12 0.14 0.16 
+
+> Distance
+> 0
+> 100
+> 200
+> 300
+> 400
+> 500
+> 600
+> 700
+> 800
+> Frequency
+
+Stream to Nearest Universe Query 
+
+> Median: 0.074
+
+Figure 11: Distance from each stream query to its nearest neighbor in the query universe for the synthetic dataset. 
+
+Figure 12: Cost prediction error of the KRR model 
+
+The embedding-space distance plots (Fig. 17, Fig. 18, Fig. 19 and Fig. 20) reveal that, although most query pairs in the combined dataset are far apart globally, local neighborhoods remain signif-icantly closer. In particular, the pairwise distance distribution is concentrated at relatively large values with median around 0.854, whereas the nearest-neighbor distances are much smaller with 0 5 10 15 20 25 30 35 40 
+
+> Token length
+> 0
+> 50
+> 100
+> 150
+> 200
+> 250
+> 300
+> Count
+
+Token Length Distribution (Stream of 2000) 
+
+Figure 13: Token length distribution for the synthetic dataset 0 5 10 15 20 25 30 35 40 
+
+> Token length
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> CDF
+
+Token Length CDF (Stream) 
+
+Figure 14: CDF of the Token length distribution for the syn-thetic dataset 20 40 60 80 100 
+
+> Token Length
+> 0
+> 50
+> 100
+> 150
+> 200
+> 250
+> 300
+> 350
+> Frequency
+> Token Length Distribution: 2500 NQ + 2500 TriviaQA
+> Natural Questions
+> TriviaQA
+
+Figure 15: Token length distribution for the combined dataset consisting of 2500 Natural Questions and 2500 TriviaQA queries. Conference’17, July 2017, Washington, DC, USA Baran Atalar, Xutong Liu, Jinhang Zuo, Siwei Wang, Wei Chen, and Carlee Joe-Wong 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 
+
+> Distance
+> 0
+> 50
+> 100
+> 150
+> 200
+> 250
+> 300
+> 350
+> Frequency
+
+Nearest-Neighbor Distance Distribution: Combined NQ + TriviaQA 
+
+> Median: 0.537
+> 25%: 0.480
+> 75%: 0.602
+
+Figure 19: Nearest-neighbor distance distribution in embed-ding space for the combined dataset. 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 
+
+> Distance
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> CDF
+
+Nearest-Neighbor Distance CDF: NQ vs TriviaQA vs Combined 
+
+> Natural Questions
+> TriviaQA
+> Combined
+
+Figure 20: Nearest-neighbor distance CDF in embedding space for Natural Questions, TriviaQA, and the combined dataset. 20 40 60 80 100 
+
+> Token Length
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> CDF
+
+Token Length CDF: 2500 NQ + 2500 TriviaQA 
+
+> Natural Questions
+> TriviaQA
+> Combined
+
+Figure 16: Token length CDF for Natural Questions, TriviaQA, and the combined dataset. 0.0 0.2 0.4 0.6 0.8 1.0  
+
+> Distance
+> 0.0
+> 0.5
+> 1.0
+> 1.5
+> 2.0
+> Frequency
+> 1e6
+
+Pairwise Distance Distribution: Combined NQ + TriviaQA 
+
+> Median: 0.854
+> 25%: 0.779
+> 75%: 0.883
+
+Figure 17: Pairwise distance distribution in embedding space for the combined dataset. 0.0 0.2 0.4 0.6 0.8 1.0 
+
+> Distance
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> CDF
+
+Pairwise Distance CDF: NQ vs TriviaQA vs Combined 
+
+> Natural Questions
+> TriviaQA
+> Combined
+
+Figure 18: Pairwise distance CDF in embedding space for Natural Questions, TriviaQA, and the combined dataset. 
+
+median around 0.537. This suggests that queries are far apart over-all but still form meaningful local clusters, which supports using similarity-based caching and 𝜖 -net discretization. 
+
+Received 20 February 2007; revised 12 March 2009; accepted 5 June 2009
