@@ -1,0 +1,2757 @@
+Title: Differentially Private Model Merging
+
+URL Source: https://arxiv.org/pdf/2604.20985v1
+
+Published Time: Fri, 24 Apr 2026 00:07:52 GMT
+
+Number of Pages: 22
+
+Markdown Content:
+# Differentially Private Model Merging 
+
+Qichuan Yin 1 Manzil Zaheer 2 Tian Li 1
+
+## Abstract 
+
+In machine learning applications, privacy require-ments during inference or deployment time could change constantly due to varying policies, regula-tions, or user experience. In this work, we aim to generate a magnitude of models to satisfy any tar-get differential privacy (DP) requirement without additional training steps , given a set of existing models trained on the same dataset with differ-ent privacy/utility tradeoffs. We propose two post processing techniques, namely random selection and linear combination, to output a final private model for any target privacy parameter. We pro-vide privacy accounting of these approaches from the lens of R ´enyi DP and privacy loss distribu-tions for general problems. In a case study on private mean estimation, we fully characterize the privacy/utility results and theoretically establish the superiority of linear combination over random selection. Empirically, we validate our approach and analyses on several models and both synthetic and real-world datasets. 
+
+## 1. Introduction 
+
+Differential privacy (DP) (Dwork, 2006) offers a rigorous statistical framework to quantify privacy leakage of random algorithms and has been widely used in practice Abowd et al. (e.g., 2022). During inference or deployment time of real-world applications, the privacy requirements can constantly change due to evolving regulatory and policy contexts, or dynamic user experience. It is therefore critical to update the deployed models quickly while satisfying the target privacy constraints. In the presence of new target privacy constraints, re-training (or finetuning) a model with DP may need extra hyperpa-rameter tuning (e.g., noise multiplier and gradient clipping threshold) and its implementation of per-gradient clipping can incur significant computation and systems costs (Pono-mareva et al., 2023).   
+
+> 1The University of Chicago 2Google DeepMind. Correspon-dence to: Qichuan Yin <qichuan@uchicago.edu >.
+> Preprint. April 24, 2026.
+
+On the other hand, it is not uncommon for service providers to have access to multiple DP models (e.g., trained with different hyperparameters) with varying privacy parameters. For instance, during model development stage, one may train a non-private model as a reference, and train a portfo-lio of private models (on the same dataset) to explore the privacy/utility tradeoff. In this work, we therefore ask: can we merge the existing models with different privacy/utility tradeoffs to output a magnitude of models that satisfy cer-tain target privacy requirement efficiently without touching raw data or performing any additional training? 
+
+Though various variants of model merging has been exten-sively studied in prior literature (e.g., Wortsman et al., 2022), it remains open how to merge private models given a target privacy, and how to perform tight accounting of privacy guarantees. For instance, existing privacy composition re-sults (e.g., sequential or advanced composition (Dwork et al., 2010)) are not tailored to any model merging algorithms and may result in a suboptimal privacy/utility tradeoff. To this end, we propose two simple, data-independent algorithms that enables modular and efficient combination of multi-ple private models to satisfy changing privacy requirements during inference time. We further provide tailored privacy accounting based on R ´enyi differential privacy (Mironov, 2017b) and privacy loss distributions (Meiser & Moham-madi, 2018; Sommer et al., 2018) for general ML problems, as well as a toy mean estimation problem. In particular, the first merging algorithm is based on the intu-itive idea of randomly outputting any model based on some probability distribution (named random selection, or RS ). And the second algorithm is to perform a linear combination of the models (named linear combination, or LC ). That is to say, suppose the algorithm takes as input two models θ1
+
+and θ2,1 RS flips a coin independent of the data and output 
+
+θ1 with probability π, and θ1 otherwise. LC outputs the de-terministic result θλ = λθ 1 + (1 − λ)θ2. In both cases, we provide algorithms to choose mixing coefficients π and λ,aiming to optimize utilities subject to the privacy constraint. Our contributions can be summarized in the following. • We study the problem of merging private models under the constraints of target privacy during inference time. We introduce two light-weight and data-independent post   
+
+> 1Our framework handles Nmodels in the rest of the paper.
+
+1
+
+> arXiv:2604.20985v1 [cs.LG] 22 Apr 2026 Differentially Private Model Merging
+
+processing mechanisms, random selection (RS) and lin-ear combination (LC), as well as efficient algorithms on setting the hyperparameters in these mechanisms. • On general problems, we provide privacy accounting for both mechanisms based on R ´enyi differential privacy and privacy loss distributions. We discuss a case study on a mean estimation problem where linear combination domi-nates random selection. • We validate our theoretical claims via empirical evalua-tion. Additionally, the experiments demonstrate that both RS and LC improve privacy/utility tradeoffs than those under naive privacy accounting in both synthetic and real-world datasets. 
+
+## 2. Related Work and Preliminaries 
+
+Model Merging. Model merging has emerged as a widely used technique for combining multiple trained models, but focus on non-private settings. Early work focuses on weight averaging of models that share the same architecture, e.g., model souping Wortsman et al. (2022). More sophisticated variants assign data-dependent or sparse weights to individ-ual parameters, such as fisher information-weighted aver-aging (Matena & Raffel, 2022), TIES (Yadav et al., 2023), or AdaMerging (Yang et al., 2023). These ideas have also been adapted to a wider range of modern applications (Il-harco et al., 2022; Yang et al., 2024; Jin et al., 2022; Yu et al., 2024). To the best of our knowledge, no prior has performed systematic studies on merging private models under DP constraints. 
+
+Differential Privacy. Differential privacy (DP) (Dwork, 2006) (Definition 2.1) is a classic statistical framework of measuring privacy properties for randomized algorithms. In machine learning, the dominant approach to enforcing DP constraints is to use DP variants of stochastic gradient descent (DP-SGD (Abadi et al., 2016)), which clip per-example gradients and add calibrated noise at each iteration. 
+
+Definition 2.1 (Differential Privacy (Dwork, 2006)) . A ran-domized mechanism M that operates on datasets consisting of individual datapoints is (ε, δ )-DP if for all (measurable) subsets S of outputs and for all neighboring datasets D, D ′
+
+that differ in exactly one record, we have 
+
+Pr[ M(D) ∈ S] ≤ eε Pr[ M(D′) ∈ S] + δ. 
+
+When δ = 0 , we simply say that M is ε-DP .
+
+Differential Privacy Model Merging. Model merging in differential privacy have recently emerged as simple yet effective post-processing tools to improve generalization. This direction is particularly appealing because DP-SGD in-troduces additional noise and often yields less stable check-points. Indri et al. (2023) proposed DP-SWA, which adapts stochastic weight averaging (Izmailov et al., 2018) to the DP setting, and find that averaging checkpoints can improve performance and reduce variance. Shejwalkar et al. (2022) more broadly investigate aggregates of intermediate check-points during training to increase the accuracy of DP model. However, most existing work treats merging primarily as a tool to improve performance , rather than as a tool designed to accommodate flexible privacy requirements. Popular privacy accounting techniques, such as those based on R´ enyi differential privacy (RDP) and privacy loss distri-butions (PLD) (Mironov, 2017a;b; Wang et al., 2019; Dong et al., 2022; Meiser & Mohammadi, 2018; Gopi et al., 2021; Koskela et al., 2021; Doroshenko et al., 2022; Sommer et al., 2018), yield tighter bounds on the cumulative privacy loss and have become standard in practical deployments of DP-SGD. In this work, we explore RDP and PLD accountant to audit privacy of our proposed approaches. For neighbouring datasets D and D′, RDP uses R ´enyi divergence of order α
+
+(denoted as Dα) to measure the difference btween output distributions, forming a curve ( RDP parameters or profiles )
+
+α 7 → εα, where 
+
+εα = sup 
+
+> D∼D′
+
+Dα
+
+ M(D) ∥ M (D′). (1) The main benefit is that it composes additively across T
+
+steps: εtotal  
+
+> α
+
+= PTt=1 ε(t) 
+
+> α
+
+. We can then convert (α, ε α)-RDP into standard (ε, δ )-DP (Mironov, 2017a). PLD-based accounting instead works with the hockey-stick divergence 
+
+Hε(P, Q ) ≜ sup 
+
+> S
+
+P (S) − eεQ(S) . (2) Here P and Q denote the (pessimistic estimate of) out-put distributions of a mechanism M on neighboring datasets D and D′, and S is all measurable events. We can track the PLD parameters or profiles via δω (ε) =max {H ε(P, Q ), Hε(Q, P )}, and compose privacy loss over steps via convolution (Sommer et al., 2018). Although PLD-based accounting is often numerically tighter than RDP in practice, we still include RDP results for several reasons. First, RDP typically leads to simpler and more interpretable expressions, which makes the privacy analysis easier to present and understand. The analytical structure of RDP is often more amenable to theoretical comparison (e.g., Section 4.1). Second, RDP accounting is usually computationally lighter and is widely supported in existing DP libraries and pipelines, making it a convenient interface for practical deployment. 
+
+## 3. Problem Formulation 
+
+We consider N differentially private algorithms 
+
+M1, . . . , MN applied on the same dataset D and 2Differentially Private Model Merging 
+
+each outputting parameters θ1(D), . . . , θ N (D) ∈ Rp. For 
+
+i ∈ {1, . . . , N }, the training mechanism Mi satisfies 
+
+(εi, δ i)-DP (Definition 2.1). Note that we allow one of the models to be non-private, i.e., some εi → ∞ . Our goal is to construct a (possibly randomized) mechanism h that takes as input these N models along with the algorithms, and outputs 
+
+θ(D) = h {θi(D)}Ni=1 , {M i}Ni=1 ; ε′, δ ′
+
+that satisfies target (ε′, δ ′)-DP. Obviously, for suit-ably large (ε′, δ ′), there always exists a trivial so-lution set h {θi(D)}Ni=1 , {M i}Ni=1 ; ε′, δ ′ ∈ {h :
+
+h depends only on the most private θi(D) }. Therefore, rather than identifying a single construction, we aim to characterize a large class of feasible merged outputs with as tight privacy accounting as possible, which translates to better privacy/utility tradeoffs. 
+
+Necessities of Knowing {M i}Ni=1 . Ideally, we would like the merging algorithm h to depend only on the N
+
+model parameters {θi(D)}Ni=1 without having access to the hyperparameters of the training algorithms {M i}Ni=1 
+
+that produce them. However, such mechanism-agnostic post processing merging algorithms may be fundamentally limited. In particular, next we show that when N = 2 ,under mild regularity conditions, any h that outputs an 
+
+(ε′, δ ′)-DP model must lie very close to the class {h :
+
+h depends only on the more private θi(D) }.
+
+Proposition 3.1 (No-free-lunch without {M i}Ni=1 ). As-sume the mapping h = h θ1(D), θ 2(D); ε′, δ ′ (either de-terministic or random) is measurable and independent of (M1, M2). Assume ε1 < ε ′ < ε 2 and δ1 = δ2 = δ. If 
+
+sup 
+
+> x,a,b ∈Rp
+
+DT V (h(x, a ), h (x, b )) > 1 − e−ε′
+
+(1 − δ′)1 − e−ε2 (1 − δ) , (3) 
+
+then the merged output h θ1(D), θ 2(D) cannot be (ε′, δ ′)-DP for all admissible choices of (M1, M2).
+
+The complete proof is provided in Appendix A. Condition 3 describes mergers h(·, ·) that react too much to changes in the less private model θ2. If varying θ2 while fixing θ1 can induce a large total-variation change in the distribution of 
+
+h(θ1, θ 2), then no universal privacy guarantee is possible. Proposition 3.1 formalizes that, without structural assump-tion on M1, M2, one cannot, in general, design a merger that is substantially different from the trivial merger while satisfying (ε′, δ ′)-DP. In particular, any deterministic merger that aims to be valid uniformly over (M1, M2) must lie in the trivial class. Therefore, to obtain meaningful improvements beyond the trivial merger, we focus on practically relevant mechanisms rather than arbitrary ones. In particular, we study the set-ting where the inputs are associated with some known RDP or PLD parameters (which can be inferred from hyperpa-rameters of the learning algorithms) (Section 5), or where the inputs are directly produced by running DP-SGD (Sec-tion 6). In the next sections, we first formally introduce two model merging algorithms (two instances of h), random se-lection and linear combination (Section 4). We then discuss privacy accounting of RS (Section 5) and LC (Section 6) mechanisms, and consider how to choose an appropriate merger h that exploits the additional assumptions of M.
+
+## 4. Model Merging via Random Selection or Linear Combination 
+
+In this section, we first formally propose two data-independent merging mechanisms, and illustrate the pri-vacy/utility tradeoff introduced by these mechanisms on a Gaussian mean estimation problem (Section 4.1). 
+
+Random Selection (RS). We propose a mechanism indepen-dent of D that samples a model index I from a categorical distribution and output θI (D) as the merged model. That is, given target privacy (ε′, δ ′), we output 
+
+θ(D) = θI (D), I ∼ Cat( π1, . . . , π N ), (4) where π = ( π1, . . . , π N ) ∈ ∆N −1 (a probability simplex) and π is dependent on (ε′, δ ′) (Section 5). Note that RS only randomly samples one model following some distribution. Another natural choice is to leverage all the models by linearly averaging them. 
+
+Linear Combination (LC). The LC method for N models on dataset D is defined as 
+
+θ(D) = 
+
+> N
+
+X
+
+> i=1
+
+λi θi(D), λ = [ λ1, · · · , λ N ] ∈ ∆N −1. (5) In both cases, as h does not have access to D, the privacy of composing N models is fully determined by how the privacy losses of {M i}Ni=1 aggregated under different instantiations of h, and the main task becomes privacy accounting for the RS or LC procedure. At a high level, RS is entirely characterized by privacy pa-rameters of RDP or PLD, as the output model is randomly sampled from the input N models. Therefore, its privacy accounting depends on the individual selected model’s pri-vacy parameters, making RS broadly applicable even when we do not understand the detailed procedure of the training algorithm (as long as we have access to privacy parameters). In contrast, LC requires to impose stronger assumptions on the structures (e.g., hyperparameters and updating rules) of the training algorithms that produce private input models (formalized in Section 6). Due to stronger assumptions, in 3Differentially Private Model Merging 
+
+practical scenarios, the best LC strategy can potentially out-perform the best RS strategy under the same privacy budget. To make this intuition concrete, we study a special case on a Gaussian mean estimation problem, before introducing general accounting. 
+
+4.1. Case Study: Mean Estimation 
+
+This section studies mean estimation with Gaussian distri-butions, one of the simplest statistical tasks where we can precisely characterize the privacy and utilities of RS and LC, under RDP accounting. In this setting, LC is never worse than RS in terms of mean-squared error (MSE) under the same privacy budget. In-tuitively, RS discards information by selecting only one candidate, while LC can always choose to mimic RS (by putting all weight on a single model) or improve upon it by averaging across candidates when beneficial. 
+
+Problem Setup. We observe n one-dimensional I.I.D. Gaussian samples and aim to estimate the unknown mean 
+
+μ. Let ˆμ denote the empirical mean and assume the ℓ2
+
+sensitivity of outputting ˆμ is ∆. Consider two independent Gaussian mechanisms applied to ˆμ such that the private mod-els satisfy θ1(D) ∼ N (ˆ μ, σ 21 ) and θ2(D) ∼ N (ˆ μ, σ 22 ). For any merged estimator θ(D) derived from (θ1(D), θ 2(D)) 
+
+by RS or LC, we note that θ(D) is unbiased relative to the empirical mean. The MSE risk decomposes as 
+
+E(θ(D) − μ)2 = E(θ(D) − ˆμ)2 + E(ˆ μ − μ)2;
+
+so comparing the MSE of RS and LC reduces to comparing 
+
+E(θ(D) − ˆμ)2.
+
+Main Results. Under random selection with parameter 
+
+π ∈ [0 , 1] , the output θ(D) follows a mixed Gaussian dis-tribution π N (μ, σ 21 ) + (1 − π) N (μ, σ 22 ). While under linear combination with parameter λ, the output θ(D) ∼N (ˆ μ, λ 2σ21 + (1 − λ)2σ22 ). For simplicity, we define mix-ture distributions Pπ = π N (ˆ μ, σ 21 ) + (1 − π) N (ˆ μ, σ 22 ),
+
+Qπ = π N (ˆ μ + ∆ , σ 21 ) + (1 − π) N (ˆ μ + ∆ , σ 22 ), and the RS/LC variance as σ2 
+
+> RS
+
+(π) = πσ 21 + (1 − π)σ22 ,
+
+σ2 
+
+> LC
+
+(λ) = λ2σ21 + (1 − λ)2σ22 . Then, we have the fol-lowing result. 
+
+Lemma 4.1. For any π, λ ∈ [0 , 1] , we have RDP parameter 
+
+(α, ε RS  
+
+> α
+
+(π)) for RS satisfying 
+
+εRS  
+
+> α
+
+= Dα
+
+ Pπ ∥Qπ
+
+ > α∆2
+
+2σ2 
+
+> RS
+
+(π) + cπ ∆2 + o(∆ 2),
+
+when ∆ → 0. Here cπ ≥ 0 is a constant depending on 
+
+π, and when π ∈ (0 , 1) , cπ > 0. And RDP parameter 
+
+(α, ε LC  
+
+> α
+
+(λ)) for LC satisfying 
+
+εLC  
+
+> α
+
+= α∆2
+
+2σ2 
+
+> LC
+
+(λ) .
+
+Theorem 4.2. Assume ∆ is small enough. By Lemmas 4.1 , when σ2LC (λ) = σ2
+
+> RS
+
+(π), the LC estimator with parameter λ
+
+achieves privacy no worse than RS with parameter π under RDP. Since for any π ∈ [0 , 1] there exists a λ ∈ [0 , 1] such that σ2LC (λ) = σ2
+
+> RS
+
+(π), it follows that LC achieves MSE no larger than RS under the same target RDP privacy budget. 
+
+Theorem 4.2 shows that, under mean estimation and small sensitivity ∆, LC is preferable to RS. This aligns the ex-periment results in Section 8.1. This is due to LC indeed leverages more models. The problem of mean estimation uses additivity of independent Gaussian noise; such a clean Gaussian structure typically does not exist for general prob-lems. One of the main technical challenges is to develop accurate and tight privacy accounting methods for general model merging under minimal assumptions. In the next two sections, we first analyze RS under the minimal assumption that each candidate mechanism admits privacy accounting via RDP and PLD. We then turn to LC, where we leverage the DP-SGD structure which enables tighter privacy bounds. 
+
+## 5. Privacy of Random Selection 
+
+Recall that we have trained N private models on the same dataset D, obtaining output parameters 
+
+θ1(D), . . . , θ N (D) ∈ Rp. As discussed in Section 3, there is no general post-processing algorithm that improves utili-ties beyond the degenerated solutions if we do not have ac-cess to any parameters of the training algorithms {M i}Ni=1 .Hence, for random selection, we assume that we are given the hyperparameters of M, from which we derive the RDP and PLD profiles of each input model. For each Mi, we denote the RDP parameters as {εα,i }α> 1 and the PLD pri-vacy parameters as ε 7 → δi(ε). To this end, we develop two complementary accounting techniques: an RDP-based bound that is convenient for analysis and optimization, and a PLD-based method that is typically tighter in practice. 
+
+RDP Accounting. We begin with the RDP approach by establishing an explicit upper bound on the RDP parameters of RS. 
+
+Theorem 5.1 ((α, ε RS  
+
+> α
+
+)-RDP) . For any α > 1, random selection (Eq. (4) ) over N private models (each being 
+
+(α, ε α,i )-RDP) satisfy (α, ε RS  
+
+> α
+
+(π))-RDP where 
+
+εRS  
+
+> α
+
+(π) ≤ 1
+
+α − 1 log 
+
+ NX
+
+> i=1
+
+πi e(α−1) εα,i 
+
+
+
+. (6) Theorem 5.1 (proved in Appendix C) provides an explicit upper bound on the RDP parameter of random selection in terms of the individual model’s parameters {εα,i }Ni=1 and the mixing weights π ∈ ∆N −1. This bound immediately enables us to certify (ε, δ )-DP for candidate mixtures via the standard RDP-to-DP conversion as follows. Given a 4Differentially Private Model Merging 
+
+Algorithm 1 RS with RDP accounting 
+
+1: Input: target privacy (ε′, δ ′), orders grid A; hyperpa-rameter sets of {M i}Ni=1 : {S i}Ni=1 .
+
+2: Output: set of π ∈ ∆N −1 satisfying the target privacy. 
+
+3: For each i ∈ { 1, . . . , N }, obtain the RDP parameters 
+
+{εα,i }α∈A by Si.
+
+4: function DP Eps( π, δ )
+
+5: for α ∈ A do 
+
+6: ai ← (α − 1) εα,i , i ∈ { 1, . . . , N }
+
+7: εRS  
+
+> α
+
+(π) ← log   P Ni=1 πieai
+
+/(α − 1) 
+
+8: εα(π; δ) ← εRS  
+
+> α
+
+(π) + log(1 /δ )/(α − 1) 
+
+9: return: min α∈A εα(π; δ′)
+
+10: return {π | DP Eps( π, δ ′) ≤ ε′}
+
+target failure probability δ ∈ (0 , 1) , and an order grid A,the εRS  
+
+> α
+
+(π)-RDP algorithm satisfies (ε, δ )-DP where 
+
+ε := ε(π; δ′) = min 
+
+> α> 1
+> α∈A
+
+
+
+εRS  
+
+> α
+
+(π) + log(1 /δ ′)
+
+α − 1
+
+
+
+.
+
+For a target privacy budget ε′, we accept a mixing weight π
+
+if ε(π; δ′) ≤ ε′. This provides us the criterion for whether a candidate π satisfies the target privacy guarantee. We summarize the method in Algorithm 1. 
+
+PLD Accounting. In the PLD accounting, we note that random selection induces the mixture distributions over the 
+
+N models. That is, considering any neighboring datasets D
+
+and D′, the output probabilities of RS are 
+
+P DRS =
+
+> N
+
+X
+
+> i=1
+
+πiP Di , P Di = Law (Mi(D)) 
+
+QD′ 
+
+> RS
+
+=
+
+> N
+
+X
+
+> i=1
+
+πiQD′ 
+
+> i
+
+, QD′ 
+
+> i
+
+= Law (Mi(D′)) 
+
+where Law (X) refers to the distribution induced by ran-dom variable X. Further, we define Pi and Qi are pes-simistic estimates of P Di and QD′ 
+
+> i
+
+respectively, which means Hε(P Di , Q D′ 
+
+> i
+
+) ≤ H ε(Pi, Q i) and Hε(QD′ 
+
+> i
+
+, P Di ) ≤Hε(Qi, P i). Note that the hockey-stick divergence used by PLD accounting Hε(·, ·) (Eq. (2) ) is jointly convex over 
+
+(P, Q ). Then we have following result about the PLD pa-rameter δRS (ε) of the random selection output. 
+
+Theorem 5.2. For any ε≥ 0 and π=( π1, . . . , π N ) ∈ ∆N −1,it holds that 
+
+sup 
+
+> D∼D′
+
+Hε(P DRS , Q D′ 
+
+> RS
+
+) ≤
+
+> N
+
+X
+
+> i=1
+
+πi Hε(Pi, Q i)
+
+and symmetrically, 
+
+sup 
+
+> D∼D′
+
+Hε(QD′ 
+
+> RS
+
+, P DRS ) ≤
+
+> N
+
+X
+
+> i=1
+
+πi Hε(Qi, P i).
+
+Algorithm 2 RS with PLD accounting 
+
+1: Input: target privacy (ε′, δ ′); hyperparameter sets of 
+
+{M i}Ni=1 : {S i}Ni=1 .
+
+2: Output: set of π ∈ ∆N −1 satisfying the target privacy. 
+
+3: For each i ∈ { 1, . . . , N }, obtain the PLD parameters 
+
+ε 7 → {H ε(Pi, Q i), Hε(Qi, P i)} by Si.
+
+4: function DP Delta( π, ε )
+
+5: δ+ ← PNi=1 πi Hε(Pi, Q i)
+
+6: δ− ← PNi=1 πi Hε(Qi, P i)
+
+7: δRS (π; ε) ← max {δ+, δ −}
+
+8: return δRS (π; ε)
+
+9: return {π | DP Delta( π, ε ′) ≤ δ′}
+
+Consequently, we have δRS (ε) is upper bounded by 
+
+max 
+
+n NX
+
+> i=1
+
+πiHε(Pi, Q i),
+
+> N
+
+X
+
+> i=1
+
+πiHε(Qi, P i)
+
+o
+
+.
+
+Theorem 5.2 (proved in Appendix D) also yields a sim-ple feasibility test based on the privacy loss distribution of random selection. Given a target privacy parameter ε′, we evaluate δRS (ε′) for a candidate mixing weight π and π is feasible if and only if δRS (ε′) ≤ δ′. We summarize this method in Algorithm 2. 
+
+Priacy/Utility Tradeoff under Random Selection. For a target (ε′, δ ′), The accounting methods above provide a feasible set of π ∈ ∆N −1. In practice, one would naturally like to choose π that yields a strong utility among all feasible 
+
+π’s. This calls for selection rules over π. Under random selection, the expected utility is linear in π, making the tradeoff easier to reason about. In typical DP scenarios, more private models tend to have lower utilities, so a natural strategy is to choose π that nearly saturates the privacy budget, e.g., ε(π; δ′) ≈ ε′ in RDP, thereby biasing selection towards higher-utility models while maintaining the privacy guarantee. Moreover, many selection rules are possible in practice. For example, one may evaluate candidate mixtures on a public dataset and choose the best-performing option. 
+
+## 6. Privacy of Linear Combination 
+
+In Section 4.1, we leverage the additivity of independent Gaussian noise and show that, for mean estimation with Gaussian mechanism, LC strictly dominates RS. However, this favorable structure does not hold for general problems. For random selection, the only assumption we make is ac-cess to the individual RDP/PLD parameters of each input model. In contrast, we show in this section that this is not sufficient for linear combination. That is, if we only know these privacy parameters and impose no further as-sumptions, then the privacy under LC cannot improve upon 5Differentially Private Model Merging 
+
+that of simply releasing all the models {θ1, . . . , θ N } jointly. This observation (formalized in Section 6.1 below) moti-vates the need for additional structural assumptions to obtain meaningful privacy accounting for LC (Section 6.2). 
+
+6.1. Limitation Result without Knowing Original Training Algorithms 
+
+Suppose we only know the final RDP or PLD privacy param-eters of each private learning mechanism {M i}Ni=1 without any further algorithmic structure information (i.e., the ex-act updating rules) about {M i}Ni=1 . We show below, when the mechanisms are instantiated with fresh independent ran-domness conditioned on the dataset D, the LC mechanism admits a universal worst-case upper bound, and this bound can be achieved. 
+
+Theorem 6.1 (Worst-case bounds and tightness) . Consider the linear combination mechanism defined by θ(D) =
+
+PNi=1 λi θi(D). Assume the mechanisms are instantiated with fresh independent randomness conditional on the dataset D. We have the following results. 
+
+(1) RDP upper bound. The RDP parameter of θ is no worse than that of the joint release (i.e., releasing 
+
+{θ1, · · · , θ N }). Thus, for every α > 1, the LC mechanism satisfies (α, ε LC  
+
+> α
+
+(λ)) -RDP where 
+
+εLC  
+
+> α
+
+(λ) ≤
+
+> N
+
+X
+
+> i=1
+
+εα,i . (7) 
+
+(2) PLD upper bound. Let ωi be the PLD of θi, and let 
+
+ωjoint = ω1 ⋆ · · · ⋆ ω N be the PLD of the joint release. Then the PLD parameter of θ is no worse than that of the joint release. That is, for any ε ≥ 0,
+
+δLC (ε) ≤ δjoint (ε), (8) 
+
+where δjoint (ε) is computed from ωjoint . (3) Tightness. The bounds in Eq. (7) -(8) are worst-case tight: there exist mech-anisms {M i}Ni=1 under which the equality holds. 
+
+Theorem 6.1 (proved in Appendix E) establishes that the privacy parameter of the deterministic linear combination is fully controlled by that of the joint model, without addi-tional assumptions. Moreover, the bound is worst-case tight; so LC satisfies no better privacy guarantee gain beyond the joint release {θ1, · · · , θ N }. Therefore, without additional information beyond the input models’ privacy parameters, one cannot derive a universally tighter privacy guarantee for LC. In particular, the resulting joint-release bounds are substantially larger than the RS bounds in Theorems 5.1 and 5.2, which are always upper-bounded by the maximum RDP/PLD parameter among all input models. This high-lights that, without further structure, LC is not guaranteed to outperform RS. Next we impose additional structures on the learning procedure that generates private input models. 
+
+6.2. Linear Combination under DP-SGD 
+
+In this section, we assume the input models are trained via DP-SGD (Abadi et al., 2016), one of the most popular DP algorithms in ML. 
+
+Per-Step Update. At step t = 1 , . . . , T , each mechanism 
+
+i ∈ [N ] forms a mini-batch by subsampling from the dataset with sampling ratio q(t) 
+
+> i
+
+(i.e., q(t) 
+
+> i
+
+= fixed mini-batch size total sample amount ). Let 
+
+z(t) 
+
+> i
+
+∈ { 0, 1} be the indicator of whether the differing record between neighboring datasets is included in the mini-batch of mechanism i at step t. Then for any subset J ⊆ [N ], the event { z(t) 
+
+> i
+
+= 1 ∀i ∈ J, z (t) 
+
+> i
+
+= 0 ∀i / ∈ J } occurs with probability 
+
+ρ(t) 
+
+> J
+
+:= Y
+
+> i∈J
+
+q(t)
+
+> i
+
+Y
+
+> i / ∈J
+
+ 1 − q(t)
+
+> i
+
+.
+
+We compute the clipped gradient ˜g(t) 
+
+> i
+
+= clip  g(t) 
+
+> i
+
+, C (t)
+
+> i
+
+
+
+such that ∥˜g(t) 
+
+> i
+
+∥2 ≤ C(t) 
+
+> i
+
+, and add Gaussian noise e(t) 
+
+> i
+
+∼N
+
+
+
+0,  σ(t) 
+
+> i
+
+C(t)
+
+> i
+
+2I
+
+
+
+, independently across i. The local up-date is 
+
+θ(t) 
+
+> i
+
+= θ(t−1)  
+
+> i
+
+− η(t)
+
+> i
+
+ ˜g(t) 
+
+> i
+
++ e(t)
+
+> i
+
+.
+
+Define the model output via LC after step t as θ(t) =
+
+PNi=1 λi θ(t) 
+
+> i
+
+. The combined update can be written as 
+
+θ(t)−θ(t−1) = −
+
+> N
+
+X
+
+> i=1
+
+λi η(t)
+
+> i
+
+ ˜g(t) 
+
+> i
+
++e(t)
+
+> i
+
+ := − g(t) 
+
+> λ
+
++e(t)
+
+> λ
+
+,
+
+where g(t) 
+
+> λ
+
+:= PNi=1 λiη(t) 
+
+> i
+
+˜g(t) 
+
+> i
+
+and e(t) 
+
+> λ
+
+:= PNi=1 λiη(t) 
+
+> i
+
+e(t) 
+
+> i
+
+.Note that the aggregated noise e(t) 
+
+> λ
+
+follows the distribution 
+
+N 0, (s(t) 
+
+> λ
+
+)2I, where (s(t) 
+
+> λ
+
+)2:= PNi=1 
+
+ λi η(t) 
+
+> i
+
+σ(t) 
+
+> i
+
+C(t)
+
+> i
+
+2.
+
+Define the clipping-weighted mixing coefficients 
+
+w(t) 
+
+> i
+
+:= λi η(t) 
+
+> i
+
+C(t) 
+
+> i
+
+, i ∈ [N ], ∆(t) 
+
+> J
+
+:= X
+
+> i∈J
+
+w(t) 
+
+> i
+
+,
+
+and let Ft−1 denote the sigma field generated by all random-ness of all models up to step t − 1. Then we have following results for accounting. 
+
+Theorem 6.2. For any an integer order α ≥ 2, the step-t
+
+mechanism satisfies the following RDP bound conditional on Ft−1:
+
+ε(t) 
+
+> α
+
+(λ) ≤ 1
+
+α − 1 log 
+
+ X
+
+> γ∈N α
+
+α!
+
+Q 
+
+> J
+
+γJ ! B(γ) Y
+
+> J
+
+ ρ(t)
+
+> J
+
+γJ
+
+ .
+
+(9) 
+
+Here summation and product over J means over J ∈ J =
+
+{J | J ⊆ [N ]}, Nα = {(γJ )J∈J | P 
+
+> J∈J
+
+γJ = α, γ J ≥
+
+0, γ J ∈ Z}, ˜∆(t) 
+
+> J
+
+= ∆ (t) 
+
+> J
+
+/s (t) 
+
+> λ
+
+and 
+
+B(γ)2 = exp 
+
+ X 
+
+> J
+
+γJ ˜∆(t)
+
+> J
+
+2
+
+− X
+
+> J
+
+γJ
+
+  ˜∆(t)
+
+> J
+
+2.
+
+!
+
+6Differentially Private Model Merging 
+
+Algorithm 3 LC with RDP accounting 
+
+1: Input: Target privacy (ε′, δ ′), orders grid A, hyperpa-rameter sets of {M i}Ni=1 : {S i}Ni=1 , total step T .
+
+2: Output: Set of λ ∈ ∆N −1 satisfying target privacy 
+
+3: function DP Eps( λ, δ )
+
+4: for α ∈ A do 
+
+5: for t = 1 to T do 
+
+6: Compute the per-step RDP parameter ε(t) 
+
+> α
+
+(λ)
+
+via (9). 
+
+7: εLC  
+
+> α
+
+(λ) ← PTt=1 ε(t) 
+
+> α
+
+(λ)
+
+8: εα(λ; δ) ← εLC  
+
+> α
+
+(λ) + log(1 /δ )/(α − 1) 
+
+9: return: min α∈A εα(π; δ′)
+
+10: return {π | DP Eps( λ, δ ′) ≤ ε′}
+
+In practice, we apply Theorem 6.2 by summing the per-step privacy costs over all T iterations and then converting the re-sulting RDP parameters into DP guarantees. We summarize the accounting procedures in Algorithm 3. The right-hand side of Eq. (9) depends on the number of input models N and the RDP order α, but not on the model size. The sum is taken over γ ∈ N α, i.e., over all non-negative integer vectors (γJ )J⊆[N ] that sum to α. Since 
+
+|J | = 2 N , the number of such γ is the number of composi-tions of α into 2N nonnegative parts: 
+
+|N α| =
+
+α + 2 N − 12N − 1
+
+
+
+.
+
+Thus, the computation is exponential in N but independent of the model size. In practice, N is typically small and such computation is lightweight (e.g., not involving any forward or backward passes); so computing ε(t) 
+
+> α
+
+(λ) remains tractable, though it is more complex than RS. Moreover, for PLD accounting, we have following results. 
+
+Lemma 6.3. Let P (t) and Q(t) denote the distribution of 
+
+θ(t) − θ(t−1) under D and D′ conditional on Ft−1. Then the privacy loss random variable L(t) satisfies 
+
+L(t) = log 
+
+P  
+
+> J⊆[N]
+
+ρ(t) 
+
+> J
+
+ϕ
+
+
+
+Y (t); v(t) 
+
+> J
+
+, (s(t) 
+
+> λ
+
+)2I
+
+
+
+ϕ
+
+
+
+Y (t); 0 , (s(t) 
+
+> λ
+
+)2I
+
+ , (10) 
+
+where Y (t) ∼ Q(t). vJ is the mean shift between D and 
+
+D′ conditioned on J = {i : zi = 1 }. ϕ(·; μ, Σ) denotes gaussian density with mean μ and covariance Σ.
+
+Theorem 6.4. Under the notation of Lemma 6.3, consider the practical surrogate privacy loss random variable 
+
+˜L(t) = log 
+
+P  
+
+> J⊆[N]
+
+ρ(t) 
+
+> J
+
+ϕ
+
+
+
+Z(t); ∆ (t) 
+
+> J
+
+, (s(t) 
+
+> λ
+
+)2
+
+
+
+ϕ
+
+
+
+Z(t); 0 , (s(t) 
+
+> λ
+
+)2
+
+ , (11) 
+
+Algorithm 4 LC with PLD accounting 
+
+1: Input: Target privacy (ε′, δ ′), hyperparameter sets of 
+
+{M i}Ni=1 : {S i}Ni=1 , total step T .
+
+2: Output: Set of λ ∈ ∆N −1 satisfying target privacy 
+
+3: function DP Delta( λ, ε )
+
+4: for t = 1 to T do 
+
+5: Compute the per-step privacy-loss random variable 
+
+˜L(t) via Eq. (11) 
+
+6: Discretize ˜L(t) on grid to obtain its PLD ω(t)
+
+7: Compose the T steps via convolution ω ← ω(1) ∗
+
+ω(2) ∗ · · · ∗ ω(T )
+
+8: Compute the induced privacy parameter δLC (ε) from the composed PLD ω.
+
+9: return δLC (ε)
+
+10: return {π | DP Delta( π, ε ′) ≤ δ′}
+
+Then, for every ε ≥ 0, we have 
+
+Hε(P (t), Q (t)) = E[( eL(t)
+
+− eε)+] ≤ E[( e˜L(t)
+
+− eε)+],
+
+Hε(Q(t), P (t)) = E[(1 − eε+L(t)
+
+)+] ≤ E[(1 − eε+ ˜L(t)
+
+)+].
+
+Corollary 6.5 (Composition via surrogate privacy loss ran-dom variables) . Under the notation of Lemma 6.3 and The-orem 6.4, define 
+
+L := 
+
+> T
+
+X
+
+> t=1
+
+L(t), ˜L := 
+
+> T
+
+X
+
+> t=1
+
+˜L(t).
+
+Then, for every ε ≥ 0, E
+
+h eL − eε
+
+> +
+
+i
+
+≤ E
+
+h e˜L − eε
+
+> +
+
+i
+
+and E
+
+h 1 − eε+L
+
+> +
+
+i
+
+≤ E
+
+h 1 − eε+ ˜L
+
+> +
+
+i
+
+hold. Conse-quently, the PLD of the composed mechanism can be upper bounded by the convolution of the per-step surrogate PLDs. 
+
+Lemma 6.3 characterizes the exact per-step privacy loss random variable for the linear combination mechanism. Building on this representation, Theorem 6.4 introduces a tractable surrogate per-step privacy-loss random variable and shows that it upper bounds the corresponding hockey-stick divergences in both directions. Combined with Corol-lary 6.5, this provides a practical composition rule. The PLD of the full mechanism can be upper bounded by con-volving the surrogate PLDs across steps. We summarize the resulting PLD accounting procedure in Algorithm 4. 
+
+Different Total Steps Across Input Models. In some applications, the input candidate models may be trained with diffeerential privacy for different numbers of iterations 
+
+{Ti}Ni=1 . To make the accounting go through, we can align all runs to a common iteration T ≜ max i Ti. For any model 
+
+i with Ti < T , we could use an equivalent T -step represen-tation by appending T − Ti virtual steps. 
+
+Utility/Privacy Tradeoffs. While LC does not enjoy the same clean utility/privacy tradeoff structure as RS in general, 7Differentially Private Model Merging 
+
+especially for nonconvex models, many practical selection rules remain applicable. In particular, LC can still be tuned effectively by evaluating performance on a public bench-mark or a non-sensitive validation set. 
+
+6.3. On Recycling Checkpoints 
+
+Recent work such as Shejwalkar et al. (2022); Indri et al. (2023) considers improving private learning by recycling checkpoints from a single DP-SGD run. This setting differs fundamentally from ours in that the input models are not independent (since they share the early optimization steps). This distinction matters for privacy accounting. Our RS procedure depends only on the individual privacy profiles (RDP/PLD) of each candidate model and does not require independence between candidates; therefore RS remains di-rectly applicable to checkpoint recycling and can guarantee effectively privacy/utility tradeoffs (see Appendix H.3 for empirical results). In contrast, our LC analysis relies on ad-ditional structure (in particular, independent noise) to obtain tighter bounds; when the inputs are correlated checkpoints, these assumptions are not satisfied, and our LC guarantees do not apply to checkpoint recycling. More broadly, the limitation of applying LC to recycled checkpoints is intuitive: under DP-SGD and standard pri-vacy accounting, it cannot yield a privacy guarantee better than the least private checkpoint (typically the checkpoint taken at the largest training step). To see why, consider two checkpoints θ1 and θ2 taken from the same DP-SGD run at steps t1 < t 2. A linear merge can be written as 
+
+θ = λθ 1 + (1 − λ)θ2 = θ1 + (1 − λ)( θ2 − θ1).
+
+Since θ2 − θ1 is exactly the cumulative update from step t1
+
+to t2, this merge is essentially equivalent to re-scaling the up-dates on the segment t ∈ { t1 +1 , . . . , t 2} by a factor (1 −λ).However, standard DP accounting for DP-SGD is driven by the sampling rate, clipping bound, noise multiplier, and number of steps, and is typically independent of the learning rate. Therefore, such a post-processing does not reduce the privacy cost attributed to the steps up to t2, and the result-ing guarantee cannot be tighter than that of the checkpoint 
+
+θ2 itself. In other words, while checkpoint recycling can improve utilities, linear combination over correlated check-points is not able to achieve tighter privacy relative to the least private model, without additional assumptions. 
+
+## 7. Compare with Other Composition Methods 
+
+Extensive prior literature has studied DP composition of jointly releasing multiple models (e.g., Dwork et al., 2010; Kairouz et al., 2015). Among them, Dwork et al. (2010) is one of the seminal works, and Kairouz et al. (2015) fur-ther improves the bounds. However, these results are stated purely using the privacy information in the form of (εi, δ i)
+
+parameters of each model. In contrast, assuming access to RDP and PLD parameters typically yields tighter account-ing. Hence, the joint-release bounds in Theorem 6.1 (the right-hand sides of Eq (7) and Eq. (8) ) using RDP/PLD parameters are in general tighter than (ε, δ )-only composi-tion bounds. Besides, beyond simply assuming access to RDP and PLD parameter, our analysis makes explicit how RS and LC interact with the underlying privacy account-ing. RS exploits mixture structure through log-sum-exp and convexity, while LC admits tight bounds when additional algorithmic structure is available. This highlights why our bounds can improve over general joint-release accounting. Theorem 6.1 also implies that our LC RDP/PLD accounting gives a tighter result than the joint-release RDP/PLD bound; and RS can also be tighter. Overall, when richer privacy profiles (e.g., RDP parameters across orders) are available, our accounting procedures provide stronger guarantees. For-mally, we present Proposition 7.1 below, which establishes our argument for the case of N independent and identical Gaussian mechanisms. 
+
+Proposition 7.1. Consider releasing N models on the same dataset, where each release follows the same Gaussian mechanism (e.g., mean estimation with sensitivity ∆ and noise Z ∼ N (0 , σ 2)). Fix δ ∈ (0 , 12 ). By RDP accounting, each model satisfies (ε, δ )-DP. Composing the N releases using the (ε, δ ) advanced composition bound (Dwork et al., 2010, Theorem III.3 ) with δ′ = N δ + δ0 yields a composed privacy parameter εcom . Using the joint RDP bound (RHS of Eq. (7)) in Theorem 6.1 yields a guarantee (εRDP , δ ′).We have that εRDP ≤ εcom .
+
+We provide the complete proof in Appendix G. 
+
+## 8. Empirical Evaluation 
+
+In this section, we first present results on a toy mean es-timation problem for RS and LC algorithms under both RDP and PLD accounting, corresponding to analysis in Sec-tion 4.1. Then on real world datasets with both convex and non-convex models, we present the privacy/utility tradeoffs of a set of models output by RS and LC, and demonstrate tighter privacy bounds than baseline composition methods. Additional experiment details are discussed in Appendix H. 
+
+8.1. Synthetic Data: Mean Estimation 
+
+We generate X1, . . . , X n
+
+> i.i.d.
+
+∼ N (0 , 1) with n = 100 , and then clip the samples to enforce a bounded domain, i.e., 
+
+Xj ← clip( Xj , −1, 1) . The goal is to estimate the popula-tion mean μ for dataset D = {X1, . . . , X n}. We generate two private estimates as input. Figure 1 report the Pareto frontier between losses (mean squared error) and privacy budgets of the RS and LC algorithms under RDP and PLD accounting. PLD gives tighter privacy upper bounds than 8Differentially Private Model Merging 
+
+Figure 1. Privacy/utility tradeoffs of mean estimation ( δ = 10 −5). Input models are also marked in the figure. 
+
+RDP. Also, both methods achieve flexible privacy by tracing out a continuous MSE/privacy tradeoff as the target privacy level changes. Moreover, LC consistently outperforms RS, validating our theoretical arguments in Section 4.1. 
+
+8.2. Results on Real Datasets 
+
+We next evaluate our method on two standard benchmarks: MNIST and CIFAR-10, and train both convex and non-convex models from scratch. MNIST consists of 70 ,000 
+
+grayscale images of handwritten digits from 10 classes (Le-Cun et al., 2002). Following the standard split, we use 
+
+60 ,000 examples for training and 10 ,000 for testing. We train a logistic regression model with DP-SGD. CIFAR-10 contains 60 ,000 natural RGB images from 10 classes, with 
+
+32 × 32 resolution and three channels (Krizhevsky et al., 2009). We use the standard training/test image split with a ResNet18 model (batch normalization layers replaced with group normalization). All DP-SGD hyperparameters and implementation details are deferred to Appendix H. Figure 2 reports the privacy changes as different mixing weight changes under both RS and LC with RDP and PLD. Both methods successfully adapt to flexible privacy require-ments. Figure 3 shows the pareto frontier of RS and LC with RDP and PLD. All methods exhibit a clear accuracy/privacy tradeoff. Across all settings, the ε values guaranteed by PLD are consistently smaller than those obtained from RDP. Figure 4 shows the Pareto frontiers (tradeoffs between util-ities and privacy budgets) of RS and LC under both RDP-and PLD-based accounting. We observe that LC performs well only when one model receives a very large weight; con-sequently, the middle portion of the frontier is sparse. This behavior highlights the challenges of nonconvex models, and also illustrates the stronger adaptability of RS. 
+
+Starting from a Pretrained Model. To study a more practi-cal training pipeline, we additionally consider a pretraining-based setup on CIFAR-10. We randomly split the training 
+
+(a) RS with RDP (b) RS with PLD 
+
+(c) LC with RDP (d) LC with PLD 
+
+Figure 2. Heatmap of the privacy parameter ε on MNIST ( δ =10 −5) as the merging weights vary when combining three models. 0 2 4 6 8 10 
+
+> Privacy budget
+> 0.885
+> 0.890
+> 0.895
+> 0.900
+> 0.905
+> 0.910
+> 0.915
+> Accuracy
+> RS under RDP
+> RS under PLD
+> LC under RDP
+> LC under PLD
+> Base Models(RDP)
+> Base Models(PLD)
+
+Figure 3. Privacy/utility tradeoffs on MNIST ( δ = 10 −5)
+
+set into two disjoint halves, Dpre and Dpriv . We first train a non-private model on Dpre using standard SGD, and then use this model as initialization for DP-SGD on Dpriv . From this initialization, we train multiple private models with different DP-SGD hyperparameters, yielding different pri-vacy/utility tradeoffs. We then apply RS and LC to these private models the same way as in other experiments. Note that the privacy guarantee in this experiment is with respect to Dpriv only, since Dpre is disjoint from the private training subset and considered non-private. Figure 5 shows the Pareto frontiers of RS and LC under both RDP- and PLD-based accounting. We observe that the same qualitative conclusions continue to hold in the pretraining-based setting. Both RS and LC enable flexi-ble adaptation to different target privacy budgets without additional training, while PLD-based accounting remains consistently tighter than RDP-based accounting. Compared with training from scratch, pretraining improves the over-all utility level, while the relative behavior of the merging 9Differentially Private Model Merging 
+
+Figure 4. Privacy/utility tradeoffs of CIFAR-10 ( δ = 10 −5). 
+
+methods remains broadly similar. Interestingly, in this pretraining-based setting, we also ob-serve a phenomenon that was already present in some of our earlier experiments: the merged model may outper-form all individual candidate models. This effect is par-ticularly visible with pretraining, which may be because a stronger common initialization places the candidate mod-els in a more compatible region of the parameter space, making merging more effective at preserving shared useful structure while averaging out part of the DP-induced noise. Similar observations have also appeared in the non-private model merging literature (Wortsman et al., 2022; Matena & Raffel, 2022). This further highlights the value of the our framework: model merging is not only a tool for adapting to different target privacy budgets after training, but may also provide utility gains relative to the the input models. 7.5 10.0 12.5 15.0 17.5 20.0 22.5 25.0 
+
+> Privacy budget
+> 0.8680
+> 0.8685
+> 0.8690
+> 0.8695
+> 0.8700
+> Accuracy
+> RS under RDP
+> RS under PLD
+> LC under RDP
+> LC under PLD
+> Base Models(RDP)
+> Base Models(PLD)
+
+Figure 5. Privacy/utility tradeoffs of CIFAR-10 starting from a pretrained model ( δ = 10 −5). 
+
+## 9. Conclusion and Future Directions 
+
+To the best of our knowledge, this is the first work that stud-ies model merging to meet flexible privacy requirements during deployment time. We have proposed two merging strategies, based on random selection and linear combina-tion, without any additional training steps. We provide prin-cipled privacy accounting based on both RDP and PLD, and our experiments demonstrate the practical accuracy/privacy tradeoffs of the proposed methods across synthetic and real datasets and models. Several directions remain open. It would be interesting to de-sign and analyze more sophisticated merging rules that bet-ter handle challenging regimes such as nonconvex models. On the practical side, an important next step is to develop effective and private procedures for tuning merging parame-ters (e.g., selecting λ and π) under privacy constraints. 
+
+## References 
+
+Abadi, M., Chu, A., Goodfellow, I., McMahan, H. B., Mironov, I., Talwar, K., and Zhang, L. Deep learning with differential privacy. In Proceedings of the 2016 ACM SIGSAC conference on computer and communications security , pp. 308–318, 2016. Abowd, J. M., Ashmead, R., Cumings-Menon, R., Garfinkel, S., Heineck, M., Heiss, C., Johns, R., Kifer, D., Leclerc, P., Machanavajjhala, A., et al. The 2020 census disclosure avoidance system topdown algorithm. Harvard Data Science Review , 2, 2022. Dong, J., Roth, A., and Su, W. J. Gaussian differential privacy. Journal of the Royal Statistical Society Series B: Statistical Methodology , 84(1):3–37, 2022. Doroshenko, V., Ghazi, B., Kamath, P., Kumar, R., and Manurangsi, P. Connect the dots: Tighter discrete ap-proximations of privacy loss distributions. arXiv preprint arXiv:2207.04380 , 2022. Dwork, C. Differential privacy. In International colloquium on automata, languages, and programming , pp. 1–12. Springer, 2006. Dwork, C., Rothblum, G. N., and Vadhan, S. Boosting and differential privacy. In 2010 IEEE 51st annual symposium on foundations of computer science , pp. 51–60. IEEE, 2010. Gopi, S., Lee, Y. T., and Wutschitz, L. Numerical composi-tion of differential privacy. Advances in Neural Informa-tion Processing Systems , 34:11631–11642, 2021. Ilharco, G., Ribeiro, M. T., Wortsman, M., Gururangan, S., Schmidt, L., Hajishirzi, H., and Farhadi, A. Editing mod-els with task arithmetic. arXiv preprint arXiv:2212.04089 ,2022. Indri, P., Drucks, T., and G ¨artner, T. Can stochastic weight averaging improve generalization in private learning? In 
+
+ICLR 2023 Workshop on Trustworthy and Reliable Large-Scale Machine Learning Models , 2023. 10 Differentially Private Model Merging 
+
+Izmailov, P., Podoprikhin, D., Garipov, T., Vetrov, D., and Wilson, A. G. Averaging weights leads to wider optima and better generalization. arXiv preprint arXiv:1803.05407 , 2018. Jin, X., Ren, X., Preotiuc-Pietro, D., and Cheng, P. Data-less knowledge fusion by merging weights of language models. arXiv preprint arXiv:2212.09849 , 2022. Kairouz, P., Oh, S., and Viswanath, P. The composition the-orem for differential privacy. In International conference on machine learning , pp. 1376–1385. PMLR, 2015. Koskela, A., J ¨alk ¨o, J., Prediger, L., and Honkela, A. Tight differential privacy for discrete-valued mechanisms and for the subsampled gaussian mechanism using fft. In 
+
+International Conference on Artificial Intelligence and Statistics , pp. 3358–3366. PMLR, 2021. Krizhevsky, A., Hinton, G., et al. Learning multiple layers of features from tiny images. 2009. LeCun, Y., Bottou, L., Bengio, Y., and Haffner, P. Gradient-based learning applied to document recognition. Proceed-ings of the IEEE , 86(11):2278–2324, 2002. Matena, M. S. and Raffel, C. A. Merging models with fisher-weighted averaging. Advances in Neural Information Processing Systems , 35:17703–17716, 2022. Meiser, S. and Mohammadi, E. Tight on budget? tight bounds for r-fold approximate differential privacy. In 
+
+Proceedings of the 2018 ACM SIGSAC Conference on Computer and Communications Security , pp. 247–264, 2018. Mironov, I. R ´enyi differential privacy. In 2017 IEEE 30th computer security foundations symposium (CSF) , pp. 263– 275. IEEE, 2017a. Mironov, I. R ´enyi differential privacy. In 2017 IEEE 30th computer security foundations symposium (CSF) , pp. 263– 275. IEEE, 2017b. Ponomareva, N., Hazimeh, H., Kurakin, A., Xu, Z., Denison, C., McMahan, H. B., Vassilvitskii, S., Chien, S., and Thakurta, A. G. How to dp-fy ml: A practical guide to machine learning with differential privacy. Journal of Artificial Intelligence Research , 77:1113–1201, 2023. Puccetti, G. and Wang, R. Extremal dependence concepts. 2015. Shejwalkar, V., Ganesh, A., Mathews, R., Mu, Y., Song, S., Thakkar, O., Thakurta, A., and Zheng, X. Recycling scraps: Improving private learning by leveraging inter-mediate checkpoints. arXiv preprint arXiv:2210.01864 ,2022. Sommer, D., Meiser, S., and Mohammadi, E. Privacy loss classes: The central limit theorem in differential privacy. 
+
+Cryptology ePrint Archive , 2018. Wang, Y.-X., Balle, B., and Kasiviswanathan, S. P. Subsam-pled r ´enyi differential privacy and analytical moments accountant. In The 22nd international conference on arti-ficial intelligence and statistics , pp. 1226–1235. PMLR, 2019. Wortsman, M., Ilharco, G., Gadre, S. Y., Roelofs, R., Gontijo-Lopes, R., Morcos, A. S., Namkoong, H., Farhadi, A., Carmon, Y., Kornblith, S., et al. Model soups: averaging weights of multiple fine-tuned models improves accuracy without increasing inference time. In 
+
+International conference on machine learning , pp. 23965– 23998. PMLR, 2022. Yadav, P., Tam, D., Choshen, L., Raffel, C. A., and Bansal, M. Ties-merging: Resolving interference when merging models. Advances in Neural Information Processing Systems , 36:7093–7115, 2023. Yang, E., Wang, Z., Shen, L., Liu, S., Guo, G., Wang, X., and Tao, D. Adamerging: Adaptive model merging for multi-task learning. arXiv preprint arXiv:2310.02575 ,2023. Yang, E., Shen, L., Guo, G., Wang, X., Cao, X., Zhang, J., and Tao, D. Model merging in llms, mllms, and beyond: Methods, theories, applications and opportunities. arXiv preprint arXiv:2408.07666 , 2024. Yousefpour, A., Shilov, I., Sablayrolles, A., Testuggine, D., Prasad, K., Malek, M., Nguyen, J., Ghosh, S., Bharadwaj, A., Zhao, J., et al. Opacus: User-friendly differential pri-vacy library in pytorch. arXiv preprint arXiv:2109.12298 ,2021. Yu, L., Yu, B., Yu, H., Huang, F., and Li, Y. Language models are super mario: Absorbing abilities from homol-ogous models as a free lunch. In Forty-first International Conference on Machine Learning , 2024. 11 Differentially Private Model Merging 
+
+## A. Proof of Proposition 3.1 
+
+Proof. Consider following counterexample: θ1(D) ≡ C with probability 1 and then h(θ1, θ 2) can be reduce to a function 
+
+˜h(θ2) that only depends on θ2. Since h is nontrival, there at least are two points {a, b } s.t ˜h(a) d̸
+
+= ˜h(b). Therefore there is at least one S ⊆ RP , such that 
+
+P(˜h(a) ∈ S) > P(˜h(b) ∈ S)
+
+Consider P(θ2(D) = a) = p, P(θ2(D)) = 1 − p, and P(θ2(D′) = a) = p′, P(θ2(D)) = 1 − p′ such that p = eε2 p′ + δ =1 ⇒ p′ = e−ε2 (1 − δ) then 
+
+P(˜h(θ2(D)) ∈ S) = pP(˜h(a) ∈ S) + (1 − p)P(˜h(b) ∈ S)= eε2 p′P(˜h(a) ∈ S) + δP(˜h(a) ∈ S) + eε′
+
+(1 − p′)P(˜h(b) ∈ S)
+
+− (eε′
+
+− 1 + ( eε2 − eε′
+
+)p′ + δ)P(˜h(b) ∈ S)
+
+> e ε′
+
+P(˜h(θ2(D′)) ∈ S) + (( eε2 − eε′
+
+)p′ + δ)P(˜h(a) ∈ S)
+
+− (eε′
+
+− 1 + ( eε2 − eε′
+
+)p′ + δ)P(˜h(b) ∈ S)= eε′
+
+P(˜h(θ2(D′)) ∈ S) + (1 − eε′−ε2 (1 − δ))( P(˜h(a) ∈ S) − P(˜h(b) ∈ S)) 
+
+− (eε′
+
+− 1) P(˜h(b) ∈ S)
+
+The last equality is gained by bringing p′ = e−ε2 (1 − δ) into the equation. If DT V (˜h(a), ˜h(b)) > e−ε′  
+
+> δ′+1 −e−ε′
+> 1−e−ε2(1 −δ)
+
+, we know 
+
+sup 
+
+> S
+
+(1 − eε′−ε2 (1 − δ))( P(˜h(a) ∈ S) − P(˜h(b) ∈ S)) − (eε′
+
+− 1) P(˜h(b) ∈ S)
+
+≥ (1 − eε′−ε2 (1 − δ)) DT V (˜h(a), ˜h(b)) − (eε′
+
+− 1)(1 − DT V (˜h(a), ˜h(b))) 
+
+> δ ′
+
+and thus there exists S such that 
+
+P(˜h(θ2(D)) ∈ S) > e ε′
+
+P(˜h(θ2(D′)) ∈ S) + δ′.
+
+We finish the proof. 
+
+## B. Proof of Lemma 4.1 and Theorem 4.2 
+
+Proof of Lemma 4.1. Since under linear combination with parameter λ, the output θ(D) ∼ N (ˆ μ, λ 2σ21 + (1 − λ)2σ22 ) and 
+
+σ2 
+
+> LC
+
+(λ) = λ2σ21 + (1 − λ)2σ22 . Thus 
+
+εLC  
+
+> α
+
+= α∆2
+
+2σ2 
+
+> LC
+
+(λ) .
+
+Next we prove 
+
+εRS  
+
+> α
+
+= Dα
+
+ Pπ ∥Qπ
+
+ ≥ α∆2
+
+2σ2 
+
+> RS
+
+(π) + o(∆ 2).
+
+Write p for the density of Pπ and note that Qπ ’s density q(x) = p(x − ∆) . Define 
+
+Jχ(P ) := 
+
+Z
+
+> R
+
+(p′(x)) 2
+
+p(x) dx. 
+
+Step 1. We show that 
+
+Dα(Pπ ∥Qπ ) ≥ α
+
+2 Jχ(Pπ ) ∆ 2 + o(∆ 2). (12) 12 Differentially Private Model Merging 
+
+Consider Ψα(∆) := log R p(x)α p(x − ∆) 1−α dx , so that Dα(Pπ ∥Qπ ) = Ψ α(∆) /(α − 1) . Differentiate over ∆ and note that R p′dx = 0 , we know Ψ′
+
+> α
+
+(0) = 0 and Ψ′′ 
+
+> α
+
+(0) = α(α − 1) Jχ(P ), which yields (12). 
+
+Step 2. Let random variable X ∼ Pπ , we next show 
+
+Jχ(Pπ ) ≥ 1Var( X) . (13) Let s(x) = p′(x)/p (x) be the score. For any smooth h, integration by parts gives E[h′(X)] = −E[h(X)s(X)] . By Cauchy-Schwarz, (E[h′(X)]) 2 ≤ E[h(X)2] E[s(X)2] = E[h(X)2] Jχ(P ). Taking the supremum over h shows Jχ(P ) ≥
+
+sup h
+
+ E[h′(X)] 2/E[h(X)2]. Choosing h(x) = x − E[X] yields E[h′(X)] = 1 and E[h(X)2] = Var( X), proving (13) .Note that when π ∈ (0 , 1) , Pπ is mixed gaussian distribution, thus the bound could not be reached and thus cπ > 0.Combining step 1 and step 2 we finish the proof. 
+
+## C. Proof of Theorem 5.1 
+
+Lemma C.1. For any α > 1, π ∈ ∆N −1, and ai, b i ≥ 0 (i = 1 , 2, . . . , N ), 
+
+  NX
+
+> i=1
+
+πiai
+
+α  NX
+
+> i=1
+
+πibi
+
+1−α ≤
+
+> N
+
+X
+
+> i=1
+
+πiaαi b 1−αi .
+
+Proof of C.1. Let the conjugate exponents be (r, s ) = ( α, α/ (α − 1)) . Let ui = ai b(1 −α)/α i , vi = bα−1/α i . By H ¨older’s inequality, we have 
+
+X
+
+> i
+
+πiai = X
+
+> i
+
+πiuivi ≤
+
+ X 
+
+> i
+
+πiuri
+
+1/r  X 
+
+> i
+
+πivsi
+
+1/s 
+
+=
+
+ X 
+
+> i
+
+πiaαi b1−αi
+
+1/α  X 
+
+> i
+
+πibi
+
+(α−1) /α 
+
+.
+
+Raising both sides to the power α and we finish the proof. 
+
+Proof of (6) . Let Pi = Law (Mi(D)) and Qi = Law (Mi(D′)) be the output distribution of the two DP mechanisms on neighboring datasets D ∼ D′. Let 
+
+Pmix =
+
+> N
+
+X
+
+> i=1
+
+πiPi, Qmix =
+
+> N
+
+X
+
+> i=1
+
+πiQi,
+
+be distributions with densities pmix = PNi=1 πipi and qmix = PNi=1 πiqi. By the definition, 
+
+e(α−1) Dα(Pmix ∥Qmix ) =
+
+Z
+
+pα 
+
+> mix
+
+q 1−α 
+
+> mix
+
+dx =
+
+Z  NX
+
+> i=1
+
+πipi
+
+α NX
+
+> i=1
+
+πiqi
+
+1−α
+
+dx. 
+
+Applying Lemma C.1, we know 
+
+pα
+
+> mix
+
+(x) q 1−α 
+
+> mix
+
+(x) ≤
+
+> N
+
+X
+
+> i=1
+
+πipαi (x) q 1−αi (x).
+
+Thus, 
+
+e(α−1) Dα(Pmix ∥Qmix ) ≤
+
+> N
+
+X
+
+> i=1
+
+πi
+
+Z
+
+pαi q 1−αi =
+
+> N
+
+X
+
+> i=1
+
+πie(α−1) Dα(Pi∥Qi).
+
+Thus, 
+
+Dα(Pmix ∥Qmix ) ≤ 1
+
+α − 1 log 
+
+ NX
+
+> i=1
+
+πi e(α−1) Dα(Pi∥Qi)
+
+.
+
+Since εα,i = sup D∼D′ Dα(Pi∥Qi), we obtain 
+
+εRS  
+
+> α
+
+(λ) ≤ 1
+
+α − 1 log 
+
+ NX
+
+> i=1
+
+πi e(α−1) εα,i 
+
+
+
+, ∀α > 1.
+
+We finish the proof. 13 Differentially Private Model Merging 
+
+## D. Proof of Theorem 5.2 
+
+Proof of Theorem 5.2. For any ε ≥ 0, recall the hockey-stick divergence is defined as 
+
+Hε(P, Q ) = sup 
+
+> S
+
+n
+
+P (S) − eεQ(S)
+
+o
+
+, (14) Thus for any measurable S,
+
+PRS (S) − eεQRS (S) = 
+
+> N
+
+X
+
+> i=1
+
+πi
+
+
+
+Pi(S) − eεQi(S)
+
+
+
+.
+
+Taking supremum over S, we obtain 
+
+Hε(PRS , Q RS ) = sup 
+
+> AN
+
+X
+
+> i=1
+
+πi
+
+
+
+Pi(A) − eεQi(A)
+
+
+
+≤
+
+> N
+
+X
+
+> i=1
+
+πi sup 
+
+> A
+
+
+
+Pi(A) − eεQi(A)
+
+
+
+=
+
+> N
+
+X
+
+> i=1
+
+πiHε(Pi, Q i).
+
+This proves the first inequality. The second inequality follows by the same argument after swapping the roles of P and Q:
+
+Hε(QRS , P RS ) ≤
+
+> N
+
+X
+
+> i=1
+
+πiHε(Qi, P i).
+
+Using the two bounds above for each neighboring pair D ∼ D′, we have 
+
+δRS (ε) ≤ sup 
+
+> D∼D′
+
+max 
+
+n NX
+
+> i=1
+
+πi Hε(Pi, Q i),
+
+> N
+
+X
+
+> i=1
+
+πi Hε(Qi, P i)
+
+o
+
+,
+
+We finish the proof. 
+
+## E. Proof of Theorem 6.1 
+
+Proof. Fix any neighboring datasets D ∼ D′, let P joint , Q joint be the output distributions of the joint release Mjoint := (M1, . . . , MN ) on D and D′, respectively. Similarly, we define P LC , Q LC be the output distributions of LC on D and D′.Obviously, the linear-combination mechanism can be understood as a post-processing of the joint release. 
+
+(1) RDP upper bound. Since the linear-combination mechanism can be understood as a post-processing of the joint release, we have 
+
+Dα(P LC ∥ QLC ) ≤ Dα(P joint ∥ Qjoint ). (15) Under the definition of R´ enyi divergence, we have 
+
+Dα(P joint ∥ Qjoint ) = 
+
+> N
+
+X
+
+> i=1
+
+Dα(Pi ∥ Qi) ≤
+
+> N
+
+X
+
+> i=1
+
+εα,i . (16) Combining (15)-(16) and taking the worst case over D ∼ D′ yields εLC  
+
+> α
+
+(λ) ≤ PNi=1 εα,i .
+
+(2) PLD upper bound. Since the linear-combination mechanism can be understood as a post-processing of the joint release, we have 
+
+Hε(P LC ∥ QLC ) ≤ H ε(P joint ∥ Qjoint ). (17) Similarly, we have 
+
+Hε(QLC , P LC ) ≤ H ε(Qjoint , P joint ).
+
+Therefore, 
+
+δLC (ε) = max {H ε(P LC , Q LC ), Hε(QLC , P LC )} ≤ max {H ε(P joint , Q joint ), Hε(Qjoint , P joint )} =: δjoint (ε).
+
+Moreover, from PLD accounting, we know the PLD of the joint release is the convolution ωjoint = ω1 ⋆ · · · ⋆ ω N , and 
+
+δjoint (ε) is computed from ωjoint .14 Differentially Private Model Merging 
+
+(3) Tightness. We show the bounds in (7) - (8) are worst-case tight by an explicit construction. Let p1, . . . , p N be positive integers and set p = PNi=1 pi. For each i ∈ [N ], let M′ 
+
+> i
+
+be any mechanism whose output lies in Rpi , and Mi output its p dimensional version θi : D → Rp, where the Pi−1 
+
+> j=1
+
+pj + 1 −th element to Pij=1 pj −th element is M ′ 
+
+> i
+
+(D) and other elements are 0. Now consider the linear-combination output 
+
+θ(D) := 
+
+> N
+
+X
+
+> i=1
+
+λiθi(D) ∈ Rp.
+
+Intuitively, linear-combination does not lose any information from the joint release. As a result, for every neighboring pair 
+
+D ∼ D′ and every α > 1, R´ enyi divergence is preserved. We have 
+
+Dα
+
+ P LC ∥ QLC  = Dα
+
+ Pjoint ∥ Qjoint 
+
+,
+
+and likewise the hockey-stick divergence (hence the PLD profile) is also preserved: 
+
+δLC (ε) = δjoint (ε), ∀ ε ≥ 0.
+
+Therefore the upper bounds (7)-(8) cannot be improved in general. This establishes worst-case tightness. 
+
+## F. Proof of Theorem 6.2, Lemma 6.3, Theorem 6.4 and Corollary 6.5 
+
+Proof of Theorem 6.2. Fix a step t and omit the superscript (t) for simplicity. Let D, D ′ be neighboring datasets. Recall for each i ∈ [N ], let zi ∈ { 0, 1} indicate whether the differing record is included in mechanism i’s minibatch. By clipping, for each i, ∥λiηi ˜gi∥2 ≤ wi. Thus, conditioning on J = {i : zi = 1 }, the mean shift between D and D′ for the mixed update is a vector vJ satisfying 
+
+∥vJ ∥2 ≤ ∆J . (18) Let ϕ0 denote the density of N (0 , s 2I) and ϕJ denote the density of N (vJ , s 2I). WLOG, using translation invariance, we may represent the step-t output distributions as 
+
+p(x) = X 
+
+> J⊆[N]
+
+ρJ ϕJ (x), q(x) = ϕ0(x),
+
+where p and q is the density of the step-t mechanism under D and D′. Define the corresponding distributions are P, Q For an integer α ≥ 2, the R´ enyi divergence is 
+
+Dα(P ∥Q) = 1
+
+α − 1 log 
+
+Z
+
+p(x)αq(x)1−α dx = 1
+
+α − 1 log 
+
+Z  X 
+
+> J
+
+ρJ ϕJ (x)
+
+α
+
+ϕ0(x)1−α dx. 
+
+Since  X 
+
+> J
+
+ρJ ϕJ (x)
+
+α
+
+= X
+
+> γ∈N α
+
+α!
+
+Q 
+
+> J
+
+γJ !
+
+Y
+
+> J
+
+ ρJ ϕJ (x)γJ
+
+.
+
+and all terms are nonnegative, we could exchange sum and integral to get 
+
+Z
+
+p(x)αq(x)1−α dx = X
+
+> γ∈N α
+
+α!
+
+Q 
+
+> J
+
+γJ !
+
+ Y 
+
+> J
+
+ργJ
+
+> J
+
+
+
+I(γ), (19) where 
+
+I(γ) := 
+
+Z Y
+
+> J
+
+ϕJ (x)γJ ϕ0(x)1−α dx. 
+
+Since ϕJ (x) = ϕ0(x) exp  ⟨x, v J ⟩/s 2 − ∥ vJ ∥22/(2 s2). Then 
+
+Y
+
+> J
+
+ϕJ (x)γJ ϕ0(x)1−α = ϕ0(x) exp 
+
+D
+
+x, 
+
+P 
+
+> J
+
+γJ vJ
+
+s2
+
+E
+
+−
+
+P 
+
+> J
+
+γJ ∥vJ ∥22
+
+2s2
+
+
+
+.
+
+15 Differentially Private Model Merging 
+
+Using the Gaussian mgf regard to X ∼ N (0 , s 2I), we have 
+
+I(γ) = exp 
+
+P 
+
+> J
+
+γJ vJ 
+
+> 22
+
+− P 
+
+> J
+
+γJ ∥vJ ∥22
+
+2s2
+
+!
+
+. (20) Using (18) and the triangle inequality, 
+
+X
+
+> J
+
+γJ vJ 2
+
+≤ X
+
+> J
+
+γJ ∥vJ ∥2 ≤ X
+
+> J
+
+γJ ∆J
+
+and note that 
+
+γ2 
+
+> J
+
+∥vJ ∥22 ≥ γJ ∥vJ ∥22.
+
+Thus   X 
+
+> J
+
+γJ ∥vJ ∥2
+
+2 − X
+
+> J
+
+γJ ∥vJ ∥22
+
+is a increasing function of ∥vJ ∥2. Thus, 
+
+I(γ) ≤ exp 
+
+  P  
+
+> J
+
+γJ ∥vJ ∥2
+
+2 − P 
+
+> J
+
+γJ ∥vJ ∥22
+
+2s2
+
+!
+
+≤ exp 
+
+  P  
+
+> J
+
+γJ ∆J
+
+2 − P 
+
+> J
+
+γJ ∆2
+
+> J
+
+2s2
+
+!
+
+.
+
+Bringing ˜∆J = ∆ J /s in the inequality, we know 
+
+I(γ) ≤ B(γ) = exp 
+
+  P  
+
+> J
+
+γJ ˜∆J
+
+2 − P 
+
+> J
+
+γJ ( ˜∆J )2
+
+2
+
+!
+
+.
+
+Substituting this bound into (19) gives 
+
+Z
+
+p(x)αq(x)1−α dx ≤ X
+
+> γ∈N α
+
+α!
+
+Q 
+
+> J
+
+γJ ! B(γ) Y
+
+> J
+
+ργJ 
+
+> J
+
+.
+
+Therefore, 
+
+Dα(P ∥Q) ≤ 1
+
+α − 1 log 
+
+ X
+
+> γ∈N α
+
+α!
+
+Q 
+
+> J
+
+γJ ! B(γ) Y
+
+> J
+
+ργJ
+
+> J
+
+ ,
+
+Taking the worst case over D ∼ D′ yields the result. We finish the proof. 
+
+Proof of Lemma 6.3. Fix a step t and omit the superscript (t) for simplicity and use s represent sλ. Let D, D ′ be neighboring datasets. Recall the definition of the privacy loss random variable 
+
+L := log dP dQ (Y ), Y ∼ Q. (21) WLOG, using translation invariance, we may represent the densities of P and Q as 
+
+p(x) = X 
+
+> J⊆[N]
+
+ρJ ϕJ (x), q(x) = ϕ0(x),
+
+where ϕ0 denote the density of N (0 , s 2I) and ϕJ denote the density of N (vJ , s 2I) Bringing p(x) and q(x) into 21, we know 
+
+L(Y ) := log 
+
+P  
+
+> J⊆[N]
+
+ρJ ϕJ (Y )
+
+ϕ0(Y ) , Y ∼ Q. 
+
+16 Differentially Private Model Merging 
+
+Proof of Theorem 6.4. We use the same notation as Proof of Lemma 6.3. First we consider the surrogate for Hε(P, Q ).
+
+Step 1: Rewrite the Hε(P, Q ) in the terms of projections of Y . We notice that if we let ZJ = ⟨Y, vJ  
+
+> ∥vJ∥2
+
+⟩ and ζJ = ∥vJ ∥2,we have ZJ ∼ N (0 , s 2) and 
+
+ϕJ (Y )
+
+ϕ0(Y ) = exp( − 12s2 ∥Y − vJ ∥22 + 12s2 ∥Y ∥22)= exp( − 12s2 ζ2 
+
+> J
+
++ 1
+
+s2 ζJ ZJ )
+
+By Lemma 6.3, we know exp( L(Y )) =        
+
+> P
+> J⊆[N]ρJϕJ(Y)
+> ϕ0(Y)
+
+= P  
+
+> J⊆[N]
+
+ρJ exp( − 12s2 ζ2 
+
+> J
+
++ 1 
+
+> s2
+
+ζJ ZJ ), and therefore 
+
+Hϵ(P, Q ) = E(exp( L(Y )) − eϵ)+ = E
+
+ X 
+
+> J⊆[N]
+
+ρJ exp( − 12s2 ζ2 
+
+> J
+
++ 1
+
+s2 ζJ ZJ ) − eϵ
+
+
+
+> +
+
+= EG(( ZJ )J⊆[N ]),
+
+where G(( zJ )J⊆[N ]) = 
+
+P  
+
+> J⊆[N]
+
+ρJ exp( − 12s2 ζ2 
+
+> J
+
++ 1 
+
+> s2
+
+ζJ zJ ) − eϵ
+
+
+
+> +
+
+.
+
+Step 2: G is supermodular We next prove G is supermodular on R2N
+
+Lemma F.1. G is supermodular on R2N
+
+. Moreover, G is coordinatewise nondecreasing. Proof. Write 
+
+TJ (zJ ) = ρJ exp 
+
+ ζJ zJ
+
+s2 − ζ2
+
+> J
+
+2s2
+
+
+
+, ψ(x) = ( x − eε)+.
+
+Then 
+
+G(( zJ )J ) = ψ X
+
+> J
+
+TJ (zJ )
+
+!
+
+.
+
+We first note that each TJ is nondecreasing. Since ψ is nondecreasing, it follows that G is coordinatewise nondecreasing. Next we prove that G is supermodular. Since ψ is convex and nondecreasing, it suffices to verify that G has increasing differences. Fix J1̸ = J2, and let all coordinates other than (zJ1 , z J2 ) be fixed. Define G0 = P  
+
+> J̸=J1,J 2
+
+TJ (zJ ). Then 
+
+G = ψ G0 + TJ1 (zJ1 ) + TJ2 (zJ2 ).
+
+For x1 ≥ x2 and y1 ≥ y2, since ψ is convex, we know 
+
+ψ G0 + TJ1 (x1) + TJ2 (y1) − ψ G0 + TJ1 (x2) + TJ2 (y1) ≥ ψ G0 + TJ1 (x1) + TJ2 (y2) − ψ G0 + TJ1 (x2) + TJ2 (y2),
+
+Therefore G has increasing differences in (zJ1 , z J2 ). Since this holds for every pair J1̸ = J2, G is supermodular. Back to the proof, since G is supermodular, we considera standard supermodular function result: 
+
+Definition F.2 ((Puccetti & Wang, 2015)) . A function c : Rd → R is said to be mean-compatible with a random vector 
+
+(X1, . . . , X d) if there exist measurable functions bj : R → [0 , ∞), j = 1 , . . . , d , such that 
+
+|c(x1, . . . , x d)| ≤ 
+
+> d
+
+X
+
+> j=1
+
+bj (xj ), ∀(x1, . . . , x d) ∈ Rd,
+
+and E[bj (Xj )] < ∞, j = 1 , . . . , d .
+
+Theorem F.3 (Theorem 2.1(b)(d) in (Puccetti & Wang, 2015)) . For a random vector (X1, . . . , X d) with joint distribution function F , the following statements are equivalent: (a) F is given by 
+
+F (x1, . . . , x d) = F ∨ 
+
+> d
+
+(x1, . . . , x d) := min F1(x1), . . . , F d(xd), x1, . . . , x d ∈ R,
+
+17 Differentially Private Model Merging 
+
+where Fj is the marginal distribution of Xj , j = 1 , . . . , d ;(b) for all supermodular functions c : Rd → R that are mean-compatible with (X1, . . . , X d), we have that 
+
+E[c(X1, . . . , X d)] = sup 
+
+n
+
+E[c(X′
+
+> 1
+
+, . . . , X ′
+
+> d
+
+)] : X′
+
+> jd
+
+= Xj , j = 1 , . . . , d 
+
+o
+
+.
+
+In our setting, let (Z)J be (X1, . . . , X d),
+
+F (( zJ )J ) = P(Z ≤ zJ , ∀J ∈ J ) = P(Z ≤ min  
+
+> J
+
+zJ ) = min  
+
+> J
+
+FJ (zJ ).
+
+Thus the condition (a) holds. Define 
+
+bJ (z) := |ρJ | exp( − u2
+
+> J
+
+2s2 + uJ zs2 ) + eϵ, z ∈ R.
+
+Then it is easy to verify 
+
+G(( zJ )J ) ≤ X
+
+> J
+
+bJ (zJ ), ∀(zJ )J .
+
+And since Z is Gaussian, its moment generating function is finite. Therefore, E[exp( uJ 
+
+> s2
+
+Z)] < ∞. Hence E[bJ (ZJ )] < ∞.Thus the function G is mean-compatible with (Z)J . Thus by Theorem F.3, since ZJd
+
+= Z and G is supermodular, we know 
+
+Hϵ(P, Q ) = EG(( ZJ )J⊆[N ]) ≤ EG(( Z)J⊆[N ]) = E  exp( L(Z)) − eϵ 
+
+> +
+
+,
+
+where Z ∼ N (0 , s 2) and exp( L(Z)) = P  
+
+> J⊆[N]
+
+ρJ exp( − 12s2 ζ2 
+
+> J
+
++ 1 
+
+> s2
+
+ζJ Z).
+
+Step 3: Monotonicity in ∥vJ ∥2Now consider tJ (ζJ ) satisfying L(Z) ≥ eϵ ⇔ Z ≥ tJ (ζJ ) , we have 
+
+ddζ J
+
+E  exp( L(Z)) − eϵ 
+
+> +
+
+= ddζ J
+
+Z  
+
+> z≥tJ(ζJ)
+
+( X 
+
+> K⊆[N]
+
+ρK ϕ(z; ζJ , s 2) − eϵϕ(z; 0 , s 2)) dz 
+
+= ρJ
+
+Z  
+
+> z≥tJ(ζJ)
+
+− ddz ϕ(z; ζJ , s 2)dz 
+
+= ρJ ϕ(tJ (ζJ ); ζJ , s 2) ≥ 0
+
+Here we note that by definition of t, the boundary term disappears. Thus let 
+
+˜L = log 
+
+P  
+
+> J⊆[N]
+
+ρJ ϕ Z; ∆ J , s 2
+
+ϕ(Z; 0 , s 2) , Z ∼ N (0 , s 2),
+
+We know 
+
+Hϵ(P, Q ) ≤ E  exp( L(Z)) − eϵ 
+
+> +
+
+≤ E
+
+
+
+exp( ˜L(Z)) − eϵ
+
+> +
+
+.
+
+For the Hϵ(Q, P ) part, a similar argument applies after swapping P and Q, so the same type of bound holds for Hϵ(Q, P ).Alternatively, one may also use the identity 
+
+Hϵ(Q, P ) = 1 − eϵ + eϵH−ϵ(P, Q ).
+
+This is due to 
+
+Hϵ(Q, P ) = 
+
+Z
+
+(q − eϵp)+dμ =
+
+Z  (q − eϵp) + ( eϵp − q)+ dμ = 1 − eϵ + eϵH−ϵ(P, Q )
+
+Since 
+
+Ee˜L = X
+
+> J
+
+ρJ
+
+Z
+
+ϕ(z; ∆ J , s 2)dz = 1 ,
+
+18 Differentially Private Model Merging 
+
+we know 
+
+E(eϵe˜L − 1) + = E(eϵe˜L − 1) + E(1 − eϵe˜L)+ = eϵ − 1 + E(1 − eϵe˜L)+
+
+and thus 
+
+Hϵ(Q, P ) = 1 − eϵ + eϵH−ϵ(P, Q ) ≤ 1 − eϵ + E(eϵe˜L − 1) + = E(1 − eϵe˜L)+
+
+Hence, the reverse direction is covered as well, and it yields the similar surrogate bound. 
+
+Proof of Corollary 6.5. We consider the following lemma. 
+
+Lemma F.4. Let L(t) be privacy loss random variables step t ( t ∈ [1 . . . T ]), conditioned on all randomness up to step 
+
+t − 1, F t−1, and ˜L(t) is surrogate. Define 
+
+δL(t) (ϵ) := E[(1 − eε−L(t)
+
+)+], δ˜L(t) (ϵ) := E(1 − eϵ− ˜L(t)
+
+)+
+
+.
+
+Suppose that ∀tδ˜L(t) (ϵ) ≥ δL(t) (ϵ), ∀ε ∈ R.
+
+Then 
+
+δ˜L(1) +··· + ˜L(T ) (ε) ≥ δL(1) +··· +L(T ) (ε), ∀ε ∈ R.
+
+Proof. For T = 2 , note 
+
+δL(1) +L(2) (ϵ) = E[eL(1) 
+
+E[( eL(2) 
+
+− eϵ−L(1) 
+
+)+] | F1] = E[eL(1) 
+
+δL(2) (ϵ − L(1) )] ≤ E[eL(1) 
+
+δ˜L(2) (ϵ − L(1) )] = δL(1) + ˜L(2) (ϵ).
+
+By the construction, ˜L(2) only depend on randomness in step 2 and thus is independent to L(1) . So similarly, δL(1) + ˜L(2) (ϵ) ≤
+
+δ˜L(1) + ˜L(2) (ϵ). Thus 
+
+δL(1) +L(2) (ϵ) ≤ δ˜L(1) + ˜L(2) (ϵ).
+
+This proves the result for T = 2 .Assume now that the statement holds for T = k − 1. For T = k, let 
+
+O1 = L(1) + · · · + L(k−1) , O2 = L(k),
+
+and define O′
+
+> 1
+
+, O ′ 
+
+> 2
+
+analogously. By the induction hypothesis, δO′ 
+
+> 1
+
+(ε) ≥ δO1 (ε) for all ε. Applying the two-term result to 
+
+(O1, O 2) and (O′
+
+> 1
+
+, O ′
+
+> 2
+
+) yields the claim for T = k. By induction, we finish the proof. Corollary 6.5 is a direct application of Lemma F.4. We finish the proof. 
+
+## G. Proof of Proposition 7.1 
+
+Proof. WLOG, we assume ∆ 
+
+> σ
+
+= 1 Step 1 Per-release RDP parameter. For the Gaussian mechanism (mean estimation with ℓ2-sensitivity ∆ and noise Z ∼ N (0 , σ 2)), the per-release R´ enyi DP parameter at order α > 1 is 
+
+εα = α ∆2
+
+2σ2 .
+
+Step 2 Per-release (ε, δ ) from RDP. Since 
+
+ε = inf 
+
+> α> 1
+
+
+
+εα + log(1 /δ )
+
+α − 1
+
+
+
+,
+
+We know 
+
+ε = ∆2
+
+2σ2 + ∆
+
+σ
+
+p2 log(1 /δ )
+
+19 Differentially Private Model Merging 
+
+Step 3 composition in (ε, δ ). Applying (Dwork et al., 2010, Theorem III.3) to N releases, each satisfying (ε, δ )-DP, yields a composed guarantee (εcom , δ ′) with 
+
+δ′ = N δ + δ0,
+
+and 
+
+εcom = εp2N log(1 /δ 0) + N ε (eε − 1) 
+
+.
+
+Step 4 Joint RDP accounting. By additivity of RDP under composition, we know 
+
+εRDP = inf 
+
+> α> 1
+
+
+
+N ε α + log(1 /δ ′)
+
+α − 1
+
+
+
+= inf 
+
+> α> 1
+
+ N α ∆2
+
+2σ2 + log(1 /δ ′)
+
+α − 1
+
+
+
+Thus 
+
+εRDP = N ∆2
+
+2σ2 + ∆
+
+σ
+
+p2N log(1 /δ ′).
+
+We only need to prove 
+
+N ∆2
+
+2σ2 + ∆
+
+σ
+
+p2N log(1 /δ ′) ≤ εp2N log(1 /δ 0) + N ε (eε − 1) .
+
+Let t = ∆ 
+
+> σ
+
+, s = p2 log(1 /δ ). Bringing 
+
+ε = 12 t2 + st 
+
+into the inequality, and use eε > 1 + ε, since eε > 1 + ε, we only need to prove 
+
+N
+
+2 t2 + tp2N log(1 /δ ′) ≤ ( 12 t2 + st )p2N log(1 /δ 0) + N ( 12 t2 + st )2
+
+Let A ≜ p2N log(1 /δ 0) and C ≜ p2N log(1 /δ ′). Since δ′ = N δ + δ0 ≥ δ0, we have C ≤ A. Therefore the left-hand side is at most N 
+
+> 2
+
+t2 + tA , and it is enough to show 
+
+N
+
+2 t2 + tA ≤
+
+ 12 t2 + st 
+
+
+
+A + N
+
+ 12 t2 + st 
+
+2
+
+. (22) Rearranging (22), the gap equals 
+
+ 12 t2 + st − t
+
+
+
+A + N
+
+h 12 t2 + st 
+
+2
+
+− 12 t2i
+
+=
+
+ 12 t2 + ( s − 1) t
+
+
+
+A + N
+
+ 14 t4 + st 3 + ( s2 − 12 )t2
+
+.
+
+Since δ ≤ 1/2, we have s = p2 log(1 /δ ) ≥ √2 log 2 > 1, hence both s − 1 ≥ 0 and s2 − 12 ≥ 0. Since t ≥ 0 and A ≥ 0,every term on the right-hand side is nonnegative, so the gap is ≥ 0. We finish the proof. 
+
+## H. Experiment Details 
+
+We use 42 for random seed in all experiments. 
+
+H.1. MNIST Dataset and Model. We use MNIST with the standard train/test split ( 60 ,000 /10 ,000 ). Images are normalized. We train a logistic regression classifier: 
+
+Flatten → Linear (28 ×28 → 10) ,
+
+optimized with cross-entropy loss. We report test-set classification accuracy (and loss) after each epoch and use the final test accuracy for Pareto-frontier plots. 20 Differentially Private Model Merging 
+
+DP-SGD Implementation. We use the Opacus package (Yousefpour et al., 2021) to train with DP-SGD under Poisson sampling. The optimizer is SGD. In our experiments, we train three base models with the following hyperparameters: learning rate 0.1, C = 1 , σ = 0 .5, T = 3 epochs ;
+
+learning rate 0.1, C = 2 , σ = 0 .5, T = 3 epochs ;
+
+learning rate 0.1, C = 1 , σ = 2 , T = 3 epochs .
+
+We use N = 60 ,000 training samples and batch size B = 256 , giving sampling rate q = B/N . The total number of optimization steps is set to total steps = T · len(train loader) .
+
+H.2. CIFAR-10 Dataset and Model. We use CIFAR-10 with the standard split ( 50 ,000 /10 ,000 ). We apply standard data preprocessing. We use ResNet18 with CIFAR-10 adaptations: the first convolution is replaced by a 3 × 3 stride-1 convolution and the max-pooling layer is removed. The final fully-connected layer is set to output 10 classes. We report test-set accuracy (and loss) after each epoch; the final test accuracy is used for the accuracy–privacy Pareto-frontier plots. 
+
+DP-SGD Implementation. We train ResNet18 with DP-SGD using Opacus. To ensure compatibility with per-sample gradients, we (i) apply ModuleValidator.fix(model) to replace batch normalization layers (e.g., BN → GN), and (ii) disable in-place operations by setting all ReLU layers to inplace=False . We use the SGD optimizer with per-sample gradient clipping norm C and noise multiplier σ. We use batch size B = 256 and train for T = 20 epochs. We fix the randomness of data shuffling using a DataLoader generator seed of 42 . We generate candidate models by sweeping the learning rate η ∈ { 0.01 , 0.02 , 0.04 } and C ∈ { 1, 2, 4}. For each setting, σ is chosen so that the resulting RDP ε is below the target thresholds ( ε < 10 and ε < 9). 
+
+DP-SGD from a Pretrained Model Initialization. In addition to training from scratch, we also consider a pretraining-based setup on CIFAR-10 to better reflect practical workflows. We randomly split the original training set into two disjoint subsets of equal size, denoted by Dpre and Dpriv . We first train a non-private ResNet18 model on Dpre using standard SGD, and then use the resulting checkpoint as initialization for DP-SGD on Dpriv . All merged candidate models are produced from this common pretrained initialization. The privacy guarantee in this setting is with respect to Dpriv only, since Dpre 
+
+is disjoint from the private training subset and is not included in the DP accounting. We fix the randomness of data split using a generator seed of 42 . We train the pretrained model using standard SGD with batch size B = 128 and learning rate 
+
+η = 0 .1, and train for T = 100 epochs. Starting from the pretrained checkpoint, we fine-tune the model on Dpriv using DP-SGD in Opacus with the same implementation adjustments as above, including ModuleValidator.fix(model) and setting all ReLU layers to 
+
+inplace=False . We use the SGD optimizer with per-sample gradient clipping norm C = 1 , noise multiplier σ, batch size B = 256 , and train for T = 3 epochs. As in the from-scratch experiments, we fix the randomness of data shuffling using a DataLoader generator seed of 42 . We generate candidate models by sweeping the learning rate η ∈ { 0.005 , 0.01 },and σ ∈ { 0.4, 0.5}.
+
+H.3. RS for Merging Checkpoints from the Same Run 
+
+We also consider the checkpoint-merging setting studied in Indri et al. (2023); Shejwalkar et al. (2022), where the candidate models are checkpoints from a single DP-SGD training run and therefore are generally not independent. This distinction matters: our LC accounting relies on independence noises across the input mechanisms, whereas RS does not. Since RS only requires access to the individual privacy profiles, it remains applicable even when the inputs are correlated checkpoints. We run experiments under DP-SGD on both an MNIST and CIFAR. We follow the similar hyperparameters selection of the main experiments. We construct three candidate models by taking checkpoints at training steps T ∈ { 1, 2, 3} for MNIST and at training steps T ∈ { 12 , 16 , 20 } for CIFAR-10. The results are shown in Figure 6. We observe that RS still achieves a favorable privacy/utility tradeoff in this correlated-checkpoint regime. 
+
+H.4. More Experiment Results 
+
+21 Differentially Private Model Merging 0.2 0.3 0.4 0.5 
+
+> Privacy budget
+> 0.879
+> 0.880
+> 0.881
+> 0.882
+> 0.883
+> 0.884
+> 0.885
+> Accuracy
+> RS under RDP
+> RS under PLD
+> Base Models(RDP)
+> Base Models(PLD)
+
+(a) Privacy/utility tradeoffs on MNIST within same run (δ = 10 −5)5 6 7 8 9 10 
+
+> Privacy budget
+> 0.49
+> 0.50
+> 0.51
+> 0.52
+> 0.53
+> Accuracy
+> RS under RDP
+> RS under PLD
+> Base Models(RDP)
+> Base Models(PLD)
+
+(b) Privacy/utility tradeoffs on CIFAR-10 within same run ( δ = 10 −5)
+
+Figure 6. Privacy/utility tradeoffs of merging checkpoints from same run. 
+
+(a) DP parameter as π changes (b) MSE as π changes 
+
+Figure 7. Random selection results for mean estimation with δ = 10 −5.
+
+(a) DP parameter as λ changes (b) MSE as λ changes 
+
+Figure 8. Linear combination results for mean estimation with δ = 10 −5.
+
+22
