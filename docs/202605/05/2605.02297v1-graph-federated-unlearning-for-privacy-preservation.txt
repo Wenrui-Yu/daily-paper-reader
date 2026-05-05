@@ -1,0 +1,525 @@
+Title: Graph Federated Unlearning for Privacy Preservation
+
+URL Source: https://arxiv.org/pdf/2605.02297v1
+
+Published Time: Tue, 05 May 2026 01:41:55 GMT
+
+Number of Pages: 16
+
+Markdown Content:
+# Graph Federated Unlearning for Privacy Preservation 
+
+## Ruotong Ma Wentao Yu Qizhou Wang Jie Yang Chen Gong Shanghai Jiao Tong University Nanjing University of Science and Technology Hong Kong Baptist University China Email: ruotong0830@gmail.com, blgpb.ywt@gmail.com, csqzwang@comp.hkbu.edu.hk 29 January 2026 
+
+Abstract 
+
+Graph federated learning (GFL) facilitates decentralized training on distributed graph data while keeping sensitive user information local, aligning with policies such as GDPR and CCPA that grant users the right to freely join or withdraw from learning systems. However, even decentralized, user information can persist after quitting, potentially propagating to central servers and then redistributing to malicious clients. This privacy leakage during user withdrawal, despite its importance, has received seldom attention in GFL. To fill the gap, we explore the potential of machine unlearning (MU) to thoroughly remove user information. However, classical MU methods are known to degrade overall performance, a problem that is exacerbated in GFL due to local message passing and global model collaboration. To this end, we make two adjustments to mitigate this challenge for GFL. First, we ensure unlearning updates that minimally affect overall performance, steering them in directions orthogonal to the gradients from learning other data. Second, we introduce virtual clients, maintained by the central server, to preserve graph topology and global embeddings without recovering information of removed entities. We conduct comprehensive experiments under a representative user-withdrawal scenario and propose a novel membership inference framework to rigorously evaluate and validate the reliability of our privacy preservation. The experimental results demonstrate the effectiveness of our approach, which also surpasses the performance of seven state-of-the-art baseline methods. 
+
+# 1 Introduction 
+
+Graph-structured data are pervasive in modern AI applications, and graph neural networks (GNNs) Xu et al (2019); Wu et al (2020); Luan et al (2022); Corso et al (2024); Yu et al (2026) have been extensively studied as a powerful architecture for analyzing such data, leveraging message-passing mechanisms to capture both node attributes and inherent topological structures. Further with recent advances in spectral graph theory Bo et al (2023) and attention mechanisms Ma et al (2025), GNNs are now capable of supporting large-scale, real-world applications ranging from high-frequency financial trading Li et al (2024) to industrial recommender systems Ko et al (2022). However, processing such large volumes of data with message propagation, especially in data-sensitive domains, makes GNNs particularly susceptible to privacy risks, thereby hindering their broader deployments Liu et al (2021). In response to increasingly stringent data-sharing and privacy regulations, graph federated learning 
+
+(GFL) Zhou et al (2024); Yu et al (2025a) has emerged as a promising solution. GFL enables GNN training on clients, further with these local-trained models collaboratively contributing to a central server. Without directly exchanging data across clients, this decentralized mechanism aligns better with mainstream data-sharing regulations Voigt and Von dem Bussche (2016). However, while these privacy-preserving improve-ments are remarkable, they do not resolve all concerns, namely gradient information and model parameters 1
+
+> arXiv:2605.02297v1 [cs.LG] 4 May 2026
+
+remain vulnerable to membership inference Liu et al (2021) and inversion attacks He et al (2019), thereby still posing privacy risks and necessitating further advancements. In this paper, we focus on an important yet seldom-discussed implication of this vulnerability: GFL cannot fully satisfy the “right to be forgotten” (RTBF) Voigt and Von dem Bussche (2016). Generally speaking, RTBF grants individuals the right to request the deletion of their personal informa-tion from online databases and/or AI systems. It is a cornerstone of modern data protection laws, most notably the GDPR Voigt and Von dem Bussche (2016), and has been adopted by following regulations such as CCPA Bonta (2022), LGPD de Oliveira et al (2025), and DPDPA Dave and Agrawal (2025). In the context of GFL, RTBF implies that users can freely join or withdraw from the system, with their associated information being embedded into or removed from GNN parameters accordingly. At first glance, it may seem that GFL systems can easily achieve this requirement by removing the corresponding user clients. However, as we will show in Section 4.2, membership inference Liu et al (2021) reveals that associated information can still be detected from other clients, since local parameters are propagated and embedded within other models. To mitigate this privacy leakage issue during user withdrawal, we explore the potential use of machine unlearning (MU) Cao and Yang (2015) for RTBF. Classical MU methods typically assume that a small portion of training data needs to be removed and aim to eliminate its influence, giving rise to differential privacy (DP)-based approaches Bourtoule et al (2021); Chen et al (2021); Tarun et al (2023); Wang et al (2025b). However, these methods have been shown to incur prohibitive computational costs for large-scale models and to degrade overall performance, motivating researchers to investigate gradient-ascent (GA)-based methods Fan et al (2023); Huang et al (2024); Liu et al (2025); Wang et al (2025a); Li et al (2025) that directly reduce the likelihood of generating predictions for data to be unlearned. While GA-based methods are easier to implement, they still face the critical challenge of harming overall model performance. This issue can be even more severe for GFL, as the negative impact of unlearning may propagate and accumulate across local nodes and further spread through federated model redistribution, ultimately harming clients that are not intended to be unlearned. Therefore, existing GA-based methods need to be further improved to better satisfy RTBF requirements in the context of GFL. To this end, we propose a graph Fed erated unlearning method with Gradient Correction and Virtual client (FedGCV) , an enhanced GA-based MU framework tailored for graph federated unlearning (GFU). To mitigate the negative impact on overall performance, FedGCV introduces two key improvements over previous MU methods. First, to counteract the erroneous propagation of unlearning effects to normal clients that are not intended to be removed, we introduce gradient correction to explicitly preserve overall GNN performance. Specifically, we constrain the unlearning gradients to be orthogonal to that used for learning other clients, which can be coordinated by the central servers and justified as performance-preserving under a first-order approximation. Second, we further preserve topological structures by introducing virtual clients ,also organized by the central server, to replace the unlearned clients and synthesize graphs to maintain both node attributes and inherent topological structures. The virtual clients preserve graph topologies and global embeddings without leaking information of removed entities, which can be employed to preserve the performance of the global model. Therefore, GFU combines gradient correction and virtual clients, aiming to enhance performance preservation while maintaining reliable RTBF. We further propose a membership-inference–based evaluation framework in section 4.1 to assess the degree of privacy preservation. Moreover, this is the first work to employ MIA in the GFU scenario. Through extensive experiments across a representative RTBF setup for GFU, we demonstrate the reliability of our method in preserving overall model performance meanwhile mitigating privacy leakage. 
+
+# 2 Preliminaries 
+
+In this section, we briefly review the relevant background. First, we introduce GNNs for graph-structured data, in Section 2.1. Then, we discuss the use of federated learning with GNNs, leading to GFL, in Section 2.2. Finally, we highlight the drawbacks of GFL, particularly its limited flexibility in meeting advanced data-sharing regulations, in Section 2.3. 22.1 Graph Neural Networks 
+
+GNNs extend conventional deep neural networks to handle graph-structured data via its unique message-passing mechanism Bai et al (2022); Yu et al (2023). In general, GNNs adopt a neighborhood aggregation strategy, in which the representation of a node vi is iteratively updated by aggregating that of its neighbor-hoods. Therefore, after k iterations of aggregation, the representation of the node vi captures the structural information contained within its k-hop neighboring nodes. Formally, the learned representation of vi at the 
+
+k-th layer, denoted by h(k) 
+
+> vi
+
+, can be written as 
+
+h(k) 
+
+> vi
+
+= CO (k)  h(k−1)  
+
+> vi
+
+, AG (k)({h(k−1)  
+
+> vj
+
+: vj ∈ N (vi)}). (2.1) Therein, N (vi) denotes the set of neighboring nodes of vi. AG (k) aggregates messages from N (vi) at the 
+
+k-th layer, and is typically a permutation-invariant operator, such as sum, mean, max, or attention-weighted sum Vaswani et al (2017). CO (k) maps the aggregated message to higher-level representations at the k-th layer, and is usually implemented as a learnable function, such as a multilayer perceptron or a gated unit Cho et al (2014). Such a message-passing mechanism has achieved great success in modeling graph-structured data and is highly adaptable to large-scale settings with complex user relationships, ranging from high-frequency financial trading Li et al (2024) to industrial recommender systems Ko et al (2022). 
+
+## 2.2 Graph Federated Learning 
+
+Although GNNs have shown strong effectiveness in processing large volumes of data, message passing typi-cally requires collecting data on a central server, which raises data-sharing and privacy concerns Voigt and Von dem Bussche (2016). Therefore, GNNs have recently been explored in the context of federated learn-ing Li et al (2020), leading to graph federated learning (GFL) Zhou et al (2025); Yu (2025); Yu et al (2025b). Generally, GFL aims to collaboratively train a global model across multiple clients without sharing their raw data, thereby preserving data privacy. Formally, we consider a federated setup with a central server S and a set of M clients. Each client 
+
+i ∈ { 1, 2, · · · , M } possesses its own local graph data Gi = ( Vi, Ei), where Vi is the node set and Ei is the edge set, respectively. In addition, we denote the node feature matrix as Xi and label matrix as Yi. The goal is to collaboratively train a global GNN on the central server without exposing any local data on clients. Let 
+
+w denote the GNN parameters. The objective is to achieve their optimal values by minimizing the empirical risk over all clients, i.e., ˆw∗ = arg min 
+
+> w
+
+ˆL(w; {G i, Xi, Yi}Mi=1 )=
+
+> M
+
+X
+
+> i=1
+
+pi ˆLi(w; Gi, Xi, Yi),
+
+(2.2) where pi is the aggregation weight, typically defined to reflect the relative importance or data size of client 
+
+i, and ˆLi(w; Gi, Xi, Yi) is the local empirical risk on client i, typically defined as the cross-entropy loss. To approximate the search for ˆw∗ without sharing data with the central server, we typically follow the federated optimization paradigm of FedAvg McMahan et al (2017). FedAvg involves multiple rounds in which clients perform local training on their private data and share updated model parameters with a central server, which aggregates them into a global model. Specifically, in each round t, the server broadcasts the global model w(t) to all clients. Each client i performs local updates to obtain w(t+1)  
+
+> i
+
+, and the server then aggregates these updates to produce the next global model, following w(t+1) = PMi=1 piw(t+1)  
+
+> i
+
+. This procedure will be repeated for T communication rounds. 
+
+## 2.3 Right To Be Forgotten 
+
+GFL is better aligned with data-sharing regulations than its centralized counterparts, as data are processed locally on clients and never directly shared with the central server. However, with increasing attention to privacy, new requirements must be fulfilled, such as the “ right to be forgotten ” (RTBF) Voigt and Von dem Bussche (2016); Bonta (2022). 3In the literature of GFL, RTBF refers to the requirement that when a user withdraws from the system, the central server and all other clients should remove the message learned from that user. This helps better preserve user privacy and prevents malicious clients from misusing such information. Formally, consider a trained global model ˆ w∗ that approximates the solution of Eq. (2.2) and suppose the j-th client with local graph data Gj requests to be unlearned. Let EXT j (w; G, X, Y) denote an extraction function that measures the degree of information about Gj that can be inferred directly from w and indirectly from a set of local graph data ( G, X, Y). The goal of RTBF in GFL is to update the original model parameters from ˆ w∗ to ˆ wu
+
+such that EXT j
+
+  ˆwu; {G i, Xi,Yi}Mi=1 \{G j , Xj , Yj }
+
+≪ EXT j
+
+  ˆw∗; {G i, Xi, Yi}Mi=1 
+
+, (2.3) i.e., the message about ( Gi, Xi, Yi) that can be extracted is notably reduced. This conceptual definition is adapted from Golatkar et al (2020), further adjusted for GFL. At first glance, it may seems that GFL is well suited for RTBF, as we can straightforwardly remove a client once the corresponding user raises a removal request. However, during federated learning, the user information has already been encoded into model parameters, shared with the central server via FedAvg as in Eq. (2.2), and then distributed to other clients. By membership inference attacks Liu et al (2021) or model inversion attacks He et al (2019), the user message may still be at risk of being extracted by others, even after the user has withdrawn from the FGL system. 
+
+## 2.4 Machine Unlearning 
+
+Machine unlearning (MU) Cao and Yang (2015) has been widely explored and has shown great promise for fulfilling the primary goal of RTBF. MU is first studied in the context of differential privacy Abadi et al (2016), where the goal is to ensure that the output distribution of the unlearned model is nearly indistinguishable from that of a model trained as if the unlearned data have never been included, up to a small privacy hyper-parameter. This classical DP definition has led to many elegant MU methods. For example, Golatkar et al (2020) study how to add Gaussian noise to parameters that balances between privacy preservation and performance preservation, which is given by ˆwu = ˆ w∗ + ( λ0σ2)1/4H−1/4r n, where n ∼ N (0 , 1) , (2.4) with λ0 a trade-off hyper-parameter, σ a prior variance, and Hr the Hessian matrix with respect to ˆL(w; {G i, Xi, Yi}Mi=1 \{G j , Xj , Yj }). Overall, the fractional Hessian inverse H−1/4r shapes the noise to be aligned with the local curvature, mitigating performance degradation while achieving the desired level of privacy. Guo et al (2020) certifies that natural gradient updates, following 
+
+w(t+1) = w(t) + H−1u ∇w ˆL(w; Gj , Xj , Yj ), (2.5) at each unlearning step t, where Hu is the Hessian matrix for ˆL(w; Gj , Xj , Yj ). Generally, DP-based un-learning methods enjoy relatively strong theoretical guarantees. However, on the other side, they typically rely on linear assumptions, require tedious hyper-parameter tuning, and often cause substantial degradation in overall performance. Recent research offers a more practical definition of MU, directly increasing the risk ˆL(w; Gj , Xj , Yj ) to be unlearned, leading to gradient ascent (GA)-based MU methods Fan et al (2023); Wang et al (2025a). Beyond an explicit unlearning objective, GA-based methods further preserve the model performance on other data that are not intended to be unlearned, leading to a bi-objective as arg min  
+
+> w
+
+− ˆL(w; Gj , Xj , Yj )+λ ˆL(w; {G i, Xi, Yi}Mi=1 \{G j , Xj , Yj }),
+
+(2.6) where λ is a trade-off hyper-parameter. Although less theoretically grounded, GA-based methods have been shown to achieve more efficient and reliable MU effects than DP-based methods in practice. However, since 4ˆL is unbounded above, maximizing ˆL(w; Gj , Xj , Yj ), or equivalently minimizing − ˆL(w; Gj , Xj , Yj ), can lead to gradient explosion Wang et al (2025a), thereby degrading performance. This problem can be even more severe for GFL. Although raw data are not shared across clients, infor-mation can still propagate between them through the exchanged model parameters Zhang et al (2021). Such implicit message passing means that the backpropagation of unlearning gradients may influence not only the data to be unlearned but also a larger portion of the remaining data than in non-graph models. Moreover, since GNNs rely heavily on the underlying graph structure, aggressively unlearning specific nodes, edges, or subgraphs can distort the learned topological representations, potentially harming the overall quality of the global model. Therefore, we need further improve upon existing GA-based unlearning methods to make it more suitable for GFL scenarios. 
+
+# 3 Our Proposed Method 
+
+In this section, we propose Fed erated unlearning method with Gradient Correction and Virtual client 
+
+(FedGCV), an enhanced GA-based MU method specifically designed for GFL. FedGCV makes two primary contributions. First, we introduce a gradient correction strategy that explicitly addresses the unlearning-preservation trade-off. Second, we propose a virtual client strategy that aims to preserve the original topological structure. Together, these components yield a reliable RTBF framework that better preserves overall model performance than conventional GA-based methods such as Eq. (2.6) for GFL. 
+
+## 3.1 Gradient Correction 
+
+Recall that conventional GA-based methods formulate MU as a bi-objective task, where we simultaneously maximize the risk on the target data, i.e., max w ˆL(w; Gj , Xj , Yj ), and minimize the risk on the remaining data, i.e., min w ˆL(w; {G i, Xi, Yi}Mi=1 \{G j , Xj , Yj }). However, previous work has shown that these two objec-tives are inherently conflicting Wang et al (2025b), indicating that substantially increasing ˆL(w; Gj , Xj , Yj )will typically hinder progress in reducing ˆL(w; {G i, Xi, Yi}Mi=1 \ {G j , Xj , Yj }). Further tuning λ only ampli-fies this trade-off between unlearning and retention, resulting either in less effective unlearning or in more severe degradation of model performance. Therefore, in this section, we explore an alternative strategy, beyond the bi-objective formulation in Eq. (2.6), that can effectively mitigate this trade-off. Our key motivation is to ensure that each unlearning update has minimal negative impact on the perfor-mance of other normal data, leading to a constrained optimization problem arg min  
+
+> w
+
+− ˆL(w; Gj , Xj , Yj )s.t. ˆL(w; {G i, Xi, Yi}Mi=1 \{G j , Xj , Yj })
+
+≤ ˆL( ˆ w∗; {G i, Xi, Yi}Mi=1 \{G j , Xj , Yj }).
+
+(3.1) However, Eq. (3.1) is hard to be solved. Therefore, following Lopez-Paz and Ranzato (2017), we approximate the constraint in Eq. (2.6) under a first-order assumption as follows: 
+
+⟨g(t)u ,g(t)r ⟩ := ∇w∂ ˆL(w(t); Gj ),
+
+∇w∂ ˆL(w(t); {G i, Xi, Yi}Mi=1 \{G j , Xj , Yj }) ≥ 0, (3.2) at each updating step t. Therein, gu denotes the direction of unlearning updates for the j-th client, and 
+
+gr denotes the direction of parameter updates for other clients. Wang et al (2025b) further study this constrained optimization and find the optimal solution as ˆg(t)u = g(t)u − min( ⟨g(t)u , g(t)r ⟩, 0) 
+
+|| g(t)r || 2 · g(t)r , (3.3) It includes two scenarios. If the constraint in Eq. (3.2) is satisfied, ⟨g(t)u , g(t)r ⟩ ≥ 0 and there is no need to correct unlearning gradients. On the other side, if ⟨g(t)u , g(t)u ⟩ < 0, gu will be projected into the orthogonal direction of gr to obtained the corrected gradient direction ˆ gu.5r
+
+# g
+
+## u
+
+# g
+
+# Feasible region 
+
+# Violating region 
+
+## u
+
+# ˆgFigure 1: Illustration of the gradient correction rule. In the GFL literature, the above discussion leads to a gradient correction rule that can be coordinated by the central server, which makes it well suited to FedAvg. Specifically, when the central server collects updates from all clients at step t, we can compute the residuals ∆u and ∆r with respect to the unlearning client and all the other clients that should be preserved, which is given by 
+
+∆(t+1) u = w(t) − pj w(t+1)  
+
+> j
+
+, (3.4) and 
+
+∆(t+1) r =
+
+> M
+
+X
+
+> i=1; i̸=j
+
+piw(t+1)  
+
+> j
+
+− w(t), (3.5) respectively. Then, the aggregation procedure with unlearning can be written as 
+
+w(t+1) = w(t) + ∆(t+1) u −
+
+min( ⟨∆(t+1) u , ∆(t+1) r ⟩, 0) 
+
+|| ∆(t+1) r || 2 · ∆(t+1) r . (3.6) This formulation adapts FedAvg to the RTBF setting, erasing the information from the client to be unlearned while, to a large extent, preserving the overall model performance. 
+
+## 3.2 Virtual Client 
+
+After unlearning the subgraph data of the specific client that needs to be forgotten, since both topological structures and node attributes of the unlearned client are lost, the performance of the global model will be notably dropped. Therefore, in the context of FedGCV, relying solely on gradient correction may lead to a decline in global model utility. To restore federated learning performance without revealing the subgraph data of the unlearned client, we propose a novel mechanism termed virtual client, where we synthesize graphs that are similar to that of the unlearned client and maintain them by the central server. Specifically, we first extract spectral information and node feature distributions from the real subgraph data. We then employ a 
+
+variational graph autoencoder (VGAE) Kipf and Welling (2016) to generate synthetic subgraphs with similar structural properties and feature distributions. These synthetic graphs are used to replace unlearned clients in subsequent federated training. This achieves adaptive collaborative training that restores utility without privacy rebound. 63.2.1 Extraction of spectral information 
+
+To construct virtual clients, we employ a VGAE to capture the latent distribution of the unlearned client. Moreover, to reconstruct the topological structures of the unlearned client, we further employ spectral constraints to guide the generation of edges between nodes across clients. Let the subgraph on a forgotten client be Gj = ( Vj , Ej ), n = |V j |, the adjacency matrix be Aj ∈ Rn×n,and the node feature matrix be Xj ∈ Rn×d. First, we employ propagation matrices, which are consistent with the message-passing mechanism: ˜Aj = Aj + I, ˆAj = ˜D− 12 
+
+> j
+
+˜Aj ˜D− 12 
+
+> j
+
+. (3.7) To capture the structural topologies of forgotten subgraphs, we then extract information from their Laplacian matrices. The graph Laplacian matrix Lj of subgraph Gj is defined as Lj = Dj − Aj , where Dj
+
+is the degree matrix of Gj and Aj is the adjacency matrix of Gj . After performing normalization on the Laplace matrix, we can obtain the normalized Laplacian matrix Lnorm  
+
+> j
+
+as: 
+
+Lnorm  
+
+> j
+
+= I − D− 12 
+
+> j
+
+Aj D− 12 
+
+> j
+
+. (3.8) Eq. (3.8) eliminates the influence of the degree of the Laplacian matrix, which further ensures the graph spectrum is bounded and yields more stable numerical results. Since Lnorm  
+
+> j
+
+is a semi-definite matrix, we can perform an eigenvalue decomposition on Lnorm  
+
+> j
+
+to obtain its eigenvalues and eigenvectors. The equation can be expressed as Lnorm  
+
+> j
+
+= Uj Λj U⊤ 
+
+> j
+
+, and take the first 
+
+k smallest eigenvalues (low-frequency component) Λjk and their corresponding eigenvectors Ujk . The low-frequency subspace characterizes the global connectivity and smooth structure of the subgraph, which is crucial for preserving graph spectral information during generation. 
+
+3.2.2 VGAE Modeling 
+
+To capture the node feature distributions of the forgotten graph, VGAE learns latent representations of subgraphs in an unsupervised manner so as to generate a similar but privacy-protective virtual subgraph. Although VGAE is capable of capturing node feature distribution, it may not learn the structural topolo-gies of graphs well. To mind this gap, we exploit the extracted spectral properties in section 3.2.1 and integrate them in the synthesis process of virtual graphs. To preserve the spectral characteristics of the forgotten graph in the synthetic graph, we project the latent variables onto the subspace spanned by Uk.The projected latent variable Zproj can be obtained from the following formula: 
+
+Zproj = UkU⊤ 
+
+> k
+
+Z, (3.9) where Z represents the inferred latent distribution of the forgotten graph. Note that Eq. (3.9) only permits 
+
+Z to utilize structures expressible by the original subgraph’s spanned subspace. Afterwards, we can obtain the synthetic graphs by performing graph reconstruction based on Zproj . This reconstruction process is implemented as an inner product following Kipf and Welling (2016). To be specific, this process uses Zproj 
+
+to obtain the edge probability matrix P:
+
+P = σ(Zproj Z⊤
+
+> proj
+
+). (3.10) Subsequently, we employ a thresholding strategy to generate the synthetic adjacency matrix Asyn from P,converting continuous probability into a matrix composed of only 0 and 1. The process can be expressed as follows: (Asyn )ij = IPij > γ , (3.11) where I[·] is an indicator function, and γ ∈ (0 , 1) is the probability threshold used to determine whether to generate an edge. Finally, to generate a virtual subgraph, we still need to integrate features with the mean vector μ
+
+and standard deviation vector σ of the original subgraph inferred by VGAE. To avoid leaking the original subgraph data G, we also employ a high-privacy statistical sampling strategy to obtain the feature matrix 7Xsyn reflecting the node feature distribution of the virtual subgraph. Each element ( Xsyn )ij follows a Gaussian distribution that satisfies the mean and standard deviation of the original subgraph: (Xsyn )ij ∼ N  μ, diag( σ2). (3.12) Only the node-specific distributions are retained without directly using the original data G, which sig-nificantly preserves the privacy of the forgotten graph. The generated Asyn incorporates the structure of the synthetic subgraph, describing the topological structure of the virtual subgraph, and the generated Xsyn 
+
+contains the node attributes and features of the synthetic subgraph, describing the node content. Both 
+
+Asyn and Xsyn can collectively represent an attributed graph Gvirtual usable in GFL, enabling performance compensation functionality in subsequent parameter updates. 
+
+# 4 Experiments 
+
+In this section, we evaluate our proposed methodological framework and compare it against state-of-the-art federated unlearning methods on four widely used graph datasets. 
+
+## 4.1 Experimental Setups 
+
+We begin by detailing the experimental setups adopted in this paper, including datasets, evaluation protocols, implementation settings, and baseline methods. 
+
+Datasets. Each client possesses a subgraph that is a subset of the original large graph. To be specific, we utilize four real-world datasets that are widely employed in graph learning tasks, including Cora, Cite-Seer Yang et al (2016), PubMed Yang et al (2016), and Tolokers Platonov et al (2023). Following prior works Yu (2025), we simulate the real GFU scenario by partitioning the original graph of the mentioned datasets with the METIS algorithm Karypis and Kumar (1998). Detailed information about these datasets is provided in Appendix A.1. 
+
+Evaluation Protocols. Our evaluation metrics align with our task motivation for graph federated unlearning. That is, maintaining both high unlearning efficiency and overall utility. (1) Membership inference attack (MIA) Sablayrolles et al (2019): MIAs evaluate privacy leakage and unlearning efficiency by measuring whether an adversary can distinguish training samples from non-members based on the model outputs. If the MIA rate is lower, the unlearning efficiency and privacy protection is better. Under this paradigm, we employ MAIT as an evaluation metric. MAIT determines whether a sample is a training member by leveraging the difference between its loss and gradient evolution track during model training, and evaluates the degree of unlearning based on the decline in this distinguishability. For a detailed implementation process, please see Appendix A.2. (2) Model accuracy (MA): After the entire unlearning process concludes, we will measure the global model accuracy to assess its overall performance. If the MA is higher, the performance retention is more reliable. 
+
+Implementation Settings. We set the random seed to s = 2025 and train a 2-layer GCN with hidden dimension d = 64, dropout rate p = 0 .5, learning rate η = 10 −2, weight decay λ = 5 × 10 −4, and batch size 
+
+B = 128 for federated training. We run federated learning for R = 30 communication rounds over K = 10 clients with full participation ratio ρ = 1 .0 (i.e., all clients are selected in each round). For interactive unlearning, we optimize the unlearning model for Eu = 30 epochs with learning rate ηu = 2 × 10 −2 and dropout pu = 0 .3. We adopt the NPO-based unlearning loss Zhang et al (2024), an advanced GA-based method, with temperature parameter β = 5 .0 and scale the corrected unlearning update by sf = 50. To reduce catastrophic drift during unlearning, we clip the per-step update norm by cmax = 10 .0 and project the parameter drift to satisfy ∥θ − θ0∥2 ≤ τ , where τ = 10 .0. For Graph-MIA–aware training, we additionally enforce a fixed-threshold alignment by pushing the target loss above the fixed-pre threshold by a margin 
+
+m = 0 .5 with weight λm = 3 .0. For post-unlearning virtual repair, we conduct Rv = 5 extra federated rounds. The adjacency reconstruction uses a threshold τa = 0 .7, and feature perturbation uses noise standard deviation σx = 0 .1. 
+
+Baselines. We consider the following joint federated unlearning methods: (1) Retraining from scratch: This method retrains an initialized model using data from the retaining clients, representing the ideal state 8Table 1: Overall performance evaluation of graph federated unlearning. The percentage next to the dataset name indicates the model accuracy achieved by FedAvg without unlearning. Cora (82.42%) CiteSeer (70.14%) Methods Performance ↑ MIA Rate ↓ Performance ↑ MIA Rate ↓
+
+retrain 68.67% 3.70% 61.83% 0.00% 
+
+PGA Halimi et al (2022) 71.91% 12.96% 56.91% 12.70% SGA-Random Bottou (2010) 68.09% 14.81% 48.88% 14.29% SGA-Degree 68.80% 12.22% 51.82% 9.52% EWC-SGA Wu et al (2022) 66.89% 9.26% 42.97% 22.22% Noisy-GD Chourasia and Shah (2023) 72.42% 87.04% 59.62% 88.89% ULKD Wu et al (2021) 70.79% 18.52% 63.23% 15.87% ReGEnUnlearn Liu and Liu (2025) 72.04% 9.09% 63.25% 12.39% 
+
+FedGCV (Ours) 79.41% 5.56% 69.07% 7.94% PubMed (86.52%) Tolokers (78.10%) Methods Performance ↑ MIA Rate ↓ Performance ↑ MIA Rate ↓
+
+retrain 85.73% 0.52% 76.58% 2.89% PGA Halimi et al (2022) 76.66% 6.81% 65.65% 11.30% SGA-Random Bottou (2010) 75.62% 10.65% 67.77% 5.34% SGA-Degree 75.70% 9.69% 65.74% 9.46% EWC-SGA Wu et al (2022) 77.07% 10.47% 67.55% 7.64% Noisy-GD Chourasia and Shah (2023) 80.67% 7.07% 66.08% 1.85% ULKD Wu et al (2021) 82.54% 8.12% 62.57% 10.96% ReGEnUnlearn Liu and Liu (2025) 77.41% 7.92% 67.47% 1.03% 
+
+FedGCV (Ours) 83.35% 3.66% 69.17% 0.18% 
+
+that unlearning tasks aim to approximate. (2) Projected Gradient Ascent(PGA) Halimi et al (2022): Projec-tion Gradient Ascent (PGA): PGA is an unlearning method designed to maximize local client loss within a controlled range. (3) Elastic Weight Consolidation-Stochastic Gradient Ascent (EWC-SGA) Wu et al (2022): EWC-SGA combines stochastic gradient ascent on the removed client loss with elastic weight consolidation to restrict updates on parameters that are important to the remaining clients to remove target clients with-out requiring full model retraining. (4) Noisy Gradient Descent (Noisy-GD) Chourasia and Shah (2023): Noisy-GD injects random noise into gradient descent updates to reduce the influence of removed data by perturbing model parameters. (5) ULKD Wu et al (2021): ULKD is a server-side storage history method that uses distillation techniques to eliminate target client data-sharing while enhancing model utility. (6) SGA-Random Bottou (2010): SGA-Random performs stochastic gradient ascent using randomly sampled data from the removed client to erase its contribution from the model. (7) SGA-Degree: SGA-Degree applies stochastic gradient ascent with degree-aware sampling, prioritizing nodes with higher structural influence during unlearning. (8) ReGEnUnlearn Liu and Liu (2025): ReGEnUnlearn optimizes sampling strategies that minimize cross-client subgraph interference through Reinforcement learning-driven Federated Policy Sampler, while integrating a Parameter-free Graph Prompt Knowledge Distillation module to achieve pre-cise retention of target client’s unique structural knowledge and gradient-ascending complete unlearning. 
+
+## 4.2 Main Results 
+
+table 1 presents the comprehensive results of our proposed method and corresponding baseline methods under two metrics. We draw the following conclusions: Compared to all baseline models, our proposed FedGCV achieves the optimal performance across four datasets (except in the ideal retrain scenario), and in many cases surpasses the performance of retrain. Notably, FedGCV achieves over 90% unlearning efficiency on the Cora, CiteSeer, PubMed, and Tolokers datasets, second only to the unlearning MIA rate of retraining. Furthermore, 9w/o GRU w/o Virtual Client w/o both with both 
+
+> 60
+> 65
+> 70
+> 75
+> 80
+> 85
+> Model Accuracy (%)
+> Bar: Model Accuracy
+> Line: MIA Rate
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> MIA Rate (%)
+
+(a) Cora w/o GRU w/o Virtual Client w/o both with both  
+
+> 50
+> 55
+> 60
+> 65
+> 70
+> 75
+> Model Accuracy (%)
+> Bar: Model Accuracy
+> Line: MIA Rate
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> MIA Rate (%)
+
+(b) CiteSeer w/o GRU w/o Virtual Client w/o both with both 
+
+> 76
+> 78
+> 80
+> 82
+> 84
+> 86
+> 88
+> 90
+> Model Accuracy (%)
+> Bar: Model Accuracy
+> Line: MIA Rate
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> MIA Rate (%)
+
+(c) PubMed w/o GRU w/o Virtual Client w/o both with both  
+
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> 60
+> 70
+> 80
+> 90
+> Model Accuracy (%)
+> Bar: Model Accuracy
+> Line: MIA Rate
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> MIA Rate (%)
+
+(d) Tolokers 
+
+Figure 2: Unlearning evaluation and model accuracy are measured using four datasets: Cora, CiteSeer, PubMed, and Tolokers. The bar charts represent Model Accuracy, where higher performance is better; the line charts represent the Mia Rate, where lower values indicate higher unlearning levels. our framework compensates for model performance loss to over 90% of the pre-unlearning accuracy, making it the best among all baseline methods. Even on heterophilic subgraph dataset like Tolokers, it still performs exceptionally well. Compared with the state-of-the-art approach, ReGEnUnlearn Liu and Liu (2025), our proposed method simultaneously improves utility by 5.21% and reduces privacy leakage by 2.00%, on average across four datasets, demonstrating a favorable balance between performance and privacy. 
+
+## 4.3 Ablation Studies 
+
+To evaluate the effectiveness of each module in FedGCV, we conducted ablation studies across four datasets (e.g., Cora, CiteSeer, PubMed and Tolokers) and employed two evaluation metrics. Specifically, we denote simplified approaches achieved by removing “GRU-based gradient correction for unlearning” and “virtual client compensation for model utility” as “w/o GRU” and “w/o Virtual Client”, respectively. It can be observed in Figure 2 that the overall performance declines whenever any component is removed, indicating each component makes significant contributions. For instance, when the GRU was disabled and replaced with a traditional gradient ascent strategy in models trained on the Cora dataset, the MIA rate reached 24.07%, an increase of nearly 20% compared to when it was enabled. In addition, when the Virtual Client was disabled, model accuracy dropped from 82.42% to 65.37%. However, after incorporating the Virtual Client, accuracy reached 79.41%, clearly enhancing model utility. 10 4 6 8 10 12 
+
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Model Accuracy (%)
+> Green line: Model Accuracy
+> Yellow line: MIA Rate
+> 0.0
+> 2.5
+> 5.0
+> 7.5
+> 10.0
+> 12.5
+> 15.0
+> 17.5
+> 20.0
+> MIA Rate (%)
+
+(a) Cora 4 6 8 10 12  
+
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Model Accuracy (%)
+> Green line: Model Accuracy
+> Yellow line: MIA Rate
+> 0.0
+> 2.5
+> 5.0
+> 7.5
+> 10.0
+> 12.5
+> 15.0
+> 17.5
+> 20.0
+> MIA Rate (%)
+
+(b) CiteSeer 4 6 8 10 12 
+
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Model Accuracy (%)
+> Green line: Model Accuracy
+> Yellow line: MIA Rate
+> 0.0
+> 2.5
+> 5.0
+> 7.5
+> 10.0
+> 12.5
+> 15.0
+> 17.5
+> 20.0
+> MIA Rate (%)
+
+(c) PubMed 4 6 8 10 12  
+
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Model Accuracy (%)
+> Green line: Model Accuracy
+> Yellow line: MIA Rate
+> 0
+> 2
+> 4
+> 6
+> 8
+> 10
+> MIA Rate (%)
+
+(d) Tolokers 
+
+Figure 3: Precision curves, MIA member recognition rates, and their standard deviation bands for different 
+
+τ values on the Cora, CiteSeer, PubMed, and Tolokers datasets. 
+
+## 4.4 Sensitivity Analysis on Hyperparameters 
+
+Here, we conduct a detailed sensitivity analysis of the hyperparameters involved in the proposed FedGCV. Our FedGCV includes a hyperparameter τ that defines the maximum permissible norm for model parameter updates. Update steps exceeding τ are scaled proportionally to remain within the τ threshold. We plotted the MIA rate metric and model accuracy curves across four datasets, demonstrating performance under different hyperparameter values. As shown in Figure 3, performance fluctuates minimally across varying hyperparameter values, validating that FedGCV exhibits low sensitivity to these parameters as long as they are within reasonable ranges. 
+
+# 5 Conclusion 
+
+This paper investigates the issue of graph federated unlearning to address data privacy and the right to be forgotten. We propose a novel graph federated unlearning framework, graph Fed erated unlearning method with Gradient Correction and Virtual client (FedGCV), which balances model utility while ensuring effective unlearning. Specifically, FedGCV first introduces a gradient rectification unlearning mechanism to correct the direction of forgotten gradients. This minimizes interference with the learning performance of retaining clients while weakening the influence of forgotten clients. Subsequently, we design a VGAE-based virtual client generation strategy to synthesize virtual subgraphs that retain the original client’s subgraph node feature distributions and graph spectral information without exposing raw data. These virtual subgraphs maintain similarity to real data in node feature distributions, Laplacian spectral properties, and propaga-11 tion structures while preserving privacy, enabling effective participation in federated training to compensate for performance loss caused by unlearning. Extensive experimental results demonstrate that FedGCV sig-nificantly reduces the risk of member inference attacks while stably maintaining the model’s predictive performance on retained data. Compared with various existing federated unlearning methods, FedGCV achieves a superior balance between unlearning effectiveness and model utility, validating its effectiveness and practicality in graph federated unlearning scenarios. 
+
+# Impact Statement 
+
+This study advances the development of Graph Federated Unlearning (GFU) methods under the right to be forgotten requirement. These methods simultaneously satisfy privacy protection for clients to be forgotten and the effectiveness demands of the overall model, thereby reducing privacy leakage risks in subgraph learning scenarios. We encourage ongoing research into legally compliant and reliable GFU methods that ensure the sustainability of model training and learning in practical applications while respecting individual rights and intellectual property. By promoting the widespread deployment of GFU methods adaptable to evolving legal and ethical standards, this study contributes to maintaining the trustworthiness of such technologies and their continued generation of social benefits. 
+
+# References 
+
+Abadi M, Chu A, Goodfellow I, McMahan HB, Mironov I, Talwar K, Zhang L (2016) Deep learning with differential privacy. In: ACM SIGSAC Conference on Computer and Communications Security, pp 308–318 Bai J, Yu W, Xiao Z, Havyarimana V, Regan AC, Jiang H, Jiao L (2022) Two-stream spatial–temporal graph convolutional networks for driver drowsiness detection. IEEE Transactions on Cybernetics 52(12):13,821– 13,833 Bo D, Wang X, Liu Y, Fang Y, Li Y, Shi C (2023) A survey on spectral graph neural networks. arXiv preprint arXiv:230205631 pp 1–9 Bonta R (2022) California consumer privacy act (CCPA). Retrieved from State of California Department of Justice: https://oag ca gov/privacy/ccpa pp 1–12 Bottou L (2010) Large-scale machine learning with stochastic gradient descent. In: International Conference on Computational Statistics, URL https://api.semanticscholar.org/CorpusID:115963355 
+
+Bourtoule L, Chandrasekaran V, Choquette-Choo CA, Jia H, Travers A, Zhang B, Lie D, Papernot N (2021) Machine unlearning. In: IEEE Symposium on Security and Privacy, pp 141–159 Cao Y, Yang J (2015) Towards making systems forget with machine unlearning. In: IEEE Symposium on Security and Privacy, pp 463–480 Chen M, Zhang Z, Wang T, Backes M, Humbert M, Zhang Y (2021) When machine unlearning jeopardizes privacy. In: ACM SIGSAC Conference on Computer and Communications Security, pp 896–911 Cho K, Van Merri¨ enboer B, Gulcehre C, Bahdanau D, Bougares F, Schwenk H, Bengio Y (2014) Learning phrase representations using RNN encoder-decoder for statistical machine translation. arXiv preprint arXiv:14061078 pp 1–15 Chourasia R, Shah N (2023) Forget unlearning: Towards true data-deletion in machine learning. In: Inter-national Conference on Machine Learning, pp 6028–6073 Corso G, Stark H, Jegelka S, Jaakkola T, Barzilay R (2024) Graph neural networks. Nature Reviews Methods Primers 4(1):17 Dave A, Agrawal AK (2025) A comparative study with GDPR, HIPAA, CCPA, PIPEDA and DPDPA. In: IEEE International Conference on Computer, Electronics, Electrical Engineering & their Applications, pp 1–6 12 Fan C, Liu J, Zhang Y, Wong E, Wei D, Liu S (2023) Salun: Empowering machine unlearning via gradient-based weight saliency in both image classification and generation. arXiv preprint arXiv:231012508 pp 1–31 Golatkar A, Achille A, Soatto S (2020) Eternal sunshine of the spotless net: Selective forgetting in deep networks. In: IEEE/CVF Conference on Computer Vision and Pattern Recognition, pp 9304–9312 Guo C, Goldstein T, Hannun A, Van Der Maaten L (2020) Certified data removal from machine learning models. In: International Conference on Machine Learning, pp 3832–3842 Halimi A, Kadhe S, Rawat A, Baracaldo N (2022) Federated unlearning: How to efficiently erase a client in FL? arXiv preprint arXiv:220705521 pp 1–13 He Z, Zhang T, Lee RB (2019) Model inversion attacks against collaborative inference. In: Annual Computer Security Applications Conference, pp 148–162 Huang Z, Cheng X, Zheng J, Wang H, He Z, Li T, Huang X (2024) Unified gradient-based machine unlearning with remain geometry enhancement. In: Advances in Neural Information Processing Systems, pp 26,377– 26,414 Karypis G, Kumar V (1998) A fast and high quality multilevel scheme for partitioning irregular graphs. SIAM Journal on Scientific Computing 20(1):359–392 Kipf TN, Welling M (2016) Variational graph auto-encoders. arXiv preprint arXiv:161107308 pp 1–3 Ko H, Lee S, Park Y, Choi A (2022) A survey of recommendation systems: Recommendation models, techniques, and application fields. Electronics 11(1):1–48 Li K, Wang Q, Wang Y, Li F, Liu J, Han B, Zhou J (2025) LLM unlearning with LLM beliefs. arXiv preprint arXiv:251019422 pp 1–33 Li L, Fan Y, Tse M, Lin KY (2020) A review of applications in federated learning. Computers & Industrial Engineering 149:1–58 Li M, Shu M, Lu T (2024) Anomaly pattern detection in high-frequency trading using graph neural networks. Journal of Industrial Engineering and Applied Science 2(6):77–85 Liu B, Ding M, Shaham S, Rahayu W, Farokhi F, Lin Z (2021) When machine learning meets privacy: A survey and outlook. ACM Computing Surveys 54(2):1–36 Liu F, Liu H (2025) Subgraph federated unlearning. In: ACM on Web Conference, pp 1205–1215 Liu S, Yao Y, Jia J, Casper S, Baracaldo N, Hase P, Yao Y, Liu CY, Xu X, Li H, et al (2025) Rethinking machine unlearning for large language models. Nature Machine Intelligence pp 1–14 Lopez-Paz D, Ranzato M (2017) Gradient episodic memory for continual learning. Advances in Neural Information Processing Systems pp 1–10 Luan S, Hua C, Lu Q, Zhu J, Zhao M, Zhang S, Chang XW, Precup D (2022) Revisiting heterophily for graph neural networks. Advances in Neural Information Processing Systems 35:1362–1375 Ma Z, Zhang Q, Zhou B, Zhang Y, Hu S, Wang Z (2025) Graph attention is not always beneficial: A the-oretical analysis of graph attention mechanisms via contextual stochastic block models. In: International Conference on Machine Learning, pp 1–41 McMahan B, Moore E, Ramage D, Hampson S, y Arcas BA (2017) Communication-efficient learning of deep networks from decentralized data. In: International Conference on Artificial Intelligence and Statistics, pp 1273–1282 13 de Oliveira JB, de Oliveira Nascimento ES, de Oliveira J´ unior EP, do Nascimento Alexandre W (2025) A prote¸ c˜ ao de dados pessoais e a aplica¸ c˜ ao da lgpd no brasil. NATIVA-Revista de Ciˆ encias, Tecnologia e Inova¸ c˜ ao 7(1):166–178 Platonov O, Kuznedelev D, Diskin M, Babenko A, Prokhorenkova L (2023) A critical look at the evaluation of GNNs under heterophily: Are we really making progress? In: International Conference on Learning Representations, pp 1–15 Sablayrolles A, Douze M, Schmid C, Ollivier Y, J´ egou H (2019) White-box vs black-box: Bayes optimal strategies for membership inference. In: International Conference on Machine Learning, pp 5558–5567 Tarun AK, Chundawat VS, Mandal M, Kankanhalli M (2023) Fast yet effective machine unlearning. IEEE Transactions on Neural Networks and Learning Systems 35(9):13,046–13,055 Vaswani A, Shazeer N, Parmar N, Uszkoreit J, Jones L, Gomez AN, Kaiser L, Polosukhin I (2017) Attention is all you need. Advances in Neural Information Processing Systems 30:1–11 Voigt P, Von dem Bussche A (2016) The eu general data protection regulation (gdpr). A Practical Guide, 1st Ed, Cham: Springer International Publishing 1(1):1–88 Wang Q, Zhou JP, Zhou Z, Shin S, Han B, Weinberger KQ (2025a) Rethinking LLM unlearning objectives: A gradient perspective and go beyond. In: International Conference on Learning Representations, pp 1–35 Wang Y, Wang Q, Liu F, Huang W, Du Y, Du X, Han B (2025b) Gru: Mitigating the trade-off between unlearning and retention for large language models. In: International Conference on Machine Learning, pp 1–21 Wu C, Wu F, Cao Y, Huang Y, Xie X (2021) A federated graph neural network framework for privacy-preserving personalization. Nature Communications 13:1–10 Wu L, Guo S, Wang J, Hong Z, Zhang J, Ding Y (2022) Federated unlearning: Guarantee the right of clients to forget. IEEE Network 36(5):129–135 Wu Z, Pan S, Chen F, Long G, Zhang C, Yu PS (2020) A comprehensive survey on graph neural networks. IEEE Transactions on Neural Networks and Learning Systems 32(1):4–24 Xu K, Hu W, Leskovec J, Jegelka S (2019) How powerful are graph neural networks? In: International Conference on Learning Representations, pp 1–17 Yang Z, Cohen W, Salakhudinov R (2016) Revisiting semi-supervised learning with graph embeddings. In: International Conference on Machine Learning, pp 40–48 Yu W (2025) Homophily heterogeneity matters in graph federated learning: A spectrum sharing and com-plementing perspective. arXiv:250213732 pp 1–15, URL https://arxiv.org/abs/2502.13732 
+
+Yu W, Wan S, Li G, Yang J, Gong C (2023) Hyperspectral image classification with contrastive graph convolutional network. IEEE Transactions on Geoscience and Remote Sensing 61(1):1–15 Yu W, Chen S, Tong Y, Gu T, Gong C (2025a) Modeling inter-intra heterogeneity for graph federated learning. In: AAAI Conference on Artificial Intelligence, pp 22,236–22,244 Yu W, Gong C, Han B, Fan L, Yang Q (2025b) Integrating commonality and individuality for graph federated learning: A graph spectrum perspective. Authorea Preprints pp 1–16, URL https://www.techrxiv.org/ doi/full/10.36227/techrxiv.175502607.78991557 
+
+Yu W, Chen S, Gong C, Han B, Niu G, Sugiyama M (2026) Atom-motif contrastive transformer for molecular property prediction. ACM Transactions on Intelligent Systems and Technology 1(1):1–28 Zhang K, Yang C, Li X, Sun L, Yiu SM (2021) Subgraph federated learning with missing neighbor generation. In: Advances in Neural Information Processing Systems, pp 6671–6682 14 Zhang R, Lin L, Bai Y, Mei S (2024) Negative preference optimization: From catastrophic collapse to effective unlearning. arXiv preprint arXiv:240405868 pp 1–32 Zhou H, Yu W, Wan S, Tong Y, Gu T, Gong C (2024) Traffic pattern sharing for federated traffic flow prediction with personalization. In: International Conference on Data Mining, pp 1–10 Zhou H, Yu W, Wan S, Tong Y, Gu T, Gong C (2025) FedTPS: traffic pattern sharing for personalized federated traffic flow prediction. Knowledge and Information Systems 1(1):1–27 15 A Implementation Details 
+
+## A.1 Datasets 
+
+In this experiment, we employ four representative graph datasets: Cora, CiteSeer, PubMed, and Tolokers, which are widely utilized in graph neural network research. 
+
+Cora: The Cora dataset is an academic paper citation network comprising 2,708 nodes, each representing a paper. Each paper’s features are represented by a 1,433-dimensional bag-of-words vector, reflecting the presence of specific terms within the paper. The dataset contains 5,429 citation edges, typically processed as an undirected graph. Papers are categorized into 7 topics, including neural networks and genetic algorithms, primarily for node classification tasks. 
+
+CiteSeer: The CiteSeer dataset is another academic paper citation network, slightly larger than Cora with 3,327 nodes and 4,732 citation edges. Each paper is represented as a 3,703-dimensional sparse binary vector and categorized into 6 domains, such as artificial intelligence and machine learning. This dataset is frequently used for node classification and graph representation learning tasks, serving as a classic benchmark for graph neural network validation. 
+
+PubMed: The PubMed dataset originates from the biomedical literature citation network, comprising 19,717 nodes and 44,338 edges. Each paper’s feature is a 500-dimensional TF-IDF vector representing word importance within the paper. There are 3 categories, such as diabetes-related topics. Due to its large scale and sparse real-valued features, PubMed is frequently used for semi-supervised node classification and testing the performance of graph convolutional networks. 
+
+Tolokers: The Tolokers dataset originates from a crowdsourcing task platform, where nodes typically represent task participants or tasks themselves. Node counts range from approximately 5,000 to 10,000, with feature dimensions of 300–1,000 sparse vectors representing user or task attributes. This dataset is suitable for evaluating graph neural network performance in real-world scenarios, particularly for federated learning and oblivious learning tasks. 
+
+## A.2 MIA Evaluation Metric 
+
+In our implementation, MAIT evaluates unlearning via a membership inference attack (MIA) that uses the per-sample loss as the membership statistic, and reports the MIA rate on the target data which should be forgotten. To make the pre/post comparison well-defined, we fix the decision threshold at the value fitted on the pre-unlearning model and reuse it for all post-unlearning evaluations. Let Dtgt denote the target dataset. Let Dret denote a retained dataset drawn from other clients. Let Dvir 
+
+denote a virtual/non-member dataset generated from Dret .Let θ be the parameters of the model being evaluated, f (·; θ) the model, and L(·, ·) the task loss (cross-entropy). For each sample ( x, y ), define the membership statistic as the sample loss: 
+
+ℓ(x, y ; θ) ≜ L(f (x; θ), y ) .
+
+Let θpre be the pre-unlearning model. MAIT fits a decision threshold τpre using θpre together with member/non-member reference data. Intuitively, τpre is chosen so that losses of members (from Dtgt ) are more likely to fall below the threshold than losses of non-members (from Dvir ), enabling membership dis-crimination. Let I[·] be the indicator function. Given the fixed threshold τpre , MAIT predicts a sample as a member if its loss is smaller than τpre . The reported MIA rate is then the fraction of target samples classified as members: MIA( θ; τpre ) = 1
+
+|D tgt |
+
+X
+
+> (x,y )∈D tgt
+
+I[ℓ(x, y ; θ) < τ pre ] .
+
+A lower MIA( θ; τpre ) indicates that the target data becomes harder to distinguish as training members and better unlearning. 16
