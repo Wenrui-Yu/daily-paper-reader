@@ -1,0 +1,2921 @@
+Title: Don't Be a Pot Stirrer! Authorized Vector Data Retrieval via Access-Aware Indexing
+
+URL Source: https://arxiv.org/pdf/2605.01342v1
+
+Published Time: Tue, 05 May 2026 00:40:08 GMT
+
+Number of Pages: 22
+
+Markdown Content:
+# Don’t Be a Pot Stirrer! Authorized Vector Data Retrieval via Access-Aware Indexing 
+
+# Shanshan Han 
+
+University of California, Irvine shanshan.han@uci.edu 
+
+# Vishal Chakraborty 
+
+University of California, Irvine vchakrab@uci.edu 
+
+# Sharad Mehrotra 
+
+University of California, Irvine sharad@ics.uci.edu 
+
+## ABSTRACT 
+
+Vector databases increasingly enforce role-based access control: each top-𝑘 approximate nearest neighbor query must return only vectors the querying role is authorized to access. Two extremes bracket the design space. A single global index avoids duplication but wastes search effort on unauthorized vectors and degrades re-call, while an oracle index, built with all authorized vectors, searches only authorized vectors but duplicates every shared vector between roles or queries. We present Veda and its efficient variant EffVeda ,two indexing strategies built on an access-aware lattice to address access control in vector databases. The methods first partitions the dataset into disjoint data blocks by role combination, then leverage the structure of the access-aware lattice to apply copy and merge 
+
+operations to group co-accessed blocks under a user-specified stor-age budget. Large nodes in the lattice are then indexed with HNSW, while small nodes are retained for linear scan. For each role, our methods construct a query plan that selects the minimal set of nodes that covers the role’s authorized data. At query time, coordinated search first queries pure (authorized-only) nodes to populate a global top-𝑘 heap. The resulting distance bound then prunes exploration on impure nodes, avoiding the inflated search that independent per-index execution would require. 
+
+## 1 INTRODUCTION 
+
+Vector databases now sit behind semantic search, recommenda-tion, and retrieval-augmented generation (RAG) [ 12 ]. Enterprise deployments increasingly hold data that not every user may see. A hospital’s RAG corpus, for instance, mixes clinical notes with billing records; a physician may read the former but not the latter, and an administrator the reverse. The retrieval layer must therefore enforce role-based access control (RBAC) [ 2 ]: a top-𝑘 approximate nearest-neighbor (ANN) query issued by role 𝑟 may return only vectors that 𝑟 is authorized to read. Regulations such as the EU AI Act [ 4] make this isolation a compliance requirement rather than an optional feature. Recall remains critical at the same time, since a clinical query that misses an authorized record can change a treatment decision. A natural question is how to organize vector data with access control constraints so that queries can respect access policies while preserving high recall. Two extremes bracket the design space. A global index builds one ANN graph, e.g., HNSW [ 15 ], over all vectors and discards unauthorized results after search. Storage stays minimal, but the search beam fills with vectors the role cannot access; recall drops, and the system must oversample to compensate. An oracle index is the ideal HNSW baseline that would be available if the query predicate were known at construction time [ 18 ]. For a query with role 𝑟 , the oracle index builds an HNSW graph over exactly its accessible data. Every query then runs on a pure search index with no post-filtering or search-scope expansion, but every vector shared across 𝑚 roles is stored 𝑚 times. We measure this trade-off with two metrics. 
+
+Storage amplification (SA ): the ratio of total indexed vectors to dataset size; the global index attains SA = 1 and oracle indexing sets the upper bound. 
+
+Query amplification (QA ): the average query cost normalized to oracle indexing; oracle indexing attains QA = 1 and the global index sets the upper bound. The goal is an index layout near the lower-left corner of the SA –QA plane. 
+
+Prior work. A growing line of work folds attribute predicates into ANN search. Filtered-DiskANN [ 6] adds label-aware edges to the Vamana graph so that traversal stays on points matching the query label. ACORN [ 18 ] expands each HNSW node’s neighbor list by a factor 𝛾 so that the predicate-matching subgraph remains navi-gable after filtering. They do not exploit the structure that RBAC imposes: a small fixed set of roles, union semantics over a user’s roles, and heavy overlap among role-authorized views. SIEVE [ 13 ]and HoneyBee [ 24 ] are data partitioning strategies that close to ours. SIEVE [ 13 ] observes the historical workload and materializes a budget-bounded set of HNSW sub-indices for the most profitable filters, falling back to the global index for the rest. HoneyBee [ 24 ]casts RBAC-aware indexing as constrained optimization and pro-duces overlapping partitions that trade storage for latency. Two limitations remain. First, each role’s data must fit inside a single partition, so fine-grained overlap among roles cannot be exploited. Second, partitions are searched independently and merged after-ward. When a partition is impure for role 𝑟 , i.e., it mixes vectors 𝑟 
+
+may and may not read, the search on that partition must inflate its beam to recover enough authorized candidates. We argue that data partitioning is the natural fit for access-controlled ANN search. Three properties of RBAC make this so. (i) Access policies are dictated by organizational structure rather than by arbitrary attribute predicates, e.g., physicians read clinical notes, administrators read billing data, and a small public slice is shared. The data therefore admits a small, stable set of role-aligned partitions, unlike category filters (e.g., color, price) whose predicate combinations are unbounded. (ii) RBAC follows union semantics: a user’s view is the union of its roles’ authorized vectors, so a query is answered by unioning partition results rather than intersecting per-attribute indices. (iii) Policies evolve, such asdepartments merge, permissions are revoked, etc, and a partitioned layout absorbs such changes efficiently, whereas deleting a role’s vectors from a global HNSW graph can sever connectivity and force a full rebuild. Parti-tioning is not unconditionally optimal, however. When a query’s authorized region already covers most of the dataset, the query must touch many partitions and pay repeated index-switching and 
+
+> arXiv:2605.01342v1 [cs.DB] 2 May 2026
+
+result-merging overhead. In this case, a single global index with in-search or post-search filtering is cheaper. We therefore treat the two as complementary: data partitioning serves selective queries, and a single global index serves broad ones. We exprimentally validate this crossover case with multi-role queries in Exp 13 in §7. 
+
+This paper. We present Veda and its efficient variant EffVeda ,two indexing strategies built on an access-aware lattice . The lattice first splits the dataset into disjoint exclusive blocks , one per distinct role combination. Copy and merge operations then restructure the lattice under a user-specified SA budget 𝛽 . Copying a block into an ancestor spends budget but keeps both nodes pure to the accessed roles. Merging spends no budget but introduces impurity. Veda 
+
+greedily picks the operation with the highest query-cost reduction per unit of added storage. EffVeda reaches a comparable layout faster by traversing the lattice bottom-up with deterministic heuris-tics that avoid re-scoring every candidate pair. Nodes that reach the indexability threshold Λ are indexed with HNSW to support fast ANN search. Smaller nodes are kept as leftover vectors for linear scan, since linear scan beats HNSW at small sizes (§2.3). For each role we derive a query plan that selects a minimal set of nodes whose union covers that role’s authorized data. We pair the lattice with coordinated search , a query-execution procedure that shares state across the indices in a role’s plan. The procedure first scans leftovers and queries pure indices to fill a global top-𝑘 heap. The 
+
+𝑘 -th distance in that heap then bounds the search on each impure index: an uninflated probe runs first, and the search inflates only if its 𝑘 -th local candidate beats the global bound. Coordinated search thus pays the inflation cost only on impure indices that can actu-ally improve the result, and the mechanism is orthogonal to the partitioning strategy itself. We develop the partitioning strategy for single-role queries, and extend the evaluation to multi-role queries in Exp 13 in §7. 
+
+Contributions. We make the following contributions. 
+
+• We formalize access-controlled ANN indexing as optimizing QA 
+
+under an SA budget and introduce the access-aware lattice that exposes copy and merge as the two primitive operations on RBAC data (§3). 
+
+• We present Veda , a greedy lattice-optimization algorithm (§4), and EffVeda , a bottom-up variant that reaches comparable layouts at lower construction cost (§5). 
+
+• We introduce coordinated search that uses a global top-𝑘 heap to prune exploration on impure indices while preserving recall (§6). 
+
+• Evaluations show that Veda and EffVeda achieve high QPS at high recall while tracking the desired SA closely (§7). 
+
+Roadmap. §2 reviews HNSW and defines impurity and query cost under access control. §3 formalizes the index-selection problem and the exclusive lattice. §4 and §5 present Veda and EffVeda . §6 describes query planning and coordinated execution. §7 reports experiments, §8 surveys related work, and §9 concludes. 
+
+## 2 ROLE-BASED ACCESS VIA INDICES 
+
+This section lays the groundwork for access-control-aware index-ing. §2.1 reviews HNSW [ 15 ] (full details in Appendix §A). §2.2 defines index impurity under role-based access control, formalizes the query-cost model, and walks through four indexing strategies on a concrete example. §2.3 distills three design challenges that motivate Veda and EffVeda .
+
+## 2.1 HNSW Overview 
+
+HNSW organizes vectors in a multi-layer proximity graph: upper layers hold sparse long-range links and lower layers hold dense short-range links [ 15 ]. A top-𝑘 query enters at a random node on the top layer and greedily descends toward closer neighbors until it reaches the bottom layer. Search on the bottom layer expands each candidate node’s neighbors through a priority queue PQ of capacity efs and returns the 𝑘 closest entries. In practice, efs is a query-time beam width chosen to be at least 𝑘 and tuned for the desired recall–latency trade-off. We set efs to 𝛼𝑘 , where 𝛼 is a small constant (typically 5–10 in practice [ 1 , 10 , 13 , 18 ]). For instance, a top-10 query on x retains efs ∈ [ 50 , 200 ] candidates in the priority queue PQ . The implicit assumption is that the true top-𝑘 neighbors of x appear among these efs candidates with high probability. We state it formally. 
+
+Assumption (HNSW Search Accuracy). Let D ( idx ) be the set of vectors stored in an HNSW index idx , and let 𝑞 = (x, 𝑟 ) be a top-𝑘 query for the nearest neighbors of x accessible to role 𝑟 . Let PQ 
+
+be the priority queue of capacity efs maintained during search on 
+
+idx . With high probability, dist (x, 𝑣 ) < dist (x, 𝑣 ′) for all 𝑣 ∈ PQ and 
+
+𝑣 ′ ∈ D ( idx ) \ PQ .
+
+Asymptotic Query Cost. Let idx be an HNSW index and let 𝑀 
+
+denote the number of neighbors inspected per node during traversal. A top-𝑘 HNSW query has the standard comparison-based bound 
+
+O( 𝑀 log |idx | + 𝑀 efs log efs + efs log 𝑘 ) ,
+
+where the terms correspond to upper-layer descent, base-layer beam search, and final top-𝑘 extraction. Since 𝑘 is small in our setting (top-
+
+1 to top-5 passages usually suffice for LLM inference [ 14 , 19 , 23 ]), the extraction term is negligible; dropping the constant 𝑀 for the 
+
+log |idx | and efs log efs terms gives O( log |idx |+ efs log efs ). To use this bound as a comparable cost proxy, we keep the two surviving features and make the hidden constants explicit: 𝐶 cmp  
+
+> 𝜃
+
+(idx , efs ) =
+
+𝑎 log |idx | + 𝑏 efs log efs +𝑐, where 𝜃 = (𝑎, 𝑏, 𝑐 ) are fitted coefficients for upper-layer traversal, base-layer search, and fixed per-query overhead. Definition 2.2 below gives the deployment-calibrated latency model used by our algorithms. 
+
+## 2.2 Access-Control-Aware Indexing 
+
+To enforce access control with HNSW, we partition the dataset into groups and build one HNSW index per group. A group may hold vectors from several roles, so an index can be impure for a given role 𝑟 : it stores vectors that 𝑟 is not authorized to read. 
+
+Definition 2.1 (Pure and Impure Indices). An index idx is pure 
+
+with respect to role 𝑟 if every vector it stores is authorized for 𝑟 ;otherwise idx is impure . Let D ( idx ) denote all vectors in idx and 
+
+D𝑟 (idx ) ⊆ D ( idx ) the subset authorized for 𝑟 .We quantify impurity as 
+
+𝜆 𝑟  
+
+> idx
+
+=
+
+ |D ( idx )| |D ( idx ) ∩ D ( 𝑟 )| 
+
+
+
+, (1) 
+
+> 257
+
+Exclusive partitions of data  
+
+> Query Role # Accessible Data
+> 40,000
+> 50,000
+> 60,000
+
+{r1}
+
+> 10,000
+
+{r1, r2}
+
+> 10,000
+
+{r1, r3}  
+
+> 10,000
+> {r1,r2,r3}
+> 10,000
+
+{r3}
+
+> 30,000
+
+{r2}
+
+> 20,000
+
+{r2, r3}
+
+> 10,000
+
+r1
+
+r2
+
+r3
+
+{r1}
+
+> 10,000
+
+{r1, r2}  
+
+> 10,000
+> {r1,r2,r3}
+> 10,000
+
+{r1, r3}
+
+> 10,000
+
+{r2}
+
+> 20,000
+
+{r3}  
+
+> 30,000
+> {r1,r2,r3}
+> 10,000
+
+{r2, r3}
+
+> 10,000
+
+N1 N2 N3
+
+N5 N6 N7
+
+{r1, r2}
+
+> 10,000
+
+N4
+
+{r1}
+
+> 10,000
+
+{r2}
+
+> 20,000
+
+{r3}
+
+> 30,000
+
+{r1, r3}
+
+> 10,000
+
+{r1, r2}
+
+> 10,000
+
+{r2, r3}  
+
+> 10,000
+> {r1,r2,r3}
+> 10,000
+
+Strategy 1: Global indexing 
+
+N1
+
+Strategy 2: Oracle indexing 
+
+{r1}
+
+> 10,000
+
+{r1, r3}
+
+> 10,000
+
+{r1, r2}  
+
+> 10,000
+> {r1,r2,r3}
+> 10,000
+
+# r1
+
+{r1, r2}  
+
+> 10,000
+> {r1,r2,r3}
+> 10,000
+
+{r2}
+
+> 20,000
+
+{r2, r3}
+
+> 10,000
+
+# r2
+
+{r1, r3}  
+
+> 10,000
+> {r1,r2,r3}
+> 10,000
+
+{r3}
+
+> 30,000
+
+{r2, r3}
+
+> 10,000
+
+# r3
+
+{r1}
+
+> 10,000
+
+{r1, r2}  
+
+> 10,000
+> {r1,r2,r3}
+> 10,000
+
+{r1, r3}
+
+> 10,000
+
+{r2}
+
+> 20,000
+
+{r3}
+
+> 30,000
+
+{r2, r3}
+
+> 10,000
+
+N1
+
+N4
+
+N2 N3
+
+N5
+
+Strategy 3: Merge (introduce impurity) 
+
+Strategy 4: Copy (introduce storage overhead) Figure 1: Indexing strategies over exclusive access-control blocks. Each dotted box marks a group 𝐺 covered by a single index. 
+
+where D ( idx ) ∩ D ( 𝑟 ) is the subset of idx accessible to 𝑟 . To com-pensate, the retrieval target is inflated from 𝑘 to 𝜆 𝑟  
+
+> idx
+
+𝑘 and efs is inflated from 𝛼𝑘 to 𝛼 𝜆 𝑟  
+
+> idx
+
+𝑘 . The priority queue thus grows linearly with impurity, and more candidates must be examined to maintain recall. Where unambiguous we write 𝜆 for 𝜆 𝑟 
+
+> idx
+
+.
+
+Definition 2.2 (Cost of Role-Based Queries on HNSW). Let idx be an HNSW index with size |idx |, let efs = 𝛼𝑘 , and let 
+
+𝐶 𝜃 (idx , efs ) = 𝑎 log |idx | + 𝑏 efs + 𝑐 
+
+be the latency model fitted on the target hardware for idx searched with beam width efs . The cost of a top-𝑘 query issued by role 𝑟 on 
+
+idx is denoted Cost H, where H denotes HNSW: 
+
+Cost H (idx , 𝑟 ) =
+
+
+
+𝐶 𝜃 (idx , efs ), if idx is pure w.r.t. 𝑟 𝐶 𝜃 (idx , ⌈𝜆 efs ⌉) , if impure and 𝜆 efs ≤ | idx |
+
+𝐶 𝜃 (idx , |idx |) , if impure and 𝜆 efs > |idx |
+
+The first case is a pure index that needs no post-filtering. The second inflates the priority queue to absorb unauthorized vectors. The third arises when inflation exceeds the index size and degener-ates to a full scan. On real hardware each expansion is dominated by work that is constant in efs . It evaluates distances 𝑀 times using 
+
+O( 𝑑 ) floating-point operations each and fetches the corresponding neighbor vectors from memory, typically through cache misses. Thus, we uses the linear form 𝐶 𝜃 (idx , efs ) to model the latency instead of the asymptotic bound in §2.1. The marginal cost of one extra unit of efs is therefore effectively constant, and measured latency is fit better by the linear form (e.g., 
+
+𝑅 2=0.99 vs. 0.98 for efs log efs when 𝑑 =128 , 𝑀 =16 ; see Appendix B for details). We accordingly adopt 𝐶 𝜃 (idx , efs ) = 𝑎 log |idx |+ 𝑏 efs +
+
+𝑐 , with 𝜃 = (𝑎, 𝑏, 𝑐 ) calibrated once per deployment so that the coefficients absorb the effects of 𝑑 , 𝑀 , and the memory hierarchy. Appendix B gives the detailed derivation and how we estimate 𝑎 , 𝑏 ,and 𝑐 . We now compare four partitioning strategies on a toy dataset of 10 ,000 vectors with three roles {𝑟 1, 𝑟 2, 𝑟 3 } (Figure 1). 
+
+• Baseline 1 (Global Index). One index over the entire dataset; every query post-filters unauthorized results (SA = 1). 
+
+• Baseline 2 (Oracle Index). An ideal query-predicate-aware HNSW baseline: for each role 𝑟 , construct an index over exactly 
+
+D ( 𝑟 ), the vectors authorized for 𝑟 . This oracle partition requires no post-filtering or search-scope expansion, but it duplicates every vector that is visible to multiple roles (SA = 1.5). 
+
+• Strategy 3 (Merge). Exclusive blocks that are co-accessed are merged into shared groups. In Figure 1 the blocks of {𝑟 1 } and {𝑟 1, 𝑟 2 }
+
+are merged, as are those of {𝑟 1, 𝑟 3 } and {𝑟 1, 𝑟 2, 𝑟 3 }. No data is dupli-cated (SA = 1). 
+
+• Strategy 4 (Copy). Selected blocks are duplicated so they co-locate with other blocks accessible to the same role. In Figure 1, the block {𝑟 1, 𝑟 2 } is copied into the group {𝑟 1 }. Queries with 𝑟 2 access the original node {𝑟 1, 𝑟 2 }, eliminating impurity when searching for role 𝑟 2 on the new data group. Similarly, the block {𝑟 1, 𝑟 2, 𝑟 3 } is copied into the group {𝑟 1, 𝑟 3 } (SA = 1.2). These four strategies span the storage–efficiency spectrum. Base-line 1 attains optimal storage ( SA = 1) but the highest query cost, since every query searches all data and then filters. Baseline 2 at-tains the oracle query cost but duplicates shared data ( SA = 1.5). 
+
+Strategy 3 avoids duplication ( SA = 1); 𝑟 1 and 𝑟 3 hit pure indices while 𝑟 2 still post-filters. Strategy 4 duplicates selectively ( SA = 1.2)to cut impurity, trading modest storage for lower latency. 
+
+## 2.3 Challenges 
+
+The four strategies expose a tension between SA and QA : improving one degrades the other. Selective merging ( Strategy 3 ) and copying (Strategy 4 ) sit between the extremes and show that the tension can be eased by managing data blocks that are retrieved together. 
+
+Copying is preferable to merging when storage permits, since it preserves the source block and avoids degrading other roles through impurity. These observations motivate an indexing scheme that combines copy and merge under a storage budget while ensuring high recall. Three challenges follow. 
+
+• Data Partition. Given a user-specified SA budget, how should the dataset be partitioned to minimize QA while preserving recall? And since linear scan beats HNSW on small groups (Figure 2), how should HNSW indexing and linear scan be combined across groups of different sizes? 
+
+• Index Selection. Given the indices built over those groups, which subset should a role query to retrieve its top-𝑘 results efficiently? 
+
+> 3
+
+(a) 128D data. (b) 200D data. (c) 256D data. 
+
+Figure 2: HNSW vs. linear scan. Linear scan dominates when the index is small. Table 1: Frequently used notation.                                                
+
+> Symbol Domain Description
+> DVectors Entire vector dataset
+> RRoles Set {𝑟 1, 𝑟 2, . . . }of user roles
+> 𝜏 P ( R ) A combination of authorized roles
+> 𝑁 ex (𝜏 )Vectors Vectors exclusively accessible to 𝜏
+> D ( 𝑟 )Vectors All vectors accessible to role 𝑟
+> IIndices Set of HNSW indices
+> D ( idx )Vectors Vectors contained in index idx
+> I ( 𝑟 )Indices HNSW indices touched for queries with role 𝑟
+> QP [𝑟 ]Query plan for role 𝑟 ; data blocks required for queries with role 𝑟
+> Cost (𝑞 )R+Query cost for 𝑞 =(x, 𝑟 )
+> SA ( I ) R+Storage amplification:
+> Í
+> idx ∈I |D ( idx ) | |D|
+> 𝛽 R+Storage amplification
+> ΛNHNSW indexing threshold
+
+• Query Answering. How can search be coordinated across mul-tiple indices, including impure ones that mix authorized and unau-thorized vectors, such that redundant exploration is avoided and recall is preserved? 
+
+## 3 DATA PARTITION AND INDEX SELECTION 
+
+This section formalizes Data Partition and Index Selection and illustrates both on the dataset of Figure 1. 
+
+## 3.1 Problem Definition 
+
+Given a vector dataset D and a SA budget, in which each vector is accessible to one or more roles, we seek a partition of D into groups suitable for indexing. The objective is threefold: (i) minimize the average estimated query cost; (ii) limiting the impurity of any group with respect to the roles that query it; and (iii) respect the given SA budget. We assume uniform single-role queries by default and extend to other workloads in §7. We assume that D and R
+
+are static during construction, and discuss extensions to insertions, deletions, and permission changes in Appendix I. 
+
+Roles and Access Tags. Let R = {𝑟 1, 𝑟 2, . . . } be the set of roles. Each vector in D carries a role combination 𝜏 ⊆ R with |𝜏 | ≥ 1 that names the roles authorized to read it. For each 𝜏 , the exclusive block 
+
+𝑁 ex (𝜏 ) is the set of vectors that are exclusively accessible to role set 
+
+𝜏 . The dataset thus decomposes into a set of disjoint exclusive blocks, denoted as Nex : Nex = {𝑁 ex (𝜏 ) : 𝜏 ⊆ R and |𝑁 ex (𝜏 )| > 0}. Let T
+
+be the set of role combinations with non-empty exclusive blocks, for example, T = {{ 𝑟 1 }, {𝑟 2 }, {𝑟 3 }, {𝑟 1, 𝑟 2 }, {𝑟 1, 𝑟 3 }, {𝑟 2, 𝑟 3 }, {𝑟 1, 𝑟 2, 𝑟 3 }} 
+
+in Figure 1. Let D ( 𝑟 ) be all vectors accessible to 𝑟 , i.e., D ( 𝑟 ) =
+
+Ð𝜏 ∈ T :𝑟 ∈𝜏 𝑁 ex (𝜏 ).
+
+Index Set. An index is built over the union of one or more exclusive blocks, and two indices may share exclusive blocks. Let I denote the set of all HNSW indices built over D, and let D ( idx ) be the vectors used to build idx . Each index is then a union of exclusive blocks, i.e., D ( idx ) = Ð𝜏 ′ ∈ T ′ 𝑁 ex (𝜏 ′) for some T ′ ⊆ T , and the same block may appear in several indices. Let I ( 𝑟 ) ⊆ I be the indices used to answer queries for role 𝑟 . An index set I is correct if, for every 𝑟 ∈ R , I ( 𝑟 ) covers all of 𝑟 ’s data: D ( 𝑟 ) ⊆ Ðidx ∈ I ( 𝑟 ) D ( idx ),where D ( 𝑟 ) = Ð𝜏 ∈ { 𝜏 ∈ T | 𝑟 ∈𝜏 } 𝑁 ex (𝜏 ).
+
+Query Model. A query 𝑞 = (x, 𝑟 ) is issued by a user with role 𝑟 
+
+and retrieves the top-𝑘 nearest neighbors of x within D ( 𝑟 ). The query may touch any subset I ( 𝑟 ) ⊆ I whose union covers D ( 𝑟 ).The expected cost for role 𝑟 is the sum over its plan: Cost (𝑟 ) =
+
+Íidx ∈ I ( 𝑟 ) Cost H (idx , 𝑟 ).
+
+Objective. Let 𝑄 = {𝑞 1, 𝑞 2, . . . } be a uniform single-role workload in which each 𝑞 = (x, 𝑟 ) draws 𝑟 ∈ R with equal probability. The estimated average query cost is 
+
+AvgCost (𝑄, I) = 1
+
+|𝑄 |∑︁ 𝑞 ∈𝑄 
+
+Cost (𝑟 ). (2) 
+
+Definition 3.1. Given a role-based dataset D, a workload 𝑄 , and an SA budget 𝛽 , the Index Selection problem constructs an in-dex set I over D via merge and copy operations that minimizes 
+
+AvgCost (𝑄, I) subject to SA (I) ≤ 𝛽 .The problem generalizes budgeted set cover: each candidate in-dex covers a subset of Ð𝑟 Lex [𝑟 ] at a storage cost, and we must cover every role’s blocks under a knapsack constraint while mini-mizing a sub-additive query cost. Budgeted set cover is NP-hard [ 11 ], so we do not seek exact solutions; §4–§5 give greedy heuristics, and Appendix §C gives the MILP used to bound their gap on small instances. We also note that although |T | ≤ 2| R | in the worst case, in practice |T | is bounded by the number of distinct permission sets the policy actually assigns, e.g., 641 –757 on our benchmarks (Table 2). 
+
+## 3.2 Exclusive Lattices 
+
+The subset-containment relations among role combinations give the exclusive blocks a natural partial order. We organize them in an exclusive lattice and then optimize that lattice to form indexable data groups (§4 and §5). Consider Strategy 4 in Figure 1. Each exclusive block is placed on a layer according to the cardinality of the role combination; with three roles, the lattice has at most three layers. Edges encode parent– child relations; upper-layer nodes are parents and lower-layer nodes are children. The block with role set {𝑟 2, 𝑟 3 }, for instance, is a child of both {𝑟 2 } and {𝑟 3 }. Edges thus mirror the containment hierarchy of the access-control policy. Formally, the exclusive lattice is a directed acyclic graph Lex =
+
+(N ex , 𝐸 ). Each node 𝑁 ex (𝜏 ) ∈ N ex holds the data authorized for exactly 𝜏 (§3), and 𝐸 captures how access scope widens from stricter to broader role sets. Nodes with the same |𝜏 | share a layer; empty nodes and empty layers are omitted. Higher layers correspond to stricter access (fewer roles) and lower layers to broader access. An 
+
+> 4
+
+edge (𝑁 ex (𝜏 ), 𝑁 ex (𝜏 ′)) ∈ 𝐸 links a parent to a child when both conditions hold: (1) Containment: 𝜏 ⊆ 𝜏 ′, so every role authorized at the parent is also authorized at the child. (2) Adjacency: |𝜏 | < |𝜏 ′ |, and no intermediate node 𝑁 ex (𝜏 ′′ )
+
+exists with |𝜏 | < |𝜏 ′′ | < |𝜏 ′ | and 𝜏 ⊆ 𝜏 ′′ ⊆ 𝜏 ′.A parent therefore has the more restrictive access set, and di-rected paths in Lex define child–ancestor relations. Any role at-tached to an ancestor can read that ancestor and all of its descen-dants; a role introduced only at a descendant might not read the ancestor’s stricter block. The data-partition problem can be cast as an optimization prob-lem with nonlinear objective and constraints, but its size grows exponentially with the input. Appendix §C gives a non-convex linear-program formulation and its MILP simplification; the next two sections develop adaptive solutions instead. 
+
+## 4 VEDA : THE ADAPTIVE SOLUTION 
+
+Veda transforms the exclusive lattice Lex = (N ex , 𝐸 ) into an opti-mized lattice L by applying copy and merge operations. The result-ing lattice groups data that is queried together. Nodes with at least 
+
+Λ vectors receive HNSW indices; smaller nodes are kept as leftover vectors for linear scan. 
+
+Operations on Child–Ancestor Pairs. Veda acts only on child– ancestor pairs (𝑁 𝑐 (𝜏 ), 𝑁 𝑎 (𝜏 ′)) along paths in L, where 𝜏 ′ ⊆ 𝜏 .Every role that can read the ancestor 𝑁 𝑎 (𝜏 ′) can also read the child 
+
+𝑁 𝑐 (𝜏 ), so any query that reaches the ancestor must also reach the child. Co-locating their data lets such queries be served from a single node. Two operations are defined on a pair (𝑁 𝑐 (𝜏 ), 𝑁 𝑎 (𝜏 ′)) :
+
+• Copy: duplicate the exclusive data of 𝑁 𝑐 (𝜏 ) into 𝑁 𝑎 (𝜏 ′) and keep 
+
+𝑁 𝑐 (𝜏 ) as a separate node. 
+
+• Merge: union 𝑁 𝑐 (𝜏 ) into 𝑁 𝑎 (𝜏 ′) and remove 𝑁 𝑐 (𝜏 ) from L.Each operation has a distinct trade-off. Copying preserves the source node but duplicates data, increasing SA . Merging avoids duplication but introduces impurity : roles that previously read a pure node may now encounter unauthorized vectors. In Strategy 3 
+
+of Figure 1, merging the node of {𝑟 1, 𝑟 2 } into the node of {𝑟 1 } forces 
+
+𝑟 2’s queries to traverse 10 ,000 vectors exclusive to 𝑟 1. To navigate this trade-off, Veda takes a user-specified SA budget 𝛽 and ranks candidate operations with a benefit function : query-cost reduction per unit of added storage. 
+
+Definition 4.1 (Benefit Function). Let 𝑄 = {𝑞 1, 𝑞 2, . . . } be a uni-form single-role query workload, where each 𝑞 = (x, 𝑟 ) targets data accessible to 𝑟 ∈ R . For an operation 𝑒 on a child–ancestor pair 
+
+(𝑁 𝑐 (𝜏 ), 𝑁 𝑎 (𝜏 ′)) , let L and L′ be the lattice before and after 𝑒 , and let I (L) denote the set of indices represented by lattice L. The 
+
+benefit of 𝑒 is 
+
+𝑓 (L , 𝑒 ) = AvgCost (𝑄, I (L)) − AvgCost (𝑄, I (L ′)) 
+
+Δ𝑆 (𝑒 ) + 1 , (3) where AvgCost (∗) is defined in Section 3.1, and Δ𝑆 (𝑒 ) is the addi-tional storage consumed by 𝑒 .The numerator is the per-query reduction in average cost; the denominator normalizes by added storage. Adding 1 guards against division by zero, since merges consume no additional storage, and copies may also have Δ𝑆 (𝑒 ) = 0 after earlier operations make nodes impure. Although Veda starts from the exclusive lattice, an ancestor may already contain the child’s vectors because of prior copy or merge operations. A positive benefit means the operation reduces cost; a negative benefit signals degradation. Because copying pre-serves source nodes and never harms an existing query plan, Veda 
+
+applies copy operations first within the budget 𝛽 (Theorem D.1, Appendix D). 
+
+Algorithm Overview. Algorithm 1 summarizes Veda . Starting from Lex , Veda enumerates the child–ancestor pairs CA 𝑠 repre-sented by the lattice edges/paths, builds a query plan QP per role (i.e., which nodes to access to cover all data for each role, detailed in§6.1 later), and refines the lattice in three phases until the SA bud-get 𝛽 is exhausted or no beneficial operation remains, e.g., every remaining copy or merge candidate has non-positive benefit under Eq. (3). 
+
+Algorithm 1 The Adaptive Solution - Overview Require: Lex : the exclusive lattice created based on D. Λ: domi-nant size. 𝛽 : desired storage amplification. R: role set.  
+
+> 1:
+
+L ← L ex , CA 𝑠 ← get _child _ancestor _pairs (L ex ) 
+
+> 2:
+
+QP = get _query _plans (R , L)  
+
+> 3:
+
+while True do  
+
+> 4:
+
+if 𝛽 > 0 then  
+
+> 5:
+
+L, QP ← copy (L , Lex , 𝛽, CA 𝑠, QP ) ⊲ Algorithm 2  
+
+> 6:
+
+if not first round and no copy applied then break  
+
+> 7:
+
+L, QP ← merge (L , Lex , CA 𝑠, QP ) ⊲ Algorithm 3  
+
+> 8:
+
+if no merge applied then break  
+
+> 9:
+
+L, QP ← split _small _nodes _into _leftovers (L , Λ) 
+
+> 10:
+
+if | L | | D | < 𝛽 then ⊲ Storage reclaimed after merging  
+
+> 11:
+
+L, QP ← handle _super _impure _nodes (L , Lex , 𝛽, CA 𝑠, QP ) 
+
+> 12:
+
+U, I ← build_vector_storage (L)  
+
+> 13:
+
+return I, U
+
+(1) Phase 1: Copy (§4.1). Greedily apply the highest-benefit copies, grouping related data while respecting 𝛽 .(2) Phase 2: Merge (§4.2). Merge residual small nodes into in-dexable groups (size ≥ Λ), reclaiming any storage freed where prior copies overlap. (3) Phase 3: Finalize (Appendix §E.3). Decompose remaining unindexable groups into exclusive blocks for linear scan. If decomposition frees storage by removing duplicates, spend the reclaimed budget on materializing the pure part of any node that is highly impure for some role (Algorithm 11 in Appendix §E.3). After Phase 3, each node in L is a group of exclusive blocks. 
+
+Veda builds an HNSW index for every node of size ≥ Λ and keeps smaller nodes as leftover vectors for efficient linear scan. 
+
+## 4.1 Phase 1: Copying 
+
+The copy phase greedily selects and applies the most beneficial copies. A candidate 𝑒 (𝑁 𝑐 (𝜏 ), 𝑁 𝑎 (𝜏 ′)) duplicates the vectors of 𝑁 𝑐 (𝜏 )
+
+into 𝑁 𝑎 (𝜏 ′), consuming 
+
+Δ𝑆 (𝑒 ) = |L ex [𝑁 𝑐 (𝜏 )]| + |L [ 𝑁 𝑎 (𝜏 ′)]| − |L ex [𝑁 𝑐 (𝜏 )] ∪ L [ 𝑁 𝑎 (𝜏 ′)]| .
+
+> 5
+
+Greedy Selection. Algorithm 2 gives the procedure. The available buffer is buf = 𝛽 |L ex | − |L| . Here |L| is the total number of stored vectors across all nodes, counting duplicates. Let PR be the set of candidate copy operations 𝑒 (𝑁 𝑐 , 𝑁 𝑎 ) such that (𝑁 𝑐 , 𝑁 𝑎 ) ∈ CA 𝑠 and both nodes are still present in the current lattice L. The algorithm evaluates each candidate’s benefit 𝑓 (L , 𝑒 ). At each step, it chooses the highest-benefit candidate 𝑒 ∗ and applies it only if the benefit is nonnegative and the copy fits the remaining budget: 
+
+𝑒 ∗ = arg max   
+
+> 𝑒 ∈PR
+
+𝑓 (L , 𝑒 ), 𝑓 (L , 𝑒 ∗) ≥ 0 and Δ𝑆 (𝑒 ∗) ≤ buf . (4) Zero-benefit copies with 𝑓 (L , 𝑒 ) = 0 are admitted. Such a copy may not change the current query plan by itself, but after complementary descendants are copied into the same ancestor, QP may replace several child accesses with one ancestor access. After each copy, 
+
+Veda updates the buffer, the query plan QP , and the candidate set 
+
+PR , recomputing benefits only for pairs that involve the modified ancestor. 
+
+Theorem 4.2 (Correctness of Greedy Copy Phase). Let L𝑡 be the lattice after 𝑡 greedy copy operations. Then: (1) Monotonicity: AvgCost (𝑄, I (L 𝑡 )) ≤ AvgCost (𝑄, I (L 𝑡 −1)) .(2) Budget Safety: | L 𝑡 || L ex | ≤ 𝛽 .(3) Termination: the phase halts when no 𝑒 satisfies Equation 4. 
+
+Algorithm 2 Veda - Copy Require: Lex : the exclusive lattice created based on D. L: the current lattice. 𝛽 : desired SA . CA 𝑠 : the child–ancestor pairs in Lex . QP : the query plan created based on L. 
+
+> 1:
+
+buf ← 𝛽 × |L ex | − |L| , PR ← 𝜙  
+
+> 2:
+
+if buf ≤ 0 then return L 
+
+> 3:
+
+for (𝑁 𝑐 , 𝑁 𝑎 ) ∈ CA 𝑠 do PR [( 𝑁 𝑎 , 𝑁 𝑐 )] ← − 1 
+
+> 4:
+
+PR ← get _pairs (L , PR , None , QP ) ⊲ In Algorithm 9  
+
+> 5:
+
+while buf > 0 do  
+
+> 6:
+
+if the best pair ∈ PR has benefit below 0 then break  
+
+> 7:
+
+for (𝑁 𝑐 , 𝑁 𝑎 ) ∈ PR do  
+
+> 8:
+
+Δ𝑆 (𝑒 ) ← |L [ 𝑁 𝑎 ] ∪ L ex [𝑁 𝑐 ]| − |L [ 𝑁 𝑎 ]|  
+
+> 9:
+
+if Δ𝑆 (𝑒 ) ≤ buf then  
+
+> 10:
+
+L [ 𝑁 𝑎 ].add (L ex [𝑁 𝑐 ]) , QP.renew() , buf .adjust () ,
+
+PR ← get _pairs (L , PR , 𝑁 𝑎 , QP ), break ⊲ Re-compute benefits for pairs where 𝑁 𝑎 is the ancestor  
+
+> 11:
+
+if No copy for this round then break  
+
+> 12:
+
+return L, QP 
+
+Complexity. There are O(|N | 2) candidate pairs, and each benefit evaluation costs O(| 𝑄 | · |N |) to update the affected query costs. Each copy may trigger re-evaluation of up to O(|N | 2) pairs, and at most O(|N |) copies occur, giving a worst-case time of O(|N | 5 |𝑄 |) .
+
+## 4.2 Phase 2: Merge 
+
+Copying alone may leave too few indexable nodes. Copying is limited by the storage budget and preserves each copied child as a separate node. Thus, data may reside in nodes with fewer than 
+
+Λ vectors, leaving few groups large enough to index. Merging consolidates child nodes into their ancestors and can push more groups past the Λ threshold without using storage. Unlike copying, merging is double-edged. It helps roles whose data is distributed across nodes into fewer, larger groups but hurts roles that now meet unauthorized vectors in the merged node. In Strategy 3 of Figure 1, merging the node of {𝑟 1, 𝑟 2 } into the node of {𝑟 1 } helps 𝑟 1
+
+(one fewer index to search) but hurts 𝑟 2, which must now traverse 
+
+10 ,000 unauthorized vectors. Veda therefore applies a merge only when its benefit (Equation 3) is strictly positive. Algorithm 3 applies merging operations greedily until no child– ancestor pair has positive benefit. Each step merges the highest-benefit child–ancestor pair, removes the child node, updates QP , and recomputes benefits only for pairs involving the modified ancestor. 
+
+Theorem 4.3 (Correctness of Merge Phase). Let L𝑡 be the lattice after 𝑡 merge operations. Then: (1) Strict Improvement: AvgCost (𝑄, I (L 𝑡 )) < AvgCost (𝑄, I (L 𝑡 −1)) .(2) Storage Reduction: if 𝑁 𝑐 (𝜏 ) and 𝑁 𝑎 (𝜏 ′) share exclusive blocks (from prior copies), then |L 𝑡 | < |L 𝑡 −1 |.(3) Termination: the phase halts when no merge has positive benefit. 
+
+Complexity. Each merge removes one node, so at most O(|N |) 
+
+merges occur. Each step re-evaluates O(|N | 2) candidate pairs at 
+
+O(| 𝑄 | · |N |) per pair, for an overall O(|N | 4 |𝑄 |) .
+
+Algorithm 3 The Adaptive Solution - Merge Require: Lex : the exclusive lattice created based on D. L: the current state of lattice. 𝛽 : desired SA . CA 𝑠 : the child– ancestor pairs in L. QP : the query plan based on L. 
+
+> 1:
+
+PR ← 𝜙  
+
+> 2:
+
+for (𝑁 𝑐 , 𝑁 𝑎 ) ∈ CA 𝑠 do PR [( 𝑁 𝑎 , 𝑁 𝑐 )] ← − 1 
+
+> 3:
+
+PR ← get _pairs (L , PR , 𝑁 𝑎 , 𝑁 𝑐 , QP ) ⊲ Algorithm 10  
+
+> 4:
+
+while True do  
+
+> 5:
+
+(𝑁 𝑎 , 𝑁 𝑐 ) ← arg max (𝑁 𝑎 ,𝑁 𝑐 ) ∈ PR 𝑓 (L , 𝑒 (𝑁 𝑎 , 𝑁 𝑐 ))  
+
+> 6:
+
+if 𝑓 (L , 𝑒 (𝑁 𝑎 , 𝑁 𝑐 )) ≤ 0 then break  
+
+> 7:
+
+L [ 𝑁 𝑎 ].add (L [ 𝑁 𝑐 ]) , L [ 𝑁 𝑐 ].delete () , QP.renew ()  
+
+> 8:
+
+PR ← get _pairs (L , PR , 𝑁 𝑎 , 𝑁 𝑐 , QP ) ⊲ Algorithm 10  
+
+> 9:
+
+return L
+
+## 5 EFFVEDA : AN EFFICIENT SOLUTION 
+
+EffVeda improves on Veda by giving the copy and merge phases narrower goals and a fixed traversal order. The copy phase traverses the exclusive lattice Lex bottom-up and, in a single operation, du-plicates a child node’s entire contents (not just its exclusive block) into one or more ancestors while keeping every node pure towards its original role set. This spends the SA budget only on disjoint ancestors, and a role’s query does not retrieve duplicate copies of the same vectors from multiple selected nodes. The merge phase then targets indexability: it greedily grows nodes that sit just below the threshold Λ until they become indexable, without consuming storage. 
+
+EffVeda estimates benefit from the marginal cost reduction per role alone. Unlike Veda , it does not maintain a query plan QP to indicate which nodes to access for each role during construction. It also does not re-score child–ancestor candidates after each step. The two phases run once each, with no alternation and no post-processing copy pass. 
+
+> 6
+
+Algorithm 4 EffVeda - Overview Require: Lex : the exclusive lattice created based on D. Λ: domi-nant size. 𝛽 : desired storage amplification. R: role set.  
+
+> 1:
+
+L ← L ex , CA 𝑠 ← get _child _ancestor _pairs (L ex ) 
+
+> 2:
+
+QP = get _query _plans (R , L)  
+
+> 3:
+
+if 𝛽 > 0 then  
+
+> 4:
+
+L, QP ← copy (L , Lex , 𝛽, CA 𝑠, QP ) ⊲ Algorithm 5  
+
+> 5:
+
+L, QP ← merge (L , Lex , CA 𝑠, QP ) ⊲ Algorithm 6  
+
+> 6:
+
+L, QP ← split _small _nodes _into _leftovers (L , Λ) 
+
+> 7:
+
+if | L | | D | < 𝛽 then ⊲ Storage reclaimed after merging  
+
+> 8:
+
+L, QP ← handle _super _impure _nodes (L , Lex , 𝛽, CA 𝑠, QP ) 
+
+> 9:
+
+U, I ← build_vector_storage (L)  
+
+> 10:
+
+return I, U55 
+
+Exclusive lattice      
+
+> {r1}
+> 10,000
+> {r2}
+> 20,000
+> {r3}
+> 30,000
+> {r1,r3}
+> 10,000
+> {r1,r2}
+> 10,000
+> {r2,r3}
+> 10,000
+> {r1,r2,r3}
+> 10,000
+
+Lattice after copying          
+
+> {r1}
+> 10,000
+> {r2}
+> 20,000
+> {r1,r3}
+> 10,000
+> {r1,r2}
+> 10,000
+> {r2,r3}
+> 10,000
+> {r1,r2,r3}
+> 10,000
+> {r1,r2,r3}
+> 10,000
+> {r3}
+> 30,000
+> {r1,r2,r3}
+> 10,000
+
+## X
+
+Figure 3: Illustration of copy operations of EffVeda .
+
+## 5.1 Phase 1: Copying 
+
+EffVeda applies purity-preserving copying by processing L in a bottom-up manner. At layer ℓ, each node is copied into a set of 
+
+disjoint partitioned ancestors so that every query formerly served by the node is now served by one of those ancestors. All nodes on yet-unprocessed upper layers stay pure for their original role sets. The source node is then redundant and can be removed from L.We formalize the purity-preserving copy with valid partitions .
+
+Valid Partitions. A valid partition of a child node 𝑁 𝑐 (𝜏 ) is a subset of its ancestors whose role sets fully cover 𝜏 disjointly. As an ex-ample, in the lattice of Figure 3, 𝑁 ({ 𝑟 1, 𝑟 2 }) and 𝑁 ({ 𝑟 3 }) is a valid partition of 𝑁 ({ 𝑟 1, 𝑟 2, 𝑟 3 }) .
+
+Definition 5.1 (Valid Partition of a Child Node). Let 𝑁 𝑐 (𝜏 ) be a child node with ancestor set 𝐴 𝑐 . A subset P𝑐 = {𝑁 𝑎 (𝜏 1), 𝑁 𝑎 (𝜏 2), . . . } ⊆ 
+
+𝐴 𝑐 is a valid partition of 𝑁 𝑐 (𝜏 ) if (1) Full coverage: 𝜏 = Ð𝑁 𝑎 (𝜏 𝑗 ) ∈ P𝑐 𝜏 𝑗 .(2) Disjoint roles: for all 𝑁 𝑎 (𝜏 𝑗 ) and 𝑁 𝑎 (𝜏 𝑗 ′ ) in P𝑐 (𝑗 ≠ 𝑗 ′), 
+
+𝜏 𝑗 ∩ 𝜏 𝑗 ′ = ∅, hence Í𝑁 𝑎 (𝜏 𝑗 ) ∈ P𝑐 |𝜏 𝑗 | = |𝜏 |.The child 𝑁 𝑐 (𝜏 ) is copied into each node in P𝑐 . Each ancestor stores only data authorized for its original roles, and every query that previously reached 𝑁 𝑐 (𝜏 ) is now answered through one of the ancestors in P𝑐 ; correctness and purity are both preserved. In Figure 3, 𝑁 ({ 𝑟 1, 𝑟 2, 𝑟 3 }) is copied into 𝑁 ({ 𝑟 1, 𝑟 2 }) and 𝑁 ({ 𝑟 3 }) .Queries for 𝑟 1 or 𝑟 2 then go to 𝑁 ({ 𝑟 1, 𝑟 2 }) , queries for 𝑟 3 go to 
+
+𝑁 ({ 𝑟 3 }) , and 𝑁 ({ 𝑟 1, 𝑟 2, 𝑟 3 }) is never queried and can be deleted. 
+
+Theorem 5.2 (Node Purity after Copying). Each ancestor 
+
+𝑁 𝑎 (𝜏 𝑗 ) ∈ P𝑐 remains pure with respect to 𝜏 𝑗 after copying data from 
+
+𝑁 𝑐 (𝜏 ) into it, and must be visited by any query for roles in 𝜏 𝑗 .
+
+Proof. Since 𝜏 𝑗 ⊂ 𝜏 , any query for 𝑟 ∈ 𝜏 𝑗 also requires 𝑁 𝑐 (𝜏 ),whose data now resides in 𝑁 𝑎 (𝜏 𝑗 ). Roles 𝜏 \𝜏 𝑗 are covered by disjoint ancestors 𝑁 𝑎 (𝜏 𝑗 ′ ) ∈ P𝑐 , so purity holds for every role. □
+
+Selecting a Valid Partition. A node 𝑁 𝑐 (𝜏 ) may admit many valid partitions. EffVeda scores each one and picks the best. Because every ancestor in a valid partition P𝑐 stays pure, the benefit can be computed directly without recomputing QP .
+
+Definition 5.3 (Benefit of Copying 𝑁 𝑐 (𝜏 ) to P𝑐 ). For a child 𝑁 𝑐 (𝜏 )
+
+and disjoint ancestors P𝑐 ⊆ 𝐴 𝑐 that jointly cover 𝜏 ,
+
+𝑓 (𝑁 𝑐 (𝜏 ), P𝑐 ) =
+
+Í𝑁 𝑎 (𝜏 𝑗 ) ∈ P𝑐 
+
+Í𝑟 ∈𝜏 𝑗 Δ𝑐 (𝑁 𝑐 (𝜏 ), 𝑁 𝑎 (𝜏 𝑗 ), 𝑟 )|L [ 𝑁 𝑐 (𝜏 )]| · (| P𝑐 | − 1) , (5) where, under uniform role access, 
+
+Δ𝑐 (𝑁 𝑐 (𝜏 ), 𝑁 𝑎 (𝜏 𝑗 ), 𝑟 ) = Cost H
+
+
+
+𝐼 H (𝑁 𝑐 (𝜏 )) , 𝑟 
+
+
+
++ Cost H
+
+
+
+𝐼 H (𝑁 𝑎 (𝜏 𝑗 )) , 𝑟 
+
+
+
+− Cost H
+
+
+
+𝐼 H  𝑁 𝑐 (𝜏 ) ∪ 𝑁 𝑎 (𝜏 𝑗 ), 𝑟 
+
+
+
+,
+
+where Cost H (∗) is defined in Theorem 2.2. 
+
+|P𝑐 | − 1 additional copies of 𝑁 𝑐 (𝜏 ) are created, each with the storage overhead of |L [ 𝑁 𝑐 (𝜏 )]| . For each ancestor 𝑁 𝑎 (𝜏 𝑗 ) ∈ P𝑐 , the gain for each role in 𝜏 𝑗 is the same, thus Eq. (5) can be simplified to: 
+
+𝑓 (𝑁 𝑐 (𝜏 ), P𝑐 ) =
+
+Í𝑁 𝑎 (𝜏 𝑗 ) ∈ P𝑐 |𝜏 𝑗 | · Δ𝑐 (𝑁 𝑐 (𝜏 ), 𝑁 𝑎 (𝜏 𝑗 ), 𝑟 )|L [ 𝑁 𝑐 (𝜏 )]| · (| P𝑐 | − 1) . (6) 
+
+Lemma 5.4. For any valid partition P𝑐 , 𝑓 (𝑁 𝑐 (𝜏 ), P𝑐 ) > 0. Moreover, since every valid partition covers 𝜏 exactly once, the role-weighted gain 
+
+Í𝑗 |𝜏 𝑗 | Δ𝑐 (·) differs across partitions only through the ancestor sizes 
+
+|𝑁 𝑎 (𝜏 𝑗 )| , which enter Δ𝑐 logarithmically; the denominator instead grows linearly in |P𝑐 |. Smaller partitions therefore dominate. (Proof in Appendix F.2.) 
+
+EffVeda finds the best valid partition of a child given its ancestor set and a target size 𝜂 . In practice this search is cheap: EffVeda 
+
+enumerates disjoint ancestor subsets in increasing 𝜂 (starting at 2), and small subsets usually suffice. Under heavy skew, however, valid partitions may need larger 𝜂 and the search space grows exponen-tially; in some cases no valid partition exists. If the lattice of Figure 3 held only 𝑁 ({ 𝑟 1 }) , 𝑁 ({ 𝑟 1, 𝑟 2 }) , 𝑁 ({ 𝑟 2, 𝑟 3 }) , and 𝑁 ({ 𝑟 1, 𝑟 2, 𝑟 3 }) , no valid partition would cover the bottom node. Without loss of generality, EffVeda restricts the search to 𝜂 = 2.Besides copying into two ancestors each time, EffVeda also ad-mits a degenerate option: copy into a single ancestor and keep the source node. Both options add exactly one copy of the child, so their storage overheads match. For each ancestor 𝑁 𝑎 (𝜏 ′) ∈ 𝐴 𝑐 , EffVeda 
+
+scores copying 𝑁 𝑐 (𝜏 ) into 𝑁 𝑎 (𝜏 ′) and identifies the complementary ancestor with role set 𝜏 \ 𝜏 ′. If that complementary ancestor also lies in 𝐴 𝑐 (a valid partition of size two), EffVeda scores the two-ancestor copy as well. After evaluating all single-ancestor copies and all valid two-ancestor partitions induced by ancestors in 𝐴 𝑐 ,
+
+EffVeda chooses the candidate with the highest copy benefit. Al-gorithm 5 summarizes the procedure; Appendix F.1 extends it to larger partitions. The complexity drops to O(|N | 2). The algorithm is summarized in Algorithm 13 in Appendix §F.2. 
+
+> 7
+
+Algorithm 5 EffVeda -Copy Require: Lex : the exclusive lattice created based on D. L: the current lattice. 𝛽 : desired SA . R: role set of D. 
+
+> 1:
+
+L ← L ex , ℓ ← LOWEST_LAYER , buf ← ( 𝛽 − 1) × |L ex | 
+
+> 2:
+
+if buf ≤ 0 then return L 
+
+> 3:
+
+while layer ℓ is not the top layer of Lex do  
+
+> 4:
+
+BPS ← ∅ , Nℓ ← get_nodes_on_a_layer (L , ℓ ), 
+
+> 5:
+
+for 𝑁 𝑐 (𝜏 ) ∈ N ℓ do  
+
+> 6:
+
+𝐴 𝑐 ← get_ancestors (L , 𝑁 𝑐 (𝜏 ))  
+
+> 7:
+
+if |𝐴 𝑐 | < 2 or |L [ 𝑁 𝑐 (𝜏 )]| < buf then continue  
+
+> 8:
+
+(BP 𝑐 , Δcost ) ← find _best _partition (𝑁 𝑐 (𝜏 ), 𝐴 𝑐 , L, buf ) 
+
+> 9:
+
+if BP 𝑐 then BPS [𝑁 𝑐 (𝜏 )] ← ( BP 𝑐 , Δcost ) 
+
+> 10:
+
+Sort BPS based on Δcost of each best partition.  
+
+> 11:
+
+for (BP 𝑐 , Δcost ) ∈ BPS do  
+
+> 12:
+
+Δ𝑆 ← |L [ 𝑁 𝑐 (𝜏 )]| × (| BP 𝑐 | − 1) ⊲ Get storage overhead  
+
+> 13:
+
+if Δ𝑆 ≤ buf then  
+
+> 14:
+
+for 𝑁 𝑎 (𝜏 ′) ∈ BP 𝑐 do L [ 𝑁 𝑎 (𝜏 ′)] .add (L [ 𝑁 𝑐 (𝜏 )])  
+
+> 15:
+
+buf ← buf − Δ𝑆 , L [ 𝑁 𝑐 (𝜏 )] .delete ()  
+
+> 16:
+
+ℓ ← ℓ − 1 
+
+> 17:
+
+return L 
+
+> 18:
+
+function Find_Best_Partition (𝑁 𝑐 (𝜏 ), 𝐴 𝑐 , L, buf ) 
+
+> 19:
+
+BP 𝑐 ← ( None , None ) ⊲ For the best partition of 𝜏  
+
+> 20:
+
+Δ𝑓 ← 0 ⊲ For benefit per storage unit  
+
+> 21:
+
+for 𝑁 𝑎 (𝜏 ′) ∈ 𝐴 𝑐 do  
+
+> 22:
+
+𝜂 ← | 𝜏 ′ | × get _copy _benefit (𝑁 𝑐 (𝜏 ), 𝑁 𝑎 (𝜏 ′)) ⊲ Get benefit of copying 𝑁 𝑐 (𝜏 ) to 𝑁 𝑎 (𝜏 ′) with Equation 5. This operation benefits queries to |𝜏 ′ | roles.  
+
+> 23:
+
+𝜏 ′′ ← 𝜏 \𝜏 ′ ⊲ Computer counter part for 𝜏 ′ 
+
+> 24:
+
+if 𝑁 𝑎 (𝜏 ′′ ) ∈ 𝐴 𝑐 then ⊲ The counter part is a node in L 
+
+> 25:
+
+𝜂 ← 𝜂 + | 𝜏 ′′ | × get _copy _benefit (𝑁 𝑐 (𝜏 ), 𝑁 𝑎 (𝜏 ′′ ))  
+
+> 26:
+
+else 𝜏 ′′ ← None  
+
+> 27:
+
+if 𝜂 > Δ𝑓 then ⊲ Higher benefit per storage unit  
+
+> 28:
+
+BP 𝑐 .update (( 𝜏 ′, 𝜏 ′′ )), Δ𝑓 .update ()  
+
+> 29:
+
+if BP 𝑐 .second is None then  
+
+> 30:
+
+R𝑐 ← BP 𝑐 [0] ⊲ Covered roles  
+
+> 31:
+
+Δ𝑆 ← 0 ⊲ Storage overhead for copying |L [ 𝑁 𝑐 (𝜏 )]|  
+
+> 32:
+
+for 𝑁 𝑎 (𝜏 ′) ∈ 𝐴 𝑐 do ⊲ Check the ancestor list again but this time to find more disjoint ancestors  
+
+> 33:
+
+Δ𝑆 ← Δ𝑆 + |L [ 𝑁 𝑐 (𝜏 )]|  
+
+> 34:
+
+if buf < Δ𝑆 or all roles in 𝜏 has been covered then  
+
+> 35:
+
+break  
+
+> 36:
+
+if All roles in 𝜏 ′ not covered in R𝑐 then  
+
+> 37:
+
+BP 𝑐 .update (𝜏 ′), R𝑐 .update (𝜏 ′) 
+
+> 38:
+
+Δ𝑓 ← Δ𝑓 + |𝜏 ′ | ×
+
+get _copy _benefit (𝑁 𝑐 (𝜏 ), 𝑁 𝑎 (𝜏 ′))  
+
+> 39:
+
+return (BP 𝑐 , Δ𝑓 /| 𝑁 𝑐 (𝜏 )|) 
+
+Although EffVeda uses a different formula in Equation 3 for computing benefits of copy operations, the two are equivalent. Take the lattice in Figure 3 and copy 𝑁 ({ 𝑟 1, 𝑟 2, 𝑟 3 }) into both 𝑁 ({ 𝑟 1, 𝑟 2 }) 
+
+and 𝑁 ({ 𝑟 3 }) . Before the copy, queries for 𝑟 3 must visit 𝑁 ({ 𝑟 3 }) ,
+
+𝑁 ({ 𝑟 1, 𝑟 3 }) , 𝑁 ({ 𝑟 2, 𝑟 3 }) , and 𝑁 ({ 𝑟 1, 𝑟 2, 𝑟 3 }) separately; afterward they visit three nodes. The gain for querying 𝑟 3 is Cost H (𝐼 H (𝑁 ({ 𝑟 3 })) , 𝑟 3)+ Cost H (𝐼 H (𝑁 ({ 𝑟 1, 𝑟 2, 𝑟 3 })) , 𝑟 3) − Cost H (𝐼 H (𝑁 ({ 𝑟 3 })∪ 𝑁 ({ 𝑟 1, 𝑟 2, 𝑟 3 })) , 𝑟 3).The same computation applies to 𝑟 1 and 𝑟 2. Summing the two gains 
+
+Algorithm 6 EffVeda - Merge Require: L: current lattice; Λ: index construction threshold; efs :base HNSW beam width.  
+
+> 1:
+
+N≻ ← sort (L , key = node_size ) 
+
+> 2:
+
+for 𝑁 𝑖 (𝜏 ) ∈ N ≻ do  
+
+> 3:
+
+if 𝑁 𝑖 (𝜏 ) ∉ L or |L [ 𝑁 𝑖 (𝜏 )]| ≥ Λ then continue  
+
+> 4:
+
+RL 𝜏 ← get_relatives (L , 𝑁 𝑖 (𝜏 ))  
+
+> 5:
+
+flag 𝑏 ← 0, 𝑁 flag ← None  
+
+> 6:
+
+for 𝑁 𝑟 (𝜏 ′) ∈ RL 𝜏 do  
+
+> 7:
+
+benefit ← merge_benefit (𝑁 𝑖 (𝜏 ), 𝑁 𝑟 (𝜏 ′), L)  
+
+> 8:
+
+if benefit > flag 𝑏 then  
+
+> 9:
+
+flag 𝑏 ← benefit , 𝑁 flag ← 𝑁 𝑟 (𝜏 ′) 
+
+> 10:
+
+if 𝑁 flag then  
+
+> 11:
+
+𝑁 𝑚 ← mergeN_nodes (𝑁 𝑖 (𝜏 ), 𝑁 flag ) 
+
+> 12:
+
+L [ 𝑁 𝑚 ] ← L [ 𝑁 𝑖 (𝜏 )] ∪ L [ 𝑁 flag ] 
+
+> 13:
+
+Delete 𝑁 𝑖 (𝜏 ) and 𝑁 flag from L 
+
+> 14:
+
+return L
+
+and dividing by the storage overhead |L [ 𝑁 ({ 𝑟 1, 𝑟 2, 𝑟 3 })]| yields the operation’s benefit. 
+
+## 5.2 Phase 2: Merging 
+
+The merge phase processes nodes in descending size order and pri-oritizes those just below the indexing threshold Λ, combining them into indexable nodes to improve query efficiency without adding storage. We note that all nodes are pure towards their original role sets after Phase 1. A merge may pair a node 𝑁 (𝜏 ) with one of its “relative” nodes, including an ancestor 𝑁 𝑎 (𝜏 ′), a descendant, or a sibling, provided the benefit is positive. As all nodes 𝑁 (𝜏 ) ∈ L are pure towards their role sets 𝜏 , queries for any role 𝑟 ∉ 𝜏 continue to route elsewhere, so correctness is preserved. As in Veda ’s Phase 2, merging in EffVeda adds no storage but may introduce impurity. 
+
+Evaluating Merge Benefit. The merge score estimates the cost saved by replacing two node visits with one merged-node visit. The key invariant from Phase 1 is that every surviving node 𝑁 (𝜏 ) ∈ L 
+
+is still pure with respect to its original role set 𝜏 . Even if it might mix data copied from child nodes with larger role sets, only queries for roles in 𝜏 are routed to 𝑁 (𝜏 ) before the merge. Thus, when evaluating a candidate merge of 𝑁 𝑥 (𝜏 𝑥 ) and 𝑁 𝑦 (𝜏 𝑦 ), EffVeda treats the two inputs as pure nodes touched by 𝜏 𝑥 and 𝜏 𝑦 , respectively. Thus, the benefit of merge operations can be estimated using a similar formula to the copy benefit function Eq. (5). The difference is that the merge benefit function takes into account the impurity penalty for roles that are authorized for only part of the merged node. This score adds the role-wise costs of the two pure nodes before the merge and subtracts the role-wise cost of the combined node after the merge, including the impurity penalty for roles that are authorized for only part of the merged node. Since merging adds no storage, EffVeda applies only candidates with positive benefit. 
+
+Greedy Execution. Algorithm 6 processes nodes in descending size order and, for each node, selects the ancestor, descendant, or sibling with the highest positive merge benefit. Each node participates in at most one merge, which limits impurity from accumulating across repeated merge operations. If the relative 𝑁 𝑟 (𝜏 ′) is a child of 𝑁 𝑖 (𝜏 ),
+
+> 8
+
+the merge proceeds upward; otherwise the ancestor merges into the relative. Once the merged node reaches Λ, processing advances to the next node; otherwise merging continues until the node is indexable. This procedure grows small nodes into indexable ones while preserving the lattice structure and the global storage budget. 
+
+Choice of Veda and EffVeda . Veda explores the full child– ancestor candidate space and yields slightly lower QA (Exps 5 and 8) at O(|N | 5 |𝑄 |) construction cost; EffVeda reaches a comparable layout in O(|N | 2) per phase. We recommend EffVeda when the number of distinct role combinations is large in the dataset or when policies change frequently enough that re-optimization (Appen-dix I) dominates, and Veda when the policy is small and static and the last few percent of QA matter. 
+
+## 6 QUERY ANSWERING 
+
+This section describes how access-controlled top-𝑘 queries are an-swered once the lattice has been optimized. As in §4, nodes with at least Λ vectors receive HNSW indices, and each such index may span several exclusive blocks. Nodes below Λ are decomposed into individual exclusive blocks 𝑁 ex (𝜏 ) and kept as leftovers for linear scan. Given a query 𝑞 = (x, 𝑟 ), two tasks remain: (i) select a minimal set of nodes whose union covers exactly the data authorized for 
+
+𝑟 (§6.1); and (ii) search the selected HNSW indices and leftovers while filtering unauthorized vectors out of impure indices (§6.2). 
+
+## 6.1 Query Plan Construction 
+
+Given the lattice L produced by Veda or EffVeda , the query plan identifies, for each role 𝑟 ∈ R , the nodes that together cover D ( 𝑟 ).We write the plan as QP (𝑟 ) = (I ( 𝑟 ), U ( 𝑟 )) , where I ( 𝑟 ) is the set of HNSW indices searched for 𝑟 and U ( 𝑟 ) is the set of leftover vectors scanned linearly. A plan is valid if it covers all authorized data for 𝑟 ; among valid plans we prefer the one with minimum estimated cost, i.e., a minimal cover. 
+
+Blocks to Cover. Let Lex [𝑟 ] = {𝑁 ex (𝜏 ) ∈ L ex | 𝑟 ∈ 𝜏 } be the exclusive blocks authorized for 𝑟 . Because of copy operations, each exclusive block may live in several nodes of the optimized lattice. Define the container map 
+
+Φ : Lex → 2L, Φ(𝑁 ex (𝜏 )) = {𝑁 (𝜏 ′) ∈ L | 𝑁 ex (𝜏 ) ⊆ 𝑁 (𝜏 ′)} .
+
+Plan Construction. If an authorized exclusive block has only one container, that container is mandatory: 
+
+{𝑁 (𝜏 ′) ∈ L | 𝑁 (𝜏 ′) ∈ Φ(𝑁 ex (𝜏 )) and |Φ(𝑁 ex (𝜏 ))| = 1} ⊆ QP (𝑟 ).
+
+With the mandatory nodes fixed, the remaining blocks are covered by choosing among their candidate containers. This residual cover can be solved exactly with an ILP or approximately with a greedy heuristic. Appendix §G gives both procedures (Algorithm 14 and Algorithm 15). 
+
+## 6.2 Coordinated Top-𝑘 Query Execution 
+
+A plan QP (𝑟 ) may mix pure indices, impure indices, and leftover vectors, as defined in §2.2, and execution depends on how each component relates to 𝑟 . Leftovers and pure indices can be searched directly. Impure indices need authorization filtering and may need inflated search parameters efs based on impurity to cover enough authorized candidates. example: k= 3                       
+
+> 1Search pure sources first → initialize global heap RS
+> Leftovers & pure indices
+> distance to x
+> abc
+> Global bound dist( x, c)
+> RS = [ a, b, c ]
+> 2Probe impure index with uninflated ef → local top‑ k(unfiltered)
+> Impure index
+> edf
+> local bound of top-3: dist( x, q)
+> filter authorized,
+> merge into RS RS = [ a, b, d]
+> 3Compare bounds: dist( x, c) ≤ dist( x, f) ?
+> Yes →stop early
+> unseen vectors lie here
+> ⇒cannot enter RS
+> No → inflate efs: resume search to λ ridx ·ef
+> authorized hits may lie here
+> Return RS ✓
+> Resume
+> ccff
+> authorized for r unauthorized
+> query x
+> query x
+
+Figure 4: Illustration of coordinated search. 
+
+The simplest strategy searches each component independently: scan U ( 𝑟 ), run standard HNSW top-𝑘 on each pure index, run inflated HNSW search on each impure index, filter, and merge into a heap of size 𝑘 . For an impure index the inflation factor 𝜆 𝑟 
+
+> idx
+
+is computed as in Eq. (1), and the query uses 𝑘 ′ = ⌈𝜆 𝑟 
+
+> idx
+
+𝑘 ⌉ with 
+
+efs ′ = ⌈𝜆 𝑟 
+
+> idx
+
+efs ⌉. Algorithm 16 in Appendix §G gives the procedure. Consider the merged group in Strategy 3 of Figure 1 that builds one HNSW index idx ({ 𝑟 1, 𝑟 2 }) over 𝑁 ex ({ 𝑟 1 }) ∪ 𝑁 ex ({ 𝑟 1, 𝑟 2 }) . Both exclusive blocks contain 10 ,000 vectors. For a query 𝑞 = (x, 𝑟 2),only the vectors in 𝑁 ex ({ 𝑟 1, 𝑟 2 }) are authorized inside this index, so 𝜆 𝑟 2  
+
+> idx ( { 𝑟 1,𝑟 2} )
+
+= ⌈20 ,000 /10 ,000 ⌉ = 2. For a top-2 query, the base-line execution searches idx ({ 𝑟 1, 𝑟 2 }) with 𝑘 ′ = 𝜆 𝑟 2 
+
+> idx ( { 𝑟 1,𝑟 2} )
+
+𝑘 = 4
+
+and filters unauthorized results. Suppose the HNSW search returns 
+
+[( 𝑢 1, 0.03 ), (𝑣 1, 0.04 ), (𝑢 2, 0.06 ), (𝑣 2, 0.09 )] , where 𝑢 1, 𝑢 2 ∈ 𝑁 ex ({ 𝑟 1 }) 
+
+and 𝑣 1, 𝑣 2 ∈ 𝑁 ex ({ 𝑟 1, 𝑟 2 }) . The query filters out 𝑢 1 and 𝑢 2, keeps 𝑣 1
+
+and 𝑣 2, and returns [( 𝑣 1, 0.04 ), (𝑣 2, 0.09 )] as the top-2 authorized results from this component. If QP (𝑟 2) contains additional indices or leftover blocks, their authorized candidates are merged with these two candidates and the closest two overall are returned. Independent inflated search wastes work when other compo-nents in the plan already supply strong authorized candidates. Coor-dinated search avoids this by querying pure sources first; the scheme is an instance of threshold-based top-𝑘 aggregation [ 5 ] adapted to graph-based ANN, where the global 𝑘 -th distance plays the role of Fagin’s threshold and each sub-index is a sorted-access source. Left-overs and pure indices contain only authorized data for 𝑟 , so their results initialize a global heap RS of size 𝑘 . Let 𝑣 𝑔 𝑘 be the current 𝑘 -th entry in RS ; its distance dist (x, 𝑣 𝑔 𝑘 ) is the global bound. For each im-pure index idx , coordinated search first runs an uninflated HNSW probe with efs , filters authorized candidates, and merges only those that improve RS . Let 𝑣 𝑙 𝑘 be the 𝑘 -th entry of the unfiltered local result from the impure index idx . If dist (x, 𝑣 𝑔 𝑘 ) ≤ dist (x, 𝑣 𝑙 𝑘 ) then, under the HNSW search accuracy assumption, no unseen vector in idx is likely to improve the global heap, and the search on idx 
+
+stops early. Otherwise the search resumes with efs inflated by 𝜆 𝑟 
+
+> idx
+
+and merges the newly found authorized candidates. Algorithm 7 gives the procedure; the resumed base-layer traversal under the global bound is detailed in Algorithm 17 (Appendix §G.2). Figure 4 illustrates the procedure with one pure and one impure index. The leftover scan and the pure-index search first populate 
+
+RS with authorized candidates. For the impure index, the 𝑘 -th un-filtered local candidate is compared to the global 𝑘 -th authorized 
+
+> 9
+
+result. If the local candidate is already farther, the rest of that index is unlikely to enter the global top-𝑘 under the HNSW search accu-racy assumption; otherwise the impure search expands with efs ′.Appendix §G.3 formalizes the inflated-𝑘 accuracy condition: if the inflated search reaches the position of the 𝑘 -th authorized vector in the unfiltered ranking, filtering returns the true authorized top-𝑘 
+
+with probability at least 1 − 𝛿 . Independently of recall, every candi-date is checked against the role’s authorization before admission to the result set RS , so the returned set is always a subset of D ( 𝑟 ).
+
+Algorithm 7 Coordinated Search Require: 𝑞 : query with role 𝑟 . QP (𝑟 ) = (I ∗ (𝑟 ), U∗ (𝑟 )) : query plan. 𝑘 : top-𝑘 parameter. Drids (𝑟 ): ground-truth data IDs derived from D ( 𝑟 ). efs : priority queue size. 
+
+Ensure: Top-𝑘 authorized results for 𝑞  
+
+> 1:
+
+RS ← LinearScan (U ∗ (𝑟 ), 𝑘 ) 
+
+> 2:
+
+Get pure indices I∗ 
+
+> pure
+
+(𝑟 ) and impure indices I∗ 
+
+> impure
+
+(𝑟 ) from 
+
+I∗ (𝑟 ) based on the role set D ( 𝑟 ). 
+
+> 3:
+
+for each idx ∈ I ∗ 
+
+> pure
+
+(𝑟 ) do  
+
+> 4:
+
+RS idx ← HNSW (idx , 𝑘, 𝑟, efs ) 
+
+> 5:
+
+RS ← merge _rs (RS idx , RS , Drids (𝑟 ), 𝑘 ) 
+
+> 6:
+
+for each idx ∈ I ∗ 
+
+> impure
+
+(𝑟 ) do  
+
+> 7:
+
+𝑣 𝑘 ← RS [𝑘 ], RS idx ← HNSW (idx , 𝑘, 𝑟, efs ) ⊲ Algorithm 17  
+
+> 8:
+
+RS ← merge _rs (RS idx , RS , Drids (𝑟 ), 𝑘 ) 
+
+> 9:
+
+if dist (RS idx [𝑘 ], x) ≥ dist (𝑣 𝑘 , x) then break  
+
+> 10:
+
+𝜆 𝑟  
+
+> idx
+
+← 𝑅 (𝑣 idx  
+
+> 𝑘
+
+)RS /𝑘 , 𝑖 ← 0, HNSW.PQ.clear (𝑘 ) 
+
+> 11:
+
+while 𝑖 < (𝜆 𝑟  
+
+> idx
+
+− 1)efs do  
+
+> 12:
+
+HNSW.PQ.add (HNSW.NextVector ()) , 𝑖 ← 𝑖 + 1 
+
+> 13:
+
+RS idx ← HNSW.PQ (( 𝜆 𝑟  
+
+> idx
+
+− 1)𝑘 ) 
+
+> 14:
+
+RS ← merge _rs (RS idx , RS , Drids (𝑟 ), 𝑘 ) 
+
+> 15:
+
+return RS .top (𝑘 )
+
+## 7 EVALUATIONS 
+
+In this section we evaluate Veda and EffVeda against the global index, the oracle index, ACORN-1 [ 18 ], ACORN-𝛾 , SIEVE [ 13 ], and HoneyBee [24]. We study: 
+
+• Index construction. End-to-end build time as the SA budget grows (Exp 1), the number of indexed data and leftover data (Exp 2), the number of HSNW indices built in total (Exp 3), and how tightly the achieved SA tracks the user-specified budget (Exp 4). 
+
+• Impact of parameters. Robustness of the results to the indexing threshold Λ (Exp 8), the contribution of coordinated search mea-sured as phase-2 skip rate and efs savings on impure indices (Exp 9), and the impact of the HNSW search parameter efs (Exp 10). 
+
+• End-to-end QPS vs. recall. 
+
+• Query processing. QA under different values of SA (Exp 5), the purity of the data each method selects per query (Exp 6), QPS vs Recall@10 of the methods on SIFT-1M, PAPER, and AMZN (Exp 11), and impact of query sensitivity (Exp 12). 
+
+• Workload variation. Weighted single-role queries (Exp 13), and multi-role queries whose authorized region can span most of D; the latter delineates where partitioning should yield to filtered search on a global index (Exp 14). 
+
+## 7.1 Setup 
+
+Setting. All experiments were conducted on a machine running ma-cOS 26.3 (Darwin 25.3.0, ARM64) with an Apple M4 Max processor (14 cores) and 36 GiB of unified memory. 
+
+Datasets. We use SIFT-1M [ 9 ], PAPER [ 22 ], and Amazon Books Reviews (AMZN) [ 8 , 17 ] (Table 2). Access-control policies are gen-erated from OrgAccess [ 20 ], which grants each role the union of a set of departments. We use the Easy subset (roles clustered to a target count), and Medium /Hard unmodified. Block sizes follow a shifted Zipf distribution (𝑖 + 𝑠 )−𝛼 [16 , 25 ]; the number of blocks assigned to department 𝑗 follows ( 𝑗 + 𝑠 ′)−𝛼 ′
+
+. Higher skew in this 
+
+permission distribution means that a few departments are associated with substantially more data than the rest. 
+
+Compared Methods. We compare Veda and EffVeda with two data partitioning methods: 1) SIEVE [ 13 ] and 2) HoneyBee [ 24 ]. We also include in-search filtering methods 3) ACORN-1 [ 18 ] and 4) ACORN-𝛾 [18 ], and two baselines: 5) Global Index (Baseline 1) and 6) Oracle Index (Baseline 2) when evaluating the throughputs of these methods. For all partition-based methods (SIEVE, HoneyBee, 
+
+Veda , EffVeda ) we apply SIEVE’s heterogeneous-search rule [13] and downscale efs on each sub-index by the log-ratio of its size to 
+
+|D| , so small partitions are not over-searched. As SIEVE relies on historical queries, it is given a held-out workload sampled from the same role distribution as the test queries. 
+
+Metrics. We report four metrics: 1) SA measures the storage over-head; 2) QA measures query cost normalized to oracle indexing, isolating algorithmic efficiency from hardware constants and quan-tifying how far a method deviates from Oracle; 3) QPS measures end-to-end query throughput; and 4) recall@ 𝑘 measures the frac-tion of the true top-𝑘 results (obtained by brute-force scan over D)that are present in the result sets. 
+
+Parameters. According to literature [ 13 , 15 , 18 , 24 ], we set the HNSW parameter 𝑀 to 16, 32, and 32 for SIFT-1M, PAPER, and AMZN, respectively, and set the default values of the searching parameter efs and the HNSW construction parameter efc to 100 and 200, respectively. The construction parameter 𝛾 in ACORN-𝛾 
+
+is set to 1/𝑚 𝑠 [ 13 , 18 ], where 𝑚 𝑠 is the minimum selectivity , i.e., the smallest fraction of the dataset admitted by any role whose selectivity exceeds the brute-force bound. By default, we set 𝛾 to 
+
+12 [13 , 18 ]. Following [ 13 ], we impose a brute-force search bound of 
+
+1/12 for ACORN-1 and ACORN-𝛾 . Without this bound, 𝛾 becomes prohibitively large (e.g., 23 ,810 for SIFT-1M), causing each HNSW node to store up to 23 ,810 · 𝑀 neighbors instead of 𝑀 , which is impractical. Based on the analysis in Figure 2, we set the indexability threshold Λ to 2,900, 3,000, and 2,600 for SIFT-1M, PAPER, and AMZN, respectively. We further validate the robustness of Veda 
+
+and EffVeda to the choice of Λ in Exp 8 and Appendix H.1. For methods that require a desired SA, i.e., Veda , EffVeda , SIEVE, and HoneyBee, we set the desired SA to a small value, i.e., 1.1 by default, to highlight the advantages of data partitioning in vector search with access control. This setting demonstrates that even a modest storage overhead yield big performance gains. Additional evaluations under different values of SA are deferred to Appendix H. 
+
+Query workloads. A query is 𝑞 = (x, 𝑟 ) for single-role queries or 
+
+𝑞 = (x, 𝜏 ) with 𝜏 ⊆ R for multi-role queries. We use four workloads: (1) uniform single-role : each role drawn with probability 1/|R| ;
+
+> 10
+
+Table 2: Summary of Datasets. Distribution columns report shifted Zipf parameters (𝑠, 𝛼 ); larger 𝛼 yields higher skew. Dataset Data Size Dim. Type AC Rules #Roles # Permissions Permission Dist. (𝑠 ′, 𝛼 ′)
+
+Block Dist. (𝑠, 𝛼 )
+
+SA w/ Oracle Idx 
+
+SIFT-1M [9] 1,000,000 128 Image Medium 82 757 (2, 1.5) (1, 1.5) 11.423 PAPER [22] 2,029,997 200 Text Hard 87 676 (2, 1.5) (1, 2) 5.255 AMZN [8, 17] 212,404 384 Text Easy 64 641 (1, 1.5) (1, 2) 15.084 (2) weighted single-role : role 𝑟 drawn with probability proportional to |D ( 𝑟 )| ; (3) uniform multi-role : each role combination 𝜏 ∈ T 
+
+(|𝜏 | > 1) with non-empty exclusive block drawn uniformly; and (4) weighted multi-role : 𝜏 drawn with probability proportional to the number of vectors exclusively accessible to 𝜏 . For each workload, we create 100 queries, and run the 100 queries 10 times in evaluation. The final result is the average of the 10 runs. By default, we use SIFT-1M with uniform single-role queries. Exps 1–13 use single-role workloads, and Exp 14 evaluates with uniform multi-role queries and weighted multi-role queries. The query vector x may or may not be drawn from the queried roles’ own authorized data. We capture this with query sensitivity that controls how often the query vector comes from the queried role’s own data. For a single-role query 
+
+𝑞 = (x, 𝑟 ), a sensitivity of 1.0 means all query vectors are drawn from the D ( 𝑟 ), while a sensitivity of 0 means all of the query vectors are drawn from D \ D ( 𝑟 ). By default, we set the sensitivity to 1.0. 
+
+## 7.2 Index Creation Evaluation 
+
+Exp 1. Index-creation time vs. SA . Figure 5a reports end-to-end build time (partitioning plus HNSW construction) and partitioning time as SA varies over 1.0, 1.1, 1.3, 1.5, 2.0, and 3.0. EffVeda is consistently faster than Veda because its bottom-up traversal in copying identifies candidate ancestors more efficiently and avoids re-scoring candidate pairs. HoneyBee spends substantially more time in data partitioning, whereas SIEVE has comparable partition-ing time because it selects predicate subsets from the workload instead of reorganizing the data. 
+
+Exp 2. Number of Indexed vs. Leftover Data. Figure 5b reports the number of indexed data and leftover data for Veda and EffVeda .For both approaches, most data are indexed, and the total number of data grows with the SA budget. 
+
+Exp 3. Number of indices vs. SA . We vary SA over 1.0, 1.1, 1.3, 1.5,
+
+2.0, and 3.0 and report the number of indices produced by the data partitioning approaches. Figure 5c shows Veda and EffVeda pro-duce more indices than SIEVE and HoneyBee at every SA budget, as the exclusive lattice exposes fine-grained role-combination blocks, and a larger budget lets more of them be copied into indexable partitions. SIEVE creates data partitions based on historical query workloads, while HoneyBee uses coarser partitions and therefore produces the fewest indices. 
+
+Exp 4. Desired vs. achieved SA . We vary SA over 1.0, 1.1, 1.3,
+
+1.5, 2.0, and 3.0 to evaluate how closely each data-partitioning method meets the requested SA. Figure 5d shows that Veda and 
+
+EffVeda track the target SA tightly. HoneyBee and SIEVE account for storage consumption only before admitting a partition, so their final admission can overshoot the target. 
+
+Table 3: Avg. # of HNSW indices per query. SA 1.0 1.1 1.3 1.5 2.0 3.0 
+
+Veda 3.53 3.69 3.01 5.01 5.03 5.14 
+
+EffVeda 6.55 5.52 5.36 6.45 5.69 5.05 
+
+## 7.3 Query-Based Evaluations 
+
+Exp 5. QA vs. SA . Figure 6a uses QA to measure how much each method deviates from Oracle, where lower QA is preferred. The results show that Veda and EffVeda outperform HoneyBee and SIEVE across the range. Most of the gain appears at small SA : a modest amount of extra storage removes a large share of unnec-essary search work because the copy phase spends the budget on high-benefit duplicates, the merge phase turns small residual nodes into indexable groups, and finalization redirects queries away from highly impure nodes when pure materializations fit in the reclaimed budget. The Veda and EffVeda curves are not strictly monotone. Both algorithms optimize a discrete lattice under a hard storage budget, so different SA settings can leave different residual nodes for finalization. A higher SA budget may trigger copy or merge operations that changes which nodes cross the indexing threshold 
+
+Λ, or which highly impure nodes are finalized. 
+
+Exp 6. Purity of selected data. Figure 6b reports the fraction of data touched per query that is actually authorized for the queried role; higher purity means fewer wasted candidates are included in the indices queried. Veda and EffVeda achieve high purity across all SA budgets due to our efficient lattice construction strategies. SIEVE’s purity depends on efs (we plot efs =100 and 500). A larger beam (higher efs ) pushes more queries to brute-force scan, resulting in higher purity. HoneyBee achieves the lowest purity across all SA budgets. Purity directly explains the QA ordering in Exp 5. 
+
+Exp 7. Number of indices per query. Table 3 reports the number of HNSW indices each query touches on average; fewer indices means less index-switching overhead. Veda usually queries fewer indices than EffVeda at tight SA budgets, because its construction strategy exhaustively considers candidate node pairs for merge and copy and can therefore concentrate the query plan into a smaller set of nodes. Overall, both methods touch fewer than seven indices per query on average, so index switching is not a dominant source of overhead. 
+
+Exp 8. Indexing threshold. Table 4 varies Λ from 2,500 to 3,300 at SA = 1.1 and reports the QPS of Veda and EffVeda . QPS changes mildly as Λ varies; Veda stays near 2,040 and EffVeda near 1,700, peaking near Λ = 2,900 . The results show that our methods are not sensitive to the exact indexing threshold. A lower Λ produces more    
+
+> 11 (a) End-to-end build time vs. SA. (b) # Indexed vs. # leftover. (c) # of indices vs. SA. (d) Achieved SA.
+
+Figure 5: Index creation evaluation.     
+
+> (a) QA vs. SA. (b) Purity vs. SA. (c) QPS vs. efs .(d) QPS vs. recall.
+
+Figure 6: SIFT-1M query evaluation. Table 4: Indexing threshold Λ vs. QPS on SIFT-1M, SA = 1.1. 
+
+Λ 2,500 2,700 2,900 3,100 3,300 
+
+Veda 2068.1 2042.8 2056.4 2031.0 2038.5 
+
+EffVeda 1657.4 1681.6 1719.5 1718.7 1701.3 
+
+Table 5: Phase-2 skip rate on impure nodes. SA 1.0 1.1 1.3 1.5 2.0 3.0 
+
+Veda 89.81% 67.95% 74.89% 90.00% 74.07% 100.00% 
+
+EffVeda 92.08% 93.22% 92.88% 92.35% 92.82% 92.17% indexable nodes in the lattice, which trades scan cost for index-switching overhead; vice versa. The finalization stage resolves highly impure nodes effectively, further absorbing most differences in the outcome lattices of different Λ. Results of SA = 1.3, 1.5 are in Appendix H.1. 
+
+Exp 9. Effect of coordinated search. Tables 5 and 6 isolate the contribution of coordinated search on impure-index visits. Phase 2 is skipped on at least 67 .95% of impure visits at every SA , resulting in the inflated efs cut by 8.57% –23 .09% . Both Veda and EffVeda 
+
+incorporate efficient finalization that handles highly impure nodes, thus the surviving impure indices have low impurity. Moreover, coordinated search leverages the tight bound of the global top-𝑘 to suppress phase 2 entirely with high probability. 
+
+Table 6: Avg. efs savings on impure nodes. SA 1.0 1.1 1.3 1.5 2.0 3.0 
+
+Veda 16.36% 23.67% 19.27% 13.63% 13.65% 8.57% 
+
+EffVeda 23.09% 12.63% 10.79% 11.91% 12.07% 10.80% 
+
+Exp 10. Effect of efs . Figure 6c reports QPS over efs varying as 10, 50, 100, 300, 500, 1000. QPS falls for all methods as efs grows because a larger beam explores more candidates in HNSW search. Baseline 1 (Global Index) is the slowest, while Baseline 2 (Oracle) is the upper bound. It searches a single pure index for each query and would not suffer from unauthorized candidates. Veda and EffVeda 
+
+remain the strongest practical methods across the range. ACORN-1 is competitive at small efs . ACORN-𝛾 is steadier and catches up with the partitioning methods at large efs . lower beams. HoneyBee remains much lower due to coarse, uncoordinated impure data partitions. Appendix H.2 shows results on PAPER and AMZN. 
+
+Exp 11. Comparison with other methods across datasets. We compare Veda and EffVeda with other methods using QPS and Recall@10 on SIFT-1M, PAPER, and AMZN. We vary efs over 10, 50, 100, 300, 500, and 1000, so each curve shows the trade-off: larger 
+
+efs improves recall but lowers QPS. Figures 6d, 7a, and 7b show that 
+
+Veda and EffVeda consistently occupy the upper-right frontier. They reach near-oracle recall while preserving high throughput be-cause their partitions keep most searches on pure or low-impurity indices. SIEVE also reaches high recall, but its workload-driven par-titions might leave more impure candidates, so it might have lower    
+
+> 12 (a) PAPER QPS vs. recall. (b) AMZN QPS vs. recall. (c) Recall@10 vs. sensitivity. (d) Weighted single-role.
+
+Figure 7: Additional dataset and workload evaluations.  
+
+> (a) Multi-role weighted queries. (b) Multi-role Avg. queries.
+
+Figure 8: Multi-role query evaluations. 
+
+QPS than our approaches at matched recall. ACORN-1 achieves high QPS only at low recall. ACORN-𝛾 is more accurate than ACORN-1 as the augmented graph helps recover authorized neighbors, but it still pays global-graph traversal cost. HoneyBee achieves lower QPS as it spend substantial work on unauthorized data. 
+
+Exp 12. Query sensitivity. Figure 7c reports Recall@10 over vary-ing query sensitivity as 0, 0.25 , 0.5, 0.75 , and 1.0. Veda , EffVeda ,SIEVE, and Oracle Index hold Recall@10 ≥ 0.99 most of the time. ACORN-1 stays below 0.40 , while ACORN-𝛾 sits at 0.94 –0.97 , as filtering a global graph fail to recover all authorized data. Baseline 1 and HoneyBee degrade to 0.90 –0.93 . When the query lies outside 
+
+D ( 𝑟 ), the authorized neighbors are scattered and their search does not reach them. 
+
+Exp 13. Weighted single-role queries. Figure 7d compare the approaches with weighted single-role queries. Veda , EffVeda and SIEVE achieve competitive performance. Performance of ACORN-1, ACORN-𝛾 , and HoneyBee are similar to Exp 11. 
+
+Exp 14. Multi-role queries. A multi-role query authorizes the union of several roles, so its region can cover most of D. Pure partition execution then visits many sub-indices and merges many candidate lists. We therefore keep one additional global HNSW index and route a query to filtered global search whenever its authorized region exceeds 80% of |D| ; this adds exactly 1 to SA .Correspondingly, we set the desired SA to 2.1 for HoneyBee and SIEVE. Figures 8a and 8b show that with this fallback Veda and 
+
+EffVeda stay close to SIEVE and Baseline 2 in the high-recall region on the uniform mixed-role workload and the weighted mixed-role workload. The experiment marks the crossover point argued in §1: partitioning wins for selective access, filtered global search wins for broad access. 
+
+## 8 RELATED WORK 
+
+The problem of access-controlled vector search begins after the policy is fixed and asks how the retrieval layer should answer top-𝑘 vector queries over the records visible to the querying role. This places Veda and EffVeda between general ANN indexing [7, 10 , 15 , 21 ], filtered vector search [ 3 , 6 , 13 , 18 ], and RBAC-aware partitioning [ 24 ]. General ANN indices supply the building blocks but assume a single global search space; we therefore focus the remainder of this section on a qualitative comparison with the four systems closest to our setting, Filtered-DiskANN [ 6], ACORN [ 18 ], SIEVE [ 13 ], and HoneyBee [ 24 ], and defer the full landscape of related works to Appendix J. 
+
+Predicate Model. Filtered-DiskANN and UNG [ 3] bake label pred-icates into graph construction, and ACORN traverses the predicate-induced subgraph of an HNSW index for arbitrary Boolean filters. All three treat the predicate as query-supplied metadata. SIEVE and HoneyBee instead exploit that the predicate distribution is known offline, SIEVE from a historical workload, HoneyBee from the RBAC role lattice, and materialize sub-indexes accordingly. Veda and Ef-fVeda follows the latter view but represents the policy as exclusive role-subset blocks, so every role’s visible set is an exact union of blocks rather than an approximate match against a learned filter. 
+
+Storage–Latency Trade-off. Filtered-DiskANN and ACORN keep storage close to a single index ( SA near 1) and pay at query time when the predicate is selective. SIEVE and HoneyBee expose an explicit memory budget and select sub-indexes (SIEVE) or partitions (HoneyBee) under it. Veda exposes the same knob but explores it with two primitives, including merge , which trades latency for storage by combining co-accessed blocks, and copy , which trades storage for latency by replicating a block into a co-accessed group. 
+
+Query Execution. ACORN and Filtered-DiskANN answer every query from one graph. SIEVE routes each query to the single cheap-est subsuming sub-index (or brute force), and HoneyBee routes a role to the partition set implied by its split. None of them lets results from one index influence search on another. EffVeda instead runs a coordinated multi-index search: pure partitions are probed first and their top-𝑘 distances tighten a global threshold that prunes the sub-sequent beam search on impure partitions and residual scans. This 
+
+> 13
+
+is the mechanism that lets Veda tolerate impure groups without inflating efs to the worst-case 𝜆 efs on every index. 
+
+Recall Under Impurity. When authorized vectors are sparse in-side the searched structure, ACORN restores reachability by widen-ing neighbor lists, Filtered-DiskANN by stitching label-specific edges, and HoneyBee/SIEVE by over-searching with a larger beam or falling back to linear scans. All four ultimately rely on raising the effective efs , which our cost model (Definition 2.2) shows is linear in latency. Veda reduces the need for inflation by lowering impurity at construction time (copy/merge) and by capping it at execution time through the shared distance bound, rather than by enlarging the candidate set. 
+
+## 9 CONCLUSION 
+
+We presented Veda and EffVeda , two access-aware indexing strate-gies for vector databases. Both partition data by role combination, organize the resulting blocks in an access-aware lattice, and use copy and merge operations to group co-accessed blocks under a storage budget. Large lattice nodes are indexed with HNSW, while small nodes are scanned linearly. For each role, the methods build a query plan that covers its authorized data with a minimal set of nodes. At query time, coordinated search probes pure nodes first to initialize a global top-𝑘 heap, then uses the resulting distance bound to prune impure nodes. Several directions remain open. Our con-struction assumes a static dataset and policy; supporting streaming inserts, deletes, and permission revocations without rebuilding the lattice from scratch is a natural next step. Multi-role queries whose authorized region covers a large fraction of D narrow the gap be-tween partition-based and filtered-graph methods, suggesting a hybrid that keeps a global graph alongside the lattice and routes each query based on the size of its authorized region. Looking fur-ther, the copy–merge–coordinate framework can extend to richer policies beyond RBAC, such as attribute-based and hierarchical access, etc. 
+
+## REFERENCES 
+
+[1] Martin Aumüller, Erik Bernhardsson, and Alexander Faithfull. 2020. ANN-Benchmarks: A benchmarking tool for approximate nearest neighbor algorithms. 
+
+Information Systems 87 (2020), 101374. [2] Elisa Bertino, Gabriel Ghinita, Ashish Kamra, et al . 2011. Access control for databases: Concepts and systems. Foundations and Trends ® in Databases 3, 1–2 (2011), 1–148. [3] Yuzheng Cai, Jiayang Shi, Yizhuo Chen, and Weiguo Zheng. 2024. Navigating labels and vectors: A unified approach to filtered approximate nearest neighbor search. Proceedings of the ACM on Management of Data 2, 6 (2024), 1–27. [4] European Parliament and Council of the European Union. 2024. Regulation (EU) 2024/1689 of the European Parliament and of the Council of 13 June 2024 laying down harmonised rules on artificial intelligence and amending certain Union legislative acts (Artificial Intelligence Act). https://eur-lex.europa.eu/eli/reg/ 2024/1689/oj/eng. Accessed: 2025-01-10. [5] Ronald Fagin, Amnon Lotem, and Moni Naor. 2001. Optimal aggregation algo-rithms for middleware. In Proceedings of the twentieth ACM SIGMOD-SIGACT-SIGART symposium on Principles of database systems . 102–113. [6] Siddharth Gollapudi, Neel Karia, Varun Sivashankar, Ravishankar Krishnaswamy, Nikit Begwani, Swapnil Raz, Yiyong Lin, Yin Zhang, Neelam Mahapatro, Premku-mar Srinivasan, et al . 2023. Filtered-diskann: Graph algorithms for approximate nearest neighbor search with filters. In Proceedings of the ACM Web Conference 2023 . 3406–3416. [7] Ruiqi Guo, Philip Sun, Erik Lindgren, Quan Geng, David Simcha, Felix Chern, and Sanjiv Kumar. 2020. Accelerating large-scale inference with anisotropic vector quantization. In International Conference on Machine Learning . PMLR, 3887–3896. [8] Ruining He and Julian McAuley. 2016. Ups and downs: Modeling the visual evolution of fashion trends with one-class collaborative filtering. In proceedings of the 25th international conference on world wide web . 507–517. [9] Herve Jegou, Matthijs Douze, and Cordelia Schmid. 2010. Product quantization for nearest neighbor search. IEEE transactions on pattern analysis and machine intelligence 33, 1 (2010), 117–128. [10] Jeff Johnson, Matthijs Douze, and Hervé Jégou. 2019. Billion-scale similarity search with GPUs. IEEE transactions on big data 7, 3 (2019), 535–547. [11] Samir Khuller, Anna Moss, and Joseph Seffi Naor. 1999. The budgeted maximum coverage problem. Information processing letters 70, 1 (1999), 39–45. [12] Patrick Lewis, Ethan Perez, Aleksandra Piktus, Fabio Petroni, Vladimir Karpukhin, Naman Goyal, Heinrich Küttler, Mike Lewis, Wen-tau Yih, Tim Rocktäschel, Sebastian Riedel, and Douwe Kiela. 2020. Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks. In Advances in Neural Informa-tion Processing Systems , Vol. 33. 9459–9474. [13] Zhaoheng Li, Silu Huang, Wei Ding, Yongjoo Park, and Jianjun Chen. 2025. SIEVE: Effective Filtered Vector Search with Collection of Indexes. arXiv preprint arXiv:2507.11907 (2025). [14] Nelson F Liu, Kevin Lin, John Hewitt, Ashwin Paranjape, Michele Bevilacqua, Fabio Petroni, and Percy Liang. 2023. Lost in the middle: How language models use long contexts. arXiv preprint arXiv:2307.03172 (2023). [15] Yu A Malkov and Dmitry A Yashunin. 2018. Efficient and robust approximate nearest neighbor search using hierarchical navigable small world graphs. IEEE transactions on pattern analysis and machine intelligence 42, 4 (2018), 824–836. [16] Benoit Mandelbrot. 1953. An informational theory of the statistical structure of language. Communication theory 84, 21 (1953), 486–502. [17] Julian McAuley, Christopher Targett, Qinfeng Shi, and Anton Van Den Hengel. 2015. Image-based recommendations on styles and substitutes. In Proceedings of the 38th international ACM SIGIR conference on research and development in information retrieval . 43–52. [18] Liana Patel, Peter Kraft, Carlos Guestrin, and Matei Zaharia. 2024. Acorn: Per-formant and predicate-agnostic search over vector embeddings and structured data. Proceedings of the ACM on Management of Data 2, 3 (2024), 1–27. [19] Benjamin Reichman and Larry Heck. 2024. Retrieval-Augmented Generation: Is Dense Passage Retrieval Retrieving. arXiv preprint arXiv:2402.11035 (2024). [20] Debdeep Sanyal, Umakanta Maharana, Yash Sinha, Hong Ming Tan, Shirish Karande, Mohan Kankanhalli, and Murari Mandal. 2025. OrgAccess: A Bench-mark for Role Based Access Control in Organization Scale LLMs. arXiv preprint arXiv:2505.19165 (2025). [21] Suhas Jayaram Subramanya, Devvrit, Rohan Kadekodi, Ravishankar Krish-naswamy, and Harsha Vardhan Simhadri. 2019. DiskANN: Fast accurate billion-point nearest neighbor search on a single node. In Advances in Neural Information Processing Systems , Vol. 32. [22] Mengzhao Wang, Lingwei Lv, Xiaoliang Xu, Yuxiang Wang, Qiang Yue, and Jiongkang Ni. 2022. Navigable proximity graph-driven native hybrid queries with structured and unstructured constraints. arXiv preprint arXiv:2203.13601 
+
+(2022). [23] Peng Xu, Wei Ping, Xianchao Wu, Lawrence McAfee, Chen Zhu, Zihan Liu, Sandeep Subramanian, Evelina Bakhturina, Mohammad Shoeybi, and Bryan Catanzaro. 2023. Retrieval meets long context large language models. arXiv preprint arXiv:2310.03025 (2023). [24] Hongbin Zhong, Matthew Lentz, Nina Narodytska, Adriana Szekeres, and Kexin Rong. 2025. HoneyBee: Efficient role-based access control for vector databases via dynamic partitioning. arXiv preprint arXiv:2505.01538 (2025). [25] George Kingsley Zipf. 2016. Human behavior and the principle of least effort: An introduction to human ecology . Ravenio books. 
+
+## A DETAILED INTRODUCTION OF HNSW INDEX 
+
+HNSW is one of the most effective and widely used approximate nearest-neighbor data structures. It organizes vectors into a multi-layer hierarchy in which each layer is a navigable proximity graph [ 15 ]. At insertion time, each vector is assigned a maximum level ℓ ≥ 0 by sampling from an exponential (geometric) distribution. On every upper layer ℓ > 0 a node retains up to 𝑀 bidirectional links chosen by a diversity-preserving heuristic; on the base layer ( ℓ = 0) the limit is 𝑀 0 ≤ 2𝑀 (often configurable in implementations). To answer a query, HNSW starts at the topmost layer and greed-ily walks toward the query vector, descending one layer at a time until it reaches the base layer in O( log |idx |) expected steps. At the base layer the search switches to a best-first expansion: candi-dates are kept in a priority queue of capacity efs and expanded in 
+
+> 14
+
+increasing distance, each expansion visiting up to 𝑀 0 neighbors. The parameter efs governs the recall–latency trade-off. Counting comparisons, the asymptotic query cost is 
+
+O( 𝑀 log |idx |) + O( efs log efs ) + O( efs log 𝑘 ),
+
+where the three terms account for upper-layer descent, base-layer priority-queue maintenance, and final selection of 𝑘 results from the efs candidates. 
+
+Figure 9: Query time vs. top-𝑘 returned neighbors (log-𝑘 
+
+scale). 
+
+In role-based settings the comparison-count bound is not the right proxy for latency. When an index is impure for the issuing role, the query must inflate 𝑘 to 𝑘 ′ = ⌈𝜆𝑘 ⌉ and efs to ⌈𝜆 efs ⌉ (§2.2), push-ing efs into a regime where the base-layer term dominates. Figure 9 sweeps 𝑘 (and the corresponding efs = 𝛼𝑘 ) and shows that wall-clock latency grows linearly once 𝑘 exceeds a small threshold 𝑘 𝑜 ,not as efs log efs . The cost model used throughout the paper there-fore charges 𝐶 𝜃 (idx , efs ) = 𝑎 log |idx | + 𝑏 efs + 𝑐 (Definition 2.2); Appendix B derives this form from the per-expansion hardware cost and gives the calibration procedure for 𝜃 = (𝑎, 𝑏, 𝑐 ).
+
+## B SELECTING THE HNSW SEARCH COST FUNCTION 
+
+Our partitioning algorithms compare candidate index layouts by their predicted query latency, so they require a closed-form model 
+
+𝐶 𝜃 (idx , efs ) that maps an index idx searched with beam width efs 
+
+to wall-clock time. This appendix justifies the functional form used in Definition 2.2, describes how its coefficients are calibrated, and validates the choice empirically. 
+
+## B.1 From Asymptotic Complexity to Wall-Clock Latency 
+
+The textbook complexity of an HNSW query decomposes into an upper-layer greedy descent of O( log |idx |) hops and a base-layer beam search that performs O( efs ) expansions while main-taining a priority queue of capacity efs . Charging each expansion an O( log efs ) heap update yields the familiar proxy 
+
+𝐶 1 (idx , efs ) = 𝑎 log |idx | + 𝑏 efs log efs + 𝑐. 
+
+This expression counts comparisons . It is the wrong currency for latency prediction because the heap update is not where time is spent. Each base-layer expansion also (i) reads the 𝑀 neighbor IDs of the popped node, (ii) fetches the corresponding 𝑀 vectors from memory, and (iii) computes 𝑀 distances of 𝑑 dimensions each. Steps (ii)–(iii) cost O( 𝑀𝑑 ) arithmetic operations plus, once the index outgrows the CPU cache, O( 𝑀 ) cache-missing random reads. For a representative configuration ( 𝑑 =128 , 𝑀 =16 , efs =100 ) a single expansion performs 
+
+𝑀 ·𝑑 = 2,048 multiply–adds and up to 16 vector fetches, against only log 2 efs ≈ 7 heap comparisons. The heap term is therefore two to three orders of magnitude cheaper than the distance term and vanishes into the per-step constant. Since the per-step work does not depend on efs , the base-layer cost is, to first order, linear in the number of expansions: 
+
+𝐶 2 (idx , efs ) = 𝑎 log |idx | + 𝑏 efs + 𝑐. 
+
+The constants 𝑎 , 𝑏 , 𝑐 depend on 𝑑 , 𝑀 , the SIMD width, and the memory hierarchy of the host, none of which are known a priori. We therefore fit them on the deployment machine rather than derive them analytically. 
+
+## B.2 Calibrating the Cost Function 
+
+We isolate the two variable terms with two one-dimensional sweeps (Algorithm 8). 
+
+Upper-layer sweep. Fix efs = 1, 𝑘 = 1 and vary |idx |. With a single-slot beam the base layer does negligible work, so the mea-sured latency reflects the greedy descent plus fixed overhead. A least-squares fit of 𝑇 size (| idx |) = 𝑎 log |idx | + 𝑐 1 recovers 𝑎 .
+
+Base-layer sweep. Fix |idx | = |idx 0 | and vary efs . We fit both candidates, 𝑇 lin  
+
+> efs
+
+(efs ) = 𝑏 efs + 𝑐 2 and 𝑇 log  
+
+> efs
+
+(efs ) = 𝑏 ′ efs log efs + 𝑐 ′
+
+> 2
+
+,and select whichever attains the higher 𝑅 2.
+
+Combining the intercepts. Each sweep holds the other variable fixed, so each intercept already contains the other term’s contri-bution at the held value. We remove that contribution from both sides, 𝑐 (1) = 𝑐 1 − 𝑏 · 1 and 𝑐 (2) = 𝑐 2 − 𝑎 log |idx 0 |, and average the two estimates, 𝑐 = 12
+
+ 𝑐 (1) + 𝑐 (2) , to damp measurement noise from either sweep. Figure 10 shows the base-layer sweep on the default configu-ration ( 𝑑 =128 , 𝑀 =16 ). The linear model tracks the measurements across the full range of efs , whereas the efs log efs model bends upward and over-predicts at large efs —precisely the regime that impure indices enter when 𝜆 efs is inflated (Definition 2.2). The linear fit attains 𝑅 2 = 0.9938 versus 𝑅 2 = 0.9811 for the log-linear fit, confirming the hardware argument of §B.1. We therefore adopt 
+
+𝐶 𝜃 (| idx |, efs ) = 𝑎 log |idx | + 𝑏 efs + 𝑐 
+
+with 𝜃 = (𝑎, 𝑏, 𝑐 ) fitted once per dataset configuration. For the configuration of 𝑑 =128 and 𝑀 =16 , the calibrated model is 
+
+𝐶 𝜃 (| idx |, efs ) = 0.0821 log 2 |idx | + 0.1159 efs + 2.3110 ,
+
+in which the base-layer term dominates for any practical efs while the log |idx | term contributes a small but non-negligible offset. The logarithm base is absorbed into 𝑎 ; our implementation uses log 2.
+
+## C THE OPTIMIZATION PROBLEM 
+
+We now give a precise optimization view of the index grouping problem. Given the lattice Lex with a set of exclusive nodes N and letting T be the set of role subsets (e.g., the set of access control poli-cies, or, the set of combinations of accessible roles) corresponding to N . we build at most one index per 𝜏 ∈ T by merging and copying exclusive nodes upward in the lattice. The decision variables are: 
+
+> 15
+
+Figure 10: Base-layer sweep: search time as efs varies at fixed 
+
+|idx |. The linear model ( 𝑅 2=0.994 ) fits better than efs log efs 
+
+(𝑅 2=0.981 ), which over-predicts at large efs .Algorithm 8 Calibrating the HNSW Cost Model Require: Sidx : index sizes to sweep; E: beam widths to sweep; 
+
+|idx 0 |: fixed size for the efs sweep; 𝑑 : vector dimension; 
+
+𝑀 : HNSW degree.  
+
+> 1:
+
+Warm up HNSW construction and search.  
+
+> 2:
+
+for |idx | ∈ S idx do  
+
+> 3:
+
+Build an HNSW index over |idx | random 𝑑 -dim. vectors with degree 𝑀 . 
+
+> 4:
+
+Record median per-query latency 𝑇 size (| idx |) at efs = 1,
+
+𝑘 = 1. 
+
+> 5:
+
+Fit 𝑇 size (| idx |) = 𝑎 log |idx | + 𝑐 1. 
+
+> 6:
+
+Build an HNSW index over |idx 0 | random vectors.  
+
+> 7:
+
+for efs ∈ E do  
+
+> 8:
+
+Record median per-query latency 𝑇 efs (efs ) at 𝑘 = 1. 
+
+> 9:
+
+Fit 𝑇 lin  
+
+> efs
+
+(efs ) = 𝑏 efs + 𝑐 2 and 𝑇 log  
+
+> efs
+
+(efs ) = 𝑏 ′ efs log efs + 𝑐 ′
+
+> 2
+
+. 
+
+> 10:
+
+Select the form with the higher 𝑅 2; let (𝑏, 𝑐 2) be its coefficients.  
+
+> 11:
+
+𝑐 ← 12
+
+ (𝑐 1 − 𝑏 ) + ( 𝑐 2 − 𝑎 log |idx 0 |)  
+
+> 12:
+
+return 𝐶 𝜃 (| idx |, efs ) = 𝑎 log |idx | + 𝑏 efs + 𝑐 
+
+• 𝑧 𝜏 ′,𝜏 ∈ { 0, 1}: 𝑁 (𝜏 ′) is included in the index for 𝜏 ;
+
+• 𝑥 𝜏 ∈ { 0, 1}: the index for 𝜏 is materialized; 
+
+• 𝑦 𝑞,𝜏 ∈ { 0, 1}: query 𝑞 consults the index for 𝜏 .The candidate size of an index for a set 𝜏 of roles is 𝑠 𝜏 = Í𝜏 ′ 𝑧 𝜏 ′,𝜏 ·|𝑁 (𝜏 ′)| . For a query 𝑞 with role set 𝑞.𝜌 , the authorized blocks are 
+
+N𝑞 = {𝑁 (𝜏 ′) : 𝜏 ′ ∩ 𝑞.𝜌 ≠ ∅} . If the query uses indices {𝜏 : 𝑦 𝑞,𝜏 = 1}
+
+to look for its nearest neighbors, the query-time cost is: 
+
+Cost (𝑞 ) =∑︁  
+
+> 𝜏 :𝑦 𝑞,𝜏 =1
+
+log 𝑠 𝜏 + 𝛼 ∑︁   
+
+> 𝑁 (𝜏 ′) ∈ N 𝑞
+
+|𝑁 (𝜏 ′)| · 
+
+Ö 
+
+> 𝜏 :𝑦 𝑞,𝜏 =1
+
+(1 − 𝑧 𝜏 ′,𝜏 )
+
+The second term inflates the cost proportionally to any portion of 
+
+𝑞 ’s authorized blocks that are not covered by the selected indices. The overall workload objective is: 
+
+min 
+
+> 𝑥,𝑧,𝑦
+
+∑︁ 𝑞 ∈ Q 
+
+𝑞.𝜔 ©«∑︁ 𝜏 ∈ T 
+
+𝑦 𝑞,𝜏 log 𝑠 𝜏 + 𝛼 ∑︁   
+
+> 𝑁 (𝜏 ′) ∈ N 𝑞
+
+|𝑁 (𝜏 ′)| · 
+
+Ö 
+
+> 𝜏 :𝑦 𝑞,𝜏 =1
+
+(1 − 𝑧 𝜏 ′,𝜏 )ª®¬
+
+(7) subject to: 
+
+∀𝜏 ′, 𝜏 : 𝑧 𝜏 ′,𝜏 ≤ 𝑥 𝜏 (include in materialized index) (8) 
+
+∀𝜏 ′, 𝜏 : 0 ≤ 𝑧 𝜏 ′,𝜏 ≤ 𝑎 𝜏 ′,𝜏 𝑎 𝜏 ′,𝜏 = 1 if 𝜏 ′ ∩ 𝜏 ≠ ∅ else 0 (9) 
+
+∀𝜏 : 𝑠 𝜏 =∑︁ 
+
+> 𝜏 ′
+
+𝑧 𝜏 ′,𝜏 |𝑁 (𝜏 ′)| (10) ∑︁ 
+
+> 𝜏
+
+𝑥 𝜏 𝑠 𝜏 ≤ 𝛽 |D| (storage budget) (11) All variables are binary; 𝛽 ≥ 1 bounds the storage amplification. Because 𝑠 𝜏 and the cost expression contain products and logs, the objective (7) is non-convex. A common simplification is to pre-enumerate a finite catalogue 
+
+G𝑐 of valid groups (from merge/copy operations), treat |𝑔 | as a constant, and decide which groups to index. Let 𝑥 𝑔 , 𝑦 𝑞,𝑔 , 𝑢 𝑞, N be bi-nary variables as in §3. With log |𝑔 | constant, the objective becomes linear: 
+
+min 
+
+> 𝑥,𝑦,𝑢
+
+∑︁ 𝑞 ∈ Q 
+
+𝑞.𝜔 ©«∑︁ 𝑔 ∈ G 𝑐 
+
+𝑦 𝑞,𝑔 log |𝑔 | + 𝛼 ∑︁   
+
+> 𝑁 (𝜏 ′) ∈ N 𝑞
+
+𝑢 𝑞,𝑁 (𝜏 ′ ) |𝑁 (𝜏 ′)| ª®¬
+
+(12) subject to: 
+
+𝑦 𝑞,𝑔 ≤ 𝑥 𝑔 ∀𝑞, 𝑔 (13) ∑︁   
+
+> 𝑔 :𝑁 (𝜏 ′) ∈ 𝑔
+
+𝑦 𝑞,𝑔 + 𝑢 𝑞,𝑁 (𝜏 ′ ) ≥ 1 ∀𝑞, 𝑁 (𝜏 ′) ∈ N 𝑞 (14) 
+
+𝑥 𝑔 = 0 if |𝑔 | < Λ (15) ∑︁ 
+
+> 𝑔
+
+𝑥 𝑔 |𝑔 | ≤ 𝛽 |D| (16) Equations (12)–(16) define a 0–1 MILP. Enumerating G𝑐 reduces the problem to a MILP, but scale re-mains a challenge: |G 𝑐 | can reach tens of thousands; 𝑦 𝑞,𝑔 spans millions of binaries for realistic workloads, and runtimes remain prohibitive. Moreover, fixed catalogues cannot adapt to shifting role distributions or data updates. 
+
+## D COPY OPERATION DOMINANCE 
+
+To justify prioritizing copy operations, we compare their effect on query workloads. Let Cost (𝑄, L) denote the cost of evaluating a workload 𝑄 over lattice L. Consider a child node 𝑁 𝑐 = 𝑁 (𝜏 𝑐 ) and an ancestor 𝑁 𝑎 = 𝑁 (𝜏 𝑎 ). Let Lcopy be the lattice where 𝑁 𝑐 is copied into 𝑁 𝑎 (so both remain), and Lmerge the lattice where 𝑁 𝑐 is merged into 𝑁 𝑎 (and removed). The following result shows that copying never performs worse than merging, and may strictly improve cost for workloads that isolate 𝑁 𝑐 .
+
+Theorem D.1 (Copy Dominance). Suppose both copying and merging 𝑁 𝑐 into 𝑁 𝑎 yield positive cost reduction for queries that involve roles in 𝜏 𝑎 . Then the following hold for all queries in 𝑄 :
+
+• If a query accesses only 𝑁 𝑐 , then Cost (𝑄, Lcopy ) < Cost (𝑄, Lmerge ).
+
+• If a query access both 𝑁 𝑐 and 𝑁 𝑎 , then Cost (𝑄, Lcopy ) =
+
+Cost (𝑄, Lmerge ).
+
+## E SUPPLEMENTARY ALGORITHMS FOR VEDA 
+
+This section collects the subroutines invoked by Algorithms 2 and 3 in §4 and the finalization phase referenced from the algorithm overview. 
+
+> 16
+
+## E.1 Copy-Phase Helpers 
+
+Algorithm 9 provides get_pairs , get_benefit , and get_diff as called from Algorithm 2. get_pairs (re)scores only the child–ancestor pairs whose ancestor was touched by the previous copy; get_benefit 
+
+evaluates Equation (3) for a candidate copy; and get_diff computes the change in a single role’s plan cost when its query plan switches from the current cover to one that uses the enlarged ancestor. 
+
+Algorithm 9 Complementary Algorithms for the copy phase in Veda  
+
+> 1:
+
+function get_pairs (L, PR , 𝑁 last  
+
+> 𝑎
+
+, QP ) 
+
+> 2:
+
+for (𝑁 𝑐 , 𝑁 𝑎 ) ∈ PR do  
+
+> 3:
+
+if !𝑁 last  
+
+> 𝑎
+
+or 𝑁 last  
+
+> 𝑎
+
+= 𝑁 𝑎 then  
+
+> 4:
+
+if 𝑁 𝑐 ∉ L then PR [( 𝑁 𝑎 , 𝑁 𝑐 )] .delete ()  
+
+> 5:
+
+PR [( 𝑁 𝑎 , 𝑁 𝑐 )] ← get_benefit (𝑁 𝑎 , 𝑁 𝑐 , L, QP ) 
+
+> 6:
+
+Sort PR by their benefits  
+
+> 7:
+
+return PR  
+
+> 8:
+
+function get_benefit (𝑁 𝑎 , 𝑁 𝑐 , L, QP ) 
+
+> 9:
+
+Δ ← 0, Δ𝑆 (𝑒 (𝑁 𝑐 , 𝑁 𝑎 )) ← |L [ 𝑁 𝑎 ] ∪ L ex [𝑁 𝑐 ]| − |L [ 𝑁 𝑎 ]|  
+
+> 10:
+
+for 𝑟 ∈ QP do  
+
+> 11:
+
+if 𝑁 𝑎 ∈ QP [𝑟 ] then  
+
+> 12:
+
+if 𝑁 𝑐 ∈ QP [𝑟 ] then  
+
+> 13:
+
+Δ ← Δ + log (|L [ 𝑁 𝑎 ]| + 1) + log (|L ex [𝑁 𝑐 ]| + 1) 
+
+> 14:
+
+Δ ← Δ − log (|L [ 𝑁 𝑎 ] + L ex [𝑁 𝑐 ]| + 1) 
+
+> 15:
+
+else  
+
+> 16:
+
+qp 𝑟 ← get_coverage (𝑟, L)  
+
+> 17:
+
+Δ ← get _diff (𝑞𝑝 𝑟 , QP [𝑟 ], L, 𝑁 𝑎 , Lex [𝑁 𝑐 ])  
+
+> 18:
+
+return Δ/Δ𝑆 (𝑒 (𝑁 𝑐 , 𝑁 𝑎 ))  
+
+> 19:
+
+function get_diff (𝑞𝑝 𝑟 , 𝑞𝑝 , L, 𝑁 𝑎 , eating _data ) 
+
+> 20:
+
+qp unq ← qp \qp 𝑟 , qp 𝑟  
+
+> unq
+
+← qp 𝑟 \qp  
+
+> 21:
+
+if 𝑁 𝑎 ∈ qp unq and 𝑁 𝑎 ∈ qp 𝑟  
+
+> unq
+
+then  
+
+> 22:
+
+qp unq .add (𝑁 𝑎 ), qp 𝑟  
+
+> unq
+
+.add (𝑁 𝑎 ) 
+
+> 23:
+
+for 𝜏 ∈ qp unq do Δ ← Δ + log (|L [ 𝜏 ]| + 1) 
+
+> 24:
+
+for 𝜏 ∈ qp 𝑟  
+
+> unq
+
+do  
+
+> 25:
+
+if 𝜏 ≠ 𝑁 𝑎 then Δ ← Δ − log (|L [ 𝜏 ]| + 1) 
+
+> 26:
+
+else Δ ← Δ − log (| eating _data ∪ L [ 𝑁 𝑎 ]| + 1) 
+
+> 27:
+
+return Δ
+
+## E.2 Merge-Phase Helpers 
+
+Algorithm 10 supplies the merge-phase analogues called from Al-gorithm 3. get_merge_benefit differs from the copy case in that it must also charge the impurity introduced for roles that previously read the child as a pure node. 
+
+## E.3 Phase 3: Finalization 
+
+After the merge phase, any remaining nodes that are not indexable are decomposed back into exclusive blocks for linear scan. As there might be duplicated data between these groups that has reclaimed storage, identify nodes that are “super impure” to issue queries and create copies of the pure parts to utilize the freed budget. 
+
+Algorithm 10 Complementary Algorithms for the merge phase in Veda  
+
+> 1:
+
+function get_pairs (L, pairs , 𝑎 last , 𝑐 last , QP ) 
+
+> 2:
+
+for (c, a) ∈ pairs do  
+
+> 3:
+
+if 𝑐 ∉ L or 𝑎 ∉ L then delete (𝑐, 𝑎 ); continue  
+
+> 4:
+
+if 𝑎 ∈ [ 𝑎 last , None ] or 𝑐 ∈ [ 𝑐 last 𝑠, None ] then  
+
+> 5:
+
+pairs [( 𝑎, 𝑐 )] ← get_merge_benefit (a, c, L)  
+
+> 6:
+
+return pairs  
+
+> 7:
+
+function get_merge_benefit (𝑎 , 𝑐 , L, QP ) 
+
+> 8:
+
+Δ ← 0 
+
+> 9:
+
+for 𝑟 ∈ QP do  
+
+> 10:
+
+if 𝑎 ∈ QP [𝑟 ] and 𝑐 ∈ QP [𝑟 ] then  
+
+> 11:
+
+Δ ← Δ + log (|L [ 𝑎 ]| + 1) + log (|L [ 𝑐 ]| + 1) 
+
+> 12:
+
+Δ ← Δ − log (|L [ 𝑎 ] + L [ 𝑐 ]| + 1) 
+
+> 13:
+
+else if 𝑎 ∈ QP [𝑟 ] or 𝑐 ∈ QP [𝑟 ] then  
+
+> 14:
+
+qp 𝑟 ← get_coverage (𝑟, L)  
+
+> 15:
+
+Δ ← get _diff (𝑞𝑝 𝑟 , QP [𝑟 ], L, 𝑎, L [ 𝑐 ])  
+
+> 16:
+
+return Δ
+
+Algorithm 11 formalizes this procedure. The algorithm first com-putes each node 𝑁 ’s reference count in L, i.e., the number of roles that access a node 𝑁 , denoted ref [𝑁 ]. Then, for each role 𝑟 , the algorithm computes its impurity of each node in QP [𝑟 ] with the pure part of 𝑁 for 𝑟 , denoted pure ex . If this pure part is smaller than 𝑁 , 𝑁 is impure for 𝑟 , and the pair is added to a candidate list with an impurity score. Candidates are processed in decreasing impurity order. Before refining a candidate, the algorithm computes the additional copy size copy 𝑠 by counting only exclusive blocks in 
+
+pure ex that have not already been copied by earlier refinements. If the remaining budget is sufficient, the algorithm materializes each exclusive block into a standalone node that can be used directly in the query plan. When the block is already standalone in L, the algorithm reuses it without spending budget. Otherwise, the block is copied into L: it keeps its original key if that key is free, and uses a renamed key if the original key is already occupied by a non-standalone node. The query plan QP [𝑟 ] is redirected to these materialized blocks, and the original impure node is removed from 
+
+QP [𝑟 ]. When this update makes ref [𝑁 ] = 0, the node is not ref-erenced by any query andis safe to delete from L to reclaim the storage. 
+
+## F SUPPLEMENTARY ALGORITHMS FOR 
+
+## EFFVEDA 
+
+## F.1 Copy with Valid Partitions of Sizes over Two 
+
+Guided by Lemma 5.4, when allowing the number of ancestors in the valid partitions to be higher than two, EffVeda enumerates ancestor subsets at each layer ℓ in increasing cardinality 𝜂 (start-ing from 2), verifies validity and storage feasibility, and evaluates 
+
+𝑓 (·) . It then selects BP 𝑐 —the valid partition with maximal bene-fit under the storage budget. This greedy bottom-up procedure confines exploration to local, purity-preserving operations while respecting the global SA constraint. The algorithm is summarized in Algorithm 12. 
+
+> 17
+
+Algorithm 11 Veda – Finalization by Super-Impure Node Re-finement Require: L: current lattice; Lex : exclusive lattice; QP : query plan over L; buf : remaining storage budget.  
+
+> 1:
+
+// Step 1: Collect impure (𝑟, 𝑁 ) candidates  
+
+> 2:
+
+C ← ∅ ; Copied ← ∅  
+
+> 3:
+
+ref [𝑁 ] ← |{ 𝑟 : 𝑁 ∈ QP [𝑟 ]}| for each 𝑁 ∈ L ⊲ # of roles that have 𝑁 in QP [𝑟 ] 
+
+> 4:
+
+for role 𝑟 ∈ QP , node 𝑁 ∈ QP [𝑟 ] do  
+
+> 5:
+
+pure ex ← { 𝑁 ex (𝜏 ) ∈ 𝑁 : 𝑟 is permitted by 𝜏 } 
+
+> 6:
+
+pure 𝑠 ← Í𝑁 ex (𝜏 ) ∈ pure ex |𝑁 ex (𝜏 )|  
+
+> 7:
+
+if 0 < pure 𝑠 < |𝑁 | then  
+
+> 8:
+
+add (𝑟, 𝑁 , pure ex , imp = |𝑁 | 
+
+> pure 𝑠
+
+, pure 𝑠 ) to C 
+
+> 9:
+
+Sort C by (imp , −pure 𝑠 ) decreasingly ⊲ Prioritize impure nodes  
+
+> 10:
+
+// Step 2: Refine each candidate, most-impure first  
+
+> 11:
+
+for (𝑟, 𝑁 , pure ex , ·, ·) ∈ C do  
+
+> 12:
+
+if 𝑁 ∉ QP [𝑟 ] or 𝑁 ∉ L then continue  
+
+> 13:
+
+copy 𝑠 ← Í𝑁 ex (𝜏 ) ∈ pure ex \Copied 𝑁 ex (𝜏 ) 
+
+> 14:
+
+if buf < copy 𝑠 then continue  
+
+> 15:
+
+for 𝑁 ex (𝜏 ) ∈ pure ex do  
+
+> 16:
+
+(𝑁 ex (𝜂 ), buf ) ← Materialize (𝑁 ex (𝜏 ), buf , L, Copied ) 
+
+> 17:
+
+QP [𝑟 ].add (𝑁 ex (𝜂 ))  
+
+> 18:
+
+QP [𝑟 ].remove (𝑁 ); ref [𝑁 ] ← ref [𝑁 ] − 1 
+
+> 19:
+
+if ref [𝑁 ] = 0 then delete 𝑁 from L; buf ← buf + | 𝑁 | 
+
+> 20:
+
+return L, QP  
+
+> 21:
+
+function Materialize (𝑁 ex (𝜏 ), buf , L, Copied ) ⊲ Ensure 
+
+𝑁 ex (𝜏 ) is queryable as a standalone key  
+
+> 22:
+
+if 𝑁 ex (𝜏 ) is standalone in L then return 𝑁 ex (𝜏 ), buf  
+
+> 23:
+
+𝜂 ← (− 1, 𝜏 ) ⊲ In case 𝜏 occupied by a non-standalone node  
+
+> 24:
+
+if 𝑁 ex (𝜏 ) ∈ Copied then return 𝑁 ex (𝜂 ), buf  
+
+> 25:
+
+Copied .add (𝑁 ex (𝜏 ))  
+
+> 26:
+
+if 𝑁 ex (𝜏 ) ∈ L then  
+
+> 27:
+
+Copy 𝑁 ex (𝜏 ) to L as 𝑁 ex (𝜂 ) 
+
+> 28:
+
+return 𝑁 ex (𝜂 ), buf − |L ex [𝑁 ex (𝜏 )]|  
+
+> 29:
+
+else  
+
+> 30:
+
+Copy 𝑁 ex (𝜏 ) to L as 𝑁 ex (𝜂 ) 
+
+> 31:
+
+return 𝑁 ex (𝜏 ), buf − |L ex [𝑁 ex (𝜏 )]| 
+
+## F.2 Finding the Best Valid Partition 
+
+Algorithm 13 returns, for a child node and a target partition size 𝜂 ,the valid partition of its ancestor set that maximizes the benefit of Equation (5) under the remaining SA budget. It is the subroutine invoked by Algorithm 12 and by the 𝜂 = 2 search in §5. 
+
+## G QUERY ANSWERING ALGORITHMS 
+
+This section collects the algorithms used by §6. The starred notation in the pseudocode, such as I∗ (𝑟 ) and U∗ (𝑟 ), denotes the selected indices and leftover vectors in the query plan QP (𝑟 ).
+
+## G.1 Detailed Top-𝑘 Query Execution 
+
+Given a query 𝑞 = (x, 𝑟 ) and a query plan QP (𝑟 ) = (I ( 𝑟 ), U ( 𝑟 )) ,the baseline execution strategy searches every selected component independently. Leftover vectors in U ( 𝑟 ) are stored by block and scanned linearly. For each HNSW index idx ∈ I ( 𝑟 ), the query uses standard top-𝑘 search when idx is pure for 𝑟 . If idx is impure, the 
+
+Algorithm 12 EffVeda -Copy with Exploring Larger Valid Partitions Require: Lex : the exclusive lattice created based on D. L: the current lattice. 𝛽 : desired SA . CA 𝑠 : the child–ancestor pairs in Lex . R: role set of D. 
+
+> 1:
+
+L ← L ex , ℓ ← LOWEST_LAYER , buf ← ( 𝛽 − 1) × |L ex | 
+
+> 2:
+
+if buf ≤ 0 then return L 
+
+> 3:
+
+while layer ℓ is not the top layer of Lex do  
+
+> 4:
+
+BPS ← ∅ , Nℓ ← get_nodes_on_a_layer (L , ℓ ), 
+
+> 5:
+
+for 𝑁 𝑐 (𝜏 ) ∈ N ℓ do  
+
+> 6:
+
+𝐴 𝑐 ← get_ancestors (L , 𝑁 𝑐 (𝜏 ))  
+
+> 7:
+
+if |𝐴 𝑐 | < 2 then continue  
+
+> 8:
+
+for 2 ≤ 𝜂 ≤ min (| 𝐴 𝑐 |, |𝜏 |) do  
+
+> 9:
+
+if 𝜂 × |L [ 𝑁 𝑐 (𝜏 )]| < buf then break  
+
+> 10:
+
+(BP 𝑐 , Δcost ) ← find _best _partition (𝑁 𝑐 (𝜏 ), 𝜂, 𝐴 𝑐 , L) 
+
+⊲ Algorithm 13 in Appendix §F.2  
+
+> 11:
+
+if BP 𝑐 then BPS [𝑁 𝑐 (𝜏 )] ← ( BP 𝑐 , Δcost ), break  
+
+> 12:
+
+Sort BPS based on Δcost of each best partition.  
+
+> 13:
+
+for (BP 𝑐 , Δcost ) ∈ BPS do  
+
+> 14:
+
+Δ𝑆 ← |L [ 𝑁 𝑐 (𝜏 )]| × (| BP 𝑐 | − 1) ⊲ Get storage overhead  
+
+> 15:
+
+if Δ𝑆 ≤ buf then  
+
+> 16:
+
+for 𝑁 𝑎 (𝜏 ′) ∈ BP 𝑐 do L [ 𝑁 𝑎 (𝜏 ′)] .add (L [ 𝑁 𝑐 (𝜏 )])  
+
+> 17:
+
+buf ← buf − Δ𝑆 , L [ 𝑁 𝑐 (𝜏 )] .delete ()  
+
+> 18:
+
+ℓ ← ℓ − 1 
+
+> 19:
+
+return L
+
+Algorithm 13 EffVeda -Find Best Partition  
+
+> 1:
+
+function Find_Best_Partition (𝑁 𝑐 (𝜏 ), 𝜂, 𝐴 𝑐 , L) 
+
+> 2:
+
+Δcost , BP 𝑐 ← None  
+
+> 3:
+
+for each 𝜂 -sized subset P𝑐 of 𝐴 𝑐 do  
+
+> 4:
+
+if Ð𝑁 𝑎 (𝜏 ′ ) ∈ P𝑐 𝜏 ′ = 𝜏 and ∀𝑁 𝑎 (𝜏 ′), 𝑁 𝑎 (𝜏 ′′ ) ∈ P𝑐 , 𝜏 ′ ∩
+
+𝜏 ′′ = ∅ then  
+
+> 5:
+
+benefit ← get_benefit (P𝑐 , L)  
+
+> 6:
+
+if benefit > Δcost then BP 𝑐 ← P𝑐 , Δcost ← benefit  
+
+> 7:
+
+return (BP 𝑐 , Δcost ) 
+
+> 8:
+
+function get_benefit (𝑎 , 𝑐 , L, QP ) 
+
+> 9:
+
+Δ ← 0 
+
+> 10:
+
+for 𝑟 ∈ QP do  
+
+> 11:
+
+if 𝑎 ∈ QP [𝑟 ] and 𝑐 ∈ QP [𝑟 ] then  
+
+> 12:
+
+Δ ← Δ + log (|L [ 𝑎 ]| + 1) + log (|L [ 𝑐 ]| + 1) 
+
+> 13:
+
+Δ ← Δ − log (|L [ 𝑎 ] + L [ 𝑐 ]| + 1) 
+
+> 14:
+
+else if 𝑎 ∈ QP [𝑟 ] or 𝑐 ∈ QP [𝑟 ] then  
+
+> 15:
+
+qp 𝑟 ← get_coverage (𝑟, L)  
+
+> 16:
+
+Δ ← get _diff (𝑞𝑝 𝑟 , QP [𝑟 ], L, 𝑎, L [ 𝑐 ])  
+
+> 17:
+
+return Δ
+
+query inflates the request size to 𝑘 ′ = ⌈𝜆 𝑟 
+
+> idx
+
+𝑘 ⌉, where 𝜆 𝑟  
+
+> idx
+
+is defined in Equation 1, and filters the returned candidates against D ( 𝑟 ). The final answer is the top-𝑘 closest authorized vectors after merging the filtered HNSW results and the linear-scan results. Coordinated search improves on this baseline by using the pure indices and leftovers to establish a global distance boundary before fully inflating impure-index search. Algorithm 7 first initializes the global result heap RS using U∗ (𝑟 ) and pure indices. For each impure index, it runs an uninflated HNSW search, filters authorized 
+
+> 18
+
+Algorithm 14 Single-Role Query Plan Construction (ILP) Require: Key-area dictionary KAD , where each atomic policy area 
+
+𝑝 maps to candidate indices KAD [𝑝 ] = [( idx , size )] , and single roles R.
+
+Ensure: Query plan QP mapping each role 𝑟 to selected indices.  
+
+> 1:
+
+Initialize QP  
+
+> 2:
+
+for each role 𝑟 ∈ R do  
+
+> 3:
+
+(C , Aopen , Bcand ) ← GetCandidates (𝑟, KAD ) 
+
+> 4:
+
+Create binary variable 𝑥 idx for each candidate index idx 
+
+appearing in Bcand  
+
+> 5:
+
+Minimize Íidx log 2 (| idx | + 1) · 𝑥 idx  
+
+> 6:
+
+for each uncovered area 𝑢 ∈ A open do  
+
+> 7:
+
+Add constraint Íidx ∈KAD [𝑢 ] 𝑥 idx ≥ 1 
+
+> 8:
+
+Solve the ILP  
+
+> 9:
+
+for each candidate index idx do  
+
+> 10:
+
+if 𝑥 idx = 1 then  
+
+> 11:
+
+C ← C ∪ { idx } 
+
+> 12:
+
+QP [𝑟 ] ← C  
+
+> 13:
+
+return QP  
+
+> 14:
+
+function GetCandidates (𝑟, KAD ) 
+
+> 15:
+
+Initialize selected coverage C, uncovered areas Aopen , and candidate lists Bcand  
+
+> 16:
+
+for each policy area 𝑝 in KAD do  
+
+> 17:
+
+if 𝑟 ∈ 𝑝 then  
+
+> 18:
+
+if |KAD [𝑝 ]| = 1 then  
+
+> 19:
+
+C ← C ∪ { KAD [𝑝 ] [ 1].idx } 
+
+> 20:
+
+else  
+
+> 21:
+
+Aopen ← A open ∪ { 𝑝 } 
+
+> 22:
+
+Bcand ← B cand ∪ { KAD [𝑝 ]}  
+
+> 23:
+
+for each candidate list 𝐿 ∈ B cand do  
+
+> 24:
+
+if some idx ∈ 𝐿 is already in C then  
+
+> 25:
+
+Remove 𝐿 and its corresponding area from Bcand 
+
+and Aopen  
+
+> 26:
+
+return (C , Aopen , Bcand )
+
+Algorithm 15 Single-Role Query Plan Construction (Greedy) Require: Key-area dictionary KAD , where each atomic policy area 
+
+𝑝 maps to candidate indices KAD [𝑝 ] = [( idx , size )] , and single roles R.
+
+Ensure: Query plan QP mapping each role 𝑟 to selected indices.  
+
+> 1:
+
+Initialize QP  
+
+> 2:
+
+for each role 𝑟 ∈ R do  
+
+> 3:
+
+(C , Aopen , Bcand ) ← GetCandidates (𝑟, KAD ) 
+
+> 4:
+
+Sort Bcand in descending order by the smallest candidate index size  
+
+> 5:
+
+for each candidate list 𝐿 ∈ B cand do  
+
+> 6:
+
+if no idx ∈ 𝐿 is already in C then  
+
+> 7:
+
+C ← C ∪ { 𝐿 [1].idx } 
+
+> 8:
+
+QP [𝑟 ] ← C  
+
+> 9:
+
+return QP 
+
+candidates, and merges only candidates that can beat the current 
+
+𝑘 -th global result. If the local 𝑘 -th result is already farther than the global 𝑘 -th result, the algorithm stops exploring that impure index. 
+
+Algorithm 16 Top-𝑘 Query Execution Require: Query 𝑞 = (x, 𝑟 ); plan QP (𝑟 ) = (I ∗ (𝑟 ), U∗ (𝑟 )) ; parame-ter 𝑘 ; ground truth data IDs Drids (𝑟 ) for filtering, derived from D ( 𝑟 ) 
+
+> 1:
+
+RS ← [ ]  
+
+> 2:
+
+for each idx ∈ I ∗ (𝑟 ) do  
+
+> 3:
+
+if idx is pure then ⊲ D ( idx ) ⊆ D ( 𝑟 ) 
+
+> 4:
+
+RS idx ← HNSW (idx , 𝑘 ) 
+
+> 5:
+
+else  
+
+> 6:
+
+𝜆 𝑟  
+
+> idx
+
+← ⌈ | D ( idx ) | | D ( idx )∩D ( 𝑟 ) | ⌉, 𝑘 ′ ← ⌈ 𝜆 𝑟  
+
+> idx
+
+· 𝑘 ⌉ 
+
+> 7:
+
+RS idx ← HNSW (idx , 𝑘 ′) 
+
+> 8:
+
+Filter RS idx with Drids (𝑟 ) and append to RS  
+
+> 9:
+
+for each 𝑣 ∈ U ∗ (𝑟 ) do  
+
+> 10:
+
+Compute dist (𝑣, x) and add 𝑣 to RS  
+
+> 11:
+
+Sort RS by distances in descending order  
+
+> 12:
+
+return Top-𝑘 data in RS 
+
+Otherwise, it continues the base-layer traversal with an inflated beam and merges the newly found authorized vectors. 
+
+## G.2 Continued Base-Layer Search on Impure Indices 
+
+Algorithm 17 gives the base-layer (layer-0) HNSW traversal used inside Algorithm 7 when an impure index must be searched under the global distance bound. The traversal carries the current global 
+
+𝑘 -th distance 𝑑 (𝑔 ) 
+
+> 𝑘
+
+from RS as an admission threshold: a neighbor is pushed onto the candidate heap only if it can still enter the global top-𝑘 , and the loop terminates as soon as the best remaining candidate is farther than 𝑑 (𝑔 ) 
+
+> 𝑘
+
+. Authorization is checked before a vector is admitted to the local result heap, so unauthorized vectors steer the traversal but never reach RS .
+
+## G.3 Accuracy Analysis of Inflated-𝑘 Search 
+
+We formalize when inflated-𝑘 search over an impure index returns the true authorized top-𝑘 . For a query 𝑞 = (x, 𝑟 ) on an impure index idx , the goal is to retrieve the 𝑘 closest vectors in D𝑟 (idx )
+
+under dist (· , ·) . Because unauthorized vectors may appear before authorized ones in the unfiltered ranking, the 𝑘 -th authorized vector can occur after position 𝑘 .
+
+Definition G.1 (Authorized Position Threshold). Let 𝑢 1, 𝑢 2, . . . de-note all vectors in D ( idx ) sorted by increasing dist (x, 𝑢 𝑖 ). Define 
+
+𝜏 𝑟 = min 
+
+n
+
+𝑡 | {𝑢 1, . . . , 𝑢 𝑡 } ∩ D 𝑟 (idx ) ≥ 𝑘 
+
+o
+
+,
+
+i.e., the position in the full unfiltered ranking where the 𝑘 -th au-thorized vector appears. Retrieving at least the first 𝜏 𝑟 true unfiltered neighbors is there-fore sufficient to include all 𝑘 authorized nearest neighbors. 
+
+Assumption 1 (HNSW Top-𝑡 Success Condition). For any in-dex idx and any integer 𝑡 ≥ 1, there exists a non-decreasing function 
+
+𝑓 (𝑡 ) such that running HNSW on idx with parameter efs ≥ 𝑓 (𝑡 )
+
+returns the true top-𝑡 nearest neighbors by distance with probability at least 1 − 𝛿 .
+
+> 19
+
+Algorithm 17 Continual L0 Search in HNSW Require: Query vector x, a max heap for global top-k results RS 
+
+before searching on the impure nodes, an impure in-dex idx ip of role 𝑟 , a list of authorized data ids Drids (𝑟 )
+
+of role 𝑟 , current entry point ep , distance d_ep , can-didate min-heap 𝐶 , , counters |RS 𝑙 |, ef , 𝑘 , desired _ef ,thresholds worst _dist , 𝑑 (𝑙 ) 
+
+> max
+
+, and optional filter predicate 
+
+isAllowed (·) 
+
+Ensure: Top-𝑘 authorized results for query vector x with role 𝑟 . 
+
+> 1:
+
+Traverse on idx ip to reach the bottom layer of idx ip  
+
+> 2:
+
+(𝑑 𝑣 , 𝑣 ) ← get_entry_point () , 𝐶 ← [] ⊲ Candidate list  
+
+> 3:
+
+𝐶. push (dv, 𝑣 ), ef ← 1, 𝑑 𝑔 𝑘 ← RS .max () , 𝑣. visited ← True  
+
+> 4:
+
+if 𝑣 ∈ D rids (𝑟 ) ∧ 𝑑 𝑣 < 𝑑 (𝑔 ) 
+
+> 𝑘
+
+then RS 𝑙 .push (𝑑 𝑣 , 𝑣 ), 𝑑 (𝑙 ) 
+
+> max
+
+← 𝑑 𝑣  
+
+> 5:
+
+RS 𝑙 , 𝐶 ← base _layer _search (x, 𝐶, 𝑘, 1, ef max , Drids (𝑟 ))  
+
+> 6:
+
+RS ← merge_rs (RS 𝑙 , RS ) 
+
+> 7:
+
+if STOP_FLAG then return RS  
+
+> 8:
+
+RS 𝑙 , 𝐶 ← base _layer _search (x, 𝐶, 𝑘, ef default , ef max , Drids (𝑟 ))  
+
+> 9:
+
+RS ← merge_rs (RS 𝑙 , RS ) 
+
+> 10:
+
+return RS  
+
+> 11:
+
+function Layer_0_search (x, 𝐶 , 𝑘 , ef , ef max , Drids (𝑟 )) 
+
+> 12:
+
+RS 𝑙 ← []  
+
+> 13:
+
+while 𝐶 is not empty do  
+
+> 14:
+
+(𝑑 𝑣 , 𝑣 ) ← 𝐶. top () , 𝐶. pop ()  
+
+> 15:
+
+if 𝑑 𝑣 > 𝑑 (𝑔 ) 
+
+> 𝑘
+
+∨ ( 𝑑 𝑣 > 𝑑 (𝑙 ) 
+
+> max
+
+∧ | RS 𝑙 | ≥ 𝑘 ) then  
+
+> 16:
+
+break  
+
+> 17:
+
+for each neighbor 𝑢 of 𝑣 in base layer do  
+
+> 18:
+
+if 𝑢 .visited then Continue  
+
+> 19:
+
+if ef ≥ ef max then break  
+
+> 20:
+
+𝑢 .visited ← True , ef ← ef + 1, 𝑑 𝑢 ← dist (x, 𝑢 ) 
+
+> 21:
+
+if 𝑑 𝑢 > 𝑑 (𝑔 ) 
+
+> 𝑘
+
+∨ ( 𝑑 𝑢 > 𝑑 (𝑙 ) 
+
+> max
+
+∧ | RS 𝑙 | ≥ 𝑘 ) then  
+
+> 22:
+
+continue  
+
+> 23:
+
+𝐶. push (𝑑 𝑢 , 𝑢 ) 
+
+> 24:
+
+if 𝑢 ∉ D ( 𝑟 ) then continue  
+
+> 25:
+
+if 𝑑 𝑢 < 𝑑 (𝑙 ) 
+
+> max
+
+then RS 𝑙 .push (𝑑 𝑢 , 𝑢 ) 
+
+> 26:
+
+else if 𝑑 𝑢 < 𝑑 (𝑔 ) 
+
+> 𝑘
+
+∧ | RS 𝑙 | < 𝑘 then  
+
+> 27:
+
+RS 𝑙 .push (𝑑, 𝑢 ), 𝑑 (𝑙 ) 
+
+> max
+
+← 𝑑 𝑢  
+
+> 28:
+
+return RS 𝑙 , 𝐶 
+
+This assumption abstracts the empirical behavior that larger efs 
+
+values yield higher HNSW recall. In our implementation, 𝑓 (𝑡 ) = 𝛼𝑡 
+
+with a small constant 𝛼 (e.g., 5 ≤ 𝛼 ≤ 10 ) satisfies the condition with high probability. 
+
+Theorem G.2 (Accuracy of Inflated-𝑘 Search). Fix a query 
+
+𝑞 = (x, 𝑟 ) on an impure index idx . Let the search retrieve the true top-𝑘 ′ unfiltered neighbors of x from D ( idx ) with probability at least 
+
+1 −𝛿 , for some 𝑘 ′ ≥ 𝜏 𝑟 . Then, after filtering unauthorized vectors from this result set, the remaining vectors contain exactly the true top-𝑘 
+
+authorized neighbors of x in D𝑟 (idx ), with probability at least 1 − 𝛿 .
+
+Proof. By definition of 𝜏 𝑟 , the 𝑘 -th authorized neighbor 𝑎 𝑘 ∈D𝑟 (idx ) appears within the first 𝜏 𝑟 elements of the true unfiltered ranking. If the algorithm returns the true top-𝑘 ′ unfiltered neigh-bors with 𝑘 ′ ≥ 𝜏 𝑟 , then all 𝑢 1, . . . , 𝑢 𝜏 𝑟 are included. Filtering unau-thorized vectors from this set retains all authorized neighbors up to 
+
+Table 7: Indexing threshold Λ vs. QPS on SIFT-1M, SA = 1.3. 
+
+Λ 2,500 2,700 2,900 3,100 3,300 
+
+Veda 2551.5 2557.2 2541.4 2597.0 2652.7 
+
+EffVeda 1620.5 1705.6 1727.6 1736.9 1720.2 
+
+Table 8: Indexing threshold Λ vs. QPS on SIFT-1M, SA = 1.5. 
+
+Λ 2,500 2,700 2,900 3,100 3,300 
+
+Veda 1651.3 1618.6 1655.9 1665.2 1693.5 
+
+EffVeda 1562.6 1502.9 1525.2 1503.0 1541.1 
+
+𝑎 𝑘 . No authorized vector after position 𝜏 𝑟 can precede 𝑎 𝑘 in distance. Hence, the first 𝑘 vectors after filtering are exactly the true top-𝑘 
+
+authorized neighbors, with probability at least 1 − 𝛿 . □
+
+Corollary G.3 (Inflation Rule). Under Assumption 1, Theo-rem G.2 holds if the search parameters satisfy 𝑘 ′ ≥ 𝜏 𝑟 and efs ′ ≥
+
+𝑓 (𝑘 ′).
+
+In practice, 𝜏 𝑟 is unknown. Coordinated search estimates an inflation factor 𝜆 𝑟  
+
+> idx
+
+≥ 1 from the observed relation between the local impure-index ranking and the global result heap RS . Setting 
+
+𝑘 ′ = ⌈𝜆 𝑟  
+
+> idx
+
+· 𝑘 ⌉, efs ′ = ⌈𝜆 𝑟  
+
+> idx
+
+· efs ⌉
+
+grows the target size and the HNSW beam together. If the chosen 
+
+𝜆 𝑟  
+
+> idx
+
+is large enough that 𝑘 ′ ≥ 𝜏 𝑟 , Corollary G.3 guarantees that filtering the returned set yields the exact authorized top-𝑘 with probability at least 1 − 𝛿 .
+
+## H COMPLEMENTARY EVALUATIONS H.1 Supplementary Results for Exp 8: Varying Indexing Thresholds 
+
+This section reports the additional results for Exp 8 in §7. In the main text, we show the sensitivity of QPS to the indexing threshold 
+
+Λ at SA = 1.1. Tables 7 and 8 repeat the same evaluation with larger storage budgets, SA = 1.3 and SA = 1.5. The results follow the same trend: varying Λ changes QPS only mildly, confirming that the proposed methods are robust to the exact indexing threshold. 
+
+## H.2 Supplementary Results for Exp 10: Impacts of efs 
+
+We provide evaluation resutls on the PAPER and AMZN datasets, as a complement to Exp 10 in §7. As on SIFT-1M, increasing efs lowers QPS for all methods because each HNSW search expands a wider beam. The relative trends are consistent across datasets. Oracle achieves the highest QPS on all datasets, and Veda and EffVeda 
+
+maintain high QPS over most of the evaluations. 
+
+## I SUPPORTING DYNAMIC WORKLOADS 
+
+The construction in §4–§5 assumes a static dataset and policy. We sketch here how the lattice absorbs insertions, deletions, and up-dates without a full rebuild.  
+
+> 20 (a) PAPER. (b) AMZN.
+
+Figure 11: Supplementary results of Exp 10: QPS vs. efs .Data updates. Every vector 𝑣 belongs to exactly one exclusive block 𝑁 ex (𝜏 ), and the container map Φ (§6.1) records the set of lattice nodes that physically hold that block. Insert (𝑣, 𝜏 ) adds 𝑣 to each node in Φ(𝑁 ex (𝜏 )) ; Delete (𝑣 ) removes it from the same set; 
+
+Update (𝑣, 𝑣 ′) is a delete followed by an insert. Indexed nodes use HNSW’s native incremental insertion [ 15 ] and tombstone deletion; leftover nodes are arrays with O( 1) update. 
+
+Policy updates. Granting or revoking role 𝑟 on 𝑣 moves 𝑣 from block 𝜏 to 𝜏 ∪ { 𝑟 } or 𝜏 \ { 𝑟 }; only nodes in the symmetric difference 
+
+Φ(𝜏 ) △ Φ(𝜏 ′) are touched, and a previously unseen destination block is created as a fresh leftover node. Adding a role is metadata only. Dropping role 𝑟 relabels every block 𝜏 ∋ 𝑟 to 𝜏 \ { 𝑟 } and merges blocks that collide; node contents are unchanged, so no HNSW index is rebuilt. 
+
+Optimization. These operations keep the layout correct . Every authorized vector stays reachable through some node in QP (𝑟 ),and coordinated search post-filters any newly impure node—but let it drift from the QA optimum as block sizes and impurities change. We restore optimality lazily: when a node crosses the threshold Λ
+
+or its size/impurity drifts beyond a slack, we re-run copy/merge on that node and its lattice neighbors only. Only after large policy changes (e.g., DropRole ), we re-run EffVeda in full. 
+
+## J DETAILED RELATED WORK 
+
+This appendix expands the qualitative comparison of §8 into a method-level survey. The unifying question is where a system pays for the access predicate: before ANN search (pre-filtering), dur-ing graph traversal (in-index filtering), through additional mate-rialized sub-indexes (workload-aware selection), or through an access-control-aware partitioning of the data itself. We organize the discussion along that axis and, for each method, state how Veda 
+
+and EffVeda differ. 
+
+## J.1 Access-Control Foundations 
+
+Classical database access control defines policy models such as DAC, MAC, and RBAC and studies their enforcement, administration, and auditing in relational systems [ 2]. That literature fixes the se-curity semantics a vector store must satisfy but says nothing about ANN-specific concerns: approximate traversal, candidate-set infla-tion, or coordination across several indices. Recent benchmarks for organization-scale retrieval-augmented generation [ 12 ], e.g., OrgAccess [ 20 ], confirm that policy-compliant retrieval over em-bedding stores is now a first-class requirement and motivate the problem we study. 
+
+## J.2 General-Purpose ANN Indexing 
+
+Unconstrained ANN indices are the primitives every system below builds on. FAISS [ 10 ] popularized partition- and compression-based indices (IVF, product quantization) that assign vectors to coarse clusters and probe a subset of inverted lists. HNSW [ 15 ] builds a multi-layer navigable small-world graph and answers queries by greedy descent from sparse upper layers to a dense base layer. DiskANN [ 21 ] introduces the Vamana graph for high-recall billion-scale search with most of the index resident on SSD. ScaNN [ 7]combines partition pruning with anisotropic vector quantization for large-scale maximum-inner-product search. All four assume a single global search space; they are orthogonal to access control and appear in Veda only as the per-group index implementation. 
+
+## J.3 Filtered and Category-Aware Vector Search 
+
+Filtered ANN attaches attributes to vectors and returns nearest neighbors that satisfy a predicate. The generic strategies— pre-filtering (materialize the matching set, then search it), post-filtering 
+
+(search globally, then discard non-matching results), and result-set filtering (test the predicate before admitting a candidate to the top-
+
+𝑘 )—are easy to layer onto any index but fail in opposite regimes: pre-filtering degenerates to a scan when the predicate is broad, and post-filtering must over-search heavily when the predicate is selective. The systems below each move the predicate deeper into the index to avoid that “unhappy middle.” 
+
+Filtered-DiskANN [6 ] makes the Vamana graph label-aware. Fil-teredVamana inserts points incrementally and prunes edges using both geometry and label overlap; StitchedVamana builds one Va-mana graph per label, overlays their edge sets into a single graph, and prunes high-degree nodes. The result remains a single SSD-friendly graph, so storage stays near SA ≈1, but the relevant label universe must be fixed at construction time. RBAC roles satisfy that assumption, yet a role’s visible set is the union of many label-specific subgraphs; Filtered-DiskANN has no mechanism to stitch those subgraphs at query time, so a role with broad access still falls back to over-search on the overlaid graph. Veda avoids this by materializing the union explicitly as a group when the storage budget allows. 
+
+UNG [3] augments a graph index with a separate label-navigating graph that encodes containment among label sets, so equality, sub-set, and overlap predicates can prune vectors that cannot match before any distance is computed. The predicate model is richer than Filtered-DiskANN’s but remains a category-search model: it accelerates “find vectors whose labels contain 𝐿 ,” not “find vectors visible to role 𝑟 across all of 𝑟 ’s permissions.” Veda ’s role-subset lattice plays the analogous navigational role for RBAC, but its nodes are physical index groups rather than logical label sets. 
+
+ACORN [ 18 ] targets predicate-agnostic hybrid search on HNSW. For a query predicate 𝑝 , search is confined to the subgraph in-duced by vectors satisfying 𝑝 ; because filtering can disconnect that subgraph, ACORN-𝛾 widens neighbor lists by a factor 𝛾 at con-struction time (with predicate-agnostic pruning), and ACORN-1
+
+> 21
+
+keeps construction close to vanilla HNSW but expands one- and two-hop neighbors at query time. Both variants restore reachability by exposing a denser neighborhood before the predicate is applied. ACORN handles arbitrary predicates and therefore cannot exploit that RBAC predicates are few, fixed, and heavily overlapping; in our setting its 𝛾 -expansion pays a uniform construction tax for flexibility Veda does not need. 
+
+SIEVE [ 13 ] is the filtered-ANN system closest to our optimization. Rather than modify traversal, it selects a workload-aware collection of HNSW sub-indexes under a memory budget and routes each query to one of them. For a sub-index 𝐼 ℎ whose filter ℎ subsumes a query filter 𝑓 , SIEVE models memory as 
+
+𝑆 (𝐼 ℎ ) = 𝑀 · card (ℎ),
+
+and indexed search cost as 
+
+𝐶 (𝐼 ℎ, sef , 𝑤, 𝑓 ) = log (card (ℎ)) · sef ·
+
+ card (ℎ)
+
+card (𝑓 )
+
+cor (𝑤,𝑓 ,ℎ )
+
+,
+
+where card (·) is filter cardinality, sef is the HNSW search parameter, and cor (𝑤, 𝑓 , ℎ ) captures query–filter correlation inside 𝐼 ℎ . Brute-force search costs 𝐶 𝑏 𝑓 (𝑓 ) = card (𝑓 ) up to a calibration constant, and a built collection I serves 𝑓 at 
+
+𝐶 (I , 𝑓 ) = min 
+
+
+
+𝐶 𝑏 𝑓 (𝑓 ), min   
+
+> 𝐼 ℎ∈ I
+
+𝐶 (𝐼 ℎ, 𝑓 )
+
+
+
+.
+
+Given a historical workload H = {( ℎ𝑖 , 𝑐 𝑖 )} and budget 𝐵 , SIEVE solves 
+
+min 
+
+> I
+
+∑︁ (ℎ𝑖 ,𝑐 𝑖 ) ∈ H 
+
+𝑐 𝑖 𝐶 (I , ℎ 𝑖 ) s.t. 𝐼 ∞ ∈ I ,∑︁  
+
+> 𝐼 ℎ∈ I
+
+𝑆 (𝐼 ℎ ) ≤ 𝐵 
+
+greedily, adding at each step the sub-index with the largest marginal cost-reduction per memory unit, and organizes the result into a Hasse diagram over filter subsumption so that a BFS from the root 
+
+𝐼 ∞ finds the smallest subsuming sub-index (any node whose filter does not subsume 𝑓 prunes its entire subtree). Two design choices separate SIEVE from Veda . First, SIEVE serves each query from one 
+
+sub-index; an RBAC role whose visible set is the union of several disjoint blocks must either fall back to 𝐼 ∞ or accept an impure superset. EffVeda instead probes multiple authorized indices and shares a global distance bound across them. Second, SIEVE’s search space is “which sub-indexes to add”; Veda ’s is “which blocks to merge and which to copy,” which can also reduce the number of indices a role touches without spending budget. 
+
+## J.4 Access-Control-Aware Vector Search 
+
+Production deployments typically sit at one of two extremes. A 
+
+global index with row-level filtering stores every vector once ( SA =1)and enforces access control by post-filtering, so queries spend most of their beam on unauthorized vectors whenever the role is selective. An oracle index builds the ideal pure HNSW graph for each access predicate known at construction time, e.g., a role or user visibility set; this makes search trivial but duplicates every shared vector and becomes unmanageable when permissions overlap heavily. Veda 
+
+treats these as the two endpoints of the SA /QA curve (§2.2) and searches the interior. 
+
+HoneyBee [ 24 ] is the closest prior work. It casts RBAC vector search as a dynamic partitioning problem: overlapping partitions replicate vectors selectively, using the “thin waist” of RBAC roles to balance storage, latency, and recall. Its per-user latency model is 
+
+𝐶 𝑢 (Π, 𝑢 𝑖 , ef 𝑠 ) =∑︁    
+
+> 𝑗 ∈AP min (𝑢 𝑖 ,Π)
+
+log (| 𝜋 𝑗 |) · ( 𝑎 · ef 𝑠 + 𝑏 ),
+
+where Π is the partitioning, AP min (𝑢 𝑖 , Π) is the minimal set of par-titions that cover 𝑢 𝑖 ’s visible data, and ef 𝑠 is the HNSW search pa-rameter. HoneyBee pairs this with a selectivity-based recall model, formulates partitioning as a constrained MINLP, and—because the exact problem is NP-hard—solves it with a greedy split heuristic that repeatedly divides role groups when the predicted latency gain justifies the storage cost. 
+
+Veda shares HoneyBee’s objective but differs on three axes. (i) Search space. HoneyBee moves top-down by splitting; Veda 
+
+moves over the role-subset lattice with both copy and merge , so it can reach layouts—e.g., two blocks merged into one pure group for a frequent role pair—that no sequence of splits produces. ( ii ) Cost model. HoneyBee charges log |𝜋 𝑗 | · ( 𝑎 ef 𝑠 + 𝑏 ) per partition; Veda 
+
+uses the hardware-calibrated 𝐶 𝜃 of Definition 2.2, whose linear-efs 
+
+term is the quantity the optimizer actually manipulates through im-purity 𝜆 . ( iii ) Execution. HoneyBee searches each partition in AP min 
+
+independently. EffVeda runs them in a coordinated schedule in which pure partitions are probed first and their top-𝑘 distances become an admission threshold for the beam on impure partitions and residual linear scans, so the inflated 𝜆 efs of Definition 2.2 is paid only on the fraction of impure candidates that survive the bound.

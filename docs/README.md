@@ -6,55 +6,52 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-05
-- 运行时间：2026-05-05 20:20:42 UTC
+- 最新运行日期：2026-05-06
+- 运行时间：2026-05-06 21:06:07 UTC
 - 运行状态：成功
-- 本次总论文数：11
-- 精读区：6
+- 本次总论文数：10
+- 精读区：5
 - 速读区：5
 
 ### 今日简报（AI）
-今日精选 11 篇前沿成果，深度剖析联邦学习隐私保护与移动具身智能大模型的架构创新。
-满分论文 FLRSP 提出的随机参数方案与 MEAN 综述，为分布式 AI 的安全与高效协同提供了关键路径。
-建议重点关注 RAG 系统及工业电网的隐私泄露风险，提前布局生成式 AI 与物联网的安全防线。
-- 详情：[/202605/05/README](/202605/05/README)
+今日深度研读 10 篇前沿成果，重点攻克了描述逻辑推理难题并系统优化了差分隐私下的文本混淆策略。
+核心结论揭示了部分有限模型推理的新路径，并为隐私保护中的文本分解与预算分配提供了系统性指导。
+建议关注 RAG 统一数据层及低资源医疗问答的 LLM 实践，以提升复杂生产环境下的系统落地效率。
+- 详情：[/202605/06/README](/202605/06/README)
 
 ### 精读区论文标签
-1. [FLRSP: Privacy-Preserving Federated Learning Using Randomly Selected Model Parameters](/202605/05/2605.01204v1-flrsp-privacy-preserving-federated-learning-using-randomly-selected-model-parameters)  
-   标签：评分：10.0/10、query:daily
-   evidence：使用随机选择参数的隐私保护联邦学习
-2. [Split and Aggregation Learning for Foundation Models Over Mobile Embodied AI Network (MEAN): A Comprehensive Survey](/202605/05/2605.00970v1-split-and-aggregation-learning-for-foundation-models-over-mobile-embodied-ai-network-mean-a-comprehensive-survey)  
-   标签：评分：9.5/10、query:daily
-   evidence：分布式网络中的隐私保护机器学习和拆分学习
-3. [Graph Federated Unlearning for Privacy Preservation](/202605/05/2605.02297v1-graph-federated-unlearning-for-privacy-preservation)  
-   标签：评分：9.5/10、query:daily
-   evidence：图联邦遗忘学习用于去中心化训练中的隐私保护
-4. [LAPRAS : Learning-Augmented PRivate Answering for linear query Streams](/202605/05/2605.01960v1-lapras--learning-augmented-private-answering-for-linear-query-streams)  
+1. [Partially Finite Model Reasoning in Description Logics Extended Version](/202605/06/2604.25549v1-partially-finite-model-reasoning-in-description-logics-extended-version)  
    标签：评分：9.0/10、query:daily
-   evidence：针对查询流的在线差分隐私分析
-5. [Optimal Privacy-Utility Trade-Offs in LDP: Functional and Geometric Perspectives](/202605/05/2605.02319v1-optimal-privacy-utility-trade-offs-in-ldp-functional-and-geometric-perspectives)  
+   evidence：专注于描述逻辑 S
+2. [A Systematic Exploration of Text Decomposition and Budget Distribution in Differentially Private Text Obfuscation](/202605/06/2605.01065v1-a-systematic-exploration-of-text-decomposition-and-budget-distribution-in-differentially-private-text-obfuscation)  
    标签：评分：9.0/10、query:daily
-   evidence：本地差分隐私中的最优隐私-效用权衡
-6. [FedPLT: Scalable, Resource-Efficient, and Heterogeneity-Aware Federated Learning via Partial Layer Training](/202605/05/2605.02337v1-fedplt-scalable-resource-efficient-and-heterogeneity-aware-federated-learning-via-partial-layer-training)  
+   evidence：差分隐私文本混淆与预算分配
+3. [Distributed Deep Variational Approach for Privacy-preserving Data Release](/202605/06/2605.03069v1-distributed-deep-variational-approach-for-privacy-preserving-data-release)  
    标签：评分：9.0/10、query:daily
-   evidence：在保护数据隐私的同时跨去中心化系统进行联邦学习
+   evidence：联邦学习节点的隐私保护数据发布框架
+4. [Distributed Learning with Adversarial Gradient Perturbations](/202605/06/2605.03313v1-distributed-learning-with-adversarial-gradient-perturbations)  
+   标签：评分：9.0/10、query:daily
+   evidence：分布式环境下对抗性梯度扰动下的凸函数学习
+5. [Don't Be a Pot Stirrer! Authorized Vector Data Retrieval via Access-Aware Indexing](/202605/06/2605.01342v1-dont-be-a-pot-stirrer-authorized-vector-data-retrieval-via-access-aware-indexing)  
+   标签：评分：8.0/10、query:daily
+   evidence：授权向量数据检索与访问控制
 
 ### 速读区论文标签
-1. [Metric-Normalized Posterior Leakage (mPL): Attacker-Aligned Privacy for Joint Consumption](/202605/05/2605.01137v1-metric-normalized-posterior-leakage-mpl-attacker-aligned-privacy-for-joint-consumption)  
-   标签：评分：8.0/10、query:daily
-   evidence：联合观测和证据聚合下机器学习系统的隐私保护
-2. [Differentially Private Synthetic Voltage Phasor Release for Distribution Grids](/202605/05/2605.02390v1-differentially-private-synthetic-voltage-phasor-release-for-distribution-grids)  
-   标签：评分：8.0/10、query:daily
-   evidence：用于机器学习的差分隐私合成数据发布
-3. [E-MIA: Exam-Style Black-Box Membership Inference Attacks against RAG Systems](/202605/05/2605.00955v1-e-mia-exam-style-black-box-membership-inference-attacks-against-rag-systems)  
+1. [BIT.UA-AAUBS at ArchEHR-QA 2026: Evaluating Open-Source and Proprietary LLMs via Prompting in Low-Resource QA](/202605/06/2605.03618v1-bitua-aaubs-at-archehr-qa-2026-evaluating-open-source-and-proprietary-llms-via-prompting-in-low-resource-qa)  
+   标签：评分：7.5/10、query:daily
+   evidence：临床问答中LLM的严格数据隐私约束
+2. [When Eavesdroppers Reason: Agentic Eavesdropping Attacks on Semantic Communication](/202605/06/2605.02204v1-when-eavesdroppers-reason-agentic-eavesdropping-attacks-on-semantic-communication)  
    标签：评分：7.0/10、query:daily
-   evidence：针对RAG系统的成员推理攻击，泄露敏感语料库信息
-4. [A Systematic Exploration of Text Decomposition and Budget Distribution in Differentially Private Text Obfuscation](/202605/05/2605.01065v1-a-systematic-exploration-of-text-decomposition-and-budget-distribution-in-differentially-private-text-obfuscation)  
+   evidence：语义通信中的隐私问题与窃听攻击
+3. [Beyond Similarity Search: A Unified Data Layer for Production RAG Systems](/202605/06/2605.03275v1-beyond-similarity-search-a-unified-data-layer-for-production-rag-systems)  
    标签：评分：7.0/10、query:daily
-   evidence：差分隐私文本混淆与隐私预算分配
-5. [Efficient Preference Poisoning Attack on Offline RLHF](/202605/05/2605.02495v1-efficient-preference-poisoning-attack-on-offline-rlhf)  
+   evidence：解决RAG系统中的租户数据泄露问题
+4. [FINER-SQL: Boosting Small Language Models for Text-to-SQL](/202605/06/2605.03465v1-finer-sql-boosting-small-language-models-for-text-to-sql)  
+   标签：评分：7.0/10、query:daily
+   evidence：解决SQL生成的机器学习中的数据隐私问题
+5. [HELO Cryptography: A Lightweight Cryptographic System for Enhancing IoT Security in P2P Data Transmission](/202605/06/2605.03948v1-helo-cryptography-a-lightweight-cryptographic-system-for-enhancing-iot-security-in-p2p-data-transmission)  
    标签：评分：6.0/10、query:daily
-   evidence：离线RLHF流水线对偏好投毒攻击的脆弱性
+   evidence：用于物联网安全和隐私的轻量级加密系统
 
 
 <div class="dpr-home-promo-card">
