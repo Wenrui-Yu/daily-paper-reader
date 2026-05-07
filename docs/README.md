@@ -6,52 +6,37 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-06
-- 运行时间：2026-05-06 21:06:07 UTC
+- 最新运行日期：2026-05-07
+- 运行时间：2026-05-07 20:47:36 UTC
 - 运行状态：成功
-- 本次总论文数：10
-- 精读区：5
-- 速读区：5
+- 本次总论文数：5
+- 精读区：1
+- 速读区：4
 
 ### 今日简报（AI）
-今日深度研读 10 篇前沿成果，重点攻克了描述逻辑推理难题并系统优化了差分隐私下的文本混淆策略。
-核心结论揭示了部分有限模型推理的新路径，并为隐私保护中的文本分解与预算分配提供了系统性指导。
-建议关注 RAG 统一数据层及低资源医疗问答的 LLM 实践，以提升复杂生产环境下的系统落地效率。
-- 详情：[/202605/06/README](/202605/06/README)
+今日深度解析 5 篇前沿论文，重点攻克标注质量参差不齐下的可信联邦学习难题。
+核心结论指出联邦学习需应对标注差异以提升鲁棒性，同时揭示了具身智能与检索增强生成（RAG）中严峻的隐私权衡挑战。
+建议开发者优先关注分布式协作中的数据质量治理，并警惕大模型检索过程中的成员推理攻击风险。
+- 详情：[/202605/07/README](/202605/07/README)
 
 ### 精读区论文标签
-1. [Partially Finite Model Reasoning in Description Logics Extended Version](/202605/06/2604.25549v1-partially-finite-model-reasoning-in-description-logics-extended-version)  
-   标签：评分：9.0/10、query:daily
-   evidence：专注于描述逻辑 S
-2. [A Systematic Exploration of Text Decomposition and Budget Distribution in Differentially Private Text Obfuscation](/202605/06/2605.01065v1-a-systematic-exploration-of-text-decomposition-and-budget-distribution-in-differentially-private-text-obfuscation)  
-   标签：评分：9.0/10、query:daily
-   evidence：差分隐私文本混淆与预算分配
-3. [Distributed Deep Variational Approach for Privacy-preserving Data Release](/202605/06/2605.03069v1-distributed-deep-variational-approach-for-privacy-preserving-data-release)  
-   标签：评分：9.0/10、query:daily
-   evidence：联邦学习节点的隐私保护数据发布框架
-4. [Distributed Learning with Adversarial Gradient Perturbations](/202605/06/2605.03313v1-distributed-learning-with-adversarial-gradient-perturbations)  
-   标签：评分：9.0/10、query:daily
-   evidence：分布式环境下对抗性梯度扰动下的凸函数学习
-5. [Don't Be a Pot Stirrer! Authorized Vector Data Retrieval via Access-Aware Indexing](/202605/06/2605.01342v1-dont-be-a-pot-stirrer-authorized-vector-data-retrieval-via-access-aware-indexing)  
-   标签：评分：8.0/10、query:daily
-   evidence：授权向量数据检索与访问控制
+1. [Trustworthy Federated Label Distribution Learning under Annotation Quality Disparity](/202605/07/2605.04827v1-trustworthy-federated-label-distribution-learning-under-annotation-quality-disparity)  
+   标签：评分：9.5/10、query:daily
+   evidence：隐私敏感应用下的可信联邦学习
 
 ### 速读区论文标签
-1. [BIT.UA-AAUBS at ArchEHR-QA 2026: Evaluating Open-Source and Proprietary LLMs via Prompting in Low-Resource QA](/202605/06/2605.03618v1-bitua-aaubs-at-archehr-qa-2026-evaluating-open-source-and-proprietary-llms-via-prompting-in-low-resource-qa)  
-   标签：评分：7.5/10、query:daily
-   evidence：临床问答中LLM的严格数据隐私约束
-2. [When Eavesdroppers Reason: Agentic Eavesdropping Attacks on Semantic Communication](/202605/06/2605.02204v1-when-eavesdroppers-reason-agentic-eavesdropping-attacks-on-semantic-communication)  
+1. [Membership Inference Attacks for Retrieval Based In-Context Learning for Document Question Answering](/202605/07/2605.04116v1-membership-inference-attacks-for-retrieval-based-in-context-learning-for-document-question-answering)  
    标签：评分：7.0/10、query:daily
-   evidence：语义通信中的隐私问题与窃听攻击
-3. [Beyond Similarity Search: A Unified Data Layer for Production RAG Systems](/202605/06/2605.03275v1-beyond-similarity-search-a-unified-data-layer-for-production-rag-systems)  
+   evidence：基于检索的上下文学习中的成员推理攻击
+2. [Position: Embodied AI Requires a Privacy-Utility Trade-off](/202605/07/2605.05017v1-position-embodied-ai-requires-a-privacy-utility-trade-off)  
    标签：评分：7.0/10、query:daily
-   evidence：解决RAG系统中的租户数据泄露问题
-4. [FINER-SQL: Boosting Small Language Models for Text-to-SQL](/202605/06/2605.03465v1-finer-sql-boosting-small-language-models-for-text-to-sql)  
+   evidence：分布式具身智能系统中的隐私与效用权衡
+3. [Private Structured-Subset Retrieval](/202605/07/2605.05160v1-private-structured-subset-retrieval)  
    标签：评分：7.0/10、query:daily
-   evidence：解决SQL生成的机器学习中的数据隐私问题
-5. [HELO Cryptography: A Lightweight Cryptographic System for Enhancing IoT Security in P2P Data Transmission](/202605/06/2605.03948v1-helo-cryptography-a-lightweight-cryptographic-system-for-enhancing-iot-security-in-p2p-data-transmission)  
-   标签：评分：6.0/10、query:daily
-   evidence：用于物联网安全和隐私的轻量级加密系统
+   evidence：从复制服务器进行隐私检索
+4. [Private Contiguous-Block Retrieval](/202605/07/2605.05169v1-private-contiguous-block-retrieval)  
+   标签：评分：7.0/10、query:daily
+   evidence：隐藏请求块身份的私有检索
 
 
 <div class="dpr-home-promo-card">
