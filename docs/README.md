@@ -6,49 +6,49 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-08
-- 运行时间：2026-05-08 20:38:23 UTC
+- 最新运行日期：2026-05-09
+- 运行时间：2026-05-09 20:04:54 UTC
 - 运行状态：成功
 - 本次总论文数：9
-- 精读区：3
-- 速读区：6
+- 精读区：4
+- 速读区：5
 
 ### 今日简报（AI）
-今日深度解析 9 篇 AI 论文，重点攻克边缘智能与联邦大模型微调中的隐私安全难题。
-核心突破在于实现了联邦学习下的客户端精准归因，并揭示了大模型面临的“弹出式测验”黑盒成员推理攻击风险。
-建议开发者优先关注大模型微调阶段的隐私合规，并探索边缘端的高效加密机器学习框架。
-- 详情：[/202605/08/README](/202605/08/README)
+今日聚焦隐私保护与生态分类前沿，深度解析 9 篇论文，重点突破曲率驱动的差分隐私技术。
+推荐关注评分 9.5 的曲率扰动差分隐私算法，以及无需共享数据即可实现多物种声学分类的任务算术新方法。
+建议优先研读高分隐私论文以掌握最新的安全计算范式，并关注边缘计算中的零信任合规交易。
+- 详情：[/202605/09/README](/202605/09/README)
 
 ### 精读区论文标签
-1. [A Privacy-Preserving Machine Learning Framework for Edge Intelligence: An Empirical Analysis](/202605/08/2605.05751v1-a-privacy-preserving-machine-learning-framework-for-edge-intelligence-an-empirical-analysis)  
+1. [Quadratic Objective Perturbation: Curvature-Based Differential Privacy](/202605/09/2605.05905v1-quadratic-objective-perturbation-curvature-based-differential-privacy)  
    标签：评分：9.5/10、query:daily
-   evidence：边缘智能的隐私保护机器学习框架
-2. [FedAttr: Towards Privacy-preserving Client-Level Attribution in Federated LLM Fine-tuning](/202605/08/2605.06596v1-fedattr-towards-privacy-preserving-client-level-attribution-in-federated-llm-fine-tuning)  
-   标签：评分：9.5/10、query:daily
-   evidence：联邦大语言模型微调中的隐私保护客户端归因
-3. [Enabling Federated Inference via Unsupervised Consensus Embedding](/202605/08/2605.05718v1-enabling-federated-inference-via-unsupervised-consensus-embedding)  
-   标签：评分：9.0/10、query:daily
-   evidence：保持数据和参数私密的联邦推理
+   evidence：差分隐私经验风险最小化
+2. [Ecologically-Constrained Task Arithmetic for Multi-Taxa Bioacoustic Classifiers Without Shared Data](/202605/09/2605.03914v1-ecologically-constrained-task-arithmetic-for-multi-taxa-bioacoustic-classifiers-without-shared-data)  
+   标签：评分：8.0/10、query:daily
+   evidence：使用任务向量算术且不共享数据的多分类器
+3. [Private Structured-Subset Retrieval](/202605/09/2605.05160v2-private-structured-subset-retrieval)  
+   标签：评分：8.0/10、query:daily
+   evidence：私有结构化子集检索推广了私有信息检索 (PIR)
+4. [$α$-Wasserstein Mechanism for Rényi Pufferfish Privacy](/202605/09/2605.05723v1--wasserstein-mechanism-for-rnyi-pufferfish-privacy)  
+   标签：评分：8.0/10、query:daily
+   evidence：使用拉普拉斯和高斯噪声实现Rényi Pufferfish隐私的机制
 
 ### 速读区论文标签
-1. [Private Structured-Subset Retrieval](/202605/08/2605.05160v1-private-structured-subset-retrieval)  
+1. [Private Contiguous-Block Retrieval](/202605/09/2605.05169v1-private-contiguous-block-retrieval)  
    标签：评分：7.5/10、query:daily
-   evidence：从复制服务器进行隐私检索
-2. [Private Structured-Subset Retrieval](/202605/08/2605.05160v2-private-structured-subset-retrieval)  
+   evidence：在隐藏身份的同时从非共谋服务器中私密检索消息
+2. [Private Contiguous-Block Retrieval](/202605/09/2605.05169v2-private-contiguous-block-retrieval)  
    标签：评分：7.0/10、query:daily
-   evidence：从复制服务器中进行隐私信息检索
-3. [Pop Quiz Attack: Black-box Membership Inference Attacks Against Large Language Models](/202605/08/2605.06423v1-pop-quiz-attack-black-box-membership-inference-attacks-against-large-language-models)  
-   标签：评分：7.0/10、query:daily
-   evidence：针对大语言模型的黑盒成员推理攻击
-4. [Position: Embodied AI Requires a Privacy-Utility Trade-off](/202605/08/2605.05017v1-position-embodied-ai-requires-a-privacy-utility-trade-off)  
+   evidence：从复制服务器中私密检索连续数据块
+3. [Zero-Trust Bilateral Edge Service Trading with Deposit-Refund Regulation for Runtime Compliance](/202605/09/2605.02182v1-zero-trust-bilateral-edge-service-trading-with-deposit-refund-regulation-for-runtime-compliance)  
    标签：评分：6.5/10、query:daily
-   evidence：AI高频部署中的隐私影响
-5. [Distributionally-Robust Learning to Optimize](/202605/08/2605.06585v1-distributionally-robust-learning-to-optimize)  
+   evidence：隐私敏感型边缘服务与零信任安全框架
+4. [Privacy Without Losing Place: A Paradigm for Private Retrieval in Spatial RAGs](/202605/09/2605.05459v1-privacy-without-losing-place-a-paradigm-for-private-retrieval-in-spatial-rags)  
    标签：评分：6.5/10、query:daily
-   evidence：学习凸优化超参数的分布鲁棒方法
-6. [Privy: From Fine Print to Fair Practice in Privacy Rights Exercise](/202605/08/2605.02005v1-privy-from-fine-print-to-fair-practice-in-privacy-rights-exercise)  
+   evidence：空间检索增强生成中的用户位置隐私
+5. [SecureMCP: A Policy-Enforced LLM Data Access Framework for AIoT Systems via Model Context Protocol](/202605/09/2605.05260v1-securemcp-a-policy-enforced-llm-data-access-framework-for-aiot-systems-via-model-context-protocol)  
    标签：评分：6.0/10、query:daily
-   evidence：基于大语言模型的助手，用于行使GDPR等法规下的隐私权
+   evidence：策略强制的大模型数据访问与隐私保护
 
 
 <div class="dpr-home-promo-card">
