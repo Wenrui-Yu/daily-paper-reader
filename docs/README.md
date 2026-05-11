@@ -6,49 +6,37 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-10
-- 运行时间：2026-05-10 20:32:28 UTC
+- 最新运行日期：2026-05-11
+- 运行时间：2026-05-11 20:58:24 UTC
 - 运行状态：成功
-- 本次总论文数：9
-- 精读区：4
-- 速读区：5
+- 本次总论文数：5
+- 精读区：2
+- 速读区：3
 
 ### 今日简报（AI）
-今日深入探讨联邦学习与隐私保护前沿，涵盖从个性化差分隐私预算到图联邦流形校准的 9 篇核心成果。
-重点关注如何通过自动化工作流优化隐私保护效率，以及利用双流形校准解决图数据在联邦环境下的非刚性对齐挑战。
-建议从大模型隐私消融研究及电动汽车充电预测等实际案例中，探索隐私技术在垂直领域的落地路径。
-- 详情：[/202605/10/README](/202605/10/README)
+今日聚焦差分隐私优化与联邦大模型微调，两篇 9.0 分力作揭示了特征相关性与图表示学习在隐私计算中的巨大潜力。
+重点关注如何通过整合特征关联提升 DP-ERM 性能，以及利用图增强技术实现更精准的联邦微调模型操纵。
+建议开发者关注隐私保护下的大模型高效微调方案，并留意 Intel SGX 应用向 Arm 架构无缝迁移的最新进展。
+- 详情：[/202605/11/README](/202605/11/README)
 
 ### 精读区论文标签
-1. [Privacy Preserving Machine Learning Workflow: from Anonymization to Personalized Differential Privacy Budgets in Federated Learning](/202605/10/2605.02372v1-privacy-preserving-machine-learning-workflow-from-anonymization-to-personalized-differential-privacy-budgets-in-federated-learning)  
-   标签：评分：9.5/10、query:daily
-   evidence：联邦学习中的隐私保护机器学习工作流
-2. [Beyond Rigid Alignment: Graph Federated Learning via Dual Manifold Calibration](/202605/10/2605.06260v1-beyond-rigid-alignment-graph-federated-learning-via-dual-manifold-calibration)  
+1. [Integrating Feature Correlation in Differential Privacy with Applications in DP-ERM](/202605/11/2605.03945v1-integrating-feature-correlation-in-differential-privacy-with-applications-in-dp-erm)  
    标签：评分：9.0/10、query:daily
-   evidence：在保护隐私的同时进行图联邦学习
-3. [CLAD: A Clustered Label-Agnostic Federated Learning Framework for Joint Anomaly Detection and Attack Classification](/202605/10/2605.06571v1-clad-a-clustered-label-agnostic-federated-learning-framework-for-joint-anomaly-detection-and-attack-classification)  
+   evidence：差分隐私经验风险最小化 (DP-ERM) 框架
+2. [Graph Representation Learning Augmented Model Manipulation on Federated Fine-Tuning of LLMs](/202605/11/2605.07961v1-graph-representation-learning-augmented-model-manipulation-on-federated-fine-tuning-of-llms)  
    标签：评分：9.0/10、query:daily
-   evidence：用于物联网异常检测的隐私保护联邦学习框架
-4. [Misclassification Rate and Privacy-Utility Trade-offs in Graph Convolutional Networks via Subsampling Stability](/202605/10/2605.01987v1-misclassification-rate-and-privacy-utility-trade-offs-in-graph-convolutional-networks-via-subsampling-stability)  
-   标签：评分：8.0/10、query:daily
-   evidence：通过子采样稳定性实现图卷积网络中的差分隐私
+   evidence：通过联邦学习协作适配大语言模型的隐私保护范式
 
 ### 速读区论文标签
-1. [On the Privacy of LLMs: An Ablation Study](/202605/10/2605.02255v1-on-the-privacy-of-llms-an-ablation-study)  
-   标签：评分：7.5/10、query:daily
-   evidence：评估检索增强设置下大语言模型的隐私攻击
-2. [Federated Learning for Early Prediction of EV Charging Demand](/202605/10/2605.04993v1-federated-learning-for-early-prediction-of-ev-charging-demand)  
-   标签：评分：7.5/10、query:daily
-   evidence：用于电动汽车充电需求预测的联邦学习
-3. [Private Contiguous-Block Retrieval](/202605/10/2605.05169v2-private-contiguous-block-retrieval)  
-   标签：评分：7.5/10、query:daily
-   evidence：从非共谋服务器中私密检索消息
-4. [LeakDojo: Decoding the Leakage Threats of RAG Systems](/202605/10/2605.05818v1-leakdojo-decoding-the-leakage-threats-of-rag-systems)  
+1. [Privacy Without Losing Place: A Paradigm for Private Retrieval in Spatial RAGs](/202605/11/2605.05459v1-privacy-without-losing-place-a-paradigm-for-private-retrieval-in-spatial-rags)  
    标签：评分：7.0/10、query:daily
-   evidence：基准测试检索增强生成系统中的泄露威胁
-5. [Distributed Online Learning for Time-Critical Communication in 6G Industrial Subnetworks](/202605/10/2605.06437v1-distributed-online-learning-for-time-critical-communication-in-6g-industrial-subnetworks)  
-   标签：评分：6.5/10、query:daily
-   evidence：工业子网通信的分布式在线学习
+   evidence：空间检索增强生成中的隐私保护
+2. [CCX: Enabling Unmodified Intel SGX Applications on Arm CCA](/202605/11/2605.07548v1-ccx-enabling-unmodified-intel-sgx-applications-on-arm-cca)  
+   标签：评分：7.0/10、query:daily
+   evidence：Arm CCA 上的隐私保护通信与机密计算
+3. [When Eavesdroppers Reason: Agentic Eavesdropping Attacks on Semantic Communication](/202605/11/2605.02204v2-when-eavesdroppers-reason-agentic-eavesdropping-attacks-on-semantic-communication)  
+   标签：评分：6.0/10、query:daily
+   evidence：语义通信中的隐私问题与窃听
 
 
 <div class="dpr-home-promo-card">
