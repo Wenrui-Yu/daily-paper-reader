@@ -1,0 +1,1294 @@
+Title: Improving Parameter-Efficient Federated Learning with Differentially Private Refactorization
+
+URL Source: https://arxiv.org/pdf/2605.08443v1
+
+Published Time: Tue, 12 May 2026 00:16:35 GMT
+
+Number of Pages: 14
+
+Markdown Content:
+# Improving Parameter-Efficient Federated Learning with Differentially Private Refactorization 
+
+# Linh Tran 
+
+tranl3@rpi.edu Rensselaer Polytechnic Institute Troy, New York, USA 
+
+# Ana Milanova 
+
+milanova@cs.rpi.edu Rensselaer Polytechnic Institute Troy, New York, USA 
+
+# Stacy Patterson 
+
+sep@cs.rpi.edu Rensselaer Polytechnic Institute Troy, New York, USA 
+
+## Abstract 
+
+Federated Learning (FL) with parameter-efficient fine-tuning, such as Low-Rank Adaptation (LoRA), enables scalable model training on distributed data. However, when combined with Differential Pri-vacy (DP), LoRA often introduces errors during global aggregation and amplifies the negative effect of DP noise. Existing cross-silo FL approaches mitigate the aggregation error by freezing one LoRA module and applying output perturbation. However, in a restricted low-rank subspaces, this additive noise frequently overwhelms the signals of the weight matrices, leading to suboptimal accuracy. To address this vulnerability, we propose FedPower , a differentially private cross-silo FL framework that reshapes server-side aggrega-tion. Instead of perturbing mismatched low-rank factors, FedPower explicitly reconstructs and clips full-rank client updates to bound the sensitivity. The server then projects the exact aggregated up-date back into a secure low-rank space using PowerDP , a novel differentially private low-rank factorization mechanism. Based on simultaneous subspace iteration, PowerDP injects calibrated DP noise prior to the final orthonormalization step, effectively mitigates the negative effect of DP noise by preserving matrix orthogonality. We provide rigorous theoretical analyses establishing sensitivity bounds for subspace projections, proving that FedPower achieves both sample-level and client-level DP. Extensive experiments on various language understanding tasks in cross-silo FL settings show that FedPower is robust against tight privacy budgets while adding negligible computational overheads. Additional empirical study on different DP noise injection schemes validates the effectiveness of PowerDP in improving the tradeoff in accuracy and privacy. Eval-uation on three different membership inference attacks validates the robustness and privacy-preserving capability of the proposed framework. 
+
+## 1 Introduction 
+
+The unprecedented capabilities of Large Language Models (LLMs) have driven their widespread adoption across highly sensitive do-mains, such as healthcare and finance. To leverage specialized, decentralized datasets (e.g., medical records, private financial trans-actions) without requiring organizations to directly share raw data, Federated Learning (FL) has emerged as a vital paradigm [ 16 ]. How-ever, deploying FL for modern LLMs with billions of parameters presents massive computational and communication bottlenecks. To mitigate this, Low-Rank Adaptation (LoRA) [ 8] has become the standard for efficient federated fine-tuning. By freezing the base model and updating only a pair of low-rank matrices, Federated LoRA, significantly reduces client-side computational costs and net-work communication overhead. We term this general FL framework that uses LoRA as FedLoRA for convenience. While FL is designed to protect the client data by keeping raw data on local devices and only sharing model updates with a cen-tral server, federated LLMs remain vulnerable to privacy breaches [5 , 15 ]. It is well-established that LLMs can memorize their training data, making them highly susceptible to membership inference at-tacks [ 19 ]. In FL, once the final fine-tuned global model is publicly released, honest-but-curious downstream users can interact with the LLM to execute membership inference attacks, effectively re-covering the sensitive local samples originally held by participating clients. Consequently, relying solely on standard FL or FedLoRA is insufficient to protect training samples. It is necessary to adapt cryptographic or privacy frameworks in data-sensitive applications. To provide mathematically rigorous guarantees against such threats, Differential Privacy (DP) [ 4 ] is widely recognized as the gold standard. In this work, we focus on a Global DP framework, assuming a trusted server whose goal is to privatize and release a secure final model. In a Differentially Private FL (DP-FL) utiliz-ing Global DP, the client model updates is clipped to bound the sensitivity, which can be done either by the clients or the server. Then, the server injects calibrated Gaussian noise directly into the global aggregate before updating the global model, achieving Global DP. This global perturbation masks the contribution of any individual training example, ensuring that the final published LLM remains private against downstream membership inference attacks. However, standard full-parameter DP-FL requires clients to com-pute and transmit billion-parameter model updates, which can be expensive in terms of both computation and communication for resource-constrained participants. Naturally, combining Global DP with FedLoRA presents an ideal solution to satisfy both efficiency and privacy. However, simply in-corporating DP into standard FedLoRA frameworks results in severe utility degradation due to the mathematical and structural conflicts [ 23 ]. First, there is an inherent mismatch in the aggregation of LoRA modules. In a precise federated averaging scheme, the server would aggregate the true weight updates from clients, computing 
+
+𝐴𝑣𝑒𝑟𝑎𝑔𝑒 (𝐵 𝑖 · 𝐴 𝑖 ). In contrast, FedLoRA independently averages the low-rank modules to compute 𝐴𝑣𝑒𝑟𝑎𝑔𝑒 (𝐵 𝑖 ) · 𝐴𝑣𝑒𝑟𝑎𝑔𝑒 (𝐴 𝑖 ). Because the average of products does not equal the product of averages, Fed-LoRA aggregation introduces additional mathematical error terms (cross-terms) into the global update. This mathematical mismatch leads to amplified DP noise during aggregation. When Global DP noise is injected on top of this mismatch aggregation process, the privacy noise interacts with and compounds the error terms from the FedLoRA aggregation as shown in Figure 1. This interaction significantly amplifies the negative impact of the DP noise, which leads to severe accuracy degradation in the final fine-tuned LLM. 
+
+> arXiv:2605.08443v1 [cs.CR] 8 May 2026 Linh Tran, Ana Milanova, and Stacy Patterson
+
+Figure 1: An illustration of the FL algorithms with LoRA in a global DP setting: existing FedLoRA and our proposed method FedPower. In both frameworks, each client trains individual LoRA modules locally and sends to server. In FedLoRA, the server aggregates each LoRA modules separately and adds Gaussian noise, and the resulting global weight contains extra error terms which degrade model accuracy. In FedPower, the server aggregates the products of each LoRA pairs and jointly privatizes and refactorizes the new LoRA modules via PowerDP. At the end of FL training, the server releases the trained global model to downstream users who may perform membership inference attack on the client’s private data. 
+
+To bridge this gap and balance the tradeoff between privacy, efficiency, and accuracy, we present FedPower , a robust DP-FL framework tailored for LLMs that entirely avoids noisy low-rank aggregation. Instead of averaging mismatched local LoRA modules, the server aggregates the merged (full-rank equivalent) updates and subsequently performs a private reparameterization, or refactoriza-tion, back into the low-rank space. To estimate this low-rank repa-rameterization while enforcing data privacy, we propose PowerDP ,a novel differentially private low-rank refactorization mechanism. Unlike standard output perturbation techniques that naively add noise to the final matrices, PowerDP seamlessly embeds the DP noise injection process directly into a lightweight power itera-tion sequence. This mitigates the negative impact of noise on the principal singular vectors, preserving the signals of the LLM up-dates while satisfying rigorous DP guarantee. Through FedPower, we demonstrate that highly efficient federated LLM fine-tuning with LoRA can be achieved without compromising on the privacy guarantees or degrading the model accuracy. Our main contributions are: (1) We introduce FedPower , a framework that resolves the structural aggregation mismatch in standard Federated LoRA. By shifting the server-side aggregation to the merged, full-rank equivalent updates prior to low-rank refactor-ization, FedPower eliminates the cross-term mathematical errors. This prevents the compound amplification of DP noise, providing a superior privacy-accuracy tradeoff for decentralized LLM fine-tuning. (2) We propose PowerDP , a novel differentially private low-rank refactorization algorithm. Rather than naively apply-ing output perturbation to the final LoRA matrices, Pow-erDP embeds calibrated Gaussian noise directly into a power iteration sequence. This design effectively preserves the principal singular vectors and signals of the model updates while maintaining the same level of privacy guarantee. (3) We provide a comprehensive theoretical analysis of our framework, proving that PowerDP tightly bounds the ℓ2-sensitivity of the subspace projections. We mathematically demonstrate that PowerDP and FedPower satisfies (𝜖, 𝛿 )-Differential Privacy, providing a provably secure defense against downstream membership inference attacks. (4) We conduct extensive experiments on four language un-derstanding tasks of the GLUE benchmark [ 26 ]. The em-pirical results show that FedPower achieves high model accuracy and outperforms existing DP-FedLoRA baselines, while maintaining negligible computational overhead at the server and adding absolutely no extra computational or communication cost to resource-constrained clients. (5) We evaluate the privacy-preserving performance of Fed-Power against three different membership inference attacks. Across all levels of privacy budgets, all attacks perform no better than random guessing. This demonstrates that Fed-Power successfully protect the private training samples from membership inference attacks. The rest of the paper is organized as follows. In Section 2, we discuss the related work on private low-rank factorization and pri-vate FL with LoRA. In Section 3, we give an overview of Federated Improving Parameter-Efficient Federated Learning with Differentially Private Refactorization 
+
+Learning and Differential Privacy, and we discuss the challenge of DP-FL with LoRA. In Section 4, we describe our proposed methods, the private PowerDP mechanism and FedPower algorithm. In Sec-tion 5, we rigorously analyze the privacy guarantee of PowerDP and FedPower and provide detailed proofs. In Section 6, we conduct extensive experimental study to demonstrate the effectiveness and benefit of FedPower and PowerDP. Finally in Section 7, we conclude the paper with discussion on future work. 
+
+## 2 Related Work 
+
+Private Low-Rank Factorization. A long line of research [ 2, 3, 6 ,7, 11 ] has explored differentially private low-rank approximations in the context of principal component analysis (PCA). However, the objectives of traditional PCA differ fundamentally from those of FL. More recent methods [ 9, 33 , 34 , 36 ] employ low-rank ap-proximations to mitigate the impact of DP noise when training large models such as LLMs. Yu et al. [ 33 , 34 ] introduce gradient reparametrization techniques with DP output perturbation. Zhou et al. [ 36 ] propose a private low-rank gradient projection with a focus on empirical risk minimization. Similarly, Kairouz et al. [ 9 ]introduce a private subspace estimation with the same application in empirical risk minimization. While these approaches align more closely with our training objectives, they are all designed for cen-tralized training environments, rendering them inapplicable to the distributed nature of FL. 
+
+FL with LoRA.. Zhang et al. [ 35 ] was the first to study a straight-forward LoRA integration in FL that lets each client train and update their LoRA matrices 𝐴 and 𝐵 , and the server averages each LoRA matrix separately. However, this approach leads to suboptimal training accuracy due to the inherent mismatch LoRA aggregation. Other works have proposed to accurately aggregate product of LoRA modules [ 20 , 23 , 27 ]. Wang et al. [ 27 ] stack LoRA matrices, while Singhal et al. [ 20 ] introduces an additional residual matrix to correct the aggregation error. Nevertheless, they do not consider data privacy, and it is not clear how DP can be applied to their shared components. 
+
+Private FL with LoRA.. The straightforward integration of Fed-LoRA with DP guarantees has been explored in several recent works [ 13 , 31 ]. Other works such as [ 10 ] focus on a split LoRA learning scenario, while Xu et al. [ 30 ] focus on FL with adaptive LoRA ranks. Both of these works are designed for different model setups which are fundamentally different from a standard FL framework that we focus on. Notably, FFA-LoRA [ 23 ] was the first to identify the compounded error arising from mismatched LoRA aggregation and DP noise injection. To circumvent this, the authors proposed freez-ing one of the LoRA modules. However, this restricts the model’s expressiveness and can hinder the convergence rate. In contrast, FedPower shift the aggregation from the low-rank space to the full-rank space before privately factorizing the aggregated full-rank model updates into new LoRA modules via PowerDP for the next global round. Full-rank aggregation completely avoids the mathe-matical errors arises in FedLoRA, and PowerDP ensures that the new factorized LoRA modules maintain meaningful signals and expressiveness. 
+
+Algorithm 1 FedLoRA (non-private) [35]  
+
+> 1:
+
+Input: number of global rounds 𝑇 , number of local rounds 𝐿 ,global weight 𝑊 0 ∈ R𝑚 ×𝑛 , rank 𝑟 , learning rate 𝜂 . 
+
+> 2:
+
+// Server initializes global LoRA modules.  
+
+> 3:
+
+𝐴 0 ∼ N ( 0, 𝜎 2)𝑟 ×𝑛 . 
+
+> 4:
+
+𝐵 0 ← 0𝑚 ×𝑟 . 
+
+> 5:
+
+for global round 𝑡 ← 1 . . . 𝑇 do  
+
+> 6:
+
+Server subsamples client set C𝑡 with sampling rate 𝑞 𝑐 . 
+
+> 7:
+
+for client 𝑖 ∈ C in parallel do  
+
+> 8:
+
+// Client initialize local LoRA modules.  
+
+> 9:
+
+𝐴 𝑡, 0 
+
+> 𝑖
+
+← 𝐴 𝑡 −1 
+
+> 10:
+
+𝐵 𝑡, 0 
+
+> 𝑖
+
+← 𝐵 𝑡 −1. 
+
+> 11:
+
+for local round 𝑙 ← 1 . . . 𝐿 do  
+
+> 12:
+
+Client subsamples batch B𝑡,𝑙 with sampling rate 𝑞 𝑠 . 
+
+> 13:
+
+// Client computes loss.  
+
+> 14:
+
+L𝑡,𝑙 𝑖 ← 1 
+
+> | B 𝑡,𝑙 |
+
+Í(𝑥,𝑦 ) ∈ B 𝑡,𝑙 ℓ (𝐴 𝑡,𝑙 −1 
+
+> 𝑖
+
+, 𝐵 𝑡,𝑙 −1 
+
+> 𝑖
+
+, 𝑥, 𝑦 ). 
+
+> 15:
+
+// Client updates local LoRA modules.  
+
+> 16:
+
+𝐴 𝑡,𝑙 𝑖 ← 𝐴 𝑡,𝑙 −1 
+
+> 𝑖
+
+− 𝜂 ∇𝑎 L𝑡,𝑙 𝑖  
+
+> 17:
+
+𝐵 𝑡,𝑙 𝑖 ← 𝐵 𝑡,𝑙 −1 
+
+> 𝑖
+
+− 𝜂 ∇𝑏 L𝑡,𝑙 𝑖 . 
+
+> 18:
+
+end for  
+
+> 19:
+
+Clients send 𝐴 𝑡,𝐿 𝑖 , 𝐵 𝑡,𝐿 𝑖 to server.  
+
+> 20:
+
+end for  
+
+> 21:
+
+// Server aggregates and updates global LoRA modules.  
+
+> 22:
+
+𝐴 𝑡 ← 1
+
+|C| ∑︁ 𝑖 ∈ C 
+
+𝐴 𝑡,𝐿 𝑖 . 
+
+> 23:
+
+𝐵 𝑡 ← 1
+
+|C| ∑︁ 𝑖 ∈ C 
+
+𝐵 𝑡,𝐿 𝑖 . 
+
+> 24:
+
+end for  
+
+> 25:
+
+// Server merges LoRA for final release.  
+
+> 26:
+
+𝑊 𝑇 ← 𝑊 0 + 𝐵 𝑇 𝐴 𝑇 . 
+
+> 27:
+
+Output: 𝑊 𝑇 .
+
+## 3 Preliminaries 3.1 Federated Learning 
+
+We consider a standard cross-silo FL architecture consisting of 𝑁 
+
+clients and a central server. Let the global dataset be denoted as 
+
+𝐷 = ∪𝑁 𝑖 =1𝐷 𝑖 , where each client 𝑖 holds a private local dataset 𝐷 𝑖 .The server maintains a global pre-trained LLM parameterized by 
+
+𝑊 .In standard FL [ 16 ], the global model is optimized through an iterative process of local training and global aggregation. At the beginning of each global round (also called communication round), a subset of clients download the current global model 𝑊 . Each client 𝑖 then aims to minimize its local empirical loss 
+
+L𝑖 = 1
+
+|𝐷 𝑖 |∑︁ (𝑥,𝑦 ) ∈ 𝐷 𝑖 
+
+ℓ (𝑊 , 𝑥, 𝑦 ), (1) where ℓ denotes the task-specific loss function (e.g., cross-entropy loss for sequence-to-sequence generation). To do so, the client performs several iterations of local gradient descent, updating its local model 𝑊 𝑖 as 
+
+𝑊 𝑖 ← 𝑊 𝑖 − 𝜂 ∇𝑊 𝑖 L𝑖 . (2) Linh Tran, Ana Milanova, and Stacy Patterson 
+
+At the end of the local training phase, participating clients trans-mit their updated local models 𝑊 𝑖 back to the server. The server then updates the global model parameters by averaging these local models 
+
+𝑊 ← 1
+
+𝑁 
+
+> 𝑁
+
+∑︁ 
+
+> 𝑖 =1
+
+𝑊 𝑖 . (3) This iterative process is repeated until the global model reaches convergence. Applying full-parameter FL to modern billion-parameter LLMs requires the clients to compute, store, and communicate giant model updates, which is prohibitively expensive. To minimize these com-putational and communication overheads, the system utilizes Low-Rank Adaptation (LoRA) [ 8 ], a parameter-efficient fine-tuning tech-nique that freezes the pre-trained model weights and only fine-tune two trainable low-rank modules. Specifically, for a pre-trained weight matrix 𝑊 ∈ R𝑚 ×𝑛 , LoRA constrains the weight update Δ𝑊 by representing it as the product of two low-rank matrices 𝐵 ∈ R𝑚 ×𝑟 and 𝐴 ∈ R𝑟 ×𝑛 , where the rank 
+
+𝑟 ≪ min (𝑚, 𝑛 ). During training, 𝑊 is frozen, and only 𝐴 and 𝐵 
+
+are updated. To ensure that the initial state of the adapted model remains identical to the pre-trained model, 𝐴 is initialized randomly from a Gaussian distribution, and 𝐵 is initialized to zero, yielding 
+
+Δ𝑊 = 𝐵𝐴 = 0 at the start of training. The forward pass for an input 
+
+𝑥 is expressed as 
+
+ℎ = 𝑊 𝑥 + Δ𝑊 𝑥 = 𝑊 𝑥 + 𝐵𝐴𝑥 . (4) In a Federated LoRA (FedLoRA) framework, clients initialize local LoRA modules 𝐴 𝑖 and 𝐵 𝑖 , train them over their private data, and send only these lightweight low-rank matrices to the server. To aggregate them, the server averages on the low-rank modules independently (i.e., computing 1
+
+> 𝑁
+
+Í 𝐵 𝑖 and 1
+
+> 𝑁
+
+Í 𝐴 𝑖 ). The complete training process for standard FedLoRA, from [ 35 ], is shown in Algorithm 1. 
+
+## 3.2 Differential Privacy 
+
+Differential Privacy (DP) [ 4] is a mathematically rigorous frame-work that protects an individual data sample via the notion of adja-cent datasets . Two datasets 𝐷, 𝐷 ′ ∈ D are adjacent if they differ by exactly one sample (e.g., via the addition, removal, or substitution of a single sample). DP restricts how much the output distribution of a randomized algorithm can change when evaluated on adjacent datasets. The standard (𝜖, 𝛿 )-DP is defined as follows. 
+
+Definition 3.1. (Differential Privacy) A randomized mechanism 
+
+M : D → R with domain D and range R satisfies (𝜖, 𝛿 )-DP if for any two adjacent datasets 𝐷, 𝐷 ′ ∈ D and for any subset of outputs 
+
+S ⊆ R , it holds that Pr [M ( 𝐷 ) ∈ S] ≤ 𝑒 𝜖 Pr [M ( 𝐷 ′) ∈ S] + 𝛿. (5) Here, 𝜖 > 0 is the privacy budget bounding the multiplicative difference in the output distributions, and 𝛿 ∈ [ 0, 1) is a small relax-ation parameter allowing the tight 𝜖 bound to fail with probability at most 𝛿 .To satisfy DP for a deterministic function 𝑓 : D → R𝑑 , a stan-dard approach is to inject calibrated random noise into the true output. The noise is typically generated from a probability distribu-tion such as Laplace or Gaussian. The required variance of noise, or noise scale 𝜎 2, relies on the data sensitivity and the desired 𝜖 bud-get. For example, the Gaussian noise mechanism achieves (𝜖, 𝛿 )-DP by perturbing the output of 𝑓 with random noise drawn from a zero-mean multivariate Gaussian distribution 
+
+M ( 𝐷 ) = 𝑓 (𝐷 ) + N ( 0, 𝜎 2𝐼 ). (6) The variance of this Gaussian distribution, 𝜎 2, is referred to as the 
+
+noise scale (also called noise multiplier). The calibration of the noise scale 𝜎 depends directly on the desired 𝜖 budget and the dataset sensitivity Δ2 𝑓 defined as 
+
+Δ2 𝑓 = max  
+
+> 𝐷 ∼𝐷 ′
+
+∥𝑓 (𝐷 ) − 𝑓 (𝐷 ′)∥ 2. (7) One of the crucial properties of differential privacy is its robustness to post-processing. This property ensures that an adversary cannot degrade the privacy guarantee by applying additional computations or using auxiliary knowledge. 
+
+Proposition 3.2. (Post-Processing) Let M : D → R be a randomized mechanism that satisfies (𝜖, 𝛿 )-DP. For any arbitrary randomized mapping 𝑔 : R → R ′ that is independent of the private dataset, the composite mechanism 𝑔 ◦ M : D → R ′ also satisfies 
+
+(𝜖, 𝛿 )-DP. 
+
+In many practical applications, such as training machine learn-ing models via iterative algorithms, multiple DP mechanisms are applied sequentially to randomly sampled subsets (batches) of a dataset. To bound the cumulative privacy loss, we rely on the mo-ment accountant [ 1, 17 ] which provides a much tighter bound than the standard sequential composition and advanced composition. 
+
+Theorem 3.3. (Moment Accountant) Let M be a sequential mechanism applied over 𝑇 iterations with sample subsampling rate 
+
+𝑞 . There exist constants 𝑐 1, 𝑐 2 such that for any 𝜖 < 𝑐 1𝑞 2𝑇 and 𝛿 > 0,
+
+M satisfies (𝜖, 𝛿 )-DP if 
+
+𝜎 ≥ 𝑐 2
+
+𝑞 √︁ 𝑇 log (1/𝛿 )
+
+𝜖 . (8) This theorem demonstrates that the privacy budget 𝜖 degrades sub-linearly (proportional to √𝑘 ). On the other hand, the subsam-pling rate 𝑞 ≤ 1 amplifies the privacy as smaller subsampling rate results in better privacy budget. While standard DP protects individual samples within a database, also referred to as sample-level DP, it may be unsuitable for cross-device FL, where there are thousands to million of clients and each client represent a private user. In such scenarios, the goal is to protect all data belonging to a specific user using the notion of client-level DP. Let a distributed dataset 𝐷 consist of data from 𝑁 
+
+clients, 𝐷 = ∪𝑁 𝑖 =1𝐷 𝑖 , where 𝐷 𝑖 represents the local dataset of client 𝑖 .Two datasets 𝐷 and 𝐷 ′ are considered client-adjacent if they differ by the addition or removal of a single client’s entire local dataset. 
+
+Definition 3.4. (Client-Level DP) A randomized mechanism 
+
+M : D → R satisfies (𝜖, 𝛿 )-client-level DP if for any two client-adjacent datasets 𝐷, 𝐷 ′ ∈ D and for any subset of outputs S ⊆ R ,it holds that Pr [M ( 𝐷 ) ∈ S] ≤ 𝑒 𝜖 Pr [M ( 𝐷 ′) ∈ S] + 𝛿. (9) To achieve client-level DP, the noise scale 𝜎 2 must be calibrated according to the sensitivity of the mechanism with respect to an entire client’s contribution, rather than a single sample. Improving Parameter-Efficient Federated Learning with Differentially Private Refactorization 
+
+Our primary goal is to protect the sample data of each client against downstream inference attacks (e.g., membership inference attacks [ 19 ]) executed on the final released model. We operate under a Global DP trust model. We assume the central server is honest during the training phase; it faithfully executes the aggregation and applies privacy noise. Furthermore, we assume the communication channels between clients and the server are secured. The primary adversary is an external downstream user who obtains access to the final fine-tuned LLM ( 𝑊 𝑓 𝑖𝑛𝑎𝑙 ). The adversary’s objective is to determine whether a specific data sample (𝑥, 𝑦 ) was present in a client’s dataset 𝐷 𝑖 . To defend against this adversary, our system aims to provide sample-level (𝜖, 𝛿 )-DP. This ensures that the presence or absence of any single data sample does not significantly alter the final released model weights, which bounds the success rate of membership inference attacks. 
+
+## 3.3 Differentially Private FedLoRA 
+
+While standard FedLoRA provides a highly communication-efficient protocol, it introduces a structural flaw during the aggregation phase. In an ideal full-parameter FL setup, the server aggregates the true effective weight updates from all clients. For LoRA, the exact effective weight update from client 𝑖 is the full-rank equivalent matrix Δ𝑊 𝑖 = 𝐵 𝑖 𝐴 𝑖 . Thus, the true federated average of the model updates should be 1
+
+> 𝑁
+
+Í𝑁 𝑖 =1 (𝐵 𝑖 𝐴 𝑖 ).However, as shown in Algorithm 1, standard FedLoRA sidesteps this by performing component-wise averaging on the low-rank modules independently. Because the product of averages does not equal the average of products, this straightforward implementation introduces a mathematical discrepancy compared to standard FL on full-rank weights 
+
+ 1
+
+𝑁 
+
+> 𝑁
+
+∑︁ 
+
+> 𝑖 =1
+
+𝐵 𝑖 
+
+
+
+·
+
+ 1
+
+𝑁 
+
+> 𝑁
+
+∑︁ 
+
+> 𝑖 =1
+
+𝐴 𝑖 
+
+| {z }
+
+> FedLoRA Aggregation
+
+≠ 1
+
+𝑁 
+
+> 𝑁
+
+∑︁ 
+
+> 𝑖 =1
+
+(𝐵 𝑖 𝐴 𝑖 )
+
+| {z }
+
+> Ideal Aggregation
+
+. (10) This discrepancy introduces mathematical errors, specifically the unintended cross-terms between different clients’ LoRA modules, into the global updates. In non-private settings, these aggregation errors are introduced over multiple global rounds, which can slow down the convergence. However, this mathematical mismatch be-comes a critical bottleneck when extended to a DP-FL setting. When DP noise is injected into the independent low-rank mod-ules, the underlying aggregation error from Equation 10 becomes significantly pronounced. As the global model reconstructs the merged weight update ( 𝐵 𝑔𝑙𝑜𝑏𝑎𝑙 · 𝐴 𝑔𝑙𝑜𝑏𝑎𝑙 ), the injected DP noise in-teracts multiplicatively with both the base parameters and the pre-existing cross-term errors. Consequently, this naive combina-tion of DP and FedLoRA results in a substantial reduction in model accuracy, making it ineffective for practical downstream tasks [ 23 ]. 
+
+## 4 Methodology 
+
+Addressing the vulnerabilities of prior approaches, we propose 
+
+FedPower which reshapes the server-side aggregation pipeline. Instead of perturbing the low-rank modules directly, the server reconstructs the full-rank updates, clips them to bound the sensi-tivity, aggregates them exactly, and finally projects them back into a secure low-rank space using our novel PowerDP mechanism. 
+
+## 4.1 The PowerDP Mechanism 
+
+A standard approach to ensuring DP for low-rank factorization is direct output perturbation: factorizing the weight matrices and subsequently adding Gaussian noise to the resulting low-rank ma-trices [ 25 , 34 ]. However, in restricted low-rank subspaces, this ad-ditive noise frequently overwhelms the latent signal. Because the low-rank matrices are sensitive to perturbations, standard output perturbation inevitably leads to degradation in the model’s learning capability [12, 23, 24]. Instead of post-hoc perturbation, PowerDP (Algorithm 2) is de-signed as an in-processing perturbation mechanism. It is built upon the foundation of simultaneous subspace iteration, also known as power iteration [ 22 ], an efficient and effective method for approx-imating dominant singular vectors. PowerDP iteratively refines the low-rank approximation but uniquely injects the calibrated DP noise directly into the final projection steps. PowerDP takes as input a full-rank target matrix 𝑊 with a known bounded norm 𝐶 𝑊 , alongside the target rank 𝑟 , and privacy param-eter 𝜎 .(1) Subspace Iteration (Lines 2–8): The algorithm initializes a random projection matrix 𝑄 . Over 𝑘 iterations, it alter-nates between projecting 𝑊 onto the current row space (𝑃 = 𝑊 𝑄 𝑇 ) and column space ( 𝐴 = 𝑃 𝑇 𝑊 ). The periodic orthonormalization of columns and rows prevents numeri-cal instability and ensures the algorithm converges to the dominant singular subspaces of 𝑊 .(2) In-Processing Noise Injection (Lines 9–10): Rather than returning the exact singular vectors, PowerDP applies Gauss-ian noise N ( 0, 𝜎 2𝐶 2 
+
+> 𝑊
+
+) to the final un-normalized projection matrices ˜𝐵 and ˜𝐴 . The variance of this noise is calibrated to the norm bound 𝐶 𝑊 of the input matrix, ensuring tight sensitivity and achieving the DP guarantees. (3) Structural Preservation (Line 11): The final orthonor-malization of the row-space matrix ˜𝐴 occurs after the noise injection. By applying Gram-Schmidt post-perturbation, the mechanism ensures that the resulting matrices remain orthogonal with norm bounded. This mitigates the effect of DP noise observed in traditional output perturbation methods, as the noise is absorbed into the subspace orien-tation rather than destroying the magnitude of the singular values. 
+
+## 4.2 Federated Learning with PowerDP 
+
+Algorithm 3 details our FL framework, FedPower , which achieves a global DP guarantee by integrating PowerDP into the global ag-gregation phase. While the client-side local training process follows a standard FL protocol (as described in Algorithm 1), the crucial difference lies in how the server accurately aggregates and privately refactorizes the LoRA modules. The FedPower training lifecycle consists of client-side local up-dates and a privacy-preserving server-side aggregation step. Linh Tran, Ana Milanova, and Stacy Patterson 
+
+Algorithm 2 PowerDP  
+
+> 1:
+
+Input: matrix 𝑊 ∈ R𝑚 ×𝑛 (norm bounded by 𝐶 𝑊 ), rank 𝑟 ≪
+
+min (𝑚, 𝑛 ), number of iterations 𝑘 , noise std 𝜎 . 
+
+> 2:
+
+Initialize 𝑄 ∈ R𝑟 ×𝑛 from Gaussian distribution.  
+
+> 3:
+
+for 𝑘 iterations do  
+
+> 4:
+
+𝑃 ← 𝑊 𝑄 𝑇 . 
+
+> 5:
+
+𝑃 ← Orthonormalize columns of 𝑃 . 
+
+> 6:
+
+𝐴 ← 𝑃 𝑇 𝑊 . 
+
+> 7:
+
+𝑄 ← Orthonormalize rows of 𝐴 . 
+
+> 8:
+
+end for  
+
+> 9:
+
+˜𝐵 ← 𝑊 𝑄 𝑇 + N ( 0, 𝜎 2𝐶 2 
+
+> 𝑊
+
+). 
+
+> 10:
+
+˜𝐴 ← 𝐴 + N ( 0, 𝜎 2𝐶 2 
+
+> 𝑊
+
+). 
+
+> 11:
+
+Orthonormalize rows of ˜𝐴 . 
+
+> 12:
+
+return ˜𝐴, ˜𝐵 .(1) Client-Side Local Training (Lines 6–16): At global round 
+
+𝑡 , a sampled subset of clients C𝑡 downloads the global low-rank modules 𝐴 𝑡 −1 and 𝐵 𝑡 −1. Each client performs 𝐿 steps of mini-batch stochastic gradient descent on their local dataset. The gradients ∇𝑎 L𝑡,𝑙 𝑖 and ∇𝑏 L𝑡,𝑙 𝑖 are used to independently update the local modules 𝐴 𝑡,𝑙 𝑖 and 𝐵 𝑡,𝑙 𝑖 .(2) Server-Side Full-Rank Reconstruction (Line 18): The server explicitly reconstructs the full-rank weight update 
+
+Δ𝑊 𝑡 𝑖 = 𝐵 𝑡,𝐿 𝑖 𝐴 𝑡,𝐿 𝑖 for each client. (3) Clipping and Aggregation (Lines 19–20): Once in the full-rank space, the server clips the matrices Δ𝑊 𝑡 𝑖 using a clipping threshold 𝐶 . This guarantees that the sensitivity of any single client’s update is bounded exactly by 𝐶 . The server then computes the average of these clipped full-rank matrices to form the aggregated global update Δ𝑊 𝑡 .(4) Private Refactorization (Line 21): Finally, the server must project the aggregated full-rank matrix Δ𝑊 𝑡 back down to the target rank 𝑟 to be transmitted for the next global round. The server passes Δ𝑊 𝑡 , the rank 𝑟 , and the clipping threshold 𝐶 into the PowerDP subroutine. Pow-erDP returns the newly privatized LoRA modules 𝐴 𝑡 and 
+
+𝐵 𝑡 for the next global round. By decoupling the optimization space (which is low-rank on the clients for communication and memory efficiency) from the privacy-bounding space (which is full-rank on the server for exact sensitivity tracking), FedPower simultaneously preserves the efficiency of LoRA and the mathematical guarantees of Differential Privacy, all without sacrificing model accuracy as we show in Section 6. 
+
+## 5 Privacy Analysis 
+
+To formally establish the privacy guarantees of FedPower, we pro-ceed in three steps. First, we rigorously bound the ℓ2-sensitivity of the matrix projections within the PowerDP subroutine. Second, we formalize the privacy guarantee of a single PowerDP application. Finally, using moment accountant and privacy amplification by subsampling, we provide the privacy guarantees of the FedPower framework at both the sample and client levels. 
+
+Algorithm 3 FedPower  
+
+> 1:
+
+Input: number of global rounds 𝑇 , number of local rounds 𝐿 ,global weight 𝑊 0 ∈ R𝑚 ×𝑛 , rank 𝑟 , learning rate 𝜂 , noise scale 
+
+𝜎 , clipping threshold 𝐶 , number of power iterations 𝑘 . 
+
+> 2:
+
+𝐴 0 ∼ N ( 0, 𝜎 2)𝑟 ×𝑛 . 
+
+> 3:
+
+𝐵 0 ← 0𝑚 ×𝑟 . 
+
+> 4:
+
+for global round 𝑡 ← 1 . . . 𝑇 do  
+
+> 5:
+
+Server subsamples client set C𝑡 with sampling rate 𝑞 𝑐 . 
+
+> 6:
+
+for client 𝑖 ∈ C in parallel do  
+
+> 7:
+
+𝐴 𝑡, 0 
+
+> 𝑖
+
+← 𝐴 𝑡 −1 
+
+> 8:
+
+𝐵 𝑡, 0 
+
+> 𝑖
+
+← 𝐵 𝑡 −1. 
+
+> 9:
+
+for local round 𝑙 ← 1 . . . 𝐿 do  
+
+> 10:
+
+Client subsamples batch B𝑡,𝑙 with sampling rate 𝑞 𝑠 . 
+
+> 11:
+
+L𝑡,𝑙 𝑖 ← 1 
+
+> | B 𝑡,𝑙 |
+
+Í(𝑥,𝑦 ) ∈ B 𝑡,𝑙 ℓ (𝐴 𝑡,𝑙 −1 
+
+> 𝑖
+
+, 𝐵 𝑡,𝑙 −1 
+
+> 𝑖
+
+, 𝑥, 𝑦 ). 
+
+> 12:
+
+𝐴 𝑡,𝑙 𝑖 ← 𝐴 𝑡,𝑙 −1 
+
+> 𝑖
+
+− 𝜂 ∇𝑎 L𝑡,𝑙 𝑖  
+
+> 13:
+
+𝐵 𝑡,𝑙 𝑖 ← 𝐵 𝑡,𝑙 −1 
+
+> 𝑖
+
+− 𝜂 ∇𝑏 L𝑡,𝑙 𝑖 . 
+
+> 14:
+
+end for  
+
+> 15:
+
+Clients send 𝐴 𝑡,𝐿 𝑖 , 𝐵 𝑡,𝐿 𝑖 to server.  
+
+> 16:
+
+end for  
+
+> 17:
+
+// Server aggregates and privatizes via PowerDP  
+
+> 18:
+
+Merge Δ𝑊 𝑡 𝑖 ← 𝐵 𝑡,𝐿 𝑖 𝐴 𝑡,𝐿 𝑖 . 
+
+> 19:
+
+Clip Δ𝑊 𝑡 𝑖 by 𝐶 . 
+
+> 20:
+
+Aggregate Δ𝑊 𝑡 ← 1
+
+|C| ∑︁ 𝑖 ∈ C 
+
+𝑊 𝑡 𝑖 . 
+
+> 21:
+
+Refactorize 𝐴 𝑡 , 𝐵 𝑡 ← PowerDP (𝑊 𝑡 , 𝑟, 𝑘, 𝜎 ). 
+
+> 22:
+
+end for  
+
+> 23:
+
+Output: 𝑊 𝑇 .
+
+## 5.1 Sensitivity of Subspace Projections 
+
+To calibrate the Gaussian mechanism within PowerDP, we must ensure that the iterative projections do not inflate the sensitivity of the aggregated weight matrices. Lemma 5.1 establishes that pro-jecting a bounded matrix onto an orthonormal subspace preserves its Frobenius norm bound. This property is the cornerstone of Pow-erDP’s privacy guarantee, as it allows us to safely inject noise into the un-normalized projection steps. 
+
+Lemma 5.1 ( Subspace Projection Sensitivity ). Let 𝑊 ∈
+
+R𝑚 ×𝑛 be a matrix with a Frobenius norm bounded by 𝐶 𝑊 (i.e., ∥𝑊 ∥𝐹 ≤
+
+𝐶 𝑊 ). For any projection matrix 𝑃 with orthonormal columns ( 𝑃 ∈
+
+R𝑚 ×𝑟 ) or orthonormal rows ( 𝑃 ∈ R𝑟 ×𝑛 ), the Frobenius norm of the projection 𝑃 𝑇 𝑊 (or 𝑊 𝑃 𝑇 ) is bounded by 𝐶 𝑊 .
+
+Proof. We use the trace property of the Frobenius norm: ∥𝑀 ∥2 
+
+> 𝐹
+
+=
+
+Tr (𝑀 𝑇 𝑀 ). Furthermore, by the cyclic property of the trace operator, 
+
+Tr (𝐴𝐵 ) = Tr (𝐵𝐴 ).
+
+Case 1: 𝑃 has orthonormal rows. Since 𝑃 ∈ R𝑟 ×𝑛 has orthonor-mal rows, 𝑃𝑃 𝑇 = 𝐼 𝑟 . We want to bound 
+
+∥𝑊 𝑃 𝑇 ∥2 
+
+> 𝐹
+
+= Tr 
+
+
+
+(𝑊 𝑃 𝑇 )𝑇 (𝑊 𝑃 𝑇 )
+
+
+
+(11) 
+
+= Tr 
+
+
+
+𝑃𝑊 𝑇 𝑊 𝑃 𝑇 
+
+(12) 
+
+= Tr 
+
+
+
+𝑊 𝑇 𝑊 𝑃 𝑇 𝑃 
+
+
+
+. (13) Improving Parameter-Efficient Federated Learning with Differentially Private Refactorization 
+
+Because 𝑃𝑃 𝑇 = 𝐼 𝑟 , the matrix 𝑃 𝑇 𝑃 ∈ R𝑛 ×𝑛 is an orthogonal projec-tion matrix onto the row space of 𝑃 . Its eigenvalues are exactly 1
+
+(with multiplicity 𝑟 ) and 0. Therefore, 𝑃 𝑇 𝑃 ⪯ 𝐼 𝑛 under the Loewner partial order. Because 𝑊 𝑇 𝑊 is positive semi-definite, we have 
+
+Tr 
+
+
+
+𝑊 𝑇 𝑊 𝑃 𝑇 𝑃 
+
+
+
+≤ Tr 
+
+
+
+𝑊 𝑇 𝑊 𝐼 𝑛 
+
+
+
+(14) 
+
+= ∥𝑊 ∥2 
+
+> 𝐹
+
+≤ 𝐶 2 
+
+> 𝑊
+
+. (15) Taking the square root yields ∥𝑊 𝑃 𝑇 ∥𝐹 ≤ 𝐶 𝑊 .
+
+Case 2: 𝑃 has orthonormal columns. Since 𝑃 ∈ R𝑚 ×𝑟 has orthonormal columns, 𝑃 𝑇 𝑃 = 𝐼 𝑟 . We want to bound 
+
+∥𝑃 𝑇 𝑊 ∥2 
+
+> 𝐹
+
+= Tr 
+
+
+
+(𝑃 𝑇 𝑊 )𝑇 (𝑃 𝑇 𝑊 )
+
+
+
+(16) 
+
+= Tr 
+
+
+
+𝑊 𝑇 𝑃𝑃 𝑇 𝑊 
+
+
+
+(17) 
+
+= Tr 
+
+
+
+𝑃𝑃 𝑇 𝑊𝑊 𝑇 
+
+. (18) Similarly, 𝑃𝑃 𝑇 ∈ R𝑚 ×𝑚 is an orthogonal projection matrix, so 
+
+𝑃𝑃 𝑇 ⪯ 𝐼 𝑚 . Since 𝑊𝑊 𝑇 is positive semi-definite, it follows that 
+
+Tr 
+
+
+
+𝑃𝑃 𝑇 𝑊𝑊 𝑇 
+
+≤ Tr 
+
+
+
+𝐼 𝑚 𝑊𝑊 𝑇 
+
+(19) 
+
+= ∥𝑊 ∥2 
+
+> 𝐹
+
+≤ 𝐶 2 
+
+> 𝑊
+
+. (20) Taking the square root yields ∥𝑃 𝑇 𝑊 ∥𝐹 ≤ 𝐶 𝑊 . This concludes the proof. □
+
+## 5.2 Privacy Guarantee of PowerDP 
+
+Building upon the sensitivity bound established in Lemma 5.1, we formulate the privacy guarantee of a single application of the Pow-erDP mechanism. 
+
+Theorem 5.2 ( PowerDP Privacy ). For any target failure proba-bility 𝛿 0 > 0, the PowerDP mechanism (Algorithm 2) satisfies (𝜖 0, 𝛿 0)-DP if the noise standard deviation 𝜎 satisfies 
+
+𝜎 ≥√︁ 2 log (1.25 /𝛿 0)
+
+𝜖 0
+
+. (21) 
+
+Proof. According to Lemma 5.1, the ℓ2-sensitivity of the tar-get matrices before noise injection ( ˜𝐵 and ˜𝐴 ) is bounded by 𝐶 𝑊 .PowerDP injects Gaussian noise N ( 0, 𝜎 2𝐶 2 
+
+> 𝑊
+
+) into these matrices. By the standard properties of the Gaussian noise mechanism [ 4], adding noise scaled by 𝜎 · Δ𝑓 (where Δ𝑓 ≤ 𝐶 𝑊 is the ℓ2-sensitivity) guarantees (𝜖 0, 𝛿 0)-DP when 
+
+𝜎 ≥√︁ 2 log (1.25 /𝛿 0)/ 𝜖 0. (22) Because the final orthonormalization step is applied after the noise injection, it acts as a data-independent post-processing step, which by Proposition 3.2 of DP, maintains the same level of privacy guar-antee. □
+
+The theorem above establishes the privacy guarantee of our framework by quantifying the exact privacy leakage of a single application of the PowerDP mechanism. By calibrating the standard deviation 𝜎 of the injected Gaussian noise to the sensitivity of the query, we can achieve a rigorous (𝜖 0, 𝛿 0)-DP guarantee per step. This base result is necessary for the privacy analysis of FedPower. 
+
+## 5.3 Privacy Guarantee of FedPower 
+
+In the context of FL, privacy guarantees can be framed at two distinct granularities: sample-level DP (protecting the inclusion of a single data sample of a client) and client-level DP (protecting the inclusion of all data samples belonging to a specific client). We show that FedPower can accommodate both paradigms. 
+
+Theorem 5.3 ( Sample-Level DP of FedPower ). Let 𝑇 be the total number of global rounds. There exists an absolute constant 
+
+𝑐 such that for any 𝜖 < 𝑐𝑞 2
+
+> 𝑐
+
+𝑞 2
+
+> 𝑠
+
+𝑇 and 𝛿 > 0, Algorithm 3 satisfies 
+
+(𝜖, 𝛿 )-DP under sample-level privacy if 
+
+𝜎 ≥ 𝑐 𝑞 𝑐 𝑞 𝑠 √︁ 𝑇 log (1/𝛿 )
+
+𝜖 , (23) 
+
+where 𝑞 𝑐 is the probability of a client being sampled in a global round, and 𝑞 𝑠 is the probability of a sample being drawn in a local batch. 
+
+Proof. In FedPower, the global clipping operation ensures that the sensitivity of any single client’s full-rank update Δ𝑊 𝑡 𝑖 is bounded by 𝐶 . PowerDP subsequently adds Gaussian noise calibrated to this sensitivity limit 𝐶 . For a single training step without subsampling, achieving (𝜖, 𝛿 )-DP requires 
+
+𝜎 ≥√︁ 2 log (1.25 /𝛿 )/ 𝜖. (24) Over 𝑇 sequential applications, Theorem 3.3 states that the privacy loss accumulates at a rate of O( √𝑇 ). Therefore, the corresponding noise multiplier needs to be scaled by 
+
+𝜎 ≥√︁ 2𝑇 log (1.25 /𝛿 )/ 𝜖. (25) FedPower features a double-sampling mechanism: clients are sampled with rate 𝑞 𝑐 , and data points within clients are sampled with rate 𝑞 𝑠 . The inclusion probability of any single data sample in a given round is 𝑞 𝑐 𝑞 𝑠 . Applying the privacy amplification by subsampling, the privacy cost per step is heavily discounted. There-fore, integrating Theorem 3.3 with subsampling rate 𝑞 𝑐 𝑞 𝑠 over 𝑇 
+
+iterations yields the final required noise scale 
+
+𝜎 = Ω 𝑞 𝑐 𝑞 𝑠 √︁ 𝑇 log (1/𝛿 )
+
+𝜖 
+
+!
+
+. (26) 
+
+□
+
+Building upon the single-step guarantee, Theorem 5.3 provides the overall privacy bound of FedPower under a sample-level threat model. Sample-level DP is the gold standard in cross-silo FL, which is the setting that we focus on. Other cross-device FL settings with mas-sive number of clients often requires protecting the participation of entire devices. Supporting these scenarios, we further provide the theoretical results on client-level DP of FedPower below. 
+
+Theorem 5.4 ( Client-Level DP of FedPower ). Let 𝑇 be the number of global rounds. There exists an absolute constant 𝑐 such that for any 𝜖 < 𝑐𝑞 2
+
+> 𝑐
+
+𝑇 and 𝛿 > 0, Algorithm 3 satisfies (𝜖, 𝛿 )-global DP under client-level privacy if 
+
+𝜎 ≥ 𝑐 𝑞 𝑐 √︁ 𝑇 log (1/𝛿 )
+
+𝜖 . (27) Linh Tran, Ana Milanova, and Stacy Patterson 
+
+Table 1: Test accuracy on 4 GLUE datasets under different sample-level privacy budgets. We report average accuracy over 5 runs. 
+
+Privacy budget Method MNLI SST-2 QQP QNLI Average Match Mismatch FedLoRA 94.95 89.60 84.21 85.48 85.69 87.99 Non-private FFA-LoRA 95.07 90.52 85.25 86.35 86.58 88.75 FedPower 95.33 92.12 86.19 86.89 86.78 89.46 
+
+FedLoRA 93.46 87.86 83.96 82.95 83.24 86.30 
+
+𝜖 = 9 FFA-LoRA 93.69 87.61 81.26 82.19 82.90 85.53 FedPower 94.04 89.72 84.16 83.61 84.12 87.13 
+
+FedLoRA 93.12 86.97 83.70 82.60 82.88 85.85 
+
+𝜖 = 6 FFA-LoRA 93.23 87.52 81.47 82.21 82.75 85.44 FedPower 93.72 88.20 84.01 83.12 83.72 86.55 
+
+FedLoRA 91.28 83.89 79.56 81.26 81.70 83.53 
+
+𝜖 = 3 FFA-LoRA 92.43 87.06 80.85 81.94 82.60 84.98 FedPower 93.03 84.99 83.30 81.94 82.61 85.18 
+
+Proof. The proof of Theorem 5.4 parallels the proof of Theo-rem 5.3. The main distinction is the unit of privacy. In client-level DP, the adjacent datasets differ by an entire client’s local dataset. Because Algorithm 3 clips the entire updated weight difference Δ𝑊 𝑡 𝑖 
+
+from client 𝑖 to a maximum norm of 𝐶 , the sensitivity of changing one client is exactly 𝐶 . The privacy amplification in this setting stems solely from the client subsampling rate 𝑞 𝑐 (as local mini-batch sampling 𝑞 𝑠 does not hide a client’s overall participation). Replacing the combined sampling rate 𝑞 𝑐 𝑞 𝑠 with 𝑞 in Theorem 3.3 yields the result. □
+
+Theorem 5.4 elevates the privacy guarantee to the client level, accommodating the requirements of cross-device federated learning where a user’s entire local dataset must be protected simultaneously. Unlike Theorem 5.3, this bound relies exclusively on client-level subsampling ( 𝑞 𝑐 ) for privacy amplification, reflecting the stronger threat model where an adversary attempts to infer the presence of an entire device rather than a single sample. 
+
+## 6 Experimental Evaluation 
+
+In this section, we conduct a comprehensive empirical study to evaluate the performance of FedPower algorithm and PowerDP mechanism. In Subsection 6.1, we detail the experimental setup. In Subsection 6.2, we evaluate the effectiveness of FedPower compared with the other two existing baselines on DP-FL with LoRA. In Sub-section 6.3, we demonstrate the effectiveness of PowerDP compared with naive input and output perturbation. In Subsection 6.4, we study the effect of refactorization frequency on the model accuracy and discuss corresponding tradeoff in accuracy and computational cost. In Subsection 6.5, we empirically validate the data privacy guarantee of FedPower via membership inference attacks. 
+
+## 6.1 Experimental Setup 
+
+We conduct experiments to evaluate the performance of FedPower with language understanding tasks on the RoBERTa large model [ 14 ]. We use four datasets from the GLUE benchmark [ 26 ] and evenly split each dataset across 6 clients. 
+
+• Multi-Genre Natural Language Inference (MNLI) [ 29 ]: a sentence-sentence pair dataset for classification task with three labels. The task determines if two given sentences are supporting, neutral, or contradicting. The dataset can be evaluated on matched (in-domain) and mismatched (out-domain) test subsets. 
+
+• Quora Question Pairs (QQP) [ 18 ]: a question-question pair dataset for paraphrasing classification. The task detects if two given questions are duplicate or not. 
+
+• Question Natural Language Inference (QNLI) [ 26 ]: a question-sentence pair dataset for entailment classification task. The task determines whether a sentence answers a given ques-tion. 
+
+• Stanford Sentiment Treebank v2 (SST-2) [ 21 ]: a sentence dataset for sentiment classification. The task determines if a given sentence is positive or negative. We apply LoRA with rank 𝑟 = 8 to the query and value pro-jections with dropout rate of 0.05 . All other parameters, including non-LoRA weights and classification heads are frozen during train-ing. In order to make a fair comparison, we keep the same batch size 𝑏 = 128 and total global rounds 𝑇 = 200 with client sample rate set to 0.5 for all experiments. We use the Adam optimizer with learning rate 𝜂 = 0.05 for non-private settings and 𝜂 = 0.5 for private settings. In all experiments, we focus on sample-level DP for a cross-silo FL setting consisting of 6 clients. We consider three privacy budgets 
+
+𝜖 = {9, 6, 3} with 𝛿 = 10 −5 and clipping threshold 𝐶 = 2.We compare the FL experiment using PowerDP with the follow-ing baselines: 
+
+• FedLoRA : straightforward fine-tuning with LoRA modules, where both of the low-rank components are updated. This method is equivalent to previous works in [ 13 , 31 , 35 ]. In this case, we directly add DP noise to the aggregated low-rank modules. 
+
+• FFA-LoRA [23 ]: fine-tuning with LoRA modules, but freez-ing one low-rank module. Clients only update and share one low-rank module. In this case, we directly add DP noise to only the shared LoRA module. Improving Parameter-Efficient Federated Learning with Differentially Private Refactorization            
+
+> (a) Accuracy vs. rounds ( 𝜖 =6). (b) Accuracy vs. rounds ( 𝜖 =3). (c) Accuracy vs. bits ( 𝜖 =6). (d) Accuracy vs. bits ( 𝜖 =3).
+
+Figure 2: Accuracy as a function of global rounds (a and b) and transferred bits (c and d) on QQP with 𝜖 = {6, 3}.
+
+We provide more details of the experiment and the algorithms of the baseline methods in the Appendix. All experiments are done on a cluster of three V100 32GB GPU machines. We repeat all experiments five times using different seeds and report the mean test accuracy across all seeds. 
+
+## 6.2 Comparison with Existing Baselines 
+
+Table 1 illustrates the privacy-accuracy tradeoff across the GLUE benchmark. In the non-private setting, FFA-LoRA outperforms Fed-LoRA by +0.76 points on average, which can be attributed to re-duced aggregation error via freezing one LoRA module. Our pro-posed FedPower further improves performance by +0.71 points (a 
+
++1.47 point gain over FedLoRA). This highlights the advantage of training and reparametrizing both LoRA modules, overcoming the capacity limitations of FFA-LoRA’s restricted learning space. In private settings, FedPower consistently outperforms all base-lines. Because global DP (server-side noise injection) inherently preserves higher baseline accuracy than local DP due to fewer noise addition, achieving consistent gains is particularly challeng-ing. Nevertheless, FedPower establishes a clear advantage, showing the strongest performance under moderate privacy budgets ( 𝜖 = 9
+
+and 𝜖 = 6). In addition, FedPower demonstrates strong robustness to noise even under a tight privacy budget ( 𝜖 = 3), yielding an average accuracy improvement of +1.65 points over FedLoRA and 
+
++0.20 points over FFA-LoRA. While FedPower consistently outperforms both baselines across all datasets, FFA-LoRA shows a surprisingly high accuracy ( 87 .06 )in MNLI out-domain test set. This improvement stems from existing observation that lower learning dimension (from only one LoRA module) improves out-of-domain generalization under the effect of DP noise [24]. Figure 2 illustrates accuracy as a function of communication rounds and transferred bits for FedLoRA, FFA-LoRA and FedPower. We observe from Figures 2a and 2b that FFA-LoRA generally has slower convergence, reaching 80% after 80 rounds. Meanwhile, FedLoRA requires 30 rounds and FedPower requires only 20 rounds to reach the same test accuracy. Even though FFA-LoRA has benefit over communication cost as each client only shares one LoRA module instead of two, Figures 2c and 2d show that FedLoRA still underperforms both FedLoRA and FedPower given the same limit of bits transferred. In contrast to the suboptimal performance observed from FFA-LoRA, FedPower not only outperforms both baselines with the highest accuracy, but also shows the best tradeoff between accuracy and communication cost as it requires the least the number of communication rounds and transferred bits to reach a desirable target accuracy. 
+
+## 6.3 The Benefit of In-Processing DP Noise 
+
+To isolate the specific accuracy-privacy tradeoff benefit of PowerDP, we compare it against alternative DP injection schemes that inject DP noise separately from the factorization process. 
+
+• Input Perturbation: DP noise is added to the input matrix 
+
+𝑊 before the factorization. By the post-processing proper-ties of differential privacy, the resulting modules 𝐴 and 𝐵 
+
+inherently satisfy the required privacy guarantees. 
+
+• Output perturbation: DP noise is added to the output 𝐴 
+
+and 𝐵 after the factorization, directly protect the outputs with DP. Because the DP noise is applied post-orthonormalization, we calculate the sensitivity of the output and calibrate the noise scale accordingly. For both input and output perturbation, we use the standard non-private power iteration [ 22 ] for factorization. We describe the detailed algorithm of input and output perturbation in the Appendix. As shown in Table 2, output perturbation results in catastrophic accuracy failure (e.g., 60 .59% at 𝜖 = 3). This failure stems from the orthonormalization step in power iteration, which forces the output sensitivity to scale proportionally with the matrix rank, thereby necessitating massive noise injection to satisfy DP guaran-tees. PowerDP circumvents this by bounding the sensitivity through the projection (Lemma 5.1), yielding much better privacy-accuracy tradeoff. While input perturbation achieves higher accuracy than output perturbation, it still underperforms FedPower equipped with Pow-erDP. We hypothesize that injecting noise prior to factorization distorts the principal components of the full-rank adaptation ma-trix, leading to suboptimal singular value estimates. Ultimately, by strategically integrating DP noise during the factorization process, PowerDP yields highly accurate low-rank approximations at an equivalent privacy budget, delivering the best overall tradeoff. 
+
+## 6.4 Frequency of Refactorization 
+
+We explore the effect of reducing the frequency of refactorization in FedPower. For global rounds that do not perform factorization, we adopt the straightforward aggregation process as described in Linh Tran, Ana Milanova, and Stacy Patterson 
+
+Table 2: Test accuracy of FedPower on 4 GLUE datasets with different privacy noise injection schemes. 
+
+Privacy budget Method MNLI SST-2 QQP QNLI Average Match Mismatch Input perturbation 92.61 87.88 83.27 81.26 82.81 85.56 
+
+𝜖 = 9 Output perturbation 91.40 87.41 83.26 79.83 80.45 84.47 PowerDP 94.04 89.72 84.16 83.61 84.12 87.13 
+
+Input perturbation 92.38 87.79 82.64 81.95 81.46 85.24 
+
+𝜖 = 6 Output perturbation 89.79 83.87 82.68 52.63 53.78 72.55 PowerDP 93.72 88.20 84.01 83.12 83.72 86.55 
+
+Input perturbation 92.04 84.23 81.32 80.01 80.80 83.68 
+
+𝜖 = 3 Output perturbation 50.92 79.00 80.64 44.97 47.45 60.59 PowerDP 93.03 84.99 83.30 81.94 82.61 85.18 Table 3: Computational cost and test accuracy of FedPower with various refactorization frequency under 𝜖 = 3.                       
+
+> Method Factorization Average aggregation Computational Average accuracy frequency time per round overhead on GLUE FedLoRA None 4.36 s 0.0 % 83.53 FedPower 10 4.41 s 1.2 % 84.37 FedPower 54.45 s 2.2 % 85.07 FedPower 14.76 s 9.3 % 85.18
+
+Equation 1 (lines 22–23). Similar to FedLoRA, we add DP noise to the resulting aggregated 𝐴 and 𝐵 .Table 3 shows the average test accuracy on the GLUE benchmark for which PowerDP is applied every 1, 5, or 10 global rounds. We observe that FedPower with any factorization frequency outper-forms FedLoRA on average, demonstrating the increased accuracy benefit of the refactorization process while incurring less than 10% computational overhead (measured in total runtime). Reducing the frequency of refactorization slightly decreases the test accuracy but comes with less computational overhead. These observations demonstrate the benefit of PowerDP refactorization and its ro-bustness to the choice of factorization frequency. While higher frequency ensures higher accuracy, variants with less frequent refactorization such as every 5 rounds can offer a favorable tradeoff when computational efficiency is prioritized. 
+
+## 6.5 Membership Inference Attacks 
+
+In this subsection, we aim to demonstrate the effectiveness of Fed-Power in protecting data samples against various types of mem-bership inference attack. Let 𝑊 𝑡𝑎𝑟 be the target released model, and we assume that the attacker has access to an auxiliary dataset 
+
+𝐷 𝑎𝑢𝑥 which comes from the same data distribution with the private training dataset. We consider three types of inference attacks as described below. 
+
+Shadow Model Attack [ 19 ]. The attacker trains 𝑠 shadow mod-els 𝑊 1 
+
+> 𝑠ℎ𝑎
+
+. . .𝑊 𝑠 𝑠ℎ𝑎 on 𝑠 non-overlapping subsets of 𝐷 𝑎𝑢𝑥 . For each shadow model, the attacker records the prediction probability vec-tors, or confidence scores, for both members (samples used to train 
+
+𝑊 𝑖 𝑠ℎ𝑎 ) and non-members. These confidence scores, along with their member or non-member labels, are used to train a set of attack mod-els (binary classifiers). To infer the membership of a target sample 
+
+(𝑥, 𝑦 ), the adversary feeds (𝑥, 𝑦 ) into 𝑊 𝑡𝑎𝑟 , extracts the resulting prediction vector, and passes it to the corresponding attack model, which outputs the probability that the sample was a member of the training set. 
+
+Loss Based Attack [ 32 ]. This attack relies on the magnitude of the loss function to predict membership. First, the adversary trains a shadow model 𝑊 𝑠ℎ𝑎 on 𝐷 𝑎𝑢𝑥 to estimate the training loss of the target model. Then, for each sample (𝑥, 𝑦 ) ∈ 𝐷 𝑎𝑢𝑥 , the sample is considered a member of the training set if: 
+
+ℓ (𝑊 𝑡𝑎𝑟 , 𝑥, 𝑦 ) < 1
+
+|𝐷 𝑎𝑢𝑥 |∑︁ (𝑥 ′,𝑦 ′ ) ∈ 𝐷 𝑎𝑢𝑥 
+
+ℓ (𝑊 𝑠ℎ𝑎 , 𝑥, 𝑦 ). (28) In this case, the averaged prediction loss is used as a threshold to classify if a given sample is part of the training set or not. 
+
+Calibration Attack [ 28 ]. This attack is an improved version of the loss based attack that addresses the difficulty variance across different data samples. Instead of a global threshold, it uses a per-sample calibration to determine membership. Specifically, the at-tacker trains 𝑠 shadow models 𝑊 1 
+
+> 𝑠ℎ𝑎
+
+. . .𝑊 𝑠 𝑠ℎ𝑎 on 𝑠 non-overlapping subsets of 𝐷 𝑎𝑢𝑥 . For a target sample (𝑥, 𝑦 ), the adversary observes its loss across the shadow models that did not include (𝑥, 𝑦 ) in their training sets to construct a null distribution of non-member losses. The sample is predicted as a member if its loss on the target model is significantly lower than its expected loss when excluded from training: Score (𝑥, 𝑦 ) = ℓ (𝑊 𝑡𝑎𝑟 , 𝑥, 𝑦 ) − 𝜇 𝑜𝑢𝑡 (𝑥, 𝑦 )
+
+𝜎 𝑜𝑢𝑡 (𝑥, 𝑦 ) < 𝜏, (29) where 𝜇 𝑜𝑢𝑡 and 𝜎 𝑜𝑢𝑡 are the mean and standard deviation of losses from the out-of-sample shadow models, and 𝜏 is a determined threshold. Figure 3 shows the success rate of each attack, averaged over 5
+
+random seeds. In the non-private setting, the model exhibits a clear Improving Parameter-Efficient Federated Learning with Differentially Private Refactorization 
+
+Figure 3: Success rates of three different membership infer-ence attacks in non-private and private settings. We include the random guessing (0.5) as a baseline. Accuracies that are closed to or under the baseline indicates successful protec-tion against the attacks. 
+
+vulnerability to membership leakage, with attack accuracies reach-ing up to 0.61 , significantly outperforming the 0.5 random guessing threshold. However, in private settings, the attack accuracy for all three methods collapses to approximately 0.5, even at a less private setting with 𝜖 = 9. As the privacy budget is further tightened to 
+
+𝜖 = 6 and 𝜖 = 3, the attacker’s advantage remains random. This convergence toward the random guessing baseline demonstrates that FedPower effectively hides the influence of individual training samples. The FedPower algorithm renders the model’s output dis-tribution indistinguishable between members and non-members and provides robust empirical validation of its privacy guarantees. We report the true positive rate and false positive rate for each membership inference attack in Figure 4. We observe a positive trend in non-private settings, where the curve is the highest across all three attacks. These results demonstrate the greatest success for the attacker in non-private settings, where the final model memorizes some aspects of the training set and makes it easy for attackers to distinguish members from non-members. However, the curves begin to drop as DP noise is introduced. Regardless of any privacy budget value, both shadow model attack (Figure 4a) and calibration loss attack (Figure 4c) show immediate collapses to the random guessing baseline. The loss based attack shows a clearer separation between 𝜖 = 9, 𝜖 = 6, and 𝜖 = 3 (Fig-ure 4b). For the configurations with stronger privacy guarantees (𝜖 = 6 and 𝜖 = 3), the loss based attack is successfully neutralized, with the curves converging closely toward the diagonal random guessing line. Even at a more relaxing budget of 𝜖 = 9, the defense provides a substantial reduction in the attacker’s true positive rate compared to the non-private model. The evaluation of the member-ship inference attack demonstrates FedPower’s robust protection as the privacy budget 𝜖 is tightened. 
+
+## 7 Conclusion and Future Works 
+
+In this work, we introduced FedPower, a differentially private feder-ated learning framework that addresses the mathematical mismatch inherent in standard DP-FedLoRA. FedPower entirely eliminates the cross-term aggregation errors that typically compound with DP noise by shifting the server-side aggregation to the merged, full-rank equivalent space. To safely project these aggregated updates back into a communication-efficient low-rank space, we proposed PowerDP, a novel lightweight differentially private refactorization mechanism. By embedding calibrated Gaussian noise directly into the simultaneous subspace iteration sequence, PowerDP success-fully mitigates the negative effect of DP noise seen in standard output perturbation methods. Our rigorous theoretical analyses established tight sensitivity bounds, proving that FedPower satisfies both sample-level and client-level differential privacy. Extensive empirical evaluations on the GLUE benchmark demonstrated that FedPower significantly outperforms existing DP-FedLoRA baselines in model utility while maintaining negligible server overhead and providing robust defense against membership inference attacks. We primarily focused on establishing a robust and highly ef-ficient framework for cross-silo federated learning in this work. Building upon the rigorous client-level DP guarantees already es-tablished in our theoretical analysis, a natural direction for future research is exploring FedPower in cross-device federated learning settings. Future studies could empirically investigate the frame-work’s scalability in these massive edge environments and explore what, if any, further adaptations might be beneficial. Additionally, while FedPower demonstrates strong utility under homogeneous (IID) federated data distributions, future work can explore its opti-mization dynamics under heterogeneous (non-IID) data partitions, further broadening the applicability of private LLM fine-tuning across diverse, real-world decentralized systems. 
+
+## References                          
+
+> [1] Martin Abadi, Andy Chu, Ian Goodfellow, H Brendan McMahan, Ilya Mironov, Kunal Talwar, and Li Zhang. 2016. Deep learning with differential privacy. In
+> ACM Conf. Comput. Commun. Secur. (CCS) . ACM, 308–318. [2] Maria-Florina Balcan, Simon Shaolei Du, Yining Wang, and Adams Wei Yu. 2016. An improved gap-dependency analysis of the noisy power method. In Conf. Learn. Theory (COLT) . PMLR, 284–309. [3] Jeremiah Blocki, Avrim Blum, Anupam Datta, and Or Sheffet. 2012. The Johnson-Lindenstrauss transform itself preserves differential privacy. In IEEE Annu. Symp. Found. Comput. Sci. (FOCS) . IEEE, 410–419. [4] Cynthia Dwork and Aaron Roth. 2014. The algorithmic foundations of differential privacy. Found. Trends Theor. Comput. Sci. 9, 3–4 (Aug. 2014), 211–487. [5] Jonas Geiping, Hartmut Bauermeister, Hannah Dröge, and Michael Moeller. 2020. Inverting gradients – How easy is it to break privacy in federated learning?. In
+> Adv. Neural Inf. Process. Syst. (NeurIPS) . Curran Associates, Inc., 16937–16947. [6] Moritz Hardt and Eric Price. 2014. The noisy power method: A meta algorithm with applications. In Adv. Neural Inf. Process. Syst. (NeurIPS) , Vol. 27. Curran Associates, Inc. [7] Moritz Hardt and Aaron Roth. 2012. Beating randomized response on incoherent matrices. In ACM Symp. Theory Comput. (STOC) . ACM, 1255–1268. [8] Edward J Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang, and Weizhu Chen. 2021. LoRA: Low-rank adaptation of large language models. arXiv:2106.09685 .[9] Peter Kairouz, Monica Ribero Diaz, Keith Rush, and Abhradeep Thakurta. 2021. (Nearly) dimension independent private ERM with AdaGrad rates via publicly estimated subspaces. In Conf. Learn. Theory (COLT) . PMLR, 2717–2746. [10] Tianqu Kang, Zixin Wang, Hengtao He, Jun Zhang, Shenghui Song, and Khaled B Letaief. 2025. Federated low-rank adaptation with differential privacy for wireless networks. In IEEE Int. Mediterr. Conf. Commun. Netw. (MeditCom) . IEEE, 1–6. [11] Michael Kapralov and Kunal Talwar. 2013. On differentially private low rank approximation. In ACM-SIAM Symp. Discrete Algorithms (SODA) . SIAM, 1395– 1414. [12] Xuechen Li, Florian Tramer, Percy Liang, and Tatsunori Hashimoto. 2022. Large language models can be strong differentially private learners. In Int. Conf. Learn. Represent. (ICLR) . OpenReview.net. [13] Xiao-Yang Liu, Rongyi Zhu, Daochen Zha, Jiechao Gao, Shan Zhong, Matt White, and Meikang Qiu. 2025. Differentially private low-rank adaptation of large
+
+Linh Tran, Ana Milanova, and Stacy Patterson 
+
+(a) Shadow Model Attack. (b) Loss Based Attack. (c) Calibration Loss Attack. 
+
+Figure 4: True positive rate vs. False positive rate of each membership inference attack across all privacy budgets. 
+
+language model using federated learning. ACM Trans. Manage. Inf. Syst. 16, 2 (2025), 1–24. [14] Yinhan Liu, Myle Ott, Naman Goyal, Jingfei Du, Mandar Joshi, Danqi Chen, Omer Levy, Mike Lewis, Luke Zettlemoyer, and Veselin Stoyanov. 2019. RoBERTa: A robustly optimized BERT pretraining approach. arXiv:1907.11692 .[15] Aravindh Mahendran and Andrea Vedaldi. 2015. Understanding deep image rep-resentations by inverting them. In IEEE/CVF Conf. Comput. Vis. Pattern Recognit. (CVPR) . IEEE, 5188–5196. [16] Brendan McMahan, Eider Moore, Daniel Ramage, Seth Hampson, and Blaise Aguera y Arcas. 2017. Communication-efficient learning of deep networks from decentralized data. In Int. Conf. Artif. Intell. Statist. (AISTATS) . PMLR, 1273–1282. [17] H Brendan McMahan, Daniel Ramage, Kunal Talwar, and Li Zhang. 2018. Learn-ing differentially private recurrent language models. In Int. Conf. Learn. Represent. (ICLR) . OpenReview.net. [18] Lakshay Sharma, Laura Graesser, Nikita Nangia, and Utku Evci. 2019. Natural language understanding with the Quora question pairs dataset. arXiv:1907.01041 .[19] Reza Shokri, Marco Stronati, Congzheng Song, and Vitaly Shmatikov. 2017. Membership inference attacks against machine learning models. In IEEE Symp. Secur. Privacy (S&P) . IEEE, 3–18. [20] Raghav Singhal, Kaustubh Ponkshe, and Praneeth Vepakomma. 2025. FedEx-LoRA: Exact aggregation for federated and efficient fine-tuning of large language models. In Annu. Meet. Assoc. Comput. Linguist. (ACL) . Association for Computa-tional Linguistics, 1316–1336. [21] Richard Socher, Alex Perelygin, Jean Wu, Jason Chuang, Christopher D Manning, Andrew Y Ng, and Christopher Potts. 2013. Recursive deep models for semantic compositionality over a sentiment treebank. In Conf. Empir. Methods Nat. Lang. Process. (EMNLP) . Association for Computational Linguistics, 1631–1642. [22] William J Stewart and Alan Jennings. 1981. A simultaneous iteration algorithm for real matrices. ACM Trans. Math. Softw. 7, 2 (Jun. 1981), 184–198. [23] Youbang Sun, Zitao Li, Yaliang Li, and Bolin Ding. 2024. Improving LoRA in privacy-preserving federated learning. In Int. Conf. Learn. Represent. (ICLR) .OpenReview.net. [24] Linh Tran, Wei Sun, Stacy Patterson, and Ana Milanova. 2025. Privacy-preserving personalized federated prompt learning for multimodal large language models. In Int. Conf. Learn. Represent. (ICLR) . OpenReview.net. [25] Thijs Vogels, Sai Praneeth Karimireddy, and Martin Jaggi. 2019. PowerSGD: Practical low-rank gradient compression for distributed optimization. In Adv. Neural Inf. Process. Syst. (NeurIPS) . Curran Associates, Inc., 14259–14268. [26] Alex Wang, Amanpreet Singh, Julian Michael, Felix Hill, Omer Levy, and Samuel Bowman. 2018. GLUE: A multi-task benchmark and analysis platform for natu-ral language understanding. In EMNLP Workshop BlackboxNLP: Analyzing and Interpreting Neural Networks for NLP . 353–355. [27] Ziyao Wang, Zheyu Shen, Yexiao He, Guoheng Sun, Hongyi Wang, Lingjuan Lyu, and Ang Li. 2024. FLoRA: Federated fine-tuning large language models with heterogeneous low-rank adaptations. In Adv. Neural Inf. Process. Syst. (NeurIPS) ,Vol. 37. Curran Associates, Inc., 22513–22533. [28] Lauren Watson, Chuan Guo, Graham Cormode, and Alexandre Sablayrolles. 2021. On the importance of difficulty calibration in membership inference attacks. In 
+
+Int. Conf. Learn. Represent. (ICLR) . OpenReview.net. [29] Adina Williams, Nikita Nangia, and Samuel Bowman. 2018. A broad-coverage challenge corpus for sentence understanding through inference. In Conf. N. Am. Chapter Assoc. Comput. Linguist.: Hum. Lang. Technol. (NAACL-HLT) . Association for Computational Linguistics, 1112–1122. [30] Jie Xu, Karthikeyan Saravanan, Rogier van Dalen, Haaris Mehmood, David Tuckey, and Mete Ozay. 2024. DP-DyLoRA: Fine-tuning transformer-based models on-device under differentially private federated learning using dynamic low-rank adaptation. arXiv:2405.06368 .[31] Qianren Yang, Yong Li, and Tao Zhao. 2025. FL-DPLoRA: An integrated and efficient privacy-preserving training framework for large language models in privacy-critical applications. In Int. Conf. Softw. Qual., Reliab., Secur. Companion (QRS-C) . IEEE, 53–62. [32] Samuel Yeom, Irene Giacomelli, Matt Fredrikson, and Somesh Jha. 2018. Privacy risk in machine learning: Analyzing the connection to overfitting. In IEEE Comput. Secur. Found. Symp. (CSF) . IEEE, 268–282. [33] Da Yu, Huishuai Zhang, Wei Chen, and Tie-Yan Liu. 2021. Do not let privacy overbill utility: Gradient embedding perturbation for private learning. In Int. Conf. Learn. Represent. (ICLR) . OpenReview.net. [34] Da Yu, Huishuai Zhang, Wei Chen, Jian Yin, and Tie-Yan Liu. 2021. Large scale private learning via low-rank reparametrization. In Int. Conf. Mach. Learn. (ICML) .PMLR, 12208–12218. [35] Jianyi Zhang, Saeed Vahidian, Martin Kuo, Chunyuan Li, Ruiyi Zhang, Tong Yu, Guoyin Wang, and Yiran Chen. 2024. Towards building the FederatedGPT: Federated instruction tuning. In IEEE Int. Conf. Acoust., Speech Signal Process. (ICASSP) . IEEE, 6915–6919. [36] Yingxue Zhou, Steven Wu, and Arindam Banerjee. 2021. Bypassing the ambient dimension: Private SGD with gradient subspace identification. In Int. Conf. Learn. Represent. (ICLR) . OpenReview.net. Improving Parameter-Efficient Federated Learning with Differentially Private Refactorization 
+
+## A Additional Details on Experimental Setup 
+
+Table 4 details the information of the datasets used in the experi-ments. Each training dataset is split evenly (IID) across 6 clients for local training. At the end of each global round, the server evaluate the current global model on the test dataset, and we report the final test accuracy at the end of the FL training framework. 
+
+Table 4: Overview of datasets used in the experiments. 
+
+Dataset Number of Training Testing classes set size set size MNLI (matched) 3 392,702 9,815 MNLI (mismatched) 9,832 SST-2 2 67,349 872 QQP 2 363,846 40,430 QNLI 2 104,743 5,463 
+
+Algorithm 4 describes the standard non-private power iteration that is used in FedPower with input and output perturbation in Section 6.3. The algorithm starts with a random Gaussian matrix 𝑄 ,and iteratively refines the basis by alternating between projecting the weight matrix onto the current subspace and orthonormalizing the result to prevent numerical instability. This process forces the subspace to align with the directions of greatest variance in the data. By the end of 𝑘 iterations, the algorithm produces an orthonormal basis 𝐴 and a corresponding projection 𝐵 , which together capture the most significant structural information of the original matrix 
+
+𝑊 at the specified rank 𝑟 .
+
+Algorithm 4 Power Iteration (non-private) [22]  
+
+> 1:
+
+Input: 𝑊 ∈ R𝑚 ×𝑛 , number of iterations 𝑘 , rank 𝑟 . 
+
+> 2:
+
+Initialize 𝑄 ∈ R𝑟 ×𝑛 from Gaussian distribution.  
+
+> 3:
+
+for 𝑘 iterations do  
+
+> 4:
+
+𝑃 ← 𝑊 𝑄 𝑇 . 
+
+> 5:
+
+𝑃 ← Orthonormalize columns of 𝑃 . 
+
+> 6:
+
+𝑄 ← 𝑃 𝑇 𝑊 . 
+
+> 7:
+
+end for  
+
+> 8:
+
+𝐴 ← Orthonormalize rows of 𝑄 . 
+
+> 9:
+
+𝐵 ← 𝑊 𝐴 𝑇 . 
+
+> 10:
+
+return 𝐴, 𝐵 .We provide the detailed algorithms for the two baselines used in the experiments: FedLoRA in Algorithm 5 and FFA-LoRA in Algorithm 6. 
+
+Algorithm 5 FedLoRA [35]  
+
+> 1:
+
+Input: number of global rounds 𝑇 , number of local rounds 𝐿 ,global weight 𝑊 0 ∈ R𝑚 ×𝑛 , rank 𝑟 , learning rate 𝜂 , noise scale 
+
+𝜎 , clipping threshold 𝐶 . 
+
+> 2:
+
+// Server initializes global LoRA modules.  
+
+> 3:
+
+𝐴 0 ∼ N ( 0, 𝜎 2)𝑟 ×𝑛 . 
+
+> 4:
+
+𝐵 0 ← 0𝑚 ×𝑟 . 
+
+> 5:
+
+for global round 𝑡 ← 1 . . . 𝑇 do  
+
+> 6:
+
+Server subsamples client set C𝑡 with sampling rate 𝑞 𝑐 . 
+
+> 7:
+
+for client 𝑖 ∈ C in parallel do  
+
+> 8:
+
+// Client initialize local LoRA modules.  
+
+> 9:
+
+𝐴 𝑡, 0 
+
+> 𝑖
+
+← 𝐴 𝑡 −1 
+
+> 10:
+
+𝐵 𝑡, 0 
+
+> 𝑖
+
+← 𝐵 𝑡 −1. 
+
+> 11:
+
+for local round 𝑙 ← 1 . . . 𝐿 do  
+
+> 12:
+
+Client subsamples batch B𝑡,𝑙 with sampling rate 𝑞 𝑠 . 
+
+> 13:
+
+// Client computes loss.  
+
+> 14:
+
+L𝑡,𝑙 𝑖 ← 1 
+
+> | B 𝑡,𝑙 |
+
+Í(𝑥,𝑦 ) ∈ B 𝑡,𝑙 ℓ (𝐴 𝑡,𝑙 −1 
+
+> 𝑖
+
+, 𝐵 𝑡,𝑙 −1 
+
+> 𝑖
+
+, 𝑥, 𝑦 ). 
+
+> 15:
+
+// Client updates local LoRA modules.  
+
+> 16:
+
+𝐴 𝑡,𝑙 𝑖 ← 𝐴 𝑡,𝑙 −1 
+
+> 𝑖
+
+− 𝜂 ∇𝑎 L𝑡,𝑙 𝑖  
+
+> 17:
+
+𝐵 𝑡,𝑙 𝑖 ← 𝐵 𝑡,𝑙 −1 
+
+> 𝑖
+
+− 𝜂 ∇𝑏 L𝑡,𝑙 𝑖 . 
+
+> 18:
+
+end for  
+
+> 19:
+
+Clients send 𝐴 𝑡,𝐿 𝑖 , 𝐵 𝑡,𝐿 𝑖 to server.  
+
+> 20:
+
+end for  
+
+> 21:
+
+Clip 𝐴 𝑡,𝐿 𝑖 and 𝐵 𝑡,𝐿 𝑖 by 𝐶 . 
+
+> 22:
+
+// Server aggregates and updates global LoRA modules.  
+
+> 23:
+
+𝐴 𝑡 ← 1
+
+|C| ∑︁ 𝑖 ∈ C 
+
+𝐴 𝑡,𝐿 𝑖 . 
+
+> 24:
+
+𝐵 𝑡 ← 1
+
+|C| ∑︁ 𝑖 ∈ C 
+
+𝐵 𝑡,𝐿 𝑖 . 
+
+> 25:
+
+// Server adds DP noises.  
+
+> 26:
+
+𝐴 𝑡 ← 𝐴 𝑡 + N ( 0, 𝜎 2𝐶 2). 
+
+> 27:
+
+𝐵 𝑡 ← 𝐵 𝑡 + N ( 0, 𝜎 2𝐶 2). 
+
+> 28:
+
+end for  
+
+> 29:
+
+// Server merges LoRA for final release.  
+
+> 30:
+
+𝑊 𝑇 ← 𝑊 0 + 𝐵 𝑇 𝐴 𝑇 . 
+
+> 31:
+
+Output: 𝑊 𝑇 .As described in Algorithm 5, the server initializes two small low-rank matrices, 𝐴 and 𝐵 . During each global round, selected clients download these global LoRA modules, perform local training over 𝐿 rounds to minimize their specific loss, and then return the updated modules to the server. To ensure privacy, the server clips the client updates to a threshold 𝐶 to bound their influence and injects Gaussian noise to the clipped modules. Most importantly, the server then aggregates each clipped LoRA modules independently. Once the global training rounds are complete, the final low-rank product 𝐵 𝑇 𝐴 𝑇 is merged back into the original weights, resulting in a fine-tuned model that benefits from decentralized data without exposing individual client updates. FFA-LoRA is structurally identical to FedLoRA in the use of federated averaging, client-side local training, and server-side DP (clipping and noise injection). However, it introduces a main dif-ference by freezing the 𝐴 module throughout the entire training process. While FedLoRA iteratively updates both 𝐴 and 𝐵 , FFA-LoRA treats 𝐴 as a static Gaussian projection, requiring clients Linh Tran, Ana Milanova, and Stacy Patterson 
+
+Algorithm 6 FFA-LoRA [23]  
+
+> 1:
+
+Input: number of global rounds 𝑇 , number of local rounds 𝐿 ,global weight 𝑊 0 ∈ R𝑚 ×𝑛 , rank 𝑟 , learning rate 𝜂 , noise scale 
+
+𝜎 , clipping threshold 𝐶 . 
+
+> 2:
+
+// Server initializes global LoRA modules.  
+
+> 3:
+
+𝐴 ∼ N ( 0, 𝜎 2)𝑟 ×𝑛 . 
+
+> 4:
+
+𝐵 0 ← 0𝑚 ×𝑟 . 
+
+> 5:
+
+for global round 𝑡 ← 1 . . . 𝑇 do  
+
+> 6:
+
+Server subsamples client set C𝑡 with sampling rate 𝑞 𝑐 . 
+
+> 7:
+
+for client 𝑖 ∈ C in parallel do  
+
+> 8:
+
+// Client initialize local LoRA module.  
+
+> 9:
+
+𝐵 𝑡, 0 
+
+> 𝑖
+
+← 𝐵 𝑡 −1. 
+
+> 10:
+
+for local round 𝑙 ← 1 . . . 𝐿 do  
+
+> 11:
+
+Client subsamples batch B𝑡,𝑙 with sampling rate 𝑞 𝑠 . 
+
+> 12:
+
+// Client computes loss.  
+
+> 13:
+
+L𝑡,𝑙 𝑖 ← 1 
+
+> | B 𝑡,𝑙 |
+
+Í(𝑥,𝑦 ) ∈ B 𝑡,𝑙 ℓ (𝐴, 𝐵 𝑡,𝑙 −1 
+
+> 𝑖
+
+, 𝑥, 𝑦 ). 
+
+> 14:
+
+// Client updates local LoRA modules.  
+
+> 15:
+
+𝐵 𝑡,𝑙 𝑖 ← 𝐵 𝑡,𝑙 −1 
+
+> 𝑖
+
+− 𝜂 ∇𝑏 L𝑡,𝑙 𝑖 . 
+
+> 16:
+
+end for  
+
+> 17:
+
+Clients send 𝐵 𝑡,𝐿 𝑖 to server.  
+
+> 18:
+
+end for  
+
+> 19:
+
+Clip 𝐵 𝑡,𝐿 𝑖 by 𝐶 . 
+
+> 20:
+
+// Server aggregates and updates global LoRA modules.  
+
+> 21:
+
+𝐵 𝑡 ← 1
+
+|C| ∑︁ 𝑖 ∈ C 
+
+𝐵 𝑡,𝐿 𝑖 . 
+
+> 22:
+
+// Server adds DP noises.  
+
+> 23:
+
+𝐵 𝑡 ← 𝐵 𝑡 + N ( 0, 𝜎 2𝐶 2). 
+
+> 24:
+
+end for  
+
+> 25:
+
+// Server merges LoRA for final release.  
+
+> 26:
+
+𝑊 𝑇 ← 𝑊 0 + 𝐵 𝑇 𝐴 . 
+
+> 27:
+
+Output: 𝑊 𝑇 .to only compute gradients for and transmit the 𝐵 module. Upon receiving the LoRA 𝐵 modules from clients, the server clips, adds noise and averages the 𝐵 modules accordingly.

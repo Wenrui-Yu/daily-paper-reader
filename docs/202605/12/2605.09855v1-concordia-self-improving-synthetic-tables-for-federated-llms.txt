@@ -1,0 +1,915 @@
+Title: Concordia: Self-Improving Synthetic Tables for Federated LLMs
+
+URL Source: https://arxiv.org/pdf/2605.09855v1
+
+Published Time: Tue, 12 May 2026 01:57:20 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+# Concordia: Self-Improving Synthetic Tables for Federated LLMs 
+
+# Jimin Huang ∗
+
+jimin.huang@thefin.ai The Fin AI 
+
+# Duanyu Feng 
+
+Sichuan University 
+
+# Nuo Chen 
+
+National University of Singapore 
+
+# Xiaoyu Wang 
+
+New York University 
+
+# Zhiqiang Zhang 
+
+Sichuan University 
+
+# Xueqing Peng 
+
+The Fin AI 
+
+# Mingquan Lin 
+
+University of Minnesota 
+
+# Prayag Tiwari 
+
+Halmstad University 
+
+# Guojun Xiong 
+
+Harvard University 
+
+# Alejandro Lopez-Lira 
+
+University of Florida 
+
+# Sophia Ananiadou 
+
+University of Manchester 
+
+## Abstract 
+
+Federated learning (FL) enables training large language models (LLMs) without sharing raw data, but adapting LLMs under strict data isolation and non-IID client distributions remains challeng-ing in practice. Synthetic data offers a natural privacy-preserving surrogate for local training, yet existing federated pipelines typi-cally treat synthetic generation as static or loosely coupled with downstream optimization, leading to rapidly diminishing utility un-der heterogeneous clients. We study federated adaptation of LLMs on tabular tasks where raw records and validation data cannot be shared, and local training must rely entirely on synthetic tables. We propose Concordia , a tri-level optimization framework that aligns synthetic data generation with federated validation utility despite these constraints. At the client level, models are adapted via parameter-efficient LoRA training on synthetic tables. Clients additionally learn lightweight utility scorers from private validation feedback to reweight synthetic samples during local training. At the outer level, each client refines its own synthetic table genera-tor using group-relative policy optimization (GRPO), guided by an ensemble of heterogeneous scorers shared across clients, without aggregating generator parameters or exposing validation data. Ex-periments on privacy-sensitive tabular benchmarks from finance and healthcare demonstrate that Concordia consistently improves federated performance, cross-client stability, and robustness to dis-tribution shift compared to static and decoupled synthetic-data baselines. 
+
+ACM Reference Format: 
+
+Jimin Huang, Duanyu Feng, Nuo Chen, Xiaoyu Wang, Zhiqiang Zhang, Xueqing Peng, Mingquan Lin, Prayag Tiwari, Guojun Xiong, Alejandro  
+
+> ∗Corresponding author. Permission to make digital or hard copies of all or part of this work for personal or classroom use is granted without fee provided that copies are not made or distributed for profit or commercial advantage and that copies bear this notice and the full citation on the first page. Copyrights for components of this work owned by others than the author(s) must be honored. Abstracting with credit is permitted. To copy otherwise, or republish, to post on servers or to redistribute to lists, requires prior specific permission and/or a fee. Request permissions from permissions@acm.org.
+> Conference’17, Washington, DC, USA
+> ©2026 Copyright held by the owner/author(s). Publication rights licensed to ACM. ACM ISBN 978-x-xxxx-xxxx-x/YYYY/MM https://doi.org/10.1145/nnnnnnn.nnnnnnn
+
+Lopez-Lira, and Sophia Ananiadou. 2026. Concordia: Self-Improving Syn-thetic Tables for Federated LLMs. In . ACM, New York, NY, USA, 12 pages. https://doi.org/10.1145/nnnnnnn.nnnnnnn 
+
+## 1 Introduction 
+
+Adapting large language models (LLMs) in privacy sensitive and regulated domains is difficult because supervision is local, heteroge-neous, and non IID, while raw records cannot be pooled. [ 22 , 33 , 40 ]We study tabular prediction in finance and healthcare under a high-assurance setting where no tables may leave an institution 
+
+(real or synthetic) and high-capacity learned parameters are non-exportable . [ 6, 28 , 32 ] This setting is most challenging un-der extreme class imbalance, e.g., insurance risk prediction with positives near 1% or below, where minority signals are crucial yet easy to wash out. [ 2, 35 ] LLM-based learners can consume natural-language feature definitions and policy rules, which helps bridge schema and policy shifts across institutions, but only if they can be adapted under these isolation constraints. Federated learning is a natural baseline when model updates can be shared, but under non IID clients and extreme imbalance its aggregated optimization tends to follow dominant clients and frequent labels, washing out rare outcomes. [ 1, 11 , 18 , 20 , 37 ] In the high-assurance setting we target, exporting gradients or LoRA deltas is also typically prohibited, so standard update-sharing FL is either ineffective or infeasible. A common workaround is to train lo-cally on on-premise synthetic tables, and recent pipelines use LLMs to generate context-rich tabular samples. [ 4 , 26 , 27 ] Yet most syn-thetic approaches are either fixed, or they optimize generation with objectives that are decoupled from the evolving downstream model and client-specific distributions across rounds. Under heterogeneity, such proxy improvements in synthetic data do not reliably trans-late into gains on each client’s private validation set. [ 23 ] We call this the validation aligned synthetic optimization problem in heterogeneous federated learning under restricted com-munication : synthetic refinements must predict gains in client local validation utility when neither real/synthetic tables nor high-capacity model or generator parameters can be shared. The key difficulty is that under non-IID clients and extreme imbalance, vali-dation utility is sparse, noisy, and non-stationary across rounds, so naïvely improving synthetic data with proxy objectives does not yield reliable utility gains.  
+
+> arXiv:2605.09855v1 [cs.LG] 11 May 2026 Conference’17, July 2017, Washington, DC, USA Huang et al.
+
+To address it, we propose Concordia, a tri-level federated loop that turns private validation utility into an online signal for refining the on-premise synthetic training distribution under heterogene-ity. [ 24 ] The three levels are jointly necessary: local LoRA [ 17 ]adaptation defines the evolving client model state, utility mod-eling distills private validation feedback into a capacity-limited scorer that reweights synthetic mini-batches toward utility-critical (often minority) cases, and federated coordination stabilizes this utility proxy across non-IID clients. Concretely, each client alter-nates multiple LoRA steps on locally generated synthetic batches with intermittent scorer refresh on its private validation set, so the proxy tracks what improves utility as the model and distribution drift over rounds. At the federated level, only scorer parameters are exchanged: the server pools and redistributes diverse scorers to reduce client-specific bias and high-variance utility noise, yielding a stable relative preference signal that each client uses to update its on-premise generator online. Unlike fixed synthetic or decoupled pipelines, Concordia closes the missing loop by letting validation utility continuously reshape the synthetic distribution seen by the next round, while keeping records, synthetic tables, generators, and LoRA weights strictly on premise. We evaluate Concordia on privacy-constrained federated tabular prediction across finance and medicine, including extreme imbal-ance (Travel 1 positives near 0.01 ) and out-of-site testing on VA Long Beach [ 9]. Under our high-assurance constraint, naïve single-node training often collapses on minority-heavy settings. Concordia de-livers its clearest gains exactly there: on Travel, MCC [ 21 ] rises from 
+
+7.07 at Round 1 to 21.78 at Round 2, moving from near-degenerate behavior to reliably useful minority-sensitive prediction, while re-maining competitive on German [ 13 ] and LendingClub 2. On the medical benchmark, it achieves non-trivial generalization to the unseen VA site. Case studies and embedding visualizations further show that, over rounds, high-utility synthetic samples concentrate around real positive neighborhoods and hard positives become bet-ter covered, providing a concrete mechanism consistent with the observed gains under non-IID imbalance. 
+
+## 2 Related Work 2.1 LLM-based tabular learning and data synthesis. 
+
+Classical tabular synthesis relies on GANs, VAEs, and diffusion mod-els [ 19 , 38 , 44 ], but often depends on rigid encodings and can strug-gle to preserve feature semantics under high-dimensional schemas or schema variation. Recent work uses LLMs to serialize tables and generate schema-conditioned samples with stronger semantic con-sistency [ 4, 26 , 27 ], which is appealing when feature definitions and policy rules are naturally expressed in language. However, LLM-based synthesis can still leak memorized information [ 39 ] and is typically optimized with proxy objectives that are decoupled from an evolving downstream learner, making synthetic improvements unreliable under distribution shift, non-IID clients, and extreme imbalance. Our work builds on LLM-based synthesis but focuses on 
+
+validation-aligned and online refinement of on-premise generation 
+
+> 1https://www.kaggle.com/datasets/mhdzahier/travel-insurance
+> 2https://www.kaggle.com/datasets/wordsforthewise/lending-club
+
+toward downstream utility in heterogeneous, privacy-constrained settings. 
+
+## 2.2 Federated adaptation and personalization under heterogeneity. 
+
+Federated personalization addresses non-IID clients by learning client-specific models or partially shared parameters, reducing the bias of a single global model toward dominant clients. [ 8 , 30 ] How-ever, most approaches focus on how to aggregate or personalize model updates given local supervision, and implicitly assume that such updates can be communicated. [ 3 , 5, 10 , 12 , 34 , 41 – 43 ] In our high-assurance setting, high-capacity updates are non-exportable and labels are extremely imbalanced, so the limiting factor is not only aggregation but the availability of utility-relevant training signal as the learner evolves. Concordia targets this bottleneck by using private validation utility to continuously reshape on-premise synthetic training toward minority-critical utility under hetero-geneity. 
+
+## 2.3 Federated learning with synthetic data and feedback. 
+
+Synthetic data has been used in federated learning to reduce raw-data exposure, lower communication cost, and improve training efficiency by generating data locally (often under differential pri-vacy) and either sharing synthetic samples or using them as a surrogate for sensitive local training [ 1 , 11 , 18 , 20 , 37 ]. In parallel, feedback-driven generation in NLP improves task relevance via reward modeling and downstream signals [ 15 , 16 , 32 , 36 , 45 ]. For privacy-sensitive tabular learning, however, existing approaches often face two limitations: they are less reliable under strongly heterogeneous clients with extreme class imbalance [ 29 ], and gen-eration is commonly fixed or only loosely coupled to the evolving federated learner, so the most informative signal is not exploited in a stable loop. Our setting further restricts communication, where neither real/synthetic tables nor high-capacity model or generator parameters can be shared. Concordia closes this gap by learning lightweight utility scorers from private validation data on each client and using a redistributed scorer pool as the only exchanged signal to guide on-premise, decentralized generator refinement toward minority-critical utility under non-IID clients. 
+
+## 3 Problem Statement 
+
+We study cross-silo federated learning for adapting LLMs to tabular prediction under strict data-isolation rules in regulated deploy-ments. A system consists of 𝑁 clients indexed by 𝑖 ∈ [ 𝑁 ] and a coordinating server that orchestrates multi-round communica-tion. Client 𝑖 holds a private dataset D𝑖 = {( 𝑥, 𝑦 )} and a private validation set V𝑖 , neither of which can be shared. 
+
+Motivating setting and heterogeneity. In privacy-sensitive do-mains such as finance and healthcare, the labels that matter most are often rare (e.g., default, fraud, adverse clinical outcomes). [ 25 ]Institutions differ in schema, feature semantics, decision policies, and label prevalence. [ 7] We denote the client-specific positive rate by 𝑝 𝑖 and allow it to vary widely across clients, including 𝑝 𝑖 = 0.When 𝑝 𝑖 = 0 or 𝑝 𝑖 is extremely small, naive local learning contains Concordia : Self-Improving Synthetic Tables for Federated LLMs Conference’17, July 2017, Washington, DC, USA 
+
+Figure 1: The Overall Framework for Concordia. 
+
+little minority signal and can collapse to majority-only behavior. Under non-IID clients, this failure is amplified and harms the sites where rare-event performance matters. Accordingly, we empha-size long-tail utility after local adaptation, including worst-client behavior, rather than only average accuracy. 
+
+Tabular task and LLM interface. Each example consists of a mixed-type feature vector 𝑥 and a label 𝑦 ∈ Y . To use an LLM as a predictor, client 𝑖 serializes 𝑥 into text using a schema-conditioned template 
+
+T𝑖 , and the model predicts 𝑦 from the serialized input. We consider both single-task federation (shared prediction target) and multi-task federation with task identifiers 𝜏 𝑖 . Clients are in the same task if they share the same label space and prediction target; 𝜏 𝑖 is treated as deployment metadata. In our experiments, all medical sites share one task identifier, while each finance dataset is treated as a separate task identifier and trained as an independent federated stream to avoid ill-posed cross-task aggregation and negative transfer. 
+
+Communication and threat model (compliance-constrained FL).. 
+
+We consider a federated deployment where institutions are prohib-ited from exporting any data-dependent high-capacity artifacts. At communication round 𝑟 , the server broadcasts a shared backbone model 𝜃 (𝑟 ) to participating clients. Client-to-server communication is restricted to a lightweight utility proxy (scorer parameters): 
+
+𝑚 (𝑟 ) 
+
+> 𝑖
+
+= 𝜙 (𝑟 ) 
+
+> 𝑖
+
+. (1) In particular, raw records, validation sets, synthetic tables, gener-ator parameters, and any parameter-efficient adaptation updates (e.g., LoRA/adapter weights) are non-exportable and never transmit-ted. Thus, unlike standard FL where the server aggregates uploaded model updates, our protocol uses the server only to pool and redis-tribute utility proxies across clients. We consider adversaries that attempt to infer client-specific records or label properties from com-municated artifacts; restricting communication to a small utility proxy reflects common audit and risk controls in regulated envi-ronments. We do not claim a formal privacy guarantee and instead study a practical design that reduces direct exposure of records and validation data while enabling effective adaptation under hetero-geneity and severe imbalance. 
+
+Synthetic training under data isolation. Since centralized super-vision is prohibited, clients rely on on-premise synthetic tables for local adaptation. Client 𝑖 maintains a client-local generator 𝐺 𝜓 𝑖 
+
+that produces labeled synthetic examples ( ˜𝑥, ˜𝑦 ) consistent with its schema and task. We assume access to a client-local labeling inter-face A𝑖 that assigns labels to synthetic samples using institution-specific resources (e.g., internal risk policies in finance, coding rules or guideline-based criteria in medicine). This interface can be noisy, and we do not require any labeling mechanism to be shared across clients. Generator parameters 𝜓 𝑖 are never uploaded or aggregated. 
+
+Local adaptation and utility proxy. Given 𝜃 (𝑟 ) and the current generator 𝐺 (𝑟 ) 
+
+> 𝜓 𝑖
+
+, client 𝑖 performs parameter-efficient local adapta-tion (e.g., LoRA) on synthetic mini-batches. To prioritize utility-critical (often minority) synthetic cases, client 𝑖 maintains a scorer 
+
+𝑆 𝜙 (𝑟 )
+
+> 𝑖
+
+that induces nonnegative weights 𝑤 𝜙 (𝑟 )
+
+> 𝑖
+
+( ˜𝑥, ˜𝑦 ) and reweights the synthetic loss during adaptation. For readability, we omit the round index (𝑟 ) when clear. Let ˜𝑧 := ( ˜𝑥, ˜𝑦 ), 𝐺 𝑖 := 𝐺 𝜓 𝑖 , and 𝑤 𝑖 ( ˜𝑧 ) :=Conference’17, July 2017, Washington, DC, USA Huang et al. 
+
+𝑤 𝜙 𝑖 ( ˜𝑧 ).
+
+Δ𝜃 ∗ 
+
+> 𝑖
+
+:= arg min 
+
+> Δ𝜃 𝑖
+
+E ˜𝑧 ∼𝐺 𝑖 [𝑤 𝑖 ( ˜𝑧 ) ℓ ( ˜𝑧 ; 𝜃 + Δ𝜃 𝑖 )] . (2) where ℓ (·) is a differentiable surrogate loss. The scorer is trained and refreshed on-premise using the private validation set V𝑖 under the current adapted state, so that it tracks which synthetic samples improve validation utility as the learner evolves. 
+
+Overall objective. Given a shared backbone 𝜃 , our goal is to learn client-local generators {𝜓 𝑖 }𝑁 𝑖 =1 such that, after local adaptation on synthetic tables, the resulting client models achieve high validation utility. We write the objective as minimizing an imbalance-aware validation loss: 
+
+min  
+
+> {𝜓 𝑖 }
+
+1
+
+𝑁 
+
+> 𝑁
+
+∑︁ 
+
+> 𝑖 =1
+
+L (𝑖 )
+
+> val
+
+ 𝜃 + Δ𝜃 ∗ 
+
+> 𝑖
+
+(𝜃,𝜓 𝑖 , 𝜙 ∗ 
+
+> 𝑖
+
+(𝜃,𝜓 𝑖 )) ; V𝑖 
+
+ , (3) where L (𝑖 ) 
+
+> val
+
+is aligned with imbalanced evaluation (e.g., −MCC ), and 𝜙 ∗ 
+
+> 𝑖
+
+(𝜃,𝜓 𝑖 ) denotes the scorer obtained by on-premise training using V𝑖 .
+
+Tri-level structure and the role of federation. Optimizing Eq. (3) couples three components: (i) local adaptation on synthetic data (inner level), (ii) validation-guided learning of the utility proxy (middle level), and (iii) a federated outer loop that stabilizes utility feedback under non-IID clients. Since V𝑖 cannot be centralized and neither generators nor adapted model updates can be transmitted, generator refinement must be driven by an indirect, communicable proxy of validation utility. Accordingly, clients upload only 𝜙 (𝑟 ) 
+
+> 𝑖
+
+.The server pools and redistributes these scorers to provide each client with a stabler relative preference signal for updating its on-premise generator across rounds. This retains the defining structure of federated learning, while operating under stricter compliance constraints on what can be communicated. 
+
+## 4 Proposed Method 4.1 Overview and Tri-level Decomposition 
+
+Concordia is a compliance-constrained federated learning frame-work that couples client-local adaptation with on-premise syn-thetic generation through a tri-level feedback loop. The key idea is to make private validation utility actionable without exporting data, synthetic tables, generators, or high-capacity model updates: clients distill validation feedback into utility proxies (scorers), and the server pools and redistributes these proxies to stabilize util-ity signals under non-IID heterogeneity and extreme imbalance. As a result, synthetic generation becomes an adaptive decision variable that is continuously shaped by utility, rather than a fixed preprocessing step. 
+
+Round protocol and communication boundary. At round 𝑟 , the server samples clients C𝑟 and groups them by task identifier 𝜏 . For each task, the server broadcasts an approved backbone snapshot 𝜃 𝜏 
+
+(fixed or externally updated by the deployment). Each client uploads 
+
+only scorer parameters 𝜙 𝑖 ; raw records, validation sets, synthetic ta-bles, generator parameters, and any parameter-efficient adaptation weights (e.g., LoRA/adapter deltas) never leave the client. The server 
+
+Algorithm 1 Concordia (Route A): Federated learning with utility-proxy pooling and on-premise generator refinement  
+
+> 1:
+
+Input: Clients { ( D 𝑖 , V𝑖 , 𝜏 𝑖 ) } 𝑁 𝑖 =1, task backbones {𝜃 𝜏 }, client genera-tors {𝜓 (0) 
+
+> 𝑖
+
+}, rounds 𝑅  
+
+> 2:
+
+Hyperparameters: local steps 𝑇 , scorer refresh interval 𝑚 , GRPO group size 𝐺 , temperature 𝛽 , format weight 𝜆 fmt  
+
+> 3:
+
+for round 𝑟 = 0 to 𝑅 − 1 do  
+
+> 4:
+
+Server samples clients C𝑟 and partitions C𝑟 (𝜏 ) = {𝑖 ∈ C 𝑟 | 𝜏 𝑖 = 𝜏 } 
+
+> 5:
+
+Server broadcasts the approved backbone 𝜃 𝜏 𝑖 to each 𝑖 ∈ C 𝑟 {fixed / externally updated}  
+
+> 6:
+
+Client local adaptation and scorer learning (on-premise, par-allel for each 𝑖 ∈ C 𝑟 ) 
+
+> 7:
+
+Initialize local adapter Δ𝜃 𝑖 ← 0 and scorer parameters 𝜙 𝑖  
+
+> 8:
+
+for 𝑡 = 1 to 𝑇 do  
+
+> 9:
+
+Sample synthetic mini-batch 𝑋 syn ∼ 𝐺 𝜓 (𝑟 ) 
+
+> 𝑖
+> 10:
+
+Compute weights 𝑤 ← 𝑤 𝜙 𝑖 (𝑋 syn ) 
+
+> 11:
+
+Δ𝜃 𝑖 ← Δ𝜃 𝑖 − 𝜂 ∇Δ𝜃 𝑖 
+
+Í𝑥 ∈𝑋 syn 𝑤 (𝑥 ) ℓ (𝑥 ; 𝜃 𝜏 𝑖 + Δ𝜃 𝑖 ) 
+
+> 12:
+
+if 𝑡 mod 𝑚 = 0 then  
+
+> 13:
+
+𝑞 𝑖 ← L (𝑖 ) 
+
+> val
+
+(𝜃 𝜏 𝑖 + Δ𝜃 𝑖 ; V𝑖 ) 
+
+> 14:
+
+𝜙 𝑖 ← 𝜙 𝑖 − 𝜂 𝜙 ∇𝜙 𝑖 
+
+h
+
+𝑞 𝑖 · Í𝑥 ∈𝑋 syn 𝑤 𝜙 𝑖 (𝑥 ) ℓ (𝑥 ; 𝜃 𝜏 𝑖 + Δ𝜃 𝑖 )
+
+i 
+
+> 15:
+
+end if  
+
+> 16:
+
+end for  
+
+> 17:
+
+Client uploads only 𝜙 𝑖 to server {no Δ𝜃 𝑖 , no data, no generators}  
+
+> 18:
+
+Server forms within-round scorer pools and redistributes  
+
+> 19:
+
+for each task 𝜏 with C𝑟 (𝜏 ) ≠ ∅ do  
+
+> 20:
+
+S𝑟 (𝜏 ) ← { 𝑆 𝜙 𝑗 }𝑗 ∈C 𝑟 (𝜏 ) 
+
+> 21:
+
+end for  
+
+> 22:
+
+Server sends pool S𝑟 (𝜏 𝑖 ) to each 𝑖 ∈ C 𝑟  
+
+> 23:
+
+Client on-premise generator refinement (parallel for each 𝑖 ∈C𝑟 ) 
+
+> 24:
+
+Let S𝑖 ← S 𝑟 (𝜏 𝑖 ) ∪ { 𝑆 𝜙 𝑖 } and sample conditions {𝑐 } 
+
+> 25:
+
+for each condition 𝑐 do  
+
+> 26:
+
+Sample group {𝑥 𝑐, 1, . . . , 𝑥 𝑐,𝐺 } ∼ 𝐺 𝜓 (𝑟 )
+
+> 𝑖
+
+(· | 𝑐 ) 
+
+> 27:
+
+for 𝑗 = 1 to 𝐺 do  
+
+> 28:
+
+¯𝑠 𝑐,𝑗 ← RobustAgg 𝑆 ∈S 𝑖 
+
+ NormGroup ( { 𝑆 (𝑥 𝑐,𝑘 ) } 𝐺 𝑘 =1 )𝑗 
+
+ 
+
+> 29:
+
+𝑟 𝑐,𝑗 ← tanh (𝛽 ¯𝑠 𝑐,𝑗 ) + 𝜆 fmt 𝑅 fmt (𝑐, 𝑥 𝑐,𝑗 ) 
+
+> 30:
+
+end for  
+
+> 31:
+
+𝐴 𝑐,𝑗 ← 𝑟 𝑐,𝑗 − 1
+
+> 𝐺
+
+Í𝐺 𝑘 =1 𝑟 𝑐,𝑘  
+
+> 32:
+
+end for  
+
+> 33:
+
+𝜓 (𝑟 +1) 
+
+> 𝑖
+
+← GRPO (𝜓 (𝑟 ) 
+
+> 𝑖
+
+; { ( 𝑥 𝑐,𝑗 , 𝐴 𝑐,𝑗 ) } )  
+
+> 34:
+
+end for  
+
+> 35:
+
+Return: client generators {𝜓 (𝑅 ) 
+
+> 𝑖
+
+} and scorer pool dynamics {𝜙 𝑖 }
+
+uses uploaded scorers solely as utility proxies and redistributes a within-round scorer pool to participating clients. 
+
+Tri-level decomposition. Each round consists of three coupled up-dates. Inner level: client 𝑖 performs on-premise parameter-efficient adaptation on synthetic mini-batches sampled from its local gener-ator, producing a local adapted state used only for evaluation and learning signals. Middle level: using private validation feedback, the client updates a lightweight scorer 𝑆 𝜙 𝑖 so that it assigns higher weight to synthetic samples that improve imbalance-aware valida-tion utility. Outer (federated) level: the server pools scorers within each task to form S𝑟 (𝜏 ) = {𝑆 𝜙 𝑗 }𝑗 ∈ C 𝑟 (𝜏 ) and redistributes S𝑟 (𝜏 𝑖 ) to each client; client 𝑖 then refines its on-premise generator for the next round using preference/reward signals aggregated from the pooled scorers. Concordia : Self-Improving Synthetic Tables for Federated LLMs Conference’17, July 2017, Washington, DC, USA 
+
+## 4.2 On-premise LoRA Adaptation on Weighted Synthetic Tables 
+
+Client 𝑖 samples a synthetic mini-batch 𝑋 syn ∼ 𝐺 𝜃 (𝑖,𝑟 )
+
+> 𝑔
+
+and performs parameter-efficient adaptation (e.g., LoRA) locally by minimizing 
+
+min 
+
+> Δ𝜃 𝑖
+
+E𝑥 ∼𝐺 𝜃 (𝑖,𝑟 )
+
+> 𝑔
+
+𝑤 𝜙 𝑖 (𝑥 ) ℓ  𝑥 ; 𝜃 𝜏 𝑖 + Δ𝜃 𝑖 
+
+ , (4) where Δ𝜃 𝑖 never leaves the client and is used only to define the current adapted state for validation feedback and scorer learning. 
+
+Default weighting rule. Weights are computed within each mini-batch as 
+
+𝑤 𝜙 𝑖 (𝑋 syn ) = Norm 
+
+
+
+clip 
+
+ 𝑆 𝜙 𝑖 (𝑥 ) + 12 , 𝑤 min , 𝑤 max 
+
+  
+
+> 𝑥 ∈𝑋 syn
+
+!
+
+, (5) where Norm normalizes weights to sum to one within the mini-batch. 
+
+What is federated in our setting. Unlike standard FedLoRA [ 43 ], our compliance constraint prohibits uploading any adapter/LoRA deltas. Instead, the only federated signal is the scorer: after local adaptation and validation-guided scorer updates, client 𝑖 uploads 
+
+𝜙 𝑖 for within-task pooling and redistribution (Section 4.1), which provides a stabler preference signal for on-premise generator re-finement under non-IID imbalance. 
+
+## 4.3 Client-side Scorer Learning via Private Validation Feedback 
+
+Client 𝑖 maintains an exportable evaluator (scorer) 𝑆 𝜙 𝑖 that maps a synthetic table 𝑥 to a scalar score and induces the reweighting rule in Eq. (5) . Different from standard federated optimization that uploads task-model updates, our compliance constraint permits exporting only this evaluator. We denote by 𝜙 𝑖 the full scorer pa-rameters, including its LLM backbone and scorer head, and 𝜙 𝑖 is the only learned artifact that may leave the silo. 
+
+Scorer architecture. Given a synthetic table 𝑥 (optionally lin-earized with task schema and condition 𝑐 ), the scorer encodes it with an LLM and obtains a representation ℎ𝜙 𝑖 (𝑥 ). A small head then predicts a scalar logit ˆ𝑠 𝜙 𝑖 (𝑥 ) = Head 𝜙 𝑖 (ℎ𝜙 𝑖 (𝑥 )) . To keep scores comparable across clients and stable for additive composition with the format reward, we use a bounded output 
+
+𝑆 𝜙 𝑖 (𝑥 ) = tanh  ˆ𝑠 𝜙 𝑖 (𝑥 ) ∈ [− 1, 1]. (6) 
+
+Private validation signal. We use an imbalance-aware validation loss L (𝑖 ) 
+
+> val
+
+= 1 − MCC in all experiments. Every 𝑚 local steps, client 
+
+𝑖 evaluates the current locally adapted state and computes 
+
+𝑞 𝑖 ← L (𝑖 )
+
+> val
+
+
+
+𝜃 (𝑟 ) 
+
+> 𝜏 𝑖
+
++ Δ𝜃 𝑖 ; V𝑖 
+
+
+
+. (7) Importantly, the scorer never observes V𝑖 directly. It receives only the scalar utility 𝑞 𝑖 computed on-premise, which serves as a validation-aligned learning signal. 
+
+Validation-aligned scorer update (first-order surrogate). Using the current synthetic mini-batch 𝑋 syn , we update the scorer by 
+
+𝜙 𝑖 ← 𝜙 𝑖 − 𝜂 𝜙 ∇𝜙 𝑖 
+
+
+
+𝑞 𝑖 ·∑︁  
+
+> 𝑥 ∈𝑋 syn
+
+𝑤 𝜙 𝑖 (𝑥 ) ℓ
+
+
+
+𝑥 ; 𝜃 (𝑟 ) 
+
+> 𝜏 𝑖
+
++ Δ𝜃 𝑖 
+
+
+
+. (8) This update can be viewed as a truncated hypergradient surrogate: it ties scorer learning to the validation utility of the current inner-loop iterate while avoiding differentiation through the full inner-loop optimum. To limit memorization and reduce leakage risk when exporting scorers, we constrain the scorer update budget per round. 
+
+## 4.4 Client-local Generator Refinement via Pooled Scorer Feedback 
+
+Within-task scorer pooling. At round 𝑟 , the server groups partici-pating clients by task and forms a within-task pool 
+
+S𝑟 (𝜏 ) = {𝑆 𝜙 𝑗 }𝑗 ∈ C 𝑟 (𝜏 ) , (9) which is redistributed to all clients 𝑖 ∈ C 𝑟 (𝜏 ). Pooling stabilizes utility feedback under non-IID heterogeneity and extreme imbal-ance: it reduces the variance of single-client preferences and yields a more reliable relative signal for refining the local generator. 
+
+Format reward and utility composition. In addition to scorer pref-erences, each client computes a deterministic format reward 𝑅 𝜓 that checks schema validity (required fields, label constraints, numeric ranges, JSON structure). For condition 𝑐 and candidate 𝑥 𝑐,𝑗 ,
+
+𝑟 fmt  
+
+> 𝑐,𝑗
+
+= 𝑅 𝜓 (𝑐, 𝑥 𝑐,𝑗 ) ∈ [− 1, 1]. (10) 
+
+Groupwise normalization and pooled preference. Client 𝑖 samples a condition 𝑐 and draws a candidate group {𝑥 𝑐, 1, . . . , 𝑥 𝑐,𝐺 } ∼ 𝐺 𝜃 (𝑖,𝑟 )
+
+> 𝑔
+
+(· | 
+
+𝑐 ). For each scorer 𝑆 ∈ S 𝑟 (𝜏 𝑖 ) we compute a group-normalized score via a rank transform: 
+
+˜𝑠 𝑆 𝑐,𝑗 = NormGroup  {𝑆 (𝑥 𝑐, 1), . . . , 𝑆 (𝑥 𝑐,𝐺 )}  
+
+> 𝑗
+
+. (11) We then aggregate across scorers (mean by default) to obtain a pooled preference score: 
+
+¯𝑠 𝑐,𝑗 = RobustAgg 𝑆 ∈ S 𝑟 (𝜏 𝑖 )
+
+
+
+˜𝑠 𝑆 𝑐,𝑗 
+
+
+
+. (12) 
+
+GRPO with group-relative advantage. We combine pooled prefer-ence with the format reward: 
+
+𝑟 𝑐,𝑗 = 𝛽 ¯𝑠 𝑐,𝑗 + 𝜆 fmt 𝑟 fmt  
+
+> 𝑐,𝑗
+
+, (13) and compute the group-relative advantage 
+
+𝐴 𝑐,𝑗 = 𝑟 𝑐,𝑗 − 1
+
+𝐺 
+
+> 𝐺
+
+∑︁ 
+
+> 𝑘 =1
+
+𝑟 𝑐,𝑘 . (14) Client 𝑖 clips and normalizes {𝐴 𝑐,𝑗 }𝐺 𝑗 =1 within each group and up-dates 𝜃 (𝑖,𝑟 ) 
+
+> 𝑔
+
+via GRPO to obtain 𝜃 (𝑖,𝑟 +1) 
+
+> 𝑔
+
+.
+
+## 5 Experiments 
+
+We evaluate Concordia under a compliance-constrained federated setting where neither training records nor validation sets can be centralized. Our benchmarks stress three deployment frictions that dominate real rollouts: (i) extreme label imbalance (Travel Insur-ance, 𝑝 ≈ 0.01 ), (ii) cross-institution shift with an unseen medical site (VA Long Beach), and (iii) heterogeneous objectives across financial tasks where naive parameter merging induces negative transfer. Conference’17, July 2017, Washington, DC, USA Huang et al.                                                                                           
+
+> Medical. MCC mean ±std.
+> Model Cleveland Hungarian Switzerland VA Baseline (Single-node) Qwen3-4B 60 .25 ±14 .76 23 .57 ±19 .71 12 .31 ±9.18 27 .50 ±10 .57
+> Qwen3-4B-Instruct 32 .28 ±17 .36 26 .65 ±14 .76 0.00 ±0.00 −0.10 ±0.08
+> Cleveland 0.00 ±0.00 0.00 ±0.00 0.00 ±0.00 0.00 ±0.00
+> Hungarian 0.00 ±0.00 0.00 ±0.00 0.00 ±0.00 0.00 ±0.00
+> Switzerland 0.00 ±0.00 0.00 ±0.00 0.00 ±0.00 0.00 ±0.00
+> Qwen3-4B (Round 1) Cleveland 74 .69 ±11 .70 30 .86 ±18 .78 −23 .35 ±12 .53 33 .61 ±25 .02
+> Hungarian 46 .28 ±16 .52 40 .00 ±18 .03 −3.29 ±27 .31 72 .76 ±21 .15
+> Switzerland 0.00 ±0.00 −9.78 ±18 .08 10 .11 ±28 .21 42 .01 ±14 .63
+> Qwen3-4B (Round 2) Cleveland 82 .29 ±8.97 0.00 ±0.00 0.00 ±0.00 14 .00 ±7.52
+> Hungarian 67 .22 ±13 .30 46 .29 ±17 .72 27 .25 ±32 .79 34 .30 ±12 .49
+> Switzerland 38 .52 ±13 .11 0.00 ±18 .14 67 .70 ±40 .37 −9.64 ±6.74
+> Finance. MCC mean ±std.
+> Model German Lendingclub Travel Baseline (Single-node) Qwen3-4B 7.93 ±5.48 −0.94 ±0.59 0.00 ±0.00
+> Qwen3-4B-Instruct 5.17 ±6.87 9.27 ±8.13 −2.85 ±2.86
+> German 0.00 ±0.00 0.00 ±0.00 0.00 ±0.00
+> Lendingclub 0.00 ±0.00 0.00 ±0.00 0.00 ±0.00
+> Travel 0.00 ±0.00 0.00 ±0.00 0.00 ±0.00
+> Qwen3-4B (Round 1) German 30 .44 ±7.06 0.00 ±0.00 0.00 ±0.00
+> Lendingclub 0.00 ±0.00 79 .83 ±1.49 0.00 ±0.00
+> Travel 0.00 ±0.00 0.00 ±0.00 7.07 ±1.85
+> Qwen3-4B (Round 2) German 32 .93 ±6.00 0.00 ±0.00 0.00 ±0.00
+> Lendingclub 0.00 ±0.00 90 .22 ±1.05 0.00 ±0.00
+> Travel 0.00 ±0.00 0.00 ±0.00 21 .78 ±5.84
+
+Table 1: Main results split by domain. 
+
+Dataset Split (Tr/Val/Te) Features Pos. Ratio Finance 
+
+German Credit 700 / 100 / 200 21 0.29 Lending Club 9,417 / 1,345 / 2,691 21 0.20 Travel Insurance 8,865 / 1,266 / 2,534 9 0.01 
+
+Healthcare 
+
+Cleveland 231 / 41 / 31 13 0.45 Hungary 224 / 40 / 30 13 0.35 Switzerland 93 / 17 / 13 13 0.07 VA Long Beach 153 / 27 / 20 13 0.28 
+
+Table 2: Summary of tabular datasets used in our experi-ments. 
+
+## 5.1 Experimental Settings 
+
+Datasets and clients. Table 2 summarizes the datasets and splits. We evaluate two regimes. First, a multi site single task regime in healthcare. Each medical site is one client under the same prediction task. Cleveland, Hun-gary, and Switzerland [ 9 ] participate in federated training, while VA Long Beach is held out and used only for evaluation as an unseen site. Second, a multi task regime in finance. German Credit, Lending Club, and Travel Insurance are treated as three separate tasks. Each dataset is treated as one client, so there is no within task client aggregation in finance. This regime isolates cross task negative transfer and tests whether our evaluator sharing can still improve generator refinement when model merging is not applicable. 
+
+Finance. We use three tabular datasets for credit and risk as-sessment. German Credit [14]. Lending Club 3. Travel Insurance 4.
+
+Healthcare. We use the Heart Disease dataset [ 9] comprising four medical sites. Each site is treated as one client. 
+
+Federated protocol. We simulate 𝑅 = 2 rounds of coordination under a strict export policy: raw records, validation sets, synthetic 
+
+> 3https://www.kaggle.com/datasets/wordsforthewise/lending-club
+> 4https://www.kaggle.com/datasets/mhdzahier/travel-insurance
+
+tables, generators, and any task-model updates are non-exportable. At each round, the server broadcasts the task backbone to partici-pating clients. Each client performs on-premise LoRA adaptation on synthetic tables generated by its client-local generator, and up-dates an exportable scorer using private validation feedback. The only client-to-server message is the scorer parameters; the server forms a within-round scorer pool from participating clients and redistributes it, after which each client refines its generator locally via GRPO using rank-normalized pooled preferences. Accordingly, our experimental comparisons focus on protocol-compatible set-tings that differ only in whether pooled scorer feedback is available, rather than on update-aggregation baselines that require transmit-ting model updates. In cross-silo deployments in healthcare and finance, each com-munication round typically incurs non-trivial operational overhead (governance approval, secure execution, and coordination across institutions), making long-horizon iterative FL hard to sustain in practice. We therefore focus on one- and two-round coordination as a realistic regime and evaluate whether pooled evaluator feedback can deliver measurable gains under extremely limited rounds. 
+
+Models and initialization. All clients initialize their generators from the same pretrained instruction following language model, followed by public instruction tuning to improve schema adherence. After initialization, generators are maintained and updated inde-pendently on each client. The downstream model uses the same backbone capacity across all methods and is adapted via the same LoRA configuration. Unless stated otherwise, all methods use the same synthetic sampling budget per round and comparable local compute. 
+
+Evaluation and early-round stability. We report Matthews Corre-lation Coefficient (MCC) [ 21 ], which is robust to class imbalance, as mean ±std over multiple seeds. Because strict deployments often limit the number of communication rounds, we focus on early-round utility : the worst-round MCC over the first two rounds and the round-to-round variance within each run, which directly reflect reliability under constrained coordination budgets. Concordia : Self-Improving Synthetic Tables for Federated LLMs Conference’17, July 2017, Washington, DC, USA 
+
+Baselines. We report only protocol-compatible settings that ap-pear in the main results. Single-node evaluates the pretrained back-bone ( Qwen3-4B [31 ]) and its instruction-tuned variant ( Qwen3-4B-Instruct [31 ]) without any cross-client interaction. Local-only 
+
+(rows named by the corresponding dataset/site, e.g., Cleveland 
+
+or German ) performs fully on-premise adaptation and generator refinement without receiving pooled scorers from other clients. 
+
+Round 1/2 report the same protocol after one and two rounds of scorer pooling and redistribution. We do not include update-aggregation baselines here because they require exporting task-model updates, which violates the export policy defining our set-ting. 
+
+## 5.2 System-level Performance under One-/Two-shot Cross-silo Coordination 
+
+We study a one-/two-shot coordination regime that is common in cross-silo healthcare and finance, where each round is expensive to execute and audit. 
+
+Few-shot coordination helps most when the label signal is a long tail. 
+
+The clearest effect appears under extreme imbalance. On Travel In-surance ( 𝑝 ≈ 0.01 ), the single-node backbone collapses to 0.00 ±0.00 
+
+MCC, but one shot already recovers a non-trivial signal ( 7.07 ± 1.85 )and the second shot amplifies it to 21 .78 ± 5.84 . The shape of this im-provement matters: the second shot contributes the majority of the gain, consistent with a mechanism where the first shot establishes a coarse decision boundary while the second benefits from a re-fined synthetic distribution that better exposes minority-supporting cases. 
+
+Improvements are not explained by model merging: finance isolates the effect of coordination. Even without any within-task aggrega-tion (each finance task has a single client), two-shot coordination remains strongly effective. German improves from 7.93 ± 5.48 to 
+
+32 .93 ± 6.00 , and Lending Club improves from −0.94 ± 0.59 to 
+
+90 .22 ± 1.05 . Moreover, high performance stays largely on-task: the Lending Club-adapted model is strong on Lending Club while remaining near 0 on other tasks, reinforcing the decision to avoid naive cross-task merging under heterogeneous objectives. Together, these patterns indicate that the observed gains are driven by the coordination signal used to refine synthetic training—rather than by aggregating task-model updates across clients or tasks. 
+
+Cross-site shift yields asymmetric transfer: a mechanism clue, not noise. In healthcare, within-site utility improves substantially on participating clients (e.g., Cleveland 60 .25 ± 14 .76 → 82 .29 ± 8.97 ;Hungarian 23 .57 ± 19 .71 → 46 .29 ± 17 .72 ). For the held-out VA site, the single-node baseline is 27 .50 ± 10 .57 , yet transfer behavior is sharply asymmetric: the best one-shot transfer reaches 72 .76 ±21 .15 ,while some two-shot transfer can regress (e.g., 34 .30 ± 12 .49 in the best Round-2 transfer setting, and negative transfer in others). This heterogeneity is informative. It suggests that under distribution shift and limited rounds, synthetic refinement can trade off in-domain fitting and out-of-site robustness, and that understanding 
+
+which refinements move samples toward the unseen-site decision boundary is central.                                  
+
+> Cand. Age Sex RestECG Angina OldPeak ST-slope Vessels Synth. label ˆ𝑠 𝜙 1ˆ𝑠 𝜙 2ˆ𝑠 𝜙 3
+> #1 65 MLVH yes 2.10 down 0heartdisease 2.3281 4.8125 5.0000 #2 55 Mnormal no 0.00 up 1healthy 2.9844 4.1250 4.0938
+
+Table 3: Clinical paired case with aligned scorer pool (Cleve-land, 𝐺 =2).                                  
+
+> Cand. Agency Product Dur. Dest. Sales Comm. Age Claim ˆ𝑠 𝜙 1ˆ𝑠 𝜙 2ˆ𝑠 𝜙 3
+> #1 c2b silver_plan 60 thailand 45.00 13.50 35 no 0.9297 -5.1563 -3.7500 #2 ssi silver_plan 60 india 25.50 7.65 55 no 0.9297 -5.1563 -3.0625
+
+Table 4: Finance paired case with mixed-task scorer pool (Travel, 𝐺 =2). 
+
+Reliability signals are visible even in a two-shot budget. While we do not claim long-horizon convergence from two rounds, several tasks show reduced seed sensitivity alongside higher mean utility (e.g., Cleveland std drops from 14 .76 to 8.97 ; Lending Club from 
+
+1.49 to 1.05 from Round 1 to Round 2). Conversely, variance can increase when the minority signal is first recovered (e.g., Travel), which is expected when performance becomes sensitive to rare-event coverage. These observations motivate a mechanistic analysis focused on how synthetic samples move between rounds. 
+
+## 5.3 Cross-domain Generator Audit: Reward-aligned Synthesis in Finance and Healthcare 
+
+To make the main results less of a black box, we audit the generator itself and ask a simple question: what does reward-aligned refinement change in the synthetic tables that clients actually train on? Controlled paired generation protocol. For each dataset, we reuse the same few-shot prompt and identical decoding hyperparameters (temperature/top-𝑝 /max length). We then sample paired synthetic tables from the generator snapshots used in each round. Each table is schema-valid by construction and is labeled locally via the client labeling interface. To interpret refinement, we inspect the same reward signal used for generator updates: an on-task scorer trained from the client’s private validation feedback. 
+
+Healthcare (Cleveland): sharpening multi-feature risk conjunctions under a fixed schema. For Heart Disease, the audit shows that re-finement organizes synthetic samples into clinically interpretable archetypes rather than single-feature heuristics. A high-risk profile jointly activates exercise-induced angina, elevated OldPeak , and adverse ST-segment slope patterns, and is labeled as heartdisease .Conversely, a low-risk profile consistently exhibits OldPeak ≈ 0, fa-vorable slope, and normal ECG patterns, and is labeled as healthy .The key point is that the label is supported by a conjunction of features, not one attribute in isolation. This is exactly the kind of structure that improves robustness under site shift: it captures transferable decision patterns that remain meaningful even when marginal feature distributions change, as in the unseen VA evalua-tion. Conference’17, July 2017, Washington, DC, USA Huang et al. 
+
+Finance (Travel): escaping majority-mode copying by preserv-ing functional dependencies. Travel Insurance is an extreme long-tail setting ( 𝑝 ≈ 0.01 ) and the few-shot context is dominated by 
+
+Claim_Status=no . Under such skew, an unrefined generator can improve variety while still being utility-irrelevant, e.g., superficial changes that do not create new decision signal. In contrast, the re-fined generator preserves the dominant mode ( airlines/online 
+
+with silver_plan ) while strengthening feature-level regularities that are meaningful for learning . In our paired examples, the generator consistently maintains a stable commission-to-sales relationship (Commission = 0.3×Sales ) while varying destinations, duration, and age. This is a concrete sign of reward alignment: refinement does not merely diversify strings or enforce formatting, but encour-ages internally consistent feature dependencies, which prevents the downstream learner from being dominated by synthetically frequent yet semantically noisy perturbations. 
+
+Takeaway. Across domains, refinement does not simply make outputs more formatted. It reshapes the support of synthetic training data in a reward-aligned way: in finance, it preserves majority-mode plausibility while reinforcing coherent feature dependencies; in healthcare, it sharpens semantically grounded risk conjunctions. 0.2 0.4 0.6 0.8 1.0 1.2 1.4 
+
+> phi3 reward
+
+Figure 2: Travel: reward-aligned refinement expands utility-relevant support. 
+
+## 5.4 Mechanistic Evidence on Travel: Reward-aligned Coverage Expansion 
+
+Travel Insurance is the most imbalanced task in our study ( 𝑝 ≈ 0.01 )and exhibits the characteristic few-shot shape in the main results: MCC improves from 0.00 ± 0.00 (single-node) to 7.07 ± 1.85 after one shot, with a substantially larger gain to 21 .78 ± 5.84 after the second shot. We use the reward-colored embedding visualization in Fig. 2 to explain why the second shot contributes disproportionately: refinement changes where the generator places probability mass in synthetic space, not merely how much it generates. 
+
+Round-0: diverse modes, but reward concentrated in a few easy regions. The round-0 generator already produces a multi-modal set of samples, visible as several separated clusters in the embed-ding space. However, reward is highly uneven across these modes. High-reward samples (yellow) concentrate in only a small sub-set of clusters, while many clusters remain uniformly low-reward (blue/gray). Under extreme imbalance, this pattern is expected: with-out a utility-driven signal, synthetic sampling tends to overproduce majority-like cases that are schema-valid yet uninformative for minority-sensitive decisions. 
+
+Refinement induces two complementary effects: within-mode shifts and across-mode activation. Comparing round-0 and round-1, Fig. 2 suggests two distinct changes driven by reward-based refinement. 
+
+Within-mode shift: in modes that persist across rounds, reward in-creases locally—blue/gray points are replaced by more gray/yellow points—indicating that refinement pushes samples toward reward-favorable subregions without collapsing the mode structure. Across-mode activation: reward is no longer confined to the same few modes; modes that were previously uniformly low-reward begin to contain high-reward samples. This indicates that refinement does not merely oversample the easiest high-reward mode, but instead activates additional utility-relevant modes that were present but ineffective in round-0. 
+
+Why this explains the two-shot gain on the long tail. These two ef-fects directly align with the observed performance shape on Travel. The first shot adapts the predictor to the initial synthetic support, which is dominated by low-reward regions and therefore yields only a modest improvement. The second shot benefits disproportion-ately because the generator has been reshaped to place more mass on reward-aligned regions within modes and to expose the learner to a broader set of reward-bearing modes. In a 𝑝 ≈ 0.01 regime, this distributional change is precisely what enables minority-sensitive utility to improve: the learner sees more boundary-relevant and rare-event-supporting cases, rather than repeating majority-like patterns. 
+
+Implication for few-shot cross-silo coordination. The Travel anal-ysis highlights why one-/two-shot coordination is meaningful in privacy-constrained deployments. When the limiting factor is rare-event exposure rather than long-horizon optimization, a single refinement step that redistributes synthetic mass toward reward-aligned regions can translate into an immediate next-shot gain. This mechanism is consistent with the design goal of Concordia: use reward feedback to reshape synthetic training under strict isolation, enabling reliable progress even when direct minority supervision is scarce. 
+
+## 6 Conclusion and Broader Impact 
+
+Conclusion. We introduced Concordia , a federated adaptation framework for tabular prediction when institutions cannot share raw records, validation sets, or generators, and must learn from client local synthetic tables. Concordia closes a key gap in syn-thetic data enabled federated learning under heterogeneity because private imbalance aware validation utility becomes a training sig-nal without being centralized. Each client learns an on task utility scorer from local validation feedback to reweight synthetic batches for LoRA updates, while the server aggregates only task consis-tent LoRA deltas and redistributes scorer parameters as the utility proxy. Across finance and healthcare, including an extreme long tail task Travel with p about 0.01 and evaluation on an unseen med-ical site VA Long Beach, Concordia improves MCC and reduces cross round volatility. A generator audit shows refinement changes what is synthesized by preserving majority mode plausibility while Concordia : Self-Improving Synthetic Tables for Federated LLMs Conference’17, July 2017, Washington, DC, USA 
+
+strengthening coherent feature dependencies in finance, and sharp-ening multi feature risk conjunctions in healthcare, consistent with improved robustness under site shift. 
+
+Broader Impact. Concordia supports collaboration in regulated domains by keeping raw data, private validation sets, and generator parameters on premise, and may lower barriers for cross institution risk modeling and clinical decision support when labels are rare and institutions differ. However, synthetic data and parameter effi-cient updates do not remove privacy risk. Transmitted LoRA and scorer parameters may still leak information through membership inference or model inversion, and generators can memorize or am-plify local biases. We therefore view Concordia as an optimization framework rather than a complete privacy solution, and recom-mend secure aggregation, access control, and when appropriate clipping or noising of transmitted updates together with audits for subgroup fairness and bias amplification. Finally, the same capabil-ity could be misused for harmful risk scoring against vulnerable groups, so responsible use requires governance, documentation of intended use, and continual monitoring in deployment. 
+
+## References 
+
+[1] Fatima Abacha, Sin G. Teo, Lucas C. Cordeiro, and Mustafa A. Mustafa. 2024. Synthetic Data Aided Federated Learning Using Foundation Models. arXiv:2407.05174 [cs.LG] https://arxiv.org/abs/2407.05174 [2] Opeoluwa Akinseloyin, Xiaorui Jiang, and Vasile Paladel. 2025. Weakly Super-vised Active Learning for Abstract Screening Leveraging LLM-Based Pseudo-Labeling. In medRxiv . https://api.semanticscholar.org/CorpusID:280868109 [3] Sara Babakniya, Ahmed Roushdy Elkordy, Yahya H. Ezzeldin, Qingfeng Liu, Kee-Bong Song, Mostafa El-Khamy, and Salman Avestimehr. 2023. SLoRA: Federated Parameter Efficient Fine-Tuning of Language Models. ArXiv abs/2308.06522 (2023). https://api.semanticscholar.org/CorpusID:260887495 [4] Vadim Borisov, Kathrin Seßler, Tobias Leemann, Martin Pawelczyk, and Gjergji Kasneci. 2022. Language models are realistic tabular data generators. arXiv preprint arXiv:2210.06280 (2022). [5] Yujun Cheng, Weiting Zhang, Zhewei Zhang, Chuan Zhang, Shengjin Wang, and Shiwen Mao. 2025. Toward Federated Large Language Models: Motivations, Methods, and Future Directions. IEEE Communications Surveys & Tutorials 27 (2025), 2733–2764. https://api.semanticscholar.org/CorpusID:274196624 [6] Lynn Chua, Badih Ghazi, Yangsibo Huang, Pritish Kamath, Daogao Liu, Pasin Manurangsi, Amer Sinha, and Chiyuan Zhang. 2024. Mind the Privacy Unit! User-Level Differential Privacy for Language Model Fine-Tuning. ArXiv abs/2406.14322 (2024). https://api.semanticscholar.org/CorpusID:270620664 [7] Edward Collins and Michel Wang. 2025. Federated Learning: A Survey on Privacy-Preserving Collaborative Intelligence. ArXiv abs/2504.17703 (2025). https: //api.semanticscholar.org/CorpusID:278033793 [8] Liam Collins, Hamed Hassani, Aryan Mokhtari, and Sanjay Shakkottai. 2021. Exploiting Shared Representations for Personalized Federated Learning. ArXiv 
+
+abs/2102.07078 (2021). https://api.semanticscholar.org/CorpusID:231924497 [9] Robert C. Detrano, András Jánosi, Walter Steinbrunn, Matthias Emil Pfisterer, Johann-Jakob Schmid, Sarbjit Sandhu, Kern H Guppy, Stella Lee, and Victor Froelicher. 1989. International application of a new probability algorithm for the diagnosis of coronary artery disease. The American journal of cardiology 64 5 (1989), 304–10. https://api.semanticscholar.org/CorpusID:23545303 [10] Tao Fan, Yan Kang, Guoqiang Ma, Weijing Chen, Wenbin Wei, Lixin Fan, and Qiang Yang. 2023. FATE-LLM: A Industrial Grade Federated Learning Framework for Large Language Models. ArXiv abs/2310.10049 (2023). https: //api.semanticscholar.org/CorpusID:264145987 [11] Jack Goetz and Ambuj Tewari. 2020. Federated Learning via Synthetic Data. arXiv:2008.04489 [cs.LG] https://arxiv.org/abs/2008.04489 [12] Wenkai Guo, Xuefeng Liu, Haolin Wang, Jianwei Niu, Shaojie Tang, and Jing Yuan. 2025. Can Federated Learning Safeguard Private Data in LLM Training? Vulnerabilities, Attacks, and Defense Evaluation. ArXiv abs/2509.20680 (2025). https://api.semanticscholar.org/CorpusID:281526125 [13] Hans Hofmann. 1994. Statlog (German Credit Data). UCI Machine Learning Repository. DOI: https://doi.org/10.24432/C5NC77. [14] Hans Hofmann. 1994. Statlog (German Credit Data). UCI Machine Learning Repository. DOI: https://doi.org/10.24432/C5NC77. [15] Charlie Hou, Akshat Shrivastava, Hongyuan Zhan, Rylan Conway, Trang Le, Adithya Sagar, Giulia Fanti, and Daniel Lazar. 2024. PrE-Text: training language models on private federated data in the age of LLMs. In Proceedings of the 41st International Conference on Machine Learning . 19043–19061. [16] Charlie Hou, Mei-Yu Wang, Yige Zhu, Daniel Lazar, and Giulia Fanti. 2025. Private Federated Learning using Preference-Optimized Synthetic Data. arXiv preprint arXiv:2504.16438 (2025). [17] Edward J. Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, and Weizhu Chen. 2021. LoRA: Low-Rank Adaptation of Large Language Models. ArXiv abs/2106.09685 (2021). https://api.semanticscholar.org/CorpusID: 235458009 [18] Shengyuan Hu, Jack Goetz, Kshitiz Malik, Hongyuan Zhan, Zhe Liu, and Yue Liu. 2022. FedSynth: Gradient Compression via Synthetic Data in Federated Learning. arXiv:2204.01273 [cs.LG] https://arxiv.org/abs/2204.01273 [19] Akim Kotelnikov, Dmitry Baranchuk, Ivan Rubachev, and Artem Babenko. 2023. Tabddpm: Modelling tabular data with diffusion models. In International Confer-ence on Machine Learning . PMLR, 17564–17579. [20] Eugenio Lomurno and Matteo Matteucci. 2024. Federated Knowledge Recycling: Privacy-Preserving Synthetic Data Sharing. arXiv:2407.20830 [cs.LG] https: //arxiv.org/abs/2407.20830 [21] Brian W. Matthews. 1975. Comparison of the predicted and observed secondary structure of T4 phage lysozyme. Biochimica et biophysica acta 405 2 (1975), 442–51. https://api.semanticscholar.org/CorpusID:44596673 [22] Jaehyun Nam, Kyuyoung Kim, Seunghyuk Oh, Jihoon Tack, Jaehyung Kim, and Jinwoo Shin. 2024. Optimized Feature Generation for Tabular Data via LLMs with Decision Tree Reasoning. ArXiv abs/2406.08527 (2024). https: //api.semanticscholar.org/CorpusID:270440964 [23] Suman V. Ravuri and Oriol Vinyals. 2019. Classification Accuracy Score for Conditional Generative Models. ArXiv abs/1905.10887 (2019). https://api. semanticscholar.org/CorpusID:166228599 [24] Mengye Ren, Wenyuan Zeng, Binh Yang, and Raquel Urtasun. 2018. Learning to Reweight Examples for Robust Deep Learning. In International Conference on Machine Learning . https://api.semanticscholar.org/CorpusID:4321928 [25] Nicola Rieke, Jonny Hancox, Wenqi Li, Fausto Milletarì, Holger R. Roth, Shadi Albarqouni, Spyridon Bakas, Mathieu Galtier, Bennett A. Landman, Klaus H. Maier-Hein, Sébastien Ourselin, Micah J. Sheller, Ronald M. Summers, Andrew Trask, Daguang Xu, Maximilian Baust, and Manuel Jorge Cardoso. 2020. The future of digital health with federated learning. NPJ Digital Medicine 3 (2020). https://api.semanticscholar.org/CorpusID:212747909 [26] Maximilian Schmidhuber and Udo Kruschwitz. 2024. Llm-based synthetic datasets: Applications and limitations in toxicity detection. LREC-COLING 2024 
+
+(2024), 37. [27] Aivin V Solatorio and Olivier Dupriez. 2023. Realtabformer: Generating realistic relational and tabular data using transformers. arXiv preprint arXiv:2302.02041 
+
+(2023). [28] Josefa Lia Stoisser, Marc Boubnovski Martell, Kaspar Märtens, Lawrence Phillips, Stephen M. Town, Rory M. Donovan-Maiye, and Julien Fauqueur. 2025. Query, Don’t Train: Privacy-Preserving Tabular Prediction from EHR Data via SQL Queries. ArXiv abs/2505.21801 (2025). https://api.semanticscholar.org/CorpusID: 278960066 [29] Marika Swanberg, Ryan McKenna, Edo Roth, Albert Cheu, and Peter Kairouz. 2025. Is API Access to LLMs Useful for Generating Private Synthetic Tabular Data? arXiv preprint arXiv:2502.06555 (2025). [30] Alysa Ziying Tan, Han Yu, Li zhen Cui, and Qiang Yang. 2021. Towards Personal-ized Federated Learning. IEEE Transactions on Neural Networks and Learning Sys-tems 34 (2021), 9587–9603. https://api.semanticscholar.org/CorpusID:232076330 [31] Qwen Team. 2025. Qwen3 Technical Report. arXiv:2505.09388 [cs.CL] https: //arxiv.org/abs/2505.09388 [32] Jianwei Wang, Junyao Yang, Haoran Li, Huiping Zhuang, Cen Chen, and Ziqian Zeng. 2025. RewardDS: Privacy-Preserving Fine-Tuning for Large Language Models via Reward Driven Data Synthesis. arXiv preprint arXiv:2502.18517 (2025). [33] Yuxin Wang, Duanyu Feng, Yongfu Dai, Zhengyu Chen, Jimin Huang, Sophia Ananiadou, Qianqian Xie, and Hao Wang. 2024. Harmonic: Harnessing llms for tabular data synthesis and privacy protection. arXiv preprint arXiv:2408.02927 
+
+(2024). [34] Zezhou Wang, Yaxin Du, Xingjun Ma, Yu-Gang Jiang, Zhuzhong Qian, and Siheng Chen. 2024. Optimizing Cross-Client Domain Coverage for Federated Instruction Tuning of Large Language Models. Findings of the Association for Computational Linguistics: EMNLP 2025 (2024). https://api.semanticscholar.org/ CorpusID:272987142 [35] Futian Weng, Miao Zhu, Mike Buckle, peta hajek, and Mohammad Zoynul Abedin. 2024. Class Imbalance Bayesian Model Averaging for Consumer Loan Default Prediction: The Role of Soft Credit Information. Research in International Business and Finance (2024). https://api.semanticscholar.org/CorpusID:275048075 [36] Huiyu Wu and Diego Klabjan. 2024. LanFL: Differentially Private Federated Learning with Large Language Models using Synthetic Samples. arXiv preprint arXiv:2410.19114 (2024). [37] Bangzhou Xin, Yangyang Geng, Teng Hu, Sheng Chen, Wei Yang, Shaowei Wang, and Liusheng Huang. 2022. Federated synthetic data generation with differential privacy. Neurocomputing 468 (2022), 1–10. doi:10.1016/J.NEUCOM.2021.10.027 Conference’17, July 2017, Washington, DC, USA Huang et al.                          
+
+> [38] Lei Xu, Maria Skoularidou, Alfredo Cuesta-Infante, and Kalyan Veeramachaneni. 2019. Modeling tabular data using conditional gan. Advances in neural information processing systems 32 (2019). [39] Biwei Yan, Kun Li, Minghui Xu, Yueyan Dong, Yue Zhang, Zhaochun Ren, and Xiuzheng Cheng. 2024. On Protecting the Data Privacy of Large Language Models (LLMs): A Survey. arXiv preprint arXiv:2403.05156 (2024). [40] Jiahuan Yan, Jintai Chen, Chaowen Hu, Bo Zheng, Yaojun Hu, Jimeng Sun, and Jian Wu. 2024. Small Models are LLM Knowledge Triggers for Medical Tabular Prediction. In International Conference on Learning Representations . https: //api.semanticscholar.org/CorpusID:268248002 [41] Rui Ye, Rui Ge, Xinyu Zhu, Jingyi Chai, Yaxin Du, Yang Liu, Yanfeng Wang, and Siheng Chen. 2024. FedLLM-Bench: Realistic Benchmarks for Federated Learning of Large Language Models. ArXiv abs/2406.04845 (2024). https://api. semanticscholar.org/CorpusID:270357469 [42] Rui Ye, Wenhao Wang, Jingyi Chai, Dihan Li, Zexi Li, Yinda Xu, Yaxin Du, Yanfeng Wang, and Siheng Chen. 2024. OpenFedLLM: Training Large Language Models on Decentralized Private Data via Federated Learning. Proceedings of the 30th ACM SIGKDD Conference on Knowledge Discovery and Data Mining (2024). https: //api.semanticscholar.org/CorpusID:267627968 [43] Liping Yi, Han Yu, Gang Wang, and Xiaoguang Liu. 2023. FedLoRA: Model-Heterogeneous Personalized Federated Learning with LoRA Tuning. ArXiv
+> abs/2310.13283 (2023). https://api.semanticscholar.org/CorpusID:264405713 [44] Zilong Zhao, Aditya Kunar, Robert Birke, and Lydia Y Chen. 2021. Ctab-gan: Effective table data synthesizing. In Asian Conference on Machine Learning . PMLR, 97–112. [45] Tianyuan Zou, Yang Liu, Peng Li, Yufei Xiong, Jianqing Zhang, Jingjing Liu, Xiaozhou Ye, Ye Ouyang, and Ya-Qin Zhang. 2025. Contrastive Private Data Synthesis via Weighted Multi-PLM Fusion. arXiv preprint arXiv:2502.00245 (2025).
+
+## A Implementation Details 
+
+This section describes implementation details for reproducing Concordia, including the downstream model and LoRA configuration, client-local generators, scorers, GRPO refinement, and the federated pro-tocol. Unless otherwise stated, all methods use the same backbone capacity and the same per-round compute and communication budget. 
+
+## A.1 Backbone LLM and Downstream Formulation 
+
+Backbone. We use Qwen3-4B as the shared backbone for both the downstream tabular learner and the synthetic table generator. The backbone is initialized from the Qwen/Qwen3-4B repository at revision 1cfa9a7208912126459214e8b04321603b3df60c .
+
+Tabular task formulation. Each tabular record is serialized into a structured JSON-like representation (keys are double-quoted; values are numeric or unquoted categorical tokens) and paired with a task instruction that specifies binary classification and the label space. The downstream model is trained using causal LM loss over the label token (i.e., the model directly generates a label string such as healthy /unhealthy ). During evaluation, the deci-sion threshold is selected on the validation split to maximize MCC and then applied to the test split. 
+
+## A.2 Federated Protocol and Two-round Schedule 
+
+Clients and rounds. We run 𝑅 = 2 communication rounds. In healthcare, we simulate 𝑁 = 3 training clients (Cleveland, Hungary, Switzerland) under a single task identifier, with full participation in both rounds. In finance, we run three independent single-client streams (German, Lending Club, Travel), each treated as its own task identifier; hence aggregation is not applicable within each finance stream. At round 𝑟 , the server broadcasts the task backbone 𝜃 (𝑟 ) 
+
+> 𝜏
+
+to par-ticipating clients of task 𝜏 . Each participating client performs lo-cal LoRA adaptation on synthetic tables, updates its scorer using private validation feedback, refines its generator via GRPO, and uploads only its LoRA delta and scorer parameters. 
+
+Task-aware aggregation. Clients are associated with a task identifier 𝜏 , where label semantics define task groups . The server aggregates LoRA deltas only within the same task identifier using 
+
+uniform average . Generator parameters are never uploaded or aggregated. Scorers are collected and redistributed as a within-round pool and are not aggregated. 
+
+## A.3 LoRA Configuration and Local Optimization 
+
+LoRA modules. We apply LoRA to attention and MLP projections with rank 𝑟 = 16 , scaling 𝛼 = 32 , and dropout 0, targeting [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj] .All backbone parameters remain frozen. 
+
+Local steps and optimizer. Each client performs 𝑇 = 1500 
+
+local update steps per round (for a total of 3000 steps across two rounds). We use AdamW with learning rate 𝜂 = 5e-5 , weight decay 
+
+0, and batch size 4 synthetic samples per step. We set the maximum sequence length to 1024 tokens and use gradient clipping with norm 1.0 .
+
+## A.4 Client-local Synthetic Table Generator 
+
+Initialization. Each client maintains a client-local generator 𝐺 𝜃 (𝑖 )
+
+> 𝑔
+
+,initialized from the same checkpoint family as the backbone, using the instruct variant ( Qwen3-4B-Instruct family ). We do not 
+
+perform public instruction tuning for schema adherence. 
+
+Generation format. For each dataset, we construct a synthesis condition 𝑐 consisting of (i) schema/field list, (ii) five in-class exemplar records, and (iii) a task instruction with explicit label strings . The generator outputs a single serialized record in 
+
+JSON-like format. We validate outputs using the FormatReward 
+
+parser/reward (brace-block extraction + required key/label checks) and discard malformed samples. 
+
+Sampling parameters. We generate synthetic tables using tem-perature 1.0 , top-𝑝 0.95 , and maximum new tokens 512 . Each local update step samples 4 synthetic tables (matching the LoRA batch size). 
+
+## A.5 Scorer Model and Utility-weighted Training 
+
+Scorer architecture. Each client maintains a lightweight scorer 
+
+𝑆 𝜙 𝑖 that maps a serialized synthetic table to a scalar score. We im-plement the scorer by attaching a scorer LoRA adapter to the backbone and predicting a scalar from the final hidden represen-tation; the scorer adapter uses rank 𝑟 = 8, scaling 𝛼 = 16 , dropout 
+
+0.05 , targeting [q_proj, v_proj] .
+
+Input and representation. The scorer consumes only the JSON-like string . We reuse backbone representations by extract-ing the last layer hidden state (last-token pooling) as the scorer input. Concordia : Self-Improving Synthetic Tables for Federated LLMs Conference’17, July 2017, Washington, DC, USA 
+
+Weighting function. The scorer outputs a bounded value 𝑆 𝜙 𝑖 (𝑥 ) ∈ [− 1, 1] via tanh . For a mini-batch 𝑋 syn , we map scores to nonnega-tive weights by 
+
+𝑤 𝜙 𝑖 (𝑋 syn ) = Norm 
+
+
+
+clip 
+
+ 𝑆 𝜙 𝑖 (𝑥 ) + 12 , 𝑤 min , 𝑤 max 
+
+  
+
+> 𝑥 ∈𝑋 syn
+
+!
+
+,
+
+with (𝑤 min , 𝑤 max ) = (0.05 , 0.95 ) and Norm normalizing weights to sum to one within the mini-batch. 
+
+Scorer update frequency. We refresh scorer parameters every 
+
+𝑚 = 15 local LoRA steps. The validation utility is computed on the private validation set using Lval = 1 − MCC . We optimize the scorer with AdamW and learning rate 𝜂 𝜙 = 5e-5 .
+
+## A.6 Within-round Scorer Pool and Cross-client Evaluation 
+
+At the end of each round, participating clients upload scorer pa-rameters to the server. The server constructs a within-round scorer pool 
+
+S𝑟 = {𝑆 𝜙 𝑗 }𝑗 ∈ C 𝑟 ,
+
+and redistributes S𝑟 to all clients in C𝑟 . Scorers are used only for evaluation and are never fine-tuned on other clients’ data. To combine heterogeneous scorer outputs, we use mean pool-ing over group-normalized scores. Specifically, for a candidate group of size 𝐺 , each scorer contributes only a within-group rela-tive preference signal using rank normalization .
+
+## A.7 Generator Refinement with GRPO 
+
+Candidate groups. For each synthesis condition 𝑐 , the client sam-ples a group of 𝐺 = 8 candidate tables. We evaluate each candidate with the scorer pool and compute an ensemble reward using mean 
+
+over normalized scores. 
+
+Advantages and stabilization. We compute group-relative advantages by subtracting the within-group mean. We normalize advantages within each group and clip to 5.0 .
+
+GRPO objective details. We use a frozen reference policy equal to the generator snapshot at the beginning of each round and apply a KL penalty to stabilize updates. The GRPO update is sample-level: each completion receives a group-relative advantage computed from the composed reward, normalized within the group. We use a PPO-style clipped objective with clip range 0.2 and KL coefficient 0.01 (kept fixed across tasks). 
+
+GRPO updates. We update the client-local generator using GRPO with learning rate 𝜂 𝑔 = 1e-6 . Per round, we run 300 GRPO update steps over 600 synthesis conditions (batch size 2 prompts per step), using maximum prompt length 1024 , maximum completion length 512 , temperature 1.0 , and top-𝑝 0.95 . We use stop strings {}\n , }\r\n , }\n\n , }} and batch reward scaling. The generator is never uploaded. 
+
+## A.8 Random Seeds and Reporting 
+
+We report MCC as mean ± standard deviation over 3 random seeds (seed ∈ { 0, 1, 2}). Each seed controls synthetic prompt construc-tion and sampling, model/adapter initialization, data shuffling, and GRPO sampling. For each seed, we run exactly two communication rounds and evaluate after each round. We use the same number of synthetic samples and the same local optimization steps for all methods and ablations. 
+
+## B Prompts and Tabular Serialization 
+
+This section documents the tabular serialization format and the client-local prompting templates used for synthetic table genera-tion. 
+
+## B.1 Serialization Format 
+
+Each record is serialized into a JSON-like format with a single record per sample. We use a fixed key order to avoid format drift across rounds. Missing values are encoded as nan . Categorical val-ues are represented as unquoted tokens (e.g., good , bad ) and continuous values are represented with 4 decimal places .
+
+Task-specific instructions (verbatim). 
+
+Heart disease                      
+
+> Predict whether the patient has heart disease using the features below: Age, Sex, ChestPainType, RestingBloodPressure, Cholesterol, FastingBloodSugar, RestingECG, MaxHeartRate, ExerciseInducedAngina, OldPeak, PeakExerciseSTSegmentSlope, NumberOfVesselsColored, and ThalassemiaStatus. Directly respond with ’unhealthy’ if the patient has heart disease or ’healthy’ if they do not.
+
+Credit risk                    
+
+> Predict whether the loan applicant is a credit risk using the features below. Directly respond with ’bad’ if the applicant is abad credit risk or ’good’ if they are agood credit risk.
+
+Loan status          
+
+> Predict the loan status using the features below. Directly respond with ’fullypaid’ if the loan is fully repaid or ’chargeoff’ if the loan is charged off.
+
+Insurance claim 
+
+> Predict whether the customer will file an insurance claim based on the features below. Directly respond with ’yes’ if the customer is likely to make a claim, or ’no’ if the customer is unlikely to make a claim.
+
+## B.2 Synthesis Condition 
+
+For each client, the synthesis condition includes the schema (field list), in-class exemplar records, and the task specification. The task specification defines the prediction target and the label format, e.g., healthy/unhealthy (heart disease), good/bad (credit risk), 
+
+fullypaid/chargeoff (loan status), and yes/no (insurance claim). 
+
+## B.3 Generator Prompt Template 
+
+We use the following client-local prompt template (5-shot in-class exemplars): 
+
+System: You are a data synthesis assistant. Output only one valid JSON-like object that matches the schema. 
+
+User: Here are five entries of tabular data in JSON format, each consisting of 𝑛 features. Each feature is Conference’17, July 2017, Washington, DC, USA Huang et al. 
+
+described as “ "feature name": value ”. The target feature label is a classification task. 
+
+User: sample one: . . . (5 exemplars) 
+
+User: Directly generate only one new final sample in JSON format that approximates the key patterns observed in the provided samples. 
+
+Assistant: { ... } 
+
+We apply a strict parser/reward (FormatReward) to the output and discard malformed generations. 
+
+## C Communication and Compute Cost C.1 Communication Payload 
+
+Each client uploads (i) the downstream LoRA delta Δ𝜃 𝑖 and (ii) the scorer parameters 𝜙 𝑖 . We communicate only a scorer LoRA adapter + scalar scorer head ; the scorer backbone is the shared public LLM checkpoint (no task head, no full scorer weights; gen-erators are never transmitted). Using bf16 transmission (2 bytes/pa-rameter), for Qwen3-4B ( 𝐿 =36 , 𝑑 =2560 ): 
+
+𝑃 lora = 33,030,144 ,𝑃 s = 4𝐿𝑟 𝑠 𝑑 = 2,949,120 ,𝑃 head = 𝑑 + 1 = 2,561 .
+
+Uplink (client → server). Per-client uplink: 
+
+2 (𝑃 lora + 𝑃 s + 𝑃 head ) = 71.96 MB (68.64 MiB ),
+
+so with |C 𝑟 |=3 clients the total uplink per round is 215.89 MB 
+
+(205.93 MiB ). 
+
+Downlink (server → clients). Per-client backbone broadcast (ag-gregated LoRA delta): 
+
+2𝑃 lora = 66.06 MB (62.99 MiB ).
+
+If the within-round scorer pool is redistributed, each client receives the other |C 𝑟 | − 1 scorers: 
+
+2(|C 𝑟 | − 1)( 𝑃 s + 𝑃 head ) = 11.81 MB (11.26 MiB ) for |C 𝑟 |=3.
+
+We exclude one-time distribution of the shared backbone check-point. 
+
+## D Privacy Discussion and Threat Model D.1 What Remains Local 
+
+Raw training records, private validation sets, and generated syn-thetic tables remain on the client. Generator parameters remain on the client and are never uploaded. Communication is restricted to (i) downstream LoRA deltas for the task backbone and (ii) scorer parameters. 
+
+## D.2 Scorer Sharing and Privacy Boundary 
+
+Scorers are shared as evaluators to enable validation-aligned co-ordination without centralizing any validation data. Crucially, a communicated scorer does not include a separate task head or the full scorer LLM weights: all parties share the same public backbone checkpoint, and each client only transmits a scorer LoRA adapter 
+
+plus a scalar scorer head . This significantly reduces the communi-cated surface compared to sharing full evaluator models, while still enabling cross-client preference signals for generator refinement. That said, the scorer remains a learned model component and could in principle leak information about the client distribution under strong adversarial assumptions. We therefore treat scorer sharing as a pragmatic privacy tradeoff: it avoids transmitting raw validation examples and generator parameters, but introduces a limited model-sharing surface.
