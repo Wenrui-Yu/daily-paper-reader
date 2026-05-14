@@ -6,49 +6,46 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-13
-- 运行时间：2026-05-13 20:25:12 UTC
+- 最新运行日期：2026-05-14
+- 运行时间：2026-05-14 20:53:58 UTC
 - 运行状态：成功
-- 本次总论文数：9
-- 精读区：6
+- 本次总论文数：8
+- 精读区：5
 - 速读区：3
 
 ### 今日简报（AI）
-今日深挖差分隐私优化核心理论，重点解析了本地标签隐私下的凸优化紧界与 DP-SGD 最优采样机制。
-研究证实了优化采样方案能显著提升隐私效能，并同步探讨了联邦学习在乳腺异质性医疗场景下的实战表现。
-建议开发者关注隐私计算与图存储检索的结合，从底层算法优化入手平衡系统安全与检索效率。
-- 详情：[/202605/13/README](/202605/13/README)
+今日精选 8 篇前沿论文，深度聚焦联邦学习安全聚合与差分隐私深度学习的效能突破。
+满分力作 DisAgg 提出分布式聚合新架构，配合 DP-KFC 的无数据预处理技术，显著优化了隐私计算的效率与精度。
+建议优先研读这两项高分成果，快速掌握安全分布式计算与隐私保护学习的最新演进方向。
+- 详情：[/202605/14/README](/202605/14/README)
 
 ### 精读区论文标签
-1. [Convex Optimization with Local Label Differential Privacy: Tight Bounds in All Privacy Regimes](/202605/13/2605.10200v1-convex-optimization-with-local-label-differential-privacy-tight-bounds-in-all-privacy-regimes)  
-   标签：评分：9.5/10、query:daily
-   evidence：本地标签差分隐私约束下的随机凸优化
-2. [Less Random, More Private: What is the Optimal Subsampling Scheme for DP-SGD?](/202605/13/2605.07072v1-less-random-more-private-what-is-the-optimal-subsampling-scheme-for-dp-sgd)  
+1. [DisAgg: Distributed Aggregators for Efficient Secure Aggregation in Federated Learning](/202605/14/2605.13708v1-disagg-distributed-aggregators-for-efficient-secure-aggregation-in-federated-learning)  
+   标签：评分：10.0/10、query:daily
+   evidence：联邦学习中的安全聚合，保护客户端更新不被服务器获取
+2. [DP-KFC: Data-Free Preconditioning for Privacy-Preserving Deep Learning](/202605/14/2605.13418v1-dp-kfc-data-free-preconditioning-for-privacy-preserving-deep-learning)  
    标签：评分：9.0/10、query:daily
-   evidence：差分隐私机器学习的最优子采样方案
-3. [Deep Learning under Fractional-Order Differential Privacy](/202605/13/2605.09890v1-deep-learning-under-fractional-order-differential-privacy)  
+   evidence：具有无数据预处理的差分隐私优化，旨在改善收敛性
+3. [FedHPro: Federated Hyper-Prototype Learning via Gradient Matching](/202605/14/2605.13475v1-fedhpro-federated-hyper-prototype-learning-via-gradient-matching)  
    标签：评分：9.0/10、query:daily
-   evidence：分数阶差分隐私随机梯度下降 (FO-DP-SGD)
-4. [Reinforcement Learning for Scalable and Trustworthy Intelligent Systems](/202605/13/2605.08378v1-reinforcement-learning-for-scalable-and-trustworthy-intelligent-systems)  
-   标签：评分：8.5/10、query:daily
-   evidence：强化学习中的联邦优化和隐私感知信息披露
-5. [MemPrivacy: Privacy-Preserving Personalized Memory Management for Edge-Cloud Agents](/202605/13/2605.09530v2-memprivacy-privacy-preserving-personalized-memory-management-for-edge-cloud-agents)  
-   标签：评分：8.5/10、query:daily
-   evidence：边缘云代理的隐私保护个性化记忆管理
-6. [Secure and Private Structured-Subset Retrieval: Fundamental Limits and Achievable Schemes](/202605/13/2605.09368v2-secure-and-private-structured-subset-retrieval-fundamental-limits-and-achievable-schemes)  
+   evidence：联邦学习在保护隐私的同时实现协作训练
+4. [A Comparative Study of Federated Learning Aggregation Strategies under Homogeneous and Heterogeneous Data Distributions](/202605/14/2605.11010v1-a-comparative-study-of-federated-learning-aggregation-strategies-under-homogeneous-and-heterogeneous-data-distributions)  
    标签：评分：8.0/10、query:daily
-   evidence：从复制服务器进行安全且隐私的检索
+   evidence：分布式环境中的联邦学习聚合策略
+5. [Byzantine-Robust Distributed Sparse Learning Revisited](/202605/14/2605.13283v1-byzantine-robust-distributed-sparse-learning-revisited)  
+   标签：评分：8.0/10、query:daily
+   evidence：高维稀疏线性模型的拜占庭鲁棒分布式估计
 
 ### 速读区论文标签
-1. [Evaluating Federated Learning approaches for mammography under breast density heterogeneity](/202605/13/2605.09137v1-evaluating-federated-learning-approaches-for-mammography-under-breast-density-heterogeneity)  
+1. [Unlearning with Asymmetric Sources: Improved Unlearning-Utility Trade-off with Public Data](/202605/14/2605.11170v1-unlearning-with-asymmetric-sources-improved-unlearning-utility-trade-off-with-public-data)  
+   标签：评分：7.5/10、query:daily
+   evidence：利用公共数据减轻机器遗忘中的隐私成本
+2. [Local Private Information Retrieval: A New Privacy Perspective for Graph-Based Replicated Systems](/202605/14/2605.10872v1-local-private-information-retrieval-a-new-privacy-perspective-for-graph-based-replicated-systems)  
    标签：评分：7.0/10、query:daily
-   evidence：评估用于乳腺摄影图像分类的联邦学习方法
-2. [Local Private Information Retrieval: A New Privacy Perspective for Graph-Based Replicated Systems](/202605/13/2605.10872v1-local-private-information-retrieval-a-new-privacy-perspective-for-graph-based-replicated-systems)  
-   标签：评分：7.0/10、query:daily
-   evidence：基于图的副本系统的隐私视角和本地用户隐私
-3. [Private Information Retrieval With Arbitrary Privacy Requirements for Graph-Based Storage](/202605/13/2605.10879v1-private-information-retrieval-with-arbitrary-privacy-requirements-for-graph-based-storage)  
-   标签：评分：7.0/10、query:daily
-   evidence：针对图存储的具有任意隐私要求的隐私信息检索
+   evidence：基于图的复制系统中的本地用户隐私
+3. [Verifying Exact Samplers for Continuous Distributions with a Discrete Program Logic](/202605/14/2605.13526v1-verifying-exact-samplers-for-continuous-distributions-with-a-discrete-program-logic)  
+   标签：评分：6.0/10、query:daily
+   evidence：差分隐私算法中的安全问题
 
 
 <div class="dpr-home-promo-card">

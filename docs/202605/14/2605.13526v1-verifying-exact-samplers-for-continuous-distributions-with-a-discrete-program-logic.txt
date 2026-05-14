@@ -1,0 +1,2625 @@
+Title: Verifying Exact Samplers for Continuous Distributions with a Discrete Program Logic
+
+URL Source: https://arxiv.org/pdf/2605.13526v1
+
+Published Time: Thu, 14 May 2026 01:17:21 GMT
+
+Number of Pages: 36
+
+Markdown Content:
+# Verifying Exact Samplers for Continuous Distributions with a Discrete Program Logic 
+
+## Markus de Medeiros # 
+
+New York University, USA 
+
+## Puming Liu # 
+
+NYU Shanghai, China 
+
+## Kwing Hei Li # 
+
+Aarhus University, Denmark 
+
+## Alejandro Aguirre # 
+
+Aarhus University, Denmark 
+
+## Lars Birkedal # 
+
+Aarhus University, Denmark 
+
+## Joseph Tassarotti # 
+
+New York University, USA 
+
+Abstract 
+
+Most implementations of sampling algorithms for continuous distributions use floating-point numbers, which introduce round-off errors and approximations. These errors can be difficult to analyze, and can cause security issues when used in algorithms for differential privacy. An alternative is to use exact sampling algorithms based on computable reals, which can lazily generate the digits of a continuous sample to arbitrary precision. However, these algorithms are intricate, and implementing and using them involves a combination of semantically challenging language features, such as probabilistic choice, higher-order functions, and dynamically-allocated mutable state. In this paper we present Continuous-Eris, a higher-order separation logic for verifying the correctness of exact sampling algorithms for computable distributions. To demonstrate Continuous-Eris, we verify the correctness of computable samplers for the uniform, Gaussian, and Laplace distributions, as well as a library for exact real arithmetic for working with generated samples. All of the results in this paper have been verified in the Rocq proof assistant. 
+
+2012 ACM Subject Classification Theory of computation → Logic and verification; Theory of computation → Program verification; Theory of computation → Probabilistic computation 
+
+Keywords and phrases Probabilistic Programming, Separation Logic, Formal Verification 
+
+Funding This work was supported in part by the National Science Foundation, grant no. 2338317, a Villum Investigator grant, no. 25804, Center for Basic Research in Program Verification (CPV), from the VILLUM Foundation, and the European Union (ERC, CHORDS, 101096090). Views and opinions expressed are however those of the author(s) only and do not necessarily reflect those of the European Union or the European Research Council. Neither the European Union nor the granting authority can be held responsible for them. Joseph Tassarotti is also employed by Amazon Web Services (AWS). This work does not reflect the views of AWS and is not connected to any products or services provided by AWS. 
+
+## 1 Introduction 
+
+When computing with real-valued data, floating-point numbers are commonly used. Because of their bounded precision, operations on floating-point numbers inevitably introduce round-off errors. For many applications, minor approximation errors are acceptable, and an expert who understands floating-point arithmetic can design algorithms to minimize such errors. 2 Verifying Exact Samplers for Continuous Distributions with a Discrete Program Logic 
+
+U _ ≜ (ref None , tape 1) 
+
+ForceNext ℓ α ≜ match ! ℓ with 
+
+| Some (b, ℓ ′) ⇒ (b, ℓ ′)
+
+| None ⇒ let b := rand α 1 in let ℓ′ := ref None in 
+
+ℓ ← Some (b, ℓ ′); ; (b, ℓ ′)
+
+end GetBits ℓ α N A ≜ if N = 0 then A else let (b, ℓ ′) := ForceNext ℓ α in GetBits ℓ′ α (N − 1) (2 ∗ A + b)   
+
+> Figure 1 A lazy exact sampler for the uniform distribution over the interval [0 ,1] , and a client
+> GetBits .
+
+However, for non-experts, the behaviors of floating-point arithmetic can sometimes be confusing, and in some applications, it is difficult to understand how much approximation error a computation introduces. These floating-point errors can even lead to critical bugs or security issues. For example, differentially private algorithms are often formally developed under the assumption that arithmetic is carried out exactly, and the presence of floating-point errors can lead to private information leakage [44]. One alternative approach, which avoids round-off error, is to use algorithms for exact real arithmetic over computable real numbers. A number of different styles of exact real arithmetic exist, but the high level idea behind these approaches is to represent a real number by a function f which can be queried to get increasingly more precise approximations of the number. Arithmetic operations on these numbers are higher-order programs, returning new functions which approximate the result of a real-valued operation in terms of approximations of its arguments. This idea has its origins in constructive mathematics and the earliest days of computer science, and has been well-studied from both a theoretical perspective [ 47 , 20 ,24 , 50 , 53 ] and an applied point of view, with several different implementations of exact reals as libraries or as built-in features of programming languages [42, 36, 10, 45, 6]. What is less well-known is that by representing real numbers as functions, it is also possible to generate exact samples from continuous probability distributions. Several algorithms exist for converting an infinite sequence of uniform Bernoulli samples into exact samples from the uniform distribution over the interval [0 , 1] , the exponential distribution, and the Gaussian distribution, among others. Using these algorithms, it becomes possible to do Monte Carlo simulations or other calculations with continuous random samples without approximations or round-off errors. Figure 1 shows a simple implementation of an algorithm that lazily samples an exact value from the uniform distribution over the interval [0 , 1] , written in an ML-like language (for now, ignore the code printed in a light gray color). The algorithm stores the sampled value as a mutable linked list of bits which represent the binary digits of the number that have been sampled so far. The sampling function U simply creates an empty list, encoded as a reference cell containing None , representing that no bits have yet been sampled. Given a value ℓ sampled using U, we can access approximations of the sampled value using 
+
+GetBits , which returns the first N bits of the sample as a big-endian integer. To calculate this approximation, GetBits traverses the linked list using a helper function ForceNext , which takes M. de Medeiros, P. Liu, K. H. Li, A. Aguirre, L. Birkedal and J. Tassarotti 3
+
+a pointer ℓ to the next cell in the list as an argument. The ForceNext function dereferences the pointer to check whether the next cell in the list exists, and if so, returns it. Otherwise, if the next pointer contains None , then we have reached the end of the list, so ForceNext 
+
+samples a new Bernoulli value with the command rand 1, which returns 0 or 1 with equal probability. It then appends the sampled value to the end of the linked list. As we will see later (§2), using this GetBits function it is possible to convert this lazily sampled uniform deviate into a form that is compatible with existing libraries for computable real arithmetic, such as CReal [21]. Why is this algorithm correct, and in what sense do the programs U and GetBits sample a uniform value from [0 , 1] ? At a high level, it is a standard fact from measure theory that an infinite sequence of Bernoulli samples, when interpreted as the binary digits of a real number, is equivalent to a uniform sample over [0 , 1] . But formally applying this argument to justify the code above is challenging. First, the algorithm involves a combination of language features whose semantics are challenging to model and hard to reason about. It directly combines mutable state, dynamically allocated pointers, and random choice. If we wish to further reason about how these samples are used with constructive real libraries like CReal, then we must also consider a setting with higher-order functions. Second, since the bits of the number are sampled lazily, at no point does our program actually obtain an infinite sequence of Bernoulli samples. Yet we would still like to reason about U as if it samples a uniform real value r ∈ [0 , 1] , in the sense that all calls to GetBits are just returning the digits of the binary expansion of r.To the best of our knowledge, no techniques from prior work are able to verify an algorithm like the above. While there has been extensive work on reasoning about probabilistic programs and verifying the correctness of sampling algorithms, prior work either restricts to discrete distributions [ 41 , 16 , 3] or assumes the existence of primitives for sampling from continuous distributions [39, 14, 31, 30, 49] and works with non-computable real arithmetic. To address this gap, we present Continuous-Eris, a higher-order separation logic which is capable of verifying the algorithm above, as well as other challenging exact samplers for continuous distributions. This is possible due to a synchronicity between two concepts: continuous distributions are approximable by discrete distributions, and nonterminating programs are approximable by terminating traces. In particular, by adding a variant of time receipts [43 ] to the Eris [ 2 ] program logic, we can exploit this coincidence to obtain a program logic with continuous reasoning principles for computable, discrete sampling algorithms. In summary, we present A program logic for verifying computable continuous sampling algorithms using error credits and time receipts ,A formally verified implementation of exact Gaussian, exponential, and Laplace sampling, and A formal proof that our Laplace sampler satisfies an accuracy bound used in the differential privacy literature. The results in this paper have been mechanized [ 15 ] in the Rocq proof assistant, building on the Iris separation logic framework [37] and the Coquelicot real analysis library [11]. 1  
+
+> 1Our development admits as axioms two standard facts about the Riemann integral that are missing from Coquelicot, but is otherwise fully verified. These axioms are Fubini’s theorem for continuous functions and that the postcomposition of an integrable function by a continuous function is integrable.
+
+4 Verifying Exact Samplers for Continuous Distributions with a Discrete Program Logic 
+
+C′ ℓ1 α1 ℓ2 α2 ≜ let (b1, ℓ ′
+
+> 1
+
+) := ForceNext ℓ1 α1 in let (b2, ℓ ′
+
+> 2
+
+) := ForceNext ℓ2 α2 in if b1 < b 2 then − 1 else if b1 > b 2 then 1 else C′ ℓ′ 
+
+> 1
+
+α1 ℓ′ 
+
+> 2
+
+α2
+
+CmpU (ℓ1, α 1) ( ℓ2, α 2) ≜ if ℓ1 = ℓ2 then 0 else C ′ ℓ1 α1 ℓ2 α2
+
+MaxU2 _ ≜ let x := U _ in let y := U _ in if CmpU x y < 0 then y else x    
+
+> Figure 2 The maximum of two uniform [0 ,1] samples.
+
+## 2 Key Ideas 
+
+To illustrate the key concepts of Continuous-Eris, we will verify the MaxU2 program in Figure 2. The program MaxU2 draws two uniform deviates x and y using U and returns their maximum value. To find the maximum, MaxU2 calls the helper function CmpU , which determines the greater of two samples by comparing their bits in order, sampling to a higher precision if needed. A standard exercise in probability theory is to prove that the value returned from the procedure is distributed over [0 , 1] with probability density function 
+
+μmax (x) ≜ 2x. In this section we will demonstrate the key principles of Continuous-Eris by formally verifying this fact. 
+
+## 2.1 Primer: Eris 
+
+Continuous-Eris is an extension of Eris [ 2], a program logic for verifying the approximate correctness of discrete probabilistic programs. Eris is based on the Iris [37] separation logic framework, and uses techniques from Iris to support reasoning about programs which combine randomness, unbounded recursion, higher-order functions, and state. The algorithms we verify in this paper use all of these features extensively, making Eris a good starting point. The core construct in Eris is the error credit , a separation logic resource E(r) (for r ∈ R≥0)which can be “spent” to exclude an event whose probability is at most r. The Eris adequacy theorem says that, for any predicate P over values, a proof of {E(ε)} e {v. P (v)} implies that the probability of the program e terminating with a value that does not satisfy P is at most 
+
+ε. Importantly, Eris is a partial correctness logic, so this statement implies nothing about the termination probability of e.Error credit assertions are used with the following rules: 
+
+1. Spending : E(1) ⊢ ⊥ . The intuition is that a credit is an upper bound on the probability that a specification fails to hold, and an upper bound of 1 on a probability is trivial. 
+
+2. Splitting : E(ε1 + ε2) ⊣⊢ E(ε1) ∗ E(ε2). This allows for splitting and joining error credits like other separation logic resources. 
+
+3. Conditioning : The value of an error credit can be conditioned on the outcome of a random sample drawn with the command rand N , provided that the expected value of the error credit is preserved: 
+
+{E(EUN [E]) } rand N {t. E(E(t)) ∗ t ∈ { 0, . . . , N }} (1) The rand N command returns an integer from the set {0, . . . , N } uniformly, and UN is the uniform distribution over that set. M. de Medeiros, P. Liu, K. H. Li, A. Aguirre, L. Birkedal and J. Tassarotti 5
+
+Error credits also inherit the rules of the underlying Iris separation logic, such as the frame rule. Since Iris is an affine logic, excess error credits can be “dropped” or go unused. To demonstrate how error credits work in practice, we will show how to spend E(1 /4) 
+
+from a E(1 /2) error budget to exclude an event with probability 1/4, as captured by the following specification: 
+
+{E(1 /2) } rand 3 {t. E(1 /4) ∗ t̸ = 0 }. (2) First, we use the splitting rule to break our credit into two parts. 
+
+E(1 /2) ⊢ E(1 /4) ∗ E(1 /4) .
+
+The first credit will be framed across the call to rand 3. For the second credit, set E(x) ≜
+
+[x = 0] , where the Iverson bracket [P ] has value 1 if P holds, and 0 otherwise. Note that 
+
+EU3[E] = 1 /4. So, using the conditioning and frame rules we get 
+
+{E(1 /4) ∗ E(EU3[E]) } rand 3 {t. E(1 /4) ∗ E(E(t)) ∗ t ∈ { 0, . . . , 3}} 
+
+Now we perform case analysis on t. In the cases where t̸ = 0 , we can continue the proof using the remaining E(1 /4) budget as desired. When t = 0 we have that E(0) = 1 , so that 
+
+E(E(0)) ⊢ ⊥ by the spending rule, allowing us to conclude. 
+
+## 2.2 Correctness of Discrete Samplers via Error Credits 
+
+As described above, Eris’s adequacy theorem allows us to use error credits to upper bound the probability that a postcondition on the return value will fail to hold. At first, it may appear that only being able to prove such upper bounds is a strong restriction on the kinds of probabilistic behaviors we can specify using Eris. However, by considering more general classes of postconditions, one can completely characterize the distribution of values that a program may return. In particular, Marionneau et al. [ 41 ] have shown that Eris satisfies a stronger soundness theorem that can be used to prove the correctness of sampling algorithms for discrete distributions. The key insight is that the conditioning rule for the rand command captures the essence of the fact that rand samples from the uniform distribution. Turning this around, Marionneau et al. show that to prove that an arbitrary program e samples from a discrete distribution μ,it suffices to prove a specification about e which looks like a generalized version of (1): 
+
+∀F ∈ B (T ), {E(Eμ[F ]) } e {t. E(F (t)) } (3) where B(T ) is the set of bounded functions T → R≥0. Informally, this specification states that e behaves like a random event with probability distribution μ, in the sense that we can condition error credits on the outcome of e provided the average value stays the same. To justify why a specification of the form in (3) suffices to prove that e generates samples with distribution μ, we can consider two instantiations of the above specification for each value 
+
+t ∈ T : first where F is instantiated by It(x) ≜ [x̸ = t] and second by It(x) ≜ [x = t]. By applying the Eris adequacy theorem to the first instantiation, we get that the probability that μ(t) samples a value other than t is at most 1 − μ(t), and from the second instantiation we have that the probability that it samples t is at most μ(t). If e terminates with probability 
+
+1, then by combining these inequalities, we have the probability that e returns t is exactly 
+
+μ(t), as desired. When deriving specifications of the form in (3) , one is no longer reasoning about the probability of error of a particular event. Instead, the proof involves characterizing the 6 Verifying Exact Samplers for Continuous Distributions with a Discrete Program Logic 
+
+expected value of an arbitrary bounded function F applied to the return values of e. Error credits just become a way to systematically track how the steps of e transform that expected value. A key benefit of this technique is that, not only does it show that a random sampler is correct, it does so in a way that can be used compositionally as part of a larger Eris proof. In particular, once one has a specification of the form (3) , one can reason about e in the logic as if it sampled from μ. Marionneau et al. [ 41 ] prove such specifications for a range of discrete sampling routines and show how they can be used for modular reasoning. However, because their results and approach were restricted to discrete distributions, they cannot be used directly to verify samplers for continuous distributions like U. Our results show how to generalize their approach to handle continuous distributions. 
+
+## 2.3 From Discrete to Continuous 
+
+To state the correctness of continuous samplers, we further generalize the pattern from (3) .In place of expectations over discrete distributions, which are countable series, we instead use expectations over continuous distributions, as represented by a Riemann integral over a probability density function. 2 For example, in the case of the uniform distribution over [0 , 1] ,the density function is just p(x) = 1 , and so the specification pattern that we will prove for 
+
+U has the form: 
+
+∀F ∈ PC ([0 , 1]) ,
+
+{
+
+E
+
+(∫ 10 F (x) dx 
+
+)} 
+
+U () {v. ∃r. E(F (r)) ∗ IsReal v r }. (4) Here, PC ([0 , 1]) is the set of bounded, piecewise-continuous functions [0 , 1] → R≥0, and IsReal 
+
+is a predicate stating that v is a representation of the real number r (we will define IsReal 
+
+later in this section). Piecewise continuity ensures that the Riemann integral exists. Like in the discrete setting, equation (4) allows us to condition credits around a call to U as if it returned a real number r ∈ [0 , 1] uniformly at random. Clients of U will be able to use this conditioning modularly as part of larger correctness and approximate correctness arguments (§4 and §5). Finally, as we will see later in §3, a specification of this form indeed captures what it means for the program to sample uniformly over the continuous distribution, in the sense that all approximants it returns are distributed with the correct probability. But how can we prove such a specification in the first place? There are several challenges. First, as we previously discussed, at the time U returns, no values have actually been sampled yet, so how can we condition on some value r being selected? Second, the primitive conditioning rule for rand is a discrete sum, yet the above involves an integral. Finally, we need to formally define what it means for the function v to represent the uniform deviate r
+
+in Eris, with the IsReal predicate. To address these issues, Continuous-Eris combines three ideas from previous logics. First, 
+
+pre-sampling tapes from Clutch [26], allow us to, as a proof device, pre-determine what the sampled values from future rand commands will be. With this we can pre-sample the bits that constitute the real number at the time that U is called. However, Clutch’s pre-sampling tapes only allow for pre-sampling a finite number of values in advance, yet the binary expansion of the sampled value r could have an infinite number of digits that are generated by calls to 
+
+ForceNext . 
+
+> 2We use Riemann integrals instead of Lebesgue integrals because they suffice for the examples we consider here and are simpler to mechanize.
+
+M. de Medeiros, P. Liu, K. H. Li, A. Aguirre, L. Birkedal and J. Tassarotti 7
+
+To overcome this, we exploit the fact that Eris is a partial correctness logic, and adapt the idea of time receipts to internalize this partiality in the logic [43]. Because of partiality, in any given execution that we reason about, we only need to consider up to some number 
+
+k of steps, where k is arbitrary but bounded. Since producing a new digit in the binary expansion takes at least one step, an execution of length k cannot observe more than k bits, so we only need to pre-sample k values to know all of the bits that could eventually be seen in that execution. Finally, by pre-sampling enough bits, we can get a Riemann sum with the conditioning rule that is arbitrarily close to the integral in (4) . Using the thin-air error credit rule proposed by Li et al. [ 40 ], we can logically pay for the discretization error that arises in passing from the sum to the integral. The remainder of this subsection outlines these three ingredients and how they are used to derive the specification (4). 
+
+Pre-sampling tapes 
+
+Pre-sampling tapes (or tapes ) were introduced in Clutch [ 26 ] as a proof device for representing knowledge about the random events in a program’s future. The operational semantics for tapes will be outlined in §3.1, here we focus on the proof rules they enable. In the logic, a tape is a separation logic resource α ↪ → (N,⃗ n ) representing the knowledge that all rand 
+
+commands marked with tape label α (denoted rand α N ) will draw their next |⃗n| samples from the finite list ⃗n , in order. This is captured by the rule for rand , which says that the returned value will be the head of the tape. 
+
+{α ↪ → (N, n ·⃗n)} rand α N {v. v = n ∗ α ↪ → (N,⃗ n)}
+
+We can presample a new value to the end of the tape, using the following rule, which allows us to condition error credits similarly to (1): 
+
+{∃ n. α ↪ → (N,⃗ n · n) ∗ E(E(n)) ∗ P } e {Q}{α ↪ → (N,⃗ n) ∗ E(EUN [E]) ∗ P } e {Q} (5) By repeatedly applying this rule, we can pre-sample a finite number of values to a tape, that will then later be consumed by calls to rand .The gray code in Figure 1 generates a fresh tape α for each uniform deviate returned by U.Intuitively we would like to presample an infinite sequence of bits representing some number 
+
+r onto this tape: doing so would mean that all future calls to GetBits will deterministically return approximations of a single real number r, and as a consequence, we could condition our error credits based on the value r takes. Note however that presampling tapes can only contain a finite list of values. We will now turn our attention to simulating infinite presampling operations using only finite tapes. 
+
+Time Receipts 
+
+Time receipts were introduced to separation logic by Mével et al. [ 43 ] to eliminate reasoning about program behaviors that would take an infeasibly long amount of time to occur ( e.g .overflowing a 64 bit counter). In Continuous-Eris we adapt this idea to internalize the fact that the logic is partial, so that we do not need to reason about diverging executions. Specifically, we introduce an assertion of the form StepsLeft (k) establishing that k is an upper 8 Verifying Exact Samplers for Continuous Distributions with a Discrete Program Logic 
+
+bound on the steps left that we will reason about in the program, which must always be nonnegative, i.e., k < 0 → StepsLeft (k) ⊢ ⊥ . This is introduced using the following rule: 
+
+∀k. {StepsLeft (k) ∗ P } e {Q}{P } e {Q} (6) Read from bottom to top, applying this rule gives us StepsLeft (k) for some arbitrary k. Since we must prove the result for all possible values of k, this ensures we consider all finite prefixes of possible executions. Each step taken by the program generates a new time receipt resource Û (1) . Time receipt resources combine additively like error credits, and can be spent to decrease the global runtime bound: 
+
+StepsLeft (n) ∗ Û (m) ∗ StepsLeft (n − m).
+
+With this in hand, we can construct a resource which provides the illusion of an infinite presampling tape. If we know we are reasoning about an execution that can be at most k
+
+more steps, and the tape already has k values on it, then any additional values can never be observed. We define an assertion to represent a tape containing an infinite binary sequence, as represented by a function f : N → { 0, 1}.
+
+InfiniteTape α f ≜ ∃k,⃗ n. α ↪ → (1; ⃗n) ∗ StepsLeft (k) ∗ k < |⃗n| ∗ ∀ i. i < k →⃗n[i] = f (i)
+
+This assertion says that, under the hood, there is a real tape with at least k samples which match the first k values of f , and we have StepsLeft (k). For this infinite tape assertion, we have a derived rand rule 
+
+{InfiniteTape α f } rand α 1 {v. v = f (0) ∗ InfiniteTape α (λ x. f (x + 1)) }
+
+which says that executing rand α 1 returns the first element f (0) of the sequence, and returns a sequence that has been shifted by 1. The proof of this rule reasons by cases on whether the underlying tape assertion inside of InfiniteTape has any samples left. If it does, it pulls the first sample off of the tape, but also generate a time receipt letting us decrease the StepsLeft 
+
+bound by 1. When the tape is empty, the StepsLeft term will become negative, allowing us to conclude the proof by the time receipt principle instead. Thus, externally, the specification makes it look as though α contains an infinite number of bits matching the infinite bitstring 
+
+f .
+
+Thin-Air Credits 
+
+We complete our illusion by deriving a presampling rule that is capable of populating an 
+
+InfiniteTape with the binary expansion of a real number. 
+
+∀r. {E(E(r)) ∗ InfiniteTape α (bin r) ∗ P } e {Q}
+
+{
+
+E
+
+(∫ 10 E(x) dx 
+
+)
+
+∗ α ↪ → (1; []) ∗ P
+
+}
+
+e {Q}
+
+(7) The function bin : [0 , 1] → (N → { 0, 1}) gives a binary expansion of a real number, and it is not important which of the possible binary expansions this function picks. Deriving this rule requires extending Continuous-Eris with one last ingredient: a rule for generating arbitrarily small error credits “out of thin air”, as proposed by Li et al. [40]: 
+
+{∃ ε > 0. E(ε) ∗ P } e {Q}{P } e {Q} (8) M. de Medeiros, P. Liu, K. H. Li, A. Aguirre, L. Birkedal and J. Tassarotti 9
+
+This rule says that at any time, we can get access to some additional error credit of some arbitrary value. As Li et al. [ 40 ] show, this rule can be added without affecting the soundness of Eris through a limiting argument taking ε → 0.To derive the specification (7) , we first apply the rule (6) to get StepsLeft (k1) for some 
+
+k1. Next, we apply (8) to get some credit ε > 0, in addition to the ∫ 10 E(x) dx error credit we start with. From Riemann integrability of E, there exists δ > 0, such that any Riemann sum over E with partition width smaller than δ will be within ε of ∫ 10 E(x) dx . Let k2 be such that 1/2k2 < δ . Set k = max (k1, k 2). We now apply the basic presampling rule (5) k
+
+times to get k bits on the tape α. If we interpret these bits as the first k bits of the fractional representation of a real number, then unfolding the expected value sums from the repeated use of (5) , we get a sum for the expected value of the resulting error credit that can be rewritten as  
+
+> 2k−1
+
+∑
+
+> i=0
+
+E
+
+( i
+
+2k
+
+)
+
+· 12k
+
+This is a Riemann sum over [0 , 1] with partition width 1/2k, thus it is less than the 
+
+ε + E
+
+(∫ 10 E(x) dx 
+
+)
+
+credit that we have. Since Eris is an affine logic that allows us to “throw away” excess error credits, we are therefore done. With this infinite tape pre-sampling rule, we are finally able to derive (4) , the specification for U. We define the predicate IsReal v r to state that the heap location v points-to a linked list of bits and an InfiniteTape , such that the bits on the list together with the bits on the infinite tape form a binary sequence for r. Executing U gives us access to a heap location and empty tape, and we can apply (7) to establish the IsReal predicate and the error credits in the postcondition of (4). 
+
+Summary 
+
+In this subsection, we have seen how a few logical ingredients allow us to derive a continuous analogue of the specification style previously proposed by Marionneau et al. [ 41 ] for discrete samples. In particular, extending Eris with time receipts allowed us to extend Clutch’s finite pre-sampling tapes into a mechanism that behaves like an infinite tape. Next we will explore how to use this specification in client code, using careful credit conditioning to verify algorithms based on uniform real samples. 
+
+## 2.4 Verified Maximum Sampler 
+
+Now we can now return to the verification of MaxU2 from Figure 2. We will do this in explicit detail as it illustrates the core techniques we will be making use of in our more complex examples. Recall that the density of the maximum of two uniforms is given by 
+
+μMaxU2 (x) = 2 x. We can state a continuous correctness theorem for MaxU2 as: 
+
+∀G ∈ PC ([0 , 1]) ,
+
+{
+
+E
+
+(∫ 10 G(x) · 2x dx 
+
+)} 
+
+MaxU2 () {v. ∃r. IsReal v r ∗ E(G(r)) }. (9) In other words, given some G, and ε0 ≜ ∫ 10 G(x) · 2x dx error credits, we want to execute the body of MaxU2 and ensure that the return value of MaxU2 approximates a real number 
+
+r, such that we end up with E(G(r)) credits leftover. To prove this, we will apply the specification for U (4) at each of the uniform sampling statements, instantiating the function 
+
+F from that specification with appropriate credit conditioning functions. 10 Verifying Exact Samplers for Continuous Distributions with a Discrete Program Logic 
+
+For the first call to U, we instantiate F with the function ε1 defined by ε1(x) ≜∫ 10 G(max (x, y )) dy . Let r1 be the real number we obtain in the post-condition of the rule. Then, for the second call to U we instantiate F with ε2 defined by ε2(y) ≜ G( max (r1, y )) .Call the result of this call r2.At this point there are two parts left to the proof. The first is to show that the iterated integral we obtain from applying this rule twice with these choices of F is equivalent to ε0,the error credits we have in the precondition of (9). We have 
+
+∫ 10
+
+∫ 10
+
+G(max( x, y )) dx dy 
+
+=
+
+∫ 10
+
+∫ 10
+
+[x < y ]G(y) dx dy +
+
+∫ 10
+
+∫ 10
+
+[y < x ]G(x) dx dy 
+
+= 2 
+
+∫ 10
+
+G(z)
+
+∫ 10
+
+[w < z ] dw dz 
+
+=
+
+∫ 10
+
+G(z) · 2z dz 
+
+= ε0
+
+The second part of the proof is to show that the code in fact computes the maximum 
+
+max (r1, r 2). But this part of the reasoning involves no probability theory, as it amounts to reasoning about the bit-by-bit comparison done by traversing the linked-list of bits in the two numbers inside CmpU using ForceNext . Readers unfamiliar with Iris may be concerned that the recursive calls in C′ are not structurally decreasing in any argument. Formally speaking, we verify C′ using the Löb induction rule from Eris. 
+
+> ht-rec
+
+∀w. {P } (rec f x = e) w {Q} ⊢ { P } e[v/x ][( rec f x = e)/f ] {Q}⊢ { P } (rec f x = e) v {Q}
+
+The Löb induction rule allows us to assume that the specification for C′ holds at every recursive call in its body. In a call to C′, if the leading bits are different, then the real number starting with 1 is greater than or equal to the one starting with 0. If the leading digits match, the program C′ will recurse and we conclude by the Löb induction hypothesis. The proofs for subsequent more sophisticated sampling algorithms follow a similar pattern: first we choose the right instantiations of the function F for each random sample the algorithm draws, and then we prove that the resulting iterated integrals are equivalent to the integral over the density of the distribution the algorithm is generating samples from. Then, after the values are sampled, we are left with traditional reasoning about linked lists or other bit manipulations of the sampled values, for which separation logic is well-suited. With Continuous-Eris, proofs of this format (including the more complex sampler in §4 and §5) can be implemented formally inside the Rocq proof assistant. 
+
+## 2.5 Interlude: Constructive Real Arithmetic 
+
+While our lazy bit list representation of [0 , 1] suffices for drawing and comparing uniform samples, clients of U such as the Gaussian or Laplace sampler will require us to represent samples over the entire real line. Before we go deeper into these more complex sampling procedures, we will discuss a simple implementation of constructive real arithmetic , which is compatible with the lazy bit lists of U, and which we have verified in Continuous-Eris. M. de Medeiros, P. Liu, K. H. Li, A. Aguirre, L. Birkedal and J. Tassarotti 11 
+
+OfZ z p ≜ z ≫ p
+
+Radd r1 r2 p ≜ let z := r1 (p − 2) + r2 (p − 2) in 
+
+(z/ 4) + ( z % 4) /2
+
+Rneg r p ≜ −(r p )
+
+Rscal r z p ≜ r (z + p)
+
+RofU u p ≜ if 0 ≤ p then 0 else GetBits u (−p) 0 
+
+Rcmp r1 r2 p ≜ let n1 := r1 n in let n2 := r2 n in if n1 + 2 < n 2 then − 1 else if n2 + 2 < n 1 then 1 else Rcmp r1 r2 (p + 1)  
+
+> Figure 3 The Continuous-Eris constructive real library
+
+There are a number of options in the literature for representing lazily defined real numbers, such as signed bit sequences [ 55 ], continued fractions [ 53 ], or sequences of dyadic approximants [ 42 ]. Our implementation is an adaptation of the CReal library [ 21 ], which is based on the latter technique. We represent a real number r using functions sr : Z → Z, which return integer approxi-mations of r to a specified accuracy. Formally, we define a predicate ApproxTo (A, z, r ) which says that A ∈ Z approximates r to within a degree of precision specified by z ∈ Z:ApproxTo (A, z, r ) ≜ |A − r · 2z | ≤ 1. (10) We say then that a function sr is a valid representation of r if ApproxTo (sr (z), z, r ) holds for all z. This condition ensures that as z → ∞ , the sequence sr (z)/2z converges to r.Figure 3 depicts our implementation of a subset of operations from CReal. With the exception of Rcmp , each operator returns a function from desired precision p ∈ Z to an integer approximant. Our library includes the following: 
+
+OfZ z: This converts the constant integer z to a real whose sequence is obtained by bit-shifting z.
+
+Radd r1 r2: Addition between r1 and r2. The first line adds the (p + 2) nd approximants for r1 and r2 together, and the second line divides this sum by four (rounding to the nearest integer). 
+
+Rneg r1: Negates a real number by negating each approximant. 
+
+Rscal r z : Uses a bit shift to approximate the real number r/ 2z for z ∈ Z. CReal defines a more complicated procedure for general multiplication between real numbers, but scaling by powers of two will suffice for our purposes. 
+
+RofU u: Convert a partly sampled uniform deviate into a lazy real number. The GetBits 
+
+function was defined in Figure 1. Like CmpU , the function Rcmp compares two real numbers by iteratively comparing approximants until they are sufficiently far apart to determine their inequality. 3 In our Rocq   
+
+> 3Note that the comparison function does not terminate when the arguments are equal. Unlike the comparison between two uniform deviates, it is possible to write programs where comparisons loop with probability greater than zero.
+
+12 Verifying Exact Samplers for Continuous Distributions with a Discrete Program Logic 
+
+RofBZU b z u ≜ let abs := Radd (OfZ z) ( RofU u) in if b = 0 then abs else Rneg abs  
+
+> Figure 4 Conversion from boolean-integer-uniform triples into constructive reals.
+
+development, we specify the correctness of these operators using the following Continuous-Eris predicate: IsApprox (v :Val ) ( x : R) ≜ ∃I. I ∗  ∀(p : Z). {I} v p {A. I ∗ ApproxTo (A, −p, r )}
+
+In other words, IsApprox states that a Continuous-Eris function v can be executed, using some set of resources I, in order to return an approximation of r with any precision p. Using this representation, it is straightforward to verify the correctness of the arithmetic operators in our library, such as the addition function. 
+
+{IsApprox vx x ∗ IsApprox vy y} Radd vx vy {v. IsApprox v (x + y)}
+
+The correctness here depends principally on using the triangle inequality to relate the (p+2) nd 
+
+approximants of x and y to the pth approximant of x + y.We can also lift the lazily uniform samples of U into constructive reals. 
+
+{IsReal u x } RofU u {v. IsApprox v x }
+
+In this proof, the I in IsApprox is instantiated with IsReal u x , which allows us to compute arbitrarily precise approximants for x using GetBits .Finally, we will derive one last program for constructing values in R using these primitive operators. The equation ToReal (b, z, r ) ≜ (−1) b(z + r) will serve as our canonical mapping from boolean-integer-uniform triples (b, z, r ) to real numbers. The program RofBZU in Fig-ure 4 takes as input a boolean-integer-real triple, and returns the corresponding constructive real. We will use this program in the verification of the Gaussian and Laplace samplers, and also our soundness theorem. We have now seen how to establish and use a continuous analogue of the specification style that Marionneau et al. [ 41 ] previously demonstrated for verifying discrete samplers. But what does this specification actually mean? In the next section, we prove an adequacy theorem that connects this specification to the semantics of the program. 
+
+## 3 Soundness 
+
+This section describes our soundness results for Continuous-Eris. Before we can state the soundness results, we first need to define the semantics of the language we are considering formally. Then, we prove that the basic adequacy theorem for Eris Hoare triples also holds for Continuous-Eris. Finally, we prove an analogue of Marionneau et al.’s [ 41 ] adequacy theorem for the correctness of continuous samplers. 
+
+## 3.1 RandML Language 
+
+RandML is the same language as used in Eris. The syntax of RandML is depicted in Figure 5. The language includes primitives for higher-order programming such as higher-order references and function closures, as well as generic recursion using recursive let bindings. RandML’s M. de Medeiros, P. Liu, K. H. Li, A. Aguirre, L. Birkedal and J. Tassarotti 13 
+
+v ∈Val ≜ z ∈ Z | b ∈ B | () | ℓ ∈ Loc | κ ∈ Label | rec f x = e | (v, w ) | inl v | inr ve ∈ Expr ≜ v | x | e1 e2 | e1 + e2 | e1 − e2 | e1 ∗ e2 | e1 ≪ e2 | e1 ≫ e2 | . . . |
+
+if e then e1 else e2 | (e1, e 2) | fst e | snd e | inl (e) | inr (e) |
+
+match e with inl v ⇒ e1 | inr w ⇒ e2 end | allocn e1 e2 | ! e | e1 ← e2 |
+
+rand e | rand e1 e2 | tape eK ∈ Ectx ≜ − | e K | K v | allocn K | ! K | e ← K | K ← v | rand K | . . . t ∈ Tape ≜ {(N,⃗ n) | N ∈ N ∧⃗n ∈ List N ≤N }
+
+σ ∈ State ≜ (Loc fin 
+
+−⇀Val ) × (Label fin 
+
+−⇀ Tape ) ρ ∈ Cfg ≜ Expr × State  
+
+> Figure 5 Syntax of RandML
+
+sole source of randomness is the rand N command seen in the previous section. Notably, RandML does not include primitives for sampling from continuous distributions. Instead, we implement and verify computable versions of these algorithms. Because the language only has discrete sampling as a primitive, we are able to give an operational semantics that does not require measure theory. To account for the possibility of nontermination, we use the monad of discrete subdistributions .
+
+▶ Definition 1 (Subdistribution) . A discrete subdistribution over a countable set A is a function μ : A → [0 , 1] such that ∑ 
+
+> a∈A
+
+μ(a) ≤ 1, sometimes also called a probability mass function or PMF. We let D(A) denote the set of all subdistributions over A. The discrete Giry monad [25] is a monad on D where the return δx is the Dirac distribution at x and 
+
+(μ>> =f )( b) ≜ ∑
+
+> a∈A
+
+μ(a) · f (a)( b) (11) 
+
+Given a subset ϕ ⊂ A and μ ∈ D (A), the probability of ϕ under μ, denoted Pr μ[ϕ], is given by 
+
+Pr  
+
+> μ
+
+[ϕ] = ∑
+
+> a∈ϕ
+
+[μ(a)] 
+
+We give a small step operational semantics to RandML in terms of subdistributions, following Eris. Namely, we define the semantics for a single step of reduction by a monadic function on subdistributions step : Cfg → D (Cfg ), where a configuration Cfg is a pair of an expression Expr and a state State . For deterministic cases (such as arithmetic operations or writing to the store) we describe their posterior subdistribution using the monadic return. Error cases such as ill-typed applications return the zero subdistribution 0. The rand N
+
+primitive draws samples from UN , the uniform distribution over {0, . . . , N }, and leaves the state σ unchanged. 
+
+step (rand N, σ ) ≜
+
+{UN >> = λn. δ (n,σ ) if N ∈ N
+
+0 otherwise The semantics also models the presampling tapes we saw in §2. A tape consists of a label 
+
+α, a bound N ∈ N, and a finite sequence of presamples ⃗n . When rand includes the optional tape label parameter, it will deterministically pop a sample from the tape if the tape is 14 Verifying Exact Samplers for Continuous Distributions with a Discrete Program Logic 
+
+non-empty, and otherwise draws a fresh random sample. 
+
+step (rand α N, σ ) ≜
+
+δ(n,σ [α7→ (N,⃗ n)]) if N ∈ N and α 7 → (N, n ·⃗n) ∈ σ
+
+UN >> = λn. δ (n,σ ) if N ∈ N and α 7 → (N, n ·⃗n) /∈ σ
+
+0 otherwise Tape labels are dynamically allocated using the tape primitive in a similar fashion to heap locations. However, the language includes no language primitives for adding samples onto the tape. Rather, samples are added to the end of the tape during a proof by applying the presampling rules we saw previously. The soundness proof for the logic includes an erasure theorem , showing that every program has the same semantics as one with all tape operations omitted. The semantics of a program is the limit of finite executions. Concretely, the subdistribution 
+
+exec n : Cfg → D (Val ) represents the subdistribution of values reached after n steps of execution. 
+
+exec n(e, σ ) ≜
+
+
+
+δe if e ∈Val 
+
+step (e, σ ) >> = exec n−1 if e / ∈Val and n > 0
+
+0 otherwise (12) Any configuration that has not reached a value after n steps does not contribute its probability to exec n. The subdistribution of return values exec (ρ) is defined at each point to be the limit of exec n as n → ∞ .
+
+## 3.2 Soundness of the Logic 
+
+We proved the following adequacy theorem of Continuous-Eris, which is the same as that of Eris: 
+
+▶ Theorem 2 (Adequacy) . For any pure predicate on values P , if we can prove 
+
+{E(ε)} e {v. P v } in Continuous-Eris, then for all states σ, we have Pr[ exec (e, σ ) /∈ P ] ≤ ε.
+
+Recall that Continuous-Eris features two proof rules not found in the original Eris: thin-air credits and time receipts. The thin-air credit rule was proved sound by Li et al. [ 40 ] for an extension to Eris for concurrent programs, and we have backported their proof technique to Continuous-Eris. For time receipts, we exploit the fact that the existing proof of soundness for Eris is based on step-indexing: since the logic is partial, the proof works by explicitly considering executions of up to n steps for each value of n. Thus, all we need to do is track this number of steps remaining in the execution we are considering using a ghost resource, in order to model the StepsLeft assertion. 
+
+## 3.3 Adequacy for Continuous Samplers 
+
+To formally capture the correctness of continuous samplers, we prove a version of the adequacy theorem tailored to continuous samplers returning lazy reals satisfying the IsApprox predicate. Stating this is subtle: we want to specify what it means for a program to lazily return digits from a real number, but clearly this will depend on the RandML representation of a real. The proof of adequacy by Marionneau et al. [ 41 ] avoids this issue as their samplers all return simple, first-order datatypes such as Z or booleans, which have a canonical representative in RandML. M. de Medeiros, P. Liu, K. H. Li, A. Aguirre, L. Birkedal and J. Tassarotti 15 
+
+Checker e N D ≜ Rcmp e (Rscal (OfZ N ) D) 0    
+
+> Figure 6 Definition of the Checker program.
+
+The key idea of our approach to this problem is to capture the behavior of a continuous sampler by analyzing the cumulative distribution function (CDF) it converges to. An absolutely continuous probability (sub-)distribution over the reals is characterized by a density function h ∈ PC (R), such that ∫ ∞−∞ h(x) dx ≤ 1 and whose definite integrals ∫ ba h(x) dx for 
+
+a ≤ b correspond to the probability of sampling a value in the interval [a, b ]. Its corresponding CDF H can be obtained by the equation H(r) = ∫ r 
+
+> −∞
+
+h(x) dx .We can observe the CDF of a RandML real random sampler by linking it against the program Checker in Figure 6. The Checker program takes in two arguments: the sampler e
+
+to be analyzed, and two integers N and D. Intuitively, Checker samples from e and compares the sampled value to the dyadic rational number N/ 2D . The Checker program will diverge if the sampled value is exactly equal to N/ 2D , otherwise it returns −1 or 1 depending on whether e returns a constructive real less than or greater than N/ 2D , respectively. Our adequacy theorem describes samplers in terms of their observable behavior when linked against this checker program, stated more precisely in Theorem 3. 
+
+▶ Theorem 3 (Partial Adequacy of Constructive Real Samplers) . Let h ∈ PC (R) be a density function. If for all integrable F ∈ PC (R) we can prove 
+
+{
+
+E
+
+(∫ ∞−∞ 
+
+F (x)h(x) dx 
+
+)} 
+
+e {v. ∃r. E(F r ) ∗ IsApprox v r }, (13) 
+
+then for all states σ and integers B, C we have 
+
+1. Pr[ exec (Checker e B C, σ )̸ = 1] ≤ ∫ B/ 2C 
+
+> −∞
+
+h(x) dx 
+
+2. Pr[ exec (Checker e B C, σ )̸ = −1] ≤ ∫ ∞ 
+
+> B/ 2C
+
+h(x) dx 
+
+This theorem relates the behavior of the Checker program with the CDF of the target continuous distribution. To understand this theorem, recall that ∫ B/ 2C 
+
+> −∞
+
+h(x) dx is the CDF of the distribution at B/ 2C , i.e . it is the probability that a value sampled from the distribution will be less than or equal to B/ 2C . The first inequality says that the probability that Checker 
+
+terminates with a value other than 1 is at most this CDF value. The second inequality gives us an analogous result about the probability that the sampled value is greater than B/ 2C .These inequalities give us a good sense of the approximate behavior of sampler programs when linked against Checker , however they do not completely characterize the CDF of e
+
+because Continuous-Eris is a partial logic. It is possible that the sampling program fails to terminate with probability greater than zero. 4 By adding hypotheses to Theorem 3, we obtain a stronger result. 
+
+▶ Theorem 4 (CDF Adequacy of Constructive Real Samplers) . Under the assumptions of The-orem 3, if the checker program terminates almost-surely ( i.e . for all B, C, and σ we have 
+
+∑ 
+
+> v∈Val
+
+exec (Checker e B C, σ )( v) = 1 ) and h is a probability density ( i.e . ∫ ∞−∞ h(x) dx = 1 )then for all states σ and integers B, C , the probability that Checker e B C returns −1 is equal            
+
+> 4This is only possible if the sampler program efails to terminate. The Checker program only fails to terminate when ereturns the exact value B/ 2C, which can be shown to happen with probability at most zero by instantiating Equation (13) with the indicator function on {B/ 2C}.
+
+16 Verifying Exact Samplers for Continuous Distributions with a Discrete Program Logic 
+
+R N x ≜ let y := U in if CmpU y x < 0 then R (N + 1) y else N
+
+H _ ≜ let x := U in if RleHalf x then R 0 x % 2 = 1 else true   
+
+> Figure 7 The decreasing uniform sequence trial ( R) and the Bernoulli trial with parameter e−1/2
+> (H).
+
+to the CDF of h at the point B/ 2C :
+
+Pr[ exec (Checker e B C, σ ) = −1] = 
+
+∫ B/ 2C
+
+> −∞
+
+h(x) dx. (14) Since the set of dyadic integers is dense in R, characterizing the CDF at these points suffices to characterize the distribution of e completely (see Billingsley [8], theorem 14.1). In our Rocq development, we have formally verified both of these adequacy statements. The proof of Theorem 4 is a consequence of Theorem 3, using the additional termination hypotheses in order to establish (14) . For the programs we will present in sections §4 and §5, we do not prove their almost-sure termination, though Karney [ 38 ] proves on paper that these algorithms terminate almost-surely. Separate program logics such as Total Eris [2] or Tachis [ 28 ], which cover the same source language, are capable of proving this fact. For the remainder of this paper, we will focus on establishing the core specification (13) , and leave the other side conditions in Theorem 4 to future work. 
+
+## 4 Verified Gaussian Sampler 
+
+In this section, we will verify a sampler for the continuous Gaussian distribution using Continuous-Eris. We will use algorithms from [ 38 ]. To the best of our knowledge, these algorithms have never been formally verified. Karney’s [ 38 ] sampler is split into a number of subroutines, and our proof follows the same modular structure by verifying each subroutine. 
+
+## 4.1 Bernoulli Negative Half-Exponential 
+
+The first component of Karney’s [ 38 ] algorithm is a routine H for drawing a sample from the Bernoulli (e−1/2) distribution. This in turn builds upon a routine R which repeatedly draws a sequence of independent, uniform samples r1, r 2, r 3, . . . from [0 , 1] . The routine stops when it draws an ri+1 that is greater than ri, at that point, it returns i, the length of the decreasing sequence it generated. 
+
+Verifying the Decreasing Reals Trial 
+
+The principle behind this algorithm is sometimes known as Von Neumann’s Technique [52 ]. Von Neumann’s insight is that the probability that this decreasing sequence has length n is 
+
+xn/n ! − xn+1 /(n + 1)! — two subsequent terms in the Taylor series of e−x.In general, R N x is distributed over N as a version of R 0 x that has been shifted rightwards by N :
+
+μ(R N x )(n) ≜ [N ≤ n] ·
+
+( xn−N
+
+(n − N )! − xn−N +1 
+
+(n − N + 1)! 
+
+)
+
+(15) M. de Medeiros, P. Liu, K. H. Li, A. Aguirre, L. Birkedal and J. Tassarotti 17 
+
+Note that although this sampler draws continuous samples internally, what it returns is a sample from a discrete distribution over N. Thus, the specification we prove for it uses a series for computing the expected value of credits, instead of an integral. Let B(N) denote the set of bounded functions N → R≥0. We seek to prove the following specification for all 
+
+F ∈ B (N), N ∈ N, l ∈Val , and x ∈ [0 , 1] :
+
+{IsReal l x ∗ 0 ≤ x ≤ 1 ∗
+
+E(∑  
+
+> n∈N
+
+μ(R N x )(n) · F (n))}
+
+R N x 
+
+{
+
+n, E(F (n)) ∗
+
+IsReal l x 
+
+}
+
+(16) At a high level we will prove this in a similar way to §2.4, using specification (4) at the call to U to redistribute the error credits based on the value of y.The challenge in proving (16) lies in correctly conditioning the credits after each proba-bilistic sampling from U. We proceed by Löb induction, using ht-rec . The execution of 
+
+R N x first evaluates the sampling statement U, branches on its result, and either returns N
+
+(requiring E(F (N )) error credits for the postcondition) or makes a recursive call (requiring enough error credits to pay for the precondition of (16) via ht-rec ). Schematically, we want to condition the credits after sampling from U as follows: 
+
+R N x 
+
+E(∑  
+
+> n∈N
+
+μ(R N x )(n) · F (n))
+
+N
+
+E(F (N )) 
+
+R (N + 1) y
+
+E(∑  
+
+> n∈N
+
+μ(R (N +1) y)(n) · F (n))   
+
+> x≤yy < x
+
+With this in mind, we choose the following function g to condition the error credits: 
+
+g(F, N, x, y ) ≜ [x ≤ y] · F (N ) + [ y ≤ x]
+
+( ∑
+
+> m∈N
+
+μ(R (N +1) y)(m) · F (m)
+
+)
+
+(17) After sampling from U we obtain a lazy real y and E(g(F, N, x, y )) error credits. However, note that at this point we have no further information about y, which we need to evaluate the comparison CmpU y x . Therefore, we perform a case distinction on (x ≤ y) ∨ (y ≤ x), which can be used to cancel out the corresponding Iverson bracket in (17) and keep executing the program symbolically 5. In the first case, we will own E(F (N )) , and, by symbolic execution, the program will evaluate to the else branch and return N , so the postcondition is satisfied. In the second case, we will own E(∑  
+
+> m∈N
+
+μ(R (N +1) y)(m) · F (m)), and we will reach the recursive call to R (N + 1) y, at which point we can use the inductive hypothesis since we have the correct amount of credits available. It remains to show that the expected value of g
+
+is equal to our initial quantity of starting credits. 
+
+∑
+
+> n∈N
+
+μ(R N x )(n) · F (n) = 
+
+∫ 10
+
+g(F, N, x, y ) dy (18)      
+
+> 5The fact that the Iverson brackets are overlapping at the point y=xis a matter of convenience.
+
+18 Verifying Exact Samplers for Continuous Distributions with a Discrete Program Logic 
+
+G e N ≜ if e () then G e (N + 1) else N
+
+I e N ≜ (N = 0) ∥ (e () && I e (n − 1)) 
+
+Z _ ≜ let k := G H 0 in if I (H (k ∗ (k − 1))) then k else Z () 
+
+Figure 8 The integer part of the Gaussian sampler. 
+
+The proof of this fact amounts to an application of Fubini’s theorem in a similar style to §2.4. Here, the boundedness of F ensures absolute and uniform convergence of the limits in (18) ,allowing their exchange. 
+
+Bernoulli Negative Half-Exponential 
+
+Finally, our specification for R can be used to verify the correctness of the half-exponential Bernoulli sampler. 6 We seek to prove that for any F : {true , false } → R≥0,
+
+{
+
+E
+
+(
+
+e−1/2F (true ) + (1 − e−1/2)F (false )
+
+)} 
+
+H {b, E(F (b)) } (19) The uniform sample in H is handled by the credit distribution 
+
+[ 12 < x 
+
+]
+
+F (true ) + 
+
+[
+
+x ≤ 12
+
+] ( ∑
+
+> m∈N
+
+μ(R 0 x)(m) · F (m%2 = 1) 
+
+)
+
+(20) In the case that 1/2 < x we gain the correct amount of credits to return F (true ), and if not, we have enough to apply the specification for R. The function RleHalf is a version of CmpU 
+
+which compares a lazy real sample against the constant value 1/2, and is verified in a similar manner. In our development, we split the series in expression (20) into even and odd terms, at which point we can apply Von-Neumann’s trick. 
+
+∑
+
+> n∈N
+
+(1 /2) 2n
+
+(2 n)! − (1 /2) 2n+1 
+
+(2 n + 1)! = ∑
+
+> n∈N
+
+(−1/2) n
+
+n! = e−1/2
+
+## 4.2 Integer Gaussian Part 
+
+The next component of the algorithm is a routine to sample the integer part of the Gaussian sample, as shown in Figure 8. Specifically, the routine Z draws from the distribution over the nonnegative integers with PMF 
+
+μZ(k) ≜ e−k2/2/NZ NZ ≜
+
+> ∞
+
+∑
+
+> k=0
+
+e−k2/2 (21) The implementation uses helper functions G (a geometric trial, parameterized by a function e that generates Bernoulli samples) and I (which draws N Bernoulli samples using argument e and returns true when all samples are true ). Our proofs of these are exactly       
+
+> 6In our implementation of H, we must handle the first iterate of this process separately, since CmpU can only compare two uniform deviates against each other, and so we need to use a specialized program
+> RleHalf to compare a uniform deviate against the constant 1/2. We choose to do it this way instead of lifting to constructive real library in order to mimic more closely Karney’s implementation.
+
+M. de Medeiros, P. Liu, K. H. Li, A. Aguirre, L. Birkedal and J. Tassarotti 19 
+
+C M ≜ let m := rand M in if m = 0 then − 1 else if m = 1 then 0 else 1
+
+A k x ≜ let f := C k in let r := U in 
+
+(f = 0) ∥ (f = −1 && CmpU x r < 0) 
+
+S k x y N ≜ let z := U in if (CmpU y z < 0 ∥ A k x ) then N else (S k x z (N + 1)) 
+
+S′ k x ≜ let z := U in if (CmpU x z < 0 ∥ A k x ) then 0 else (S k x z 1) 
+
+B k x ≜ (S′ k x ) % 2 = 0 
+
+N′ _ ≜ let k := Z () in let x := U in if I (B k x ) ( k + 1) then (k, x ) else R N ′() 
+
+N _ ≜ let (z, u ) := N′ () in let b := rand 1 in RofBZU b z u  
+
+> Figure 9 The Gaussian sampler ( N).
+
+analgous to those described by Marionneau et al. [ 41 ] and we will not replicate them here, however we highlight that it is important that this program is higher-order, as the Gaussian sampler dynamically chooses the parameters to G and I. Using these combinators we can implement Z, Karney’s sampler for the integer part of the Gaussian distribution. 7
+
+The program itself is a simple rejection sampling loop, and involves no real numbers beyond those used internally by H. Proving that Z is distributed as μZ amounts to applying the specifications we have developed so far. At a high level, we begin with E(V ) credits where V ≜ ∑∞ 
+
+> k=0
+
+μZ(k) · F (k) for some F ∈ B (N). Like before, the proof proceeds by Löb induction, conditioning the credits on the results of G and I by g and h respectively: 
+
+h(k, b ) ≜ [b] · F (k) + [ ¬b] · Vg(k) ≜ e−k(k−1) /2h(k, true ) + (1 − e−k(k−1) /2)h(k, false )
+
+The fact that their expected value does not exceed the initial amount of error credits follows from Fubini’s theorem. 
+
+## 4.3 Gaussian Sampler 
+
+A RandML implementation of Karney’s sampler for the Gaussian distibution is given in 
+
+N′ in Figure 9. More precisely, the N′ sampler draws from the half or one-sided Gaussian distribution over [0 , ∞), represented as a pair containing a nonnegative integer and a lazy uniform real. The full Gaussian sampler N transforms a sample from N′ into the full normal distribution over (−∞ , ∞) in N by choosing a sign uniformly at random, and applying 
+
+RofBZU to combine our samples into our constructive real library from §2.5.      
+
+> 7This sampler corresponds to steps N1 and N2 from Karney’s paper.
+
+20 Verifying Exact Samplers for Continuous Distributions with a Discrete Program Logic 
+
+The implementation of N′ involes a complicated rejection step B, which (like Karney) we split into a number of steps: 
+
+C M : returns −1, 0, and 1 with probabilities 1/M , 1/M , and (M − 2) /M respectively, when 1 ≤ M .
+
+A k x : A bernoulli trial with parameter (1 − (2 k + x)/(2 k + 2)) .
+
+S′ k x : A D(N) sampler with PMF 
+
+xn
+
+n!
+
+( 2k + x
+
+2k + 2 
+
+)n
+
+− xn+1 
+
+(n + 1) 
+
+( 2k + x
+
+2k + 2 
+
+)n+1 
+
+S is a sampling loop for this program, written in tail-recursive form. This program is similar to the loop in R, but with additional thinning introduced by A.
+
+B k x : A e−x(2 k+x)/(2 k+2) Bernoulli trial, based on Von-Neumann’s technique. Aside from the spike in complexity, the techniques we have developed so far are capable of verifying this composition of samplers with no substantial modifications. In our Rocq development we prove specifications for each helper function in the style of (3) , quantifying over functions in B({− 1, 0, 1}), B({true , false }), or B(N), which are used modularly to condition error credits in their clients. Each helper function is a discrete sampler, though some of them (like S) make internal use of real numbers to sample discrete values with the correct probabilities. §A.1 contains the credit distribution functions for each of these helpers, as well as the proof that their expected value does not exceed the initial supply of error credits. The most challenging aspect of our approach is determining a closed form for the distribution of each helper function, which is necessary to state specifications in the form of (3). With B in hand, we can verify the correctness of the one-sided Gaussian sampler N′.Because the return value for this program is a pair of a (nonnegative) integer and a lazy real, our specification expresses the density of N′ as 
+
+μN′ (n, x ) ≜ e−(n+x)2/2/NN′ NN′ ≜
+
+∫ 10
+
+> ∞
+
+∑
+
+> k=0
+
+e−(k+x)2/2 dx (22) Finally, we define the symmetric normal distribution N by lifting our Gaussian samples to a CReal, choosing the sign uniformly at random. For any bounded, piecewise continuous 
+
+F : R → R≥0 we can show that 
+
+{
+
+E
+
+(∫ ∞−∞ 
+
+e−x2/2
+
+2NN′
+
+· F (x) dx 
+
+)} 
+
+N () {v. ∃r. IsApprox v r ∗ E(F (r)) }. (23) To prove this, we instantiate the specification for N′ with the function G(n, x ) = F (−(n +
+
+x)) + F (n + x), and then use the final rand 1 step to distribute that credit to the positive and negative cases appropriately. Our specification for RofBZU performs the final task of lifting this result to a CReal. The specification (23) is now in a form for which we can apply the adequacy theorems, and this completes our verification. 
+
+## 5 Verified Laplace Sampler 
+
+In this section, we verify a sampler for the continuous Laplace distribution Lε,μ , which has important applications in differentially private algorithms. Its density function is given by: 
+
+Lε,μ (x) = ε
+
+2 · e−ε·| x−μ| (24) M. de Medeiros, P. Liu, K. H. Li, A. Aguirre, L. Birkedal and J. Tassarotti 21 
+
+E N ≜ let x := U in let y := R 0 x in if y % 2 = 0 then (x, N ) else E (N + 1)  
+
+> Figure 10 The Negative Exponential sampler ( E).
+
+L ε μ ≜ let (z, u ) := E 0 in let sgn := rand 1 in Radd μ (Rscal ε (RofBZU (sgn , z, u )))  
+
+> Figure 11 The Laplace sampler ( L).
+
+Our starting point is a sampler for the negative exponential distribution (§5.1). Samples from this distribution can be transformed into Laplace samples by applying appropriate arithmetic operations, which we implement using our verified library for constructive real arithmetic (§2.5). Finally, we prove a tail bound on the size of Laplace samples, which has applications for proving accuracy bounds of differentially private algorithms (§5.2). 
+
+## 5.1 Laplace Sampling 
+
+The Laplace sampler uses the sampler E for the negative exponential distribution shown in Figure 10. Karney [ 38 ] calls this Algorithm V . Similarly to the one-sided Gaussian sampler, 
+
+E returns pairs in N × [0 , 1] . In this case, the probability of returning (z, x ) is μE ≜ e−(z+x).The proof of this fact is similar enough to the proof of the Gaussian sampler in §4 that we will omit it and direct interested readers to the appendix or Rocq development. We must make three modifications to the exponential mechanism in order to turn it into a sampler for the Laplace distribution: 
+
+1. Extend the distribution by symmetry to all of R,
+
+2. Multiply the result by a scaling factor ε, and 
+
+3. Shift the distribution by the mean μ.We can implement all three of these steps using our constructive reals library as described in §2.5. Figure 11 depicts the implementation of our Laplace sampler. First, after taking a sample from E, one can decide the sign of the result using a rand 1 sample. The boolean-integer-uniform triple is lifted into a single constructive real value using the RofBZU function which, like the Gaussian, gives us a sample from the symmetric version of the negative exponential distribution. Now we are able to perform arithmetic on this sample: we can scale and shift the returned value using our constructive reals library. After obtaining the sample from the negative exponential function and symmetrizing it like we did in §4, the remaining operations are all deterministic. Putting everything together, we can prove that for any F ∈ PC (R),
+
+{
+
+E
+
+(∫ ∞−∞ 
+
+F (x)L2ε,μ dx 
+
+)
+
+∗ IsApprox vμ μ I μ
+
+}
+
+L ε v μ
+
+{
+
+v. ∃IL, r. E(F r ) ∗ IL ∗
+
+IsApprox v r (Iμ ∗ IL)
+
+}
+
+(25) 22 Verifying Exact Samplers for Continuous Distributions with a Discrete Program Logic 
+
+## 5.2 Accuracy Bound 
+
+As mentioned previously, the continuous Laplace distribution is widely used in differential privacy applications. With differential privacy, random noise is added to the results of computations to avoid leaking private information about the data used in the computation. Adding more noise gives stronger privacy guarantees, but adding too much noise can make the computed value less useful. Thus, an important consideration in analyzing differentially private algorithms is to consider the utility or accuracy of the algorithm. For example, in defining the Report Noisy Max algorithm, Dwork and Roth [ 17 ] establish a utility bound on a differentially private query program based on the following property of the Laplace distribution: 
+
+P
+
+[
+
+|L ε,μ − μ| > log (1 /β )
+
+ε
+
+]
+
+≤ β (26) Barthe et al. [ 4 ] incorporated a similar bound for the discrete Laplace distribution as a rule in aHL, a program logic for reasoning about error bounds, where sampling from the discrete Laplace was added as a primitive to the language. Instead of adding this bound as a primitive rule in our logic, our specification for the continuous Laplace sampler allows us to derive this bound for our sampler implementation in a straightforward way. First, we instantiate the specification (25) with F being the indicator function for the set 
+
+S ≜
+
+(
+
+− ∞ , μ − log(1 /β )2ε
+
+]
+
+∪
+
+[
+
+μ + log(1 /β )2ε , ∞
+
+)
+
+Then, computing the improper integral in (25) , we can use the fact that F (x) = 1 for x ∈ S
+
+together with the spending rule to prove the following Continuous-Eris equivalent of the approximate specification (26): 
+
+{E(β) ∗ IsApprox vμ μ I μ} L ε v μ
+
+{
+
+f. ∃IL, r. (|r − μ| < log(1 /β )2ε ) ∗ IL ∗
+
+IsApprox v r (Iμ ∗ IL)
+
+}
+
+## 6 Related Work 
+
+We have already alluded to the extensive literature on different representations of computable reals and operations on them. The implementation we have verified is a simplified adaptation of the CReal library [ 21 ] which is based on the work of Ménissier-Morain [ 42 ]. The actual CReal library implementation uses additional mutable state to cache approximations of numbers for efficiency. Since our language includes mutable state, it should be possible to generalize our verification to handle this as well. SampCert [ 16 ] verifies a number of discrete samplers in the Lean theorem prover. Unlike Continuous-Eris, which supports the verification of programs that use higher-order random functions and state (features known to be challenging to reason about denotationally), SampCert’s object language is restricted to first-order programs. Hence, it cannot support samplers based on lazy reals. The SampCert development includes a verified implementation of the discrete Gaussian sampler, a two-sided version of our sampler Z from §4.2 which can have variance σ ∈ Q and mean μ ∈ Z.Zar [ 3] is a formally verified compiler for discrete probabilistic programs that generates executable samplers. Its proof shows that the generated code produces samples with the correct probability distribution. M. de Medeiros, P. Liu, K. H. Li, A. Aguirre, L. Birkedal and J. Tassarotti 23 
+
+Although we have focused on two exact samplers for continuous distributions, a range of algorithms exist for different distributions and stochastic processes. Huber [ 34 ] and Occil [ 46 ] provide extensive overviews of these algorithms. A related line of work explores what probability distributions are computable, i.e . in the sense that one can computably approximate the value of the measure or density defining a distribution [22, 1, 32, 18, 9]. As alluded to earlier, the semantics of languages that have sampling from continuous probability distributions as a primitive poses some technical challenges, particularly when combined with other semantically rich language features, such as higher-order functions and general recursion. A number of approaches to the denotational semantics of higher-order probabilistic programs that feature continuous sampling have been proposed [ 29 , 19 , 13 , 51 , 35 ]. Others have explored operational semantics for such languages [ 12 ] and logical relations techniques for proving equivalences [ 54 ]. Because the language we consider only has discrete probabilistic sampling as a primitive, and uses this to implement computable versions of continuous sampling, we avoid the semantic challenges of continuous distributions, while meanwhile still handling other features such as mutable higher-order state. Huang and Morrisett [ 33 ] used computable distributions as the basis for a denotational semantics of a probabilistic programming language, and gave a sampler implementation for this approach. Dash et al. [ 14 ] develop a monadic probabilistic programming language with support for laziness, and show how to use it to express various stochastic processes, such as Poisson and Gaussian processes. Since these processes are an infinite collection of random variables, they cannot be sampled in their entirety. Instead, a key idea is to lazily sample parts of a process and then cache the sampled values, similar to how the U sampler we considered lazily samples and stores the bits of a uniform [0 , 1] sample. Their language supports a form of conditioning, and can be used for Bayesian modeling with a Monte Carlo inference algorithm. They give a denotational semantics in terms of quasi-Borel spaces and an implementation called LazyPPL in Haskell. LazyPPL assumes the existence of primitives for sampling directly from continuous distributions such as the Gaussian, which are implemented in practice using floats. In contrast, our focus has been on proving the correctness of computable samplers for these continuous distributions, and we have used an operational semantics. Recently, a number of program logics [ 39 , 31 , 48 , 49 , 30 ] have been developed for reasoning about programs that sample from continuous probability distributions. These logics all treat sampling from continuous distributions and exact real operations as primitives, as opposed to our approach of verifying computable implementations of these operations. Moreover, these logics do not support mutable state or dynamically allocated memory. In contrast, Continuous-Eris inherits the Iris framework’s support for reasoning about state and pointers. On the other hand, some of these logics support language constructs for conditioning on observable events, as needed for Bayesian probabilistic modeling, which Continuous-Eris does not handle. The proof outlined in §2.3 for generalizing Eris’s discrete error credit rules into continuous versions exploits the fact that the Riemann integral can be approximated by Riemann sums. Batz et al. [ 5] have also used Riemann sums to approximate integrals in verifying probabilistic programs. They observe that when using a pre-expectation calculus for a program with continuous samples, the standard approach gives rise to terms involving integrals, which poses a challenge for automated verification. They show that by instead replacing these integrals with approximations by Riemann sums, one obtains a version that is more amenable to automation, while still yielding sound bounds on the original problem. Beutner et al. [ 7 ]similarly use Riemann sums in bounding properties of probabilistic programs. Although it is common to use floating-point approximations of continuous distributions, 24 Verifying Exact Samplers for Continuous Distributions with a Discrete Program Logic 
+
+Garg et al. [ 23 ] instead consider using fixed-point approximations in a probabilistic program-ming language for Bayesian inference. They show that it is then possible to apply exact techniques for discrete Bayesian inference to this approximation, while soundly controlling the errors introduced by discretization. 
+
+## 7 Conclusion 
+
+Exact sampling algorithms for continuous distributions involve a combination of features that are challenging to reason about. Continuous-Eris provides a way to verify these algorithms using infinite presampling tapes, which are derived by extending Eris with time receipts. 
+
+## 7.1 Future Work 
+
+There are other logics related to Eris that also feature presampling tapes and mechanisms that behave similarly to error credits, such as Approxis [ 27 ], which allows for relational reasoning, and Tachis [ 28 ], for bounding expected costs. It would be interesting to also extend these logics with time receipts and derive infinite presampling tapes to be able to apply them to programs that use exact samplers from continuous distributions. Another direction for future work is to address the restrictions associated to Riemann integration. One concrete limitation of the current approach is that our credit distribution functions are required to be piecewise continuous, and therefore cannot express credit distri-butions which have an uncountable number of discontinuities. Integrability notwithstanding, one might imagine using the indicator function on the rationals as a credit distribution function to prove that the uniform sampler avoids all rational points. In its current form proving this in Continuous-Eris requires one to apply Theorem 4, thereby exiting the program logic and giving up the ability to use this fact as part of a larger Continuous-Eris proof. Generalizations to more permissive integrals such as the Lebesgue or Henstock–Kurzweil integral may alleviate these side conditions. 
+
+References                 
+
+> 1Nathanael L. Ackerman, Cameron E. Freer, and Daniel M. Roy. On the computability of conditional probability. J. ACM , 66(3):23:1–23:40, 2019. doi:10.1145/3321699 .
+> 2Alejandro Aguirre, Philipp G. Haselwarter, Markus de Medeiros, Kwing Hei Li, Simon Odder-shede Gregersen, Joseph Tassarotti, and Lars Birkedal. Error credits: Resourceful reasoning about error bounds for higher-order probabilistic programs. Proc. ACM Program. Lang. ,8(ICFP), August 2024. doi:10.1145/3674635 .
+> 3Alexander Bagnall, Gordon Stewart, and Anindya Banerjee. Formally verified samplers from probabilistic programs with loops and conditioning. Proc. ACM Program. Lang. , 7(PLDI):1–24, 2023. doi:10.1145/3591220 .
+> 4Gilles Barthe, Marco Gaboardi, Benjamin Grégoire, Justin Hsu, and Pierre-Yves Strub. A Program Logic for Union Bounds. In 43rd International Colloquium on Automata, Languages, and Programming (ICALP 2016) . Schloss-Dagstuhl - Leibniz Zentrum für Informatik, 2016.
+> doi:10.4230/LIPIcs.ICALP.2016.107 .
+> 5Kevin Batz, Joost-Pieter Katoen, Francesca Randone, and Tobias Winkler. Foundations for deductive verification of continuous probabilistic programs: From lebesgue to riemann and back. Proc. ACM Program. Lang. , 9(OOPSLA1):421–448, 2025. doi:10.1145/3720429 .
+> 6Andrej Bauer and Iztok Kavkler. Implementing real numbers with RZ. In Ruth Dillhage, Tanja Grubba, Andrea Sorbi, Klaus Weihrauch, and Ning Zhong, editors, Proceedings of the Fourth International Conference on Computability and Complexity in Analysis, CCA 2007, Siena,
+
+M. de Medeiros, P. Liu, K. H. Li, A. Aguirre, L. Birkedal and J. Tassarotti 25 
+
+Italy, June 16-18, 2007 , volume 202 of Electronic Notes in Theoretical Computer Science ,pages 365–384. Elsevier, 2007. doi:10.1016/J.ENTCS.2008.03.027 .
+
+7 Raven Beutner, C.-H. Luke Ong, and Fabian Zaiser. Guaranteed bounds for posterior inference in universal probabilistic programming. In Ranjit Jhala and Isil Dillig, editors, 
+
+PLDI ’22: 43rd ACM SIGPLAN International Conference on Programming Language Design and Implementation, San Diego, CA, USA, June 13 - 17, 2022 , pages 536–551. ACM, 2022. 
+
+doi:10.1145/3519939.3523721 .
+
+8 Patrick Billingsley. Probability and Measure . Wiley, 3rd edition, 1995. 
+
+9 Paul Bilokon and Abbas Edalat. A domain-theoretic approach to brownian motion and general continuous stochastic processes. In Thomas A. Henzinger and Dale Miller, editors, 
+
+Joint Meeting of the Twenty-Third EACSL Annual Conference on Computer Science Logic (CSL) and the Twenty-Ninth Annual ACM/IEEE Symposium on Logic in Computer Science (LICS), CSL-LICS 2014, Vienna, Austria, July 14 - 18, 2014 , pages 15:1–15:10. ACM, 2014. 
+
+doi:10.1145/2603088.2603102 .
+
+10 Hans-Juergen Boehm. Towards an API for the real numbers. In Alastair F. Donaldson and Emina Torlak, editors, Proceedings of the 41st ACM SIGPLAN International Conference on Programming Language Design and Implementation, PLDI 2020, London, UK, June 15-20, 2020 , pages 562–576. ACM, 2020. doi:10.1145/3385412.3386037 .
+
+11 Sylvie Boldo, Catherine Lelay, and Guillaume Melquiond. Coquelicot: A user-friendly library of real analysis for Coq. Math. Comput. Sci. , 9(1):41–62, 2015. doi:10.1007/ S11786-014-0181-1 .
+
+12 Johannes Borgström, Ugo Dal Lago, Andrew D. Gordon, and Marcin Szymczak. A lambda-calculus foundation for universal probabilistic programming. In Jacques Garrigue, Gabriele Keller, and Eijiro Sumii, editors, Proceedings of the 21st ACM SIGPLAN International Conference on Functional Programming, ICFP 2016, Nara, Japan, September 18-22, 2016 ,pages 33–46. ACM, 2016. doi:10.1145/2951913.2951942 .
+
+13 Fredrik Dahlqvist and Dexter Kozen. Semantics of higher-order probabilistic programs with conditioning. Proc. ACM Program. Lang. , 4(POPL):57:1–57:29, 2020. doi:10.1145/3371125 .
+
+14 Swaraj Dash, Younesse Kaddar, Hugo Paquet, and Sam Staton. Affine monads and lazy structures for bayesian programming. Proc. ACM Program. Lang. , 7(POPL):1338–1368, 2023. 
+
+doi:10.1145/3571239 .
+
+15 Markus de Medeiros, Puming Liu, Kwing Hei Li, Alejandro Aguirre, Lars Birkedal, and Joseph Tassarotti. Artifact for "Verifying exact samplers for continuous distributions with a discrete program logic", May 2026. doi:10.5281/zenodo.20114733 .
+
+16 Markus de Medeiros, Muhammad Naveed, Tancrède Lepoint, Temesghen Kahsai, Tristan Ravitch, Stefan Zetzsche, Anjali Joshi, Joseph Tassarotti, Aws Albarghouthi, and Jean-Baptiste Tristan. Verified foundations for differential privacy. Proc. ACM Program. Lang. , 9(PLDI), June 2025. doi:10.1145/3729294 .
+
+17 Cynthia Dwork and Aaron Roth. The algorithmic foundations of differential privacy. Found. Trends Theor. Comput. Sci. , 9(3–4):211–407, August 2014. doi:10.1561/0400000042 .
+
+18 Abbas Edalat. A computable approach to measure and integration theory. Inf. Comput. ,207(5):642–659, 2009. doi:10.1016/J.IC.2008.05.003 .
+
+19 Thomas Ehrhard, Michele Pagani, and Christine Tasson. Measurable cones and stable, measurable functions: A model for probabilistic higher-order programming. Proc. ACM Program. Lang. , 2(POPL):59:1–59:28, 2018. doi:10.1145/3158147 .
+
+20 Martín Hötzel Escardó. PCF extended with real numbers. Theor. Comput. Sci. , 162(1):79–115, 1996. doi:10.1016/0304-3975(95)00250-2 .
+
+21 Jean-Christophe Filliâtre. Creal library. URL: https://usr.lmf.cnrs.fr/~jcf/creal.en. html .
+
+22 Cameron E. Freer and Daniel M. Roy. Computable de finetti measures. Ann. Pure Appl. Log. ,163(5):530–546, 2012. doi:10.1016/J.APAL.2011.06.011 .26 Verifying Exact Samplers for Continuous Distributions with a Discrete Program Logic 
+
+23 Poorva Garg, Steven Holtzen, Guy Van den Broeck, and Todd D. Millstein. Bit blasting probabilistic programs. Proc. ACM Program. Lang. , 8(PLDI):865–888, 2024. doi:10.1145/ 3656412 .
+
+24 Pietro Di Gianantonio. Real number computability and domain theory. Inf. Comput. ,127(1):11–25, 1996. doi:10.1006/INCO.1996.0046 .
+
+25 Michèle Giry. A categorical approach to probability theory. In B. Banaschewski, editor, 
+
+Categorical Aspects of Topology and Analysis , pages 68–85, Berlin, Heidelberg, 1982. Springer Berlin Heidelberg. 
+
+26 Simon Oddershede Gregersen, Alejandro Aguirre, Philipp G. Haselwarter, Joseph Tassarotti, and Lars Birkedal. Asynchronous probabilistic couplings in higher-order separation logic. Proc. ACM Program. Lang. , 8(POPL):753–784, 2024. doi:10.1145/3632868 .
+
+27 Philipp G. Haselwarter, Kwing Hei Li, Alejandro Aguirre, Simon Oddershede Gregersen, Joseph Tassarotti, and Lars Birkedal. Approximate relational reasoning for higher-order probabilistic programs. Proc. ACM Program. Lang. , 9(POPL):1196–1226, 2025. doi:10.1145/3704877 .
+
+28 Philipp G. Haselwarter, Kwing Hei Li, Markus de Medeiros, Simon Oddershede Gregersen, Alejandro Aguirre, Joseph Tassarotti, and Lars Birkedal. Tachis: Higher-order separation logic with credits for expected costs. Proc. ACM Program. Lang. , 8(OOPSLA2):1189–1218, 2024. doi:10.1145/3689753 .
+
+29 Chris Heunen, Ohad Kammar, Sam Staton, and Hongseok Yang. A convenient category for higher-order probability theory. In 32nd Annual ACM/IEEE Symposium on Logic in Computer Science, LICS 2017, Reykjavik, Iceland, June 20-23, 2017 , pages 1–12. IEEE Computer Society, 2017. doi:10.1109/LICS.2017.8005137 .
+
+30 Michikazu Hirata, Yasuhiko Minamide, and Tetsuya Sato. Program logic for higher-order probabilistic programs in isabelle/hol. In Michael Hanus and Atsushi Igarashi, editors, 
+
+Functional and Logic Programming - 16th International Symposium, FLOPS 2022, Kyoto, Japan, May 10-12, 2022, Proceedings , volume 13215 of Lecture Notes in Computer Science ,pages 57–74. Springer, 2022. doi:10.1007/978-3-030-99461-7\_4 .
+
+31 Shing Hin Ho, Nicolas Wu, and Azalea Raad. Bayesian separation logic: A logical foundation and axiomatic semantics for probabilistic programming. Proc. ACM Program. Lang. , 10(POPL), January 2026. doi:10.1145/3776696 .
+
+32 Mathieu Hoyrup and Cristóbal Rojas. Computability of probability measures and martin-löf randomness over metric spaces. Information and Computation , 207(7):830–847, 2009. URL: https://www.sciencedirect.com/science/article/pii/S0890540109000170 ,
+
+doi:10.1016/j.ic.2008.12.009 .
+
+33 Daniel Huang and Greg Morrisett. An application of computable distributions to the semantics of probabilistic programming languages. In Peter Thiemann, editor, Programming Languages and Systems - 25th European Symposium on Programming, ESOP 2016, Held as Part of the European Joint Conferences on Theory and Practice of Software, ETAPS 2016, Eindhoven, The Netherlands, April 2-8, 2016, Proceedings , volume 9632 of Lecture Notes in Computer Science , pages 337–363. Springer, 2016. doi:10.1007/978-3-662-49498-1\_14 .
+
+34 M.L. Huber. Perfect Simulation . Chapman & Hall/CRC Monographs on Statistics & Applied Probability. CRC Press, 2016. 
+
+35 Mathieu Huot, Alexander K. Lew, Vikash K. Mansinghka, and Sam Staton. ωpap spaces: Rea-soning denotationally about higher-order, recursive probabilistic and differentiable programs. In 
+
+38th Annual ACM/IEEE Symposium on Logic in Computer Science, LICS 2023, Boston, MA, USA, June 26-29, 2023 , pages 1–14. IEEE, 2023. doi:10.1109/LICS56636.2023.10175739 .
+
+36 Vernon A. Lee Jr. and Hans-Juergen Boehm. Optimizing programs over the constructive reals. In Bernard N. Fischer, editor, Proceedings of the ACM SIGPLAN’90 Conference on Programming Language Design and Implementation (PLDI), White Plains, New York, USA, June 20-22, 1990 , pages 102–111. ACM, 1990. doi:10.1145/93542.93558 .M. de Medeiros, P. Liu, K. H. Li, A. Aguirre, L. Birkedal and J. Tassarotti 27 
+
+37 Ralf Jung, Robbert Krebbers, Jacques-Henri Jourdan, Ales Bizjak, Lars Birkedal, and Derek Dreyer. Iris from the ground up: A modular foundation for higher-order concurrent separation logic. J. Funct. Program. , 28:e20, 2018. doi:10.1017/S0956796818000151 .
+
+38 Charles F. F. Karney. Sampling exactly from the normal distribution. ACM Trans. Math. Softw. , 42(1), January 2016. doi:10.1145/2710016 .
+
+39 John M. Li, Amal Ahmed, and Steven Holtzen. Lilac: A modal separation logic for conditional probability. Proc. ACM Program. Lang. , 7(PLDI):148–171, 2023. doi:10.1145/3591226 .
+
+40 Kwing Hei Li, Alejandro Aguirre, Simon Oddershede Gregersen, Philipp G. Haselwarter, Joseph Tassarotti, and Lars Birkedal. Modular reasoning about error bounds for concurrent probabilistic programs. Proc. ACM Program. Lang. , 9(ICFP), August 2025. doi:10.1145/ 3747514 .
+
+41 Virgil Marionneau, Félix Sassus Bourda, Alejandro Aguirre, and Lars Birkedal. Modular specifications and implementations of random samplers in higher-order separation logic. In 
+
+Proceedings of the 15th ACM SIGPLAN International Conference on Certified Programs and Proofs , CPP ’26, page 368–382, New York, NY, USA, 2026. Association for Computing Machinery. doi:10.1145/3779031.3779109 .
+
+42 Valérie Ménissier-Morain. Arbitrary precision real arithmetic: design and algorithms. Research Report lip6.2003.003, LIP6, May 2003. URL: https://hal.science/hal-02545650 .
+
+43 Glen Mével, Jacques-Henri Jourdan, and François Pottier. Time Credits and Time Receipts in Iris. In Lecture Notes in Computer Science , volume 11423 of Lecture Notes in Computer Science , pages 3–29, Prague, Czech Republic, April 2019. Springer. URL: https://hal. science/hal-02183311 , doi:10.1007/978-3-030-17184-1\_1 .
+
+44 Ilya Mironov. On significance of the least significant bits for differential privacy. In Proceedings of the 2012 ACM conference on Computer and communications security , pages 650–661, 2012. 
+
+45 Norbert Th. Müller. The iRRAM: Exact arithmetic in C++. In Jens Blanck, Vasco Brattka, and Peter Hertling, editors, Computability and Complexity in Analysis, 4th International Workshop, CCA 2000, Swansea, UK, September 17-19, 2000, Selected Papers , volume 2064 of Lecture Notes in Computer Science , pages 222–252. Springer, 2000. doi:10.1007/3-540-45335-0\_14 .
+
+46 Peter Occil. Partially-sampled random numbers for accurate sampling of continuous distribu-tions. URL: https://peteroupc.github.io/exporand.pdf .
+
+47 Peter John Potts, Abbas Edalat, and Martín Hötzel Escardó. Semantics of exact real arithmetic. In Proceedings, 12th Annual IEEE Symposium on Logic in Computer Science, Warsaw, Poland, June 29 - July 2, 1997 , pages 248–257. IEEE Computer Society, 1997. 
+
+doi:10.1109/LICS.1997.614952 .
+
+48 Tetsuya Sato. Approximate relational hoare logic for continuous random samplings. In Lars Birkedal, editor, The Thirty-second Conference on the Mathematical Foundations of Programming Semantics, MFPS 2016, Carnegie Mellon University, Pittsburgh, PA, USA, May 23-26, 2016 , volume 325 of Electronic Notes in Theoretical Computer Science , pages 277–298. Elsevier, 2016. 
+
+49 Tetsuya Sato, Alejandro Aguirre, Gilles Barthe, Marco Gaboardi, Deepak Garg, and Justin Hsu. Formal verification of higher-order probabilistic programs: reasoning about approximation, convergence, bayesian inference, and optimization. Proc. ACM Program. Lang. , 3(POPL):38:1– 38:30, 2019. doi:10.1145/3290351 .
+
+50 Alex K. Simpson. Lazy functional algorithms for exact real functionals. In Lubos Brim, Jozef Gruska, and Jirí Zlatuska, editors, Mathematical Foundations of Computer Science 1998, 23rd International Symposium, MFCS’98, Brno, Czech Republic, August 24-28, 1998, Proceedings , volume 1450 of Lecture Notes in Computer Science , pages 456–464. Springer, 1998. doi:10.1007/BFB0055795 .
+
+51 Matthijs Vákár, Ohad Kammar, and Sam Staton. A domain theory for statistical probabilistic programming. Proc. ACM Program. Lang. , 3(POPL):36:1–36:29, 2019. doi:10.1145/3290349 .
+
+52 J. von Neumann. Various techniques used in connection with random digits. In A. S. Householder, G. E. Forsythe, and H. H. Germond, editors, Monte Carlo Method , pages 36–38, 28 Verifying Exact Samplers for Continuous Distributions with a Discrete Program Logic 
+
+(NBS, Washington, DC), proceedings of a symposium held June 29–July 1, 1949, in Los Angeles, 1951. 
+
+53 Jean Vuillemin. Exact real computer arithmetic with continued fractions. IEEE Trans. Computers , 39(8):1087–1105, 1990. doi:10.1109/12.57047 .
+
+54 Mitchell Wand, Ryan Culpepper, Theophilos Giannakopoulos, and Andrew Cobb. Contextual equivalence for a probabilistic language with continuous random variables and recursion. Proc. ACM Program. Lang. , 2(ICFP):87:1–87:30, 2018. doi:10.1145/3236782 .
+
+55 E. Wiedmer. Computing with infinite objects. Theoretical Computer Science , 10:133–155, 1980. M. de Medeiros, P. Liu, K. H. Li, A. Aguirre, L. Birkedal and J. Tassarotti 29 
+
+## A Appendix A.1 Credit Conditioning 
+
+Here we describe the credit conditioning functions used by our proofs, and show a proof that they are expectation-preserving. Many of the derivations involve an exchange of limits, for which we use Fubini’s theorem. Formally justifying the existence and exchange of these iterated limits typically amounts to proving that their arguments converge uniformly, or are uniformly continuous. For more details we refer the reader to our Rocq development, where all of the equalities in this section are formally verified. 
+
+## A.1.1 Decreasing Reals Trial 
+
+For the uniform deviate sample from U, use 
+
+g(F, N, x, y ) ≜ [y ≤ x]
+
+( ∑
+
+> m∈N
+
+μ(R (N +1) y)(m) · F (m)
+
+)
+
++ [ y ≥ x] · F (N ).
+
+A.1.1.1 Expectation Preservation 
+
+∫ 10
+
+g(F, N, x, y ) dy 
+
+=
+
+∫ 10
+
+[y ≤ x]
+
+(∑
+
+> m∈N
+
+μ(R (N +1) y)(m) · F (m)
+
+)
+
++ [ y ≥ x] · F (N ) dy 
+
+=
+
+∫ 10
+
+[y ≤ x]
+
+(∑
+
+> m∈N
+
+μ(R (N +1) y)(m) · F (m)
+
+)
+
+dy +
+
+∫ 10
+
+[y ≥ x] · F (N ) dy 
+
+=
+
+∫ 10
+
+[y ≤ x]
+
+(∑
+
+> m∈N
+
+[N + 1 ≤ m] ·
+
+( ym−N −1
+
+(m − N − 1)! − ym−N
+
+(m − N )! 
+
+)
+
+· F (m)
+
+)
+
+dy 
+
++
+
+∫ 10
+
+[y ≥ x] · F (N ) dy 
+
+=
+
+∑
+
+> m∈N
+
+[∫ 10
+
+[y ≤ x]
+
+(
+
+[N + 1 ≤ m] ·
+
+( ym−N −1
+
+(m − N − 1)! − ym−N
+
+(m − N )! 
+
+)) 
+
+dy · F (m)
+
+]
+
++
+
+∫ 10
+
+[y ≥ x] · F (N ) dy 
+
+=
+
+> ∞
+
+∑ 
+
+> m=N+1
+
+[∫ x
+
+> 0
+
+( ym−N −1
+
+(m − N − 1)! − ym−N
+
+(m − N )! 
+
+)
+
+dy · F (m)
+
+]
+
++
+
+∫ 1
+
+> x
+
+F (N ) dy 
+
+=
+
+> ∞
+
+∑ 
+
+> m=N+1
+
+[( xm−N
+
+(m − N )! − xm−N +1 
+
+(m − N + 1)! 
+
+)
+
+· F (m)
+
+]
+
++ (1 − x)F (N )=
+
+> ∞
+
+∑
+
+> m=N
+
+[( xm−N
+
+(m − N )! − xm−N +1 
+
+(m − N + 1)! 
+
+)
+
+· F (m)
+
+]
+
+=
+
+∑
+
+> n∈N
+
+μ(R N x)(n) · F (n)30 Verifying Exact Samplers for Continuous Distributions with a Discrete Program Logic 
+
+## A.1.2 Bernoulli Negative Half Exponential 
+
+For the uniform deviate sample from U, use 
+
+g(F, x ) ≜ [1 /2 < x ] · F (true ) + [ x ≤ 1/2] 
+
+( ∑
+
+> m∈N
+
+μ(R 0 x)(m) · h(F, m )
+
+)
+
+For the integer sample from R use 
+
+h(F, n ) ≜ F (n%2 = 1) 
+
+A.1.2.1 Expectation Preservation 
+
+∫ 10
+
+g(F, x ) dx 
+
+=
+
+∫ 10
+
+[1 /2 < x ] · F (true ) + [ x ≤ 1/2] 
+
+(∑
+
+> m∈N
+
+μ(R 0 x)(m) · F (m%2 = 1) 
+
+)
+
+dx 
+
+= F (true )2 +
+
+∫ 10
+
+[x ≤ 1/2] 
+
+(∑
+
+> m∈N
+
+μ(R 0 x)(m) · F (m%2 = 1) 
+
+)
+
+dx 
+
+= F (true )2 +
+
+∑
+
+> m∈N
+
+[∫ 10
+
+[x ≤ 1/2] (μ(R 0 x)(m)) dx · F (m%2 = 1) 
+
+]
+
+= F (true )2 +
+
+∑
+
+> m∈N
+
+[∫ 1/20
+
+(μ(R 0 x)(m)) dx · F (m%2 = 1) 
+
+]
+
+= F (true )2 +
+
+∑
+
+> m∈N
+
+[∫ 1/20
+
+( xm
+
+m! − xm+1 
+
+(m + 1)! 
+
+)
+
+dx · F (m%2 = 1) 
+
+]
+
+= F (true )2 +
+
+∑
+
+> m∈N
+
+[( (1 /2) m+1 
+
+(m + 1)! − (1 /2) m+2 
+
+(m + 2)! 
+
+)
+
+· F (m%2 = 1) 
+
+]
+
+= F (true )2 − F (true )2 +
+
+∑
+
+> m∈N
+
+[( (1 /2) m
+
+m! − (1 /2) m+1 
+
+(m + 1)! 
+
+)
+
+· F (m%2 = 0) 
+
+]
+
+=
+
+∑
+
+> m∈N
+
+[( (1 /2) m
+
+m! − (1 /2) m+1 
+
+(m + 1)! 
+
+)
+
+· [m%2 = 0] 
+
+]
+
+· F (true )+
+
+∑
+
+> m∈N
+
+[( (1 /2) m
+
+m! − (1 /2) m+1 
+
+(m + 1)! 
+
+)
+
+· [m%2 = 1] 
+
+]
+
+· F (false )=
+
+∑
+
+> m∈N
+
+[( (−1/2) m
+
+m!
+
+)] 
+
+· F (true ) + 
+
+(
+
+1 −
+
+∑
+
+> m∈N
+
+[( (−1/2) m
+
+m!
+
+)] )
+
+· F (false )=e−1/2F (true ) + (1 − e−1/2) F (false )
+
+## A.1.3 Gaussian Integer Part 
+
+For the integer sample from G, use 
+
+g(F, k ) ≜ e−k(k−1) /2 · h(F, k, true ) + (1 − e−k(k−1) /2) · h(F, k, false )M. de Medeiros, P. Liu, K. H. Li, A. Aguirre, L. Birkedal and J. Tassarotti 31 
+
+For the boolean sample from I use 
+
+h(F, k, b ) ≜ [b] · F (k) + [ ¬b] · ∑
+
+j∈N
+
+e−j2/2
+
+NZ
+
+· F (j)
+
+A.1.3.1 Expectation Preservation 
+
+We seek to show that ∑
+
+k∈N e−k2/2
+
+NZ · F (k) = ∑
+
+k∈N
+
+(e−1/2)k · (1 − e−1/2) · g(F, k ). First, we calculate 
+
+∑
+
+> k∈N
+
+(e−1/2)k
+
+· (1 − e−1/2) · g(F, k )=
+
+∑
+
+> k∈N
+
+(e−1/2)k
+
+· (1 − e−1/2) ·
+
+(
+
+e−k(k−1) /2 · F (k) + (1 − e−k(k−1) /2) ·
+
+∑
+
+> j∈N
+
+[ e−j2/2
+
+NZ
+
+· F (j)
+
+])
+
+=
+
+∑
+
+> k∈N
+
+(e−k/ 2 − e−(k+1) /2) ·
+
+(
+
+e−k(k−1) /2 · F (k) + (1 − e−k(k−1) /2) ·
+
+∑
+
+> j∈N
+
+[ e−j2/2
+
+NZ
+
+· F (j)
+
+])
+
+=
+
+∑
+
+> k∈N
+
+(e−k/ 2 · e−k(k−1) /2 · F (k)) −
+
+∑
+
+> k∈N
+
+(e−(k+1) /2 · e−k(k−1) /2 · F (k))
+
++
+
+∑
+
+> k∈N
+
+(
+
+e−k/ 2 · (1 − e−k(k−1) /2) ·
+
+∑
+
+> j∈N
+
+[ e−j2/2
+
+NZ
+
+· F (j)
+
+])
+
+−
+
+∑
+
+> k∈N
+
+(
+
+e−(k+1) /2 · (1 − e−k(k−1) /2) ·
+
+∑
+
+> j∈N
+
+[ e−j2/2
+
+NZ
+
+· F (j)
+
+])
+
+=
+
+∑
+
+> k∈N
+
+(
+
+e−k2/2 · F (k)
+
+)
+
+−
+
+∑
+
+> n∈N
+
+(
+
+e−(k2+1) /2 · F (k)
+
+)
+
++
+
+∑
+
+> k∈N
+
+[ e−k2/2
+
+NZ
+
+· F (k)
+
+]
+
+·
+
+∑
+
+> j∈N
+
+(e−j/ 2 · (1 − e−j(j−1) /2))
+
+−
+
+∑
+
+> k∈N
+
+[ e−k2/2
+
+NZ
+
+· F (k)
+
+]
+
+·
+
+∑
+
+> j∈N
+
+(e−(j+1) /2 · (1 − e−j(j−1) /2)·)32 Verifying Exact Samplers for Continuous Distributions with a Discrete Program Logic 
+
+Combining sums, we can then show the original equality termwise: 
+
+e−k2/2 − e−(k2+1) /2 + e−k2/2
+
+NZ
+
+∑
+
+> j∈N
+
+(e−j/ 2 · (1 − e−j(j−1) /2))
+
+− e−k2/2
+
+NZ
+
+·
+
+∑
+
+> j∈N
+
+(e−(j+1) /2 · (1 − e−j(j−1) /2))
+
+=e−k2/2 − e−(k2+1) /2 + (1 − e−1/2) · e−k2/2
+
+NZ
+
+∑
+
+> j∈N
+
+(e−j/ 2 · (1 − e−j(j−1) /2))
+
+=e−k2/2 − e−(k2+1) /2 + (1 − e−1/2) · e−k2/2
+
+NZ
+
+[∑
+
+> j∈N
+
+e−j/ 2 −
+
+∑
+
+> j∈N
+
+e−j2/2
+
+]
+
+=e−k2/2 − e−(k2+1) /2 + (1 − e−1/2) · e−k2/2
+
+NZ
+
+[ 11 − e−1/2 − N Z
+
+]
+
+= e−k2/2
+
+NZ
+
++ e−k2/2 − e−(k2+1) /2 + e−(k2+1) /2 − e−k2/2
+
+= e−k2/2
+
+NZ
+
+## A.1.4 Gaussian Helper 
+
+The credit arithmetic for C and A are trivial. The credit arithmetic for S is almost identical to the analysis for S′, which we will outline here. The closed form for S′ that we seek to establish is 
+
+μ(S′ k x y N )(n) ≜ [N ≤ n] ·
+
+(
+
+yn−N
+
+(n − N )! 
+
+( 2k + x
+
+2k + 2 
+
+)n−N
+
+− yn−N +1 
+
+(n − N + 1)! 
+
+( 2k + x
+
+2k + 2 
+
+)n−N +1 )
+
+For the uniform deviate sample from U, use 
+
+g(F, x, k, y, N, z ) ≜
+
+[y < z ] · F (N )+ [ z ≤ y] ·
+
+[ 2 − x
+
+2k + 2 · h(F, x, k, y, N, z, true ) + 2k + x
+
+2k + 2 h(F, x, k, y, N, z, false )
+
+]
+
+For the boolean sample from A, use 
+
+h(F, x, k, y, N, z, b ) ≜ [b] · F (N ) + [ ¬b] · ∑
+
+> j∈N
+
+μ(S′ k x z N +1) (j) · F (j)M. de Medeiros, P. Liu, K. H. Li, A. Aguirre, L. Birkedal and J. Tassarotti 33 A.1.4.1 Expectation Preservation 
+
+We seek to show that ∑ 
+
+> n∈N
+
+μ(S′ k x y N )(n) · F (n) = ∫ 10 g(F, x, k, y, N, z ) dz . We calculate with the right-hand side of this equation. 
+
+∫ 10
+
+g(F, x, k, y, N, z ) dz 
+
+=
+
+∫ 10
+
+[y < z ] · F (N ) + [ z ≤ y] ·
+
+[
+
+2 − x
+
+2k + 2 · F (N ) + 2k + x
+
+2k + 2 
+
+(∑
+
+> j∈N
+
+μ(S′ k x z N +1) (j) · F (j)
+
+)] 
+
+dz 
+
+=
+
+(
+
+1 − y + y · 2 − x
+
+2k + 2 
+
+)
+
+· F (N ) + 
+
+∫ 10
+
+[
+
+[z ≤ y] · 2k + x
+
+2k + 2 
+
+(∑
+
+> j∈N
+
+μ(S′ k x z N +1) (j) · F (j)
+
+)] 
+
+dz 
+
+=
+
+(
+
+1 − y + y · 2 − x
+
+2k + 2 
+
+)
+
+· F (N ) + 2k + x
+
+2k + 2 
+
+∑
+
+> j∈N
+
+∫ y
+
+> 0
+
+(μ(S′ k x z N +1) (j)) dz · F (j)
+
+Now, compare coefficients on F . For n < N , the Iverson brackets ensure every coefficient on F (n) is zero. Comparing coefficients on F (N ), the Iverson bracket in (μ(S′ k x z N +1) (j))
+
+eliminates the rightmost term from the right-hand side, leaving 
+
+μ(S′ k x y N )(N ) = 1 − y + y · 2 − x
+
+2k + 2 = 1 − y
+
+(
+
+1 − 2 − x
+
+2k + 2 
+
+)
+
+= 1 − y
+
+( 2k + x
+
+2k + 2 
+
+)
+
+Lastly, we compare coefficients for n > N .
+
+μ(S′ k x y N )(n)= 2k + x
+
+2k + 2 
+
+∫ y
+
+> 0
+
+(μ(S′ k x z N +1) (n)) dz 
+
+= 2k + x
+
+2k + 2 
+
+∫ y
+
+> 0
+
+( yn−N −1
+
+(n − N − 1)! 
+
+( 2k + x
+
+2k + 2 
+
+)n−N −1
+
+− zn−N
+
+(n − N )! 
+
+( 2k + x
+
+2k + 2 
+
+)n−N )
+
+dz 
+
+=
+
+∫ y
+
+> 0
+
+( yn−N −1
+
+(n − N − 1)! 
+
+( 2k + x
+
+2k + 2 
+
+)n−N
+
+− zn−N
+
+(n − N )! 
+
+( 2k + x
+
+2k + 2 
+
+)n−N +1 )
+
+dz 
+
+= yn−N
+
+(n − N )! 
+
+( 2k + x
+
+2k + 2 
+
+)n−N
+
+− yn−N +1 
+
+(n − N + 1)! 
+
+( 2k + x
+
+2k + 2 
+
+)n−N +1 
+
+## A.1.5 One-sided Gaussian 
+
+Recall that this is a distribution over N × [0 , 1] , so F : N → [0 , 1] → R≥0.For the integer sample from Z, use 
+
+f (F, k ) ≜
+
+∫ 10
+
+g(F, k, x ) dx 
+
+For the uniform deviate sample from U, use 
+
+g(F, k, x ) ≜ e−x(2 k+x)/2h(F, x, y, true ) + (1 − e−x(2 k+x)/2)h(F, x, y, false )34 Verifying Exact Samplers for Continuous Distributions with a Discrete Program Logic 
+
+For the boolean sample from I, use 
+
+h(F, x, k, b ) ≜ [b] · F (k, x ) + [ ¬b] · ∑
+
+j∈N
+
+∫ 10
+
+e−(j+w)2/2
+
+NN′
+
+· F (j, w ) dw 
+
+A.1.5.1 Expectation Preservation 
+
+∑
+
+> k∈N
+
+∫ 10
+
+e−(k+x)2/2
+
+NN′
+
+· F (k, x ) dx 
+
+=
+
+∑
+
+> k∈N
+
+e−k2/2
+
+NZ
+
+∫ 10
+
+e−x(2 k+x)/2F (k, x ) + (1 − e−x(2 k+x)/2)
+
+[∑
+
+> j∈N
+
+∫ 10
+
+e−(j+w)2/2
+
+NN′
+
+· F (j, w ) dw 
+
+]
+
+dx 
+
+=
+
+∑
+
+> k∈N
+
+e−k2/2
+
+NZ
+
+∫ 10
+
+e−x(2 k+x)/2F (k, x ) dx 
+
+= + 
+
+∑
+
+> k∈N
+
+e−k2/2
+
+NZ
+
+∫ 10
+
+(1 − e−x(2 k+x)/2)
+
+[∑
+
+> j∈N
+
+∫ 10
+
+e−(j+w)2/2
+
+NN′
+
+· F (j, w ) dw 
+
+]
+
+dx 
+
+=
+
+∑
+
+> k∈N
+
+∫ 10
+
+e−k2/2
+
+NZ
+
+e−x(2 k+x)/2F (k, x ) dx +=
+
+∑
+
+> k∈N
+
+∫ 10
+
+∑
+
+> j∈N
+
+e−j2/2
+
+NZ
+
+[∫ 10
+
+(1 − e−w(2 j+w)/2) e−(k+x)2/2
+
+NN′
+
+dw 
+
+]
+
+· F (k, x ) dx 
+
+It suffices to show the integrand and summand are equal, allowing us to cancel F .
+
+e−(k+x)2/2
+
+NN′
+
+= e−k2/2
+
+NZ
+
+e−x(2 k+x)/2 +
+
+∑
+
+> j∈N
+
+e−j2/2
+
+NZ
+
+[∫ 10
+
+(1 − e−w(2 j+w)/2) e−(k+x)2/2
+
+NN′
+
+dw 
+
+]
+
+= e−(k+x)2/2
+
+NZ
+
++ e−(k+x)2/2
+
+NN′ · N Z
+
+·
+
+∑
+
+> j∈N
+
+e−j2/2
+
+[∫ 10
+
+(1 − e−w(2 j+w)/2) dw 
+
+]
+
+= e−(k+x)2/2
+
+NZ
+
++ e−(k+x)2/2
+
+NN′ · N Z
+
+·
+
+(∑
+
+> j∈N
+
+e−j2/2 − e−j2/2 ∑
+
+> j∈N
+
+∫ 10
+
+e−w(2 j+w)/2 dw 
+
+)
+
+= e−(k+x)2/2
+
+NZ
+
++ e−(k+x)2/2
+
+NN′ · N Z
+
+·
+
+(∑
+
+> j∈N
+
+e−j2/2 −
+
+∑
+
+> j∈N
+
+∫ 10
+
+e−(w+j)2/2 dw 
+
+)
+
+= e−(k+x)2/2
+
+NZ
+
++ e−(k+x)2/2
+
+NN′ · N Z
+
+· (NZ − N N′ )= e−(k+x)2/2
+
+NN′
+
+( NN′
+
+NZ
+
++ NZ − N N′
+
+NZ
+
+)
+
+= e−(k+x)2/2
+
+NN′M. de Medeiros, P. Liu, K. H. Li, A. Aguirre, L. Birkedal and J. Tassarotti 35 
+
+## A.1.6 Negative Exponential 
+
+The negative exponential is also a distribution over N × [0 , 1] , so F : N → [0 , 1] → R≥0. We seek to show that E N is distributed as 
+
+μ(E N )(k, x ) ≜ [N ≤ k]e−(x+k−N )
+
+For the uniform deviate sample from U use 
+
+g(F, N, x ) ≜ ∑
+
+> n∈N
+
+( xn
+
+n! − xn+1 
+
+(n + 1)! 
+
+)
+
+· h(F, N, x, n )
+
+For the integer sample from R, use 
+
+h(F, N, x, k ) ≜
+
+[k%2 = 0] · F (N, x ) + [ k%2 = 1] · ∑
+
+> j∈N
+
+∫ 10
+
+[N + 1 ≤ j] · e−(j−N −1+ y) · F (j, y ) dy 36 Verifying Exact Samplers for Continuous Distributions with a Discrete Program Logic A.1.6.1 Expectation Preservation 
+
+∑
+
+> k∈N
+
+∫ 10
+
+[N ≤ k]e−(x+k−N ) · F (k, x )=
+
+∫ 10
+
+g(F, N, x ) dx 
+
+=
+
+∫ 10
+
+∑
+
+> k∈N
+
+( xk
+
+k! − xk+1 
+
+(k + 1)! 
+
+)
+
+·
+
+(
+
+[k%2 = 0] · F (N, x ) + [ k%2 = 1] ·
+
+∑
+
+> j∈N
+
+∫ 10
+
+[N + 1 ≤ j] · e−(j−N −1+ y) · F (j, y ) dy 
+
+)
+
+dx 
+
+=
+
+∫ 10
+
+∑
+
+> k∈N
+
+( xk
+
+k! − xk+1 
+
+(k + 1)! 
+
+)
+
+· [k%2 = 0] · F (N, x ) dx 
+
++
+
+∫ 10
+
+∑
+
+> k∈N
+
+( xn
+
+n! − xn+1 
+
+(n + 1)! 
+
+)
+
+· [k%2 = 1] ·
+
+∑
+
+> j∈N
+
+∫ 10
+
+[N + 1 ≤ j] · e−(j−N −1+ y) · F (j, y ) dy dx 
+
+=
+
+∫ 10
+
+∑
+
+> k∈N
+
+(( xk
+
+k! − xk+1 
+
+(k + 1)! 
+
+)
+
+· [k%2 = 0] 
+
+)
+
+· F (N, x ) dx 
+
++
+
+(∫ 10
+
+∑
+
+> k∈N
+
+( xn
+
+n! − xn+1 
+
+(n + 1)! 
+
+)
+
+· [k%2 = 1] dx 
+
+)
+
+·
+
+(∑
+
+> j∈N
+
+∫ 10
+
+[N + 1 ≤ j] · e−(j−N −1+ y) · F (j, y ) dy 
+
+)
+
+=
+
+∫ 10
+
+e−x · F (N, x ) dx 
+
++
+
+(∫ 10
+
+(1 − e−x) dx 
+
+)
+
+·
+
+(∑
+
+> j∈N
+
+∫ 10
+
+[N + 1 ≤ j] · e−(j−N −1+ y) · F (j, y ) dy 
+
+)
+
+=
+
+∫ 10
+
+e−x · F (N, x ) dx + 1
+
+e ·
+
+(∑
+
+> k∈N
+
+∫ 10
+
+[N + 1 ≤ k] · e−(k−N −1+ x) · F (k, x ) dx 
+
+)
+
+=
+
+∫ 10
+
+e−x · F (N, x ) dx +
+
+(∑
+
+> k∈N
+
+∫ 10
+
+[N + 1 ≤ k] · e−(k−N +x) · F (k, x ) dx 
+
+)
+
+=
+
+∑
+
+> k∈N
+
+∫ 10
+
+[N ≤ k] · e−(k−N +x) · F (k, x ) dx
