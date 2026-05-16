@@ -1,0 +1,796 @@
+Title: Privacy-preserving Chunk Scheduling in a BitTorrent Implementation of Federated Learning
+
+URL Source: https://arxiv.org/pdf/2605.10499v1
+
+Published Time: Tue, 12 May 2026 02:49:29 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+# Privacy-preserving Chunk Scheduling in a BitTorrent Implementation of Federated Learning 
+
+Naicheng Li 
+
+IMDEA Networks Institute 
+
+Madrid, Spain naicheng.li@networks.imdea.org 
+
+Javad Dogani 
+
+IMDEA Networks Institute 
+
+Madrid, Spain javad.dogani@networks.imdea.org 
+
+Rui Wang 
+
+Department of Software Technology Delft University of Technology 
+
+Delft, The Netherlands r.wang-8@tudelft.nl 
+
+Kaitai Liang 
+
+Department of Computing & Department of Intelligent Systems University of Turku & Delft University of Technology 
+
+Turku, Finland & Delft, The Netherlands kaitai.liang@utu.fi 
+
+Nikolaos Laoutaris 
+
+IMDEA Networks Institute 
+
+Madrid, Spain nikolaos.laoutaris@networks.imdea.org 
+
+Abstract —Traditional federated learning (FL) relies on acentral aggregator server, which can create performance bottle-necks and privacy risks. Decentralized mix-and-forward designs remove the server, but repeated local mixing can attenuate global information under heterogeneity and exposes peer-to-peer neighborhoods as a privacy attack surface. To preserve FedAvg-style aggregation semantics (over updates reconstructable by the round deadline) while scaling dissemination, we present 
+
+FLTorrent , a BitTorrent-based dissemination layer for serverless FL with a short warm-up. Warm-up hardens within-round source unlinkability —a dissemination-layer goal orthogonal to content protections (e.g., DP or secure aggregation)—via (i) pre-round obfuscation, (ii) randomized lags, and (iii) coordination-only non-owner-first scheduling (tracker off the data path), before switching to vanilla BitTorrent swarming. We upper-bound the per-transfer attribution posterior by the fraction of owner chunks in a sender’s eligible cover set, and derive a tighter high-probability bound that improves with early non-owner mass. A simple heuristic, G REEDY FASTEST FIRST , attains ≈ 92% of a bandwidth-optimal max-flow upper bound, while warm-up remains a stable ≈ 12% share of a round across 100 –500 peers. Under an observation-only local adversary, FLTorrent drives attribution success close to neighborhood-level random guessing for typical nodes, improves with network size, and remains robust under collusion. In LLM-scale stress tests (Gemma-7B, DeepSeek-R1-14B, Qwen2.5-32B, and Llama-3.3-70B) over 7–
+
+10 Gbps access links, FLTorrent adds only ∼ 6–10% end-to-end overhead relative to BitTorrent-only. Overall, FLTorrent shows that within-round unlinkability and BitTorrent-level efficiency can co-exist with predictable, low overheads at scale. 
+
+Index Terms —Federated learning, Peer-to-peer systems, Bit-Torrent swarming, Privacy, Unlinkability, Chunk Scheduling. 
+
+I. I NTRODUCTION 
+
+Federated Learning (FL) trains shared models without cen-tralizing training data by exchanging model updates [1]. In the canonical server-based workflow, a central aggregator collects client updates, computes a weighted average (FedAvg), and redistributes the new model [1]. While widely adopted for privacy and compliance (e.g., GDPR), this architecture has its downsides: the server can become a communication bottleneck and requires full trust. These issues have motivated substantial distributed-systems work on communication-efficient aggrega-tion, client selection, personalization, and robustness [2]–[5]. Despite keeping data local, FL is not immune to privacy inference. Prior work shows that adversaries can extract sensitive information from update contents via membership inference and gradient inversion/reconstruction [6]–[9]. Ac-cordingly, many deployments adopt content-level defenses such as secure aggregation (and often DP), which limit visibility of individual updates to the aggregator [10]–[12]. However, such defenses do not address metadata leakage in the communication substrate—e.g., which participant likely produced which update and when—which becomes salient in peer-to-peer dissemination. This motivates reducing reliance on a single trusted aggregator and hardening the dissemination layer against within-round attribution. A prominent direction is decentralized learning and decen-tralized FL (DL/DFL), where clients exchange information over an overlay graph and update their models via local mixing (e.g., push-sum/gossip, mixing matrices, or “mix-and-forward” propagation) [13]–[15]. This improves fault tolerance and re-duces reliance on one aggregation point, but it complicates the “what is being computed” question and introduces proximity-driven privacy risks. First, local mixing is inherently a multi-hop approximation: within a finite time budget, each node only sees partially mixed information rather than the full per-round set of updates. Under heterogeneity (e.g., non-IID data, bandwidth skew, and churn), such repeated mixing can distort the effective aggregation and degrade convergence/robustness, which we refer to as attenuation . Second, peer-to-peer (P2P) proximity changes the privacy attack surface: neighbors can observe fine-grained protocol signals (e.g., timing and early-transfer patterns) and exploit proximity-driven privacy risks in decentralized ML settings [16]. Thus, existing decentralized designs often trade off among (i) FedAvg-style aggregation semantics, (ii) scalable dissemination, and (iii) robustness to 
+
+> arXiv:2605.10499v1 [cs.DC] 11 May 2026
+
+proximity-driven privacy threats. 
+
+Main idea. To avoid semantic attenuation while scaling dis-semination, we build the communication substrate on BitTor-rent [17]. Rather than repeatedly mixing models over hops, we treat each client’s update as a file to be disseminated: the update is split into fixed-size chunks, and peers exchange chunks in parallel within a swarm. Swarming amortizes upload cost (others replicate what you seed), leverages heteroge-neous bandwidth, and sustains high utilization via tit-for-tat incentives [17], [18]. Most importantly, if each round’s updates are fully disseminated (i.e., reconstructable) by the round deadline , then every client locally computes the same 
+
+FedAvg aggregate as in server-based FL, without a central aggregator [1]. When some updates are not reconstructable by the deadline (e.g., due to partial participation or timeouts), FLTorrent computes FedAvg over the reconstructable active set, matching the standard FL treatment of missing updates. In other words, BitTorrent aligns dissemination with aggregation semantics: once peers obtain the same set of per-round updates by the deadline, they naturally agree on the same aggregate. However, vanilla BitTorrent optimizes throughput and avail-ability, not privacy. In P2P FL, this mismatch creates aprotocol-specific privacy objective: within-round source un-linkability (attribution resistance) between a client and its update at the P2P layer. Concretely, at round start, each client initially holds only its own chunks; consequently, early trans-missions are biased toward “owner” chunks, and a neighbor can attribute an update by correlating which chunks it first observes from which sender. Such attribution is not merely cosmetic: once an update can be linked to a specific client or silo (e.g., a hospital), the consequences become materially worse and can be actionable (e.g., revealing spatio-temporal operational signals). For example, source inference attacks aim to identify which client contributed a particular training record; Hu et al. [19] show that identifying the source hospital can already be actionable (e.g., revealing whether a hospital is in a high-risk region), and Chen et al. [20] discuss that spatio-temporal source inference can reveal sensitive dynamics (e.g., during a rare disease outbreak). Even when secure aggregation hides individual updates from the server, it does not preclude inference about participant-level attributes (e.g., client quality) from aggregated outputs [21]. In this paper, we focus on local, observation-only adversaries within the swarm and on permissioned settings where admission control mitigates Sybil attacks; global traffic analysis is out of scope. 
+
+Contributions. We introduce FLTorrent , a BitTorrent-based dissemination layer with a short privacy-preserving warm-up phase that hardens the protocol against within-round source attribution while preserving FedAvg-style aggregation seman-tics over the reconstructable set by the round’s deadline. FLTorrent combines a short privacy-preserving warm-up phase with standard BitTorrent swarming: during warm-up, it injects uncertainty about chunk origin via (i) pre-round obfuscation 
+
+(injecting limited non-owner chunk mass before time 0), (ii) 
+
+time obfuscation (random lags that blur temporal correlation), and (iii) non-owner-first scheduling coordinated by a tracker (coordination-only and not on the data path) to avoid early, owner-revealing transfers. Warm-up ends once each peer has accumulated at least k chunks in its cover set; at that point, per-transfer attribution confidence is provably capped by a term that decreases on the order of 1/k (details in our analysis), after which FLTorrent switches to vanilla BitTorrent for effi-cient bulk dissemination. We further (i) formalize within-round attribution in the P2P setting and derive unlinkability bounds, (ii) characterize a max-flow-style upper bound for bandwidth-optimal warm-up scheduling and develop practical heuristics, and (iii) release FLTorrent as an open-source framework to facilitate reproducibility and follow-on research. 
+
+Results. Our greedy warm-up scheduler, G REEDY FASTEST -FIRST , attains ≈ 92% of the max-flow-style upper bound. Across 100–500 peers, warm-up remains a stable ≈ 11 .5% –
+
+12 .4% fraction of a round with overall utilization 75% –80% .With all defenses enabled, the maximum attribution success rate approaches random guessing (approximately 1/m under default connectivity). In LLM-scale stress tests (Gemma-7B, DeepSeek-R1-14B, Qwen2.5-32B, Llama-3.3-70B) over 7– 10 Gbps links, FLTorrent adds only ∼ 6% –10% round-time overhead relative to BitTorrent-only. II. P ROBLEM FORMULATION 
+
+A. Background: BitTorrent primitives and FL rounds. 
+
+BitTorrent [17] disseminates an object by splitting it into fixed-size chunks (BitTorrent pieces ) and exchanging them in parallel among peers. A torrent descriptor (metadata) enumerates chunk identifiers (piece indices) and cryptographic hashes, enabling receivers to verify chunk integrity and discard corrupted payloads [22]. Peers advertise availability via bit-fields and use swarming incentives (e.g., tit-for-tat) to sustain high utilization [17]. In vanilla BitTorrent, the tracker mainly supports peer discovery and does not schedule chunks. In 
+
+FLTorrent , the tracker additionally collects per-peer chunk availability (bitfields) during a short warm-up period and issues early scheduling directives; it is not on the data path and does not need access to chunk contents. A BitTorrent peer 
+
+corresponds to an FL client ; we use “client” throughout and use “peer” only when referring to BitTorrent mechanisms. 
+
+B. System Model (One Round) 
+
+We consider a BitTorrent-style tracker T and a set of clients V (|V| = n). For a single FL round r ∈ N, the tracker forms an overlay graph Gr = ( V, Er ) and coordi-nates warm-up scheduling using the bitfields it collects. For 
+
+v ∈ V , its neighborhood is N r (v) = {w : ( v, w ) ∈ E r }
+
+and the average degree is m = 1
+
+> n
+
+P 
+
+> v∈V
+
+|N r (v)|. Time is slotted with index s ∈ {0, 1, . . . } and duration ∆ = 1.Each round has a deadline at slot smax (used throughout for warm-up termination and aggregation). Each client v
+
+has uplink/downlink capacities Uv , D v (bytes/slot). Under a dissemination/scheduling policy π, instantaneous rates uv [s; π]
+
+and dv [s; π] satisfy 0 ≤ uv [s; π] ≤ Uv , 0 ≤ dv [s; π] ≤ Dv ,and flow conservation P 
+
+> v∈V
+
+uv [s; π] = P 
+
+> v∈V
+
+dv [s; π] for all s. When convenient, we convert byte budgets into per-slot chunk budgets as uv = ⌊Uv ∆/C ⌋ and dv = ⌊Dv ∆/C ⌋.Client v produces update grv of size Srv bytes, sliced into 
+
+Krv = ⌈Srv /C ⌉ chunks of C bytes each. For exposition, we label these chunks as Crv = {(v, r, i ) : i = 1 , . . . , K rv } and 
+
+Cr = S 
+
+> v∈V
+
+Crv . (These tuples are analysis labels ; in the actual protocol, peers exchange a torrent identifier and a piece index, which do not explicitly encode v.) For any client v ∈ V , let 
+
+Crv [s] ⊆ C r denote the chunks held by v at slot s. The (full) completion time under policy π (assuming all clients remain active) is Tfull (π) = min {s : ∀v ∈ V , Crv [s] = Cr }.
+
+Aggregation semantics. At round start, each update is pub-lished with a torrent descriptor and a scalar weight (e.g., local sample count). In our analysis, we assume homogeneous update sizes across clients (i.e., Srv = S for all v and thus 
+
+Krv = K); consequently, torrent descriptors—which contain only chunk hashes and piece counts—do not reveal owner identity. 1 Peers learn only which chunks form a given update and its associated weight, not which client produced it. By the round deadline smax , each client v reconstructs the subset of updates whose chunks it has obtained and locally computes a FedAvg aggregate over its reconstructable set 
+
+gagg ,r v = X  
+
+> u∈A rv
+> wuP
+> j∈A rvwj
+
+gru, Arv := {u ∈ V : Cru ⊆ C rv [smax ]}
+
+with |A rv | ≥ 1 required for aggregation. (Indexing by client identity u is for analysis; in the protocol, peers identify updates by their published descriptors/pseudonyms, not by real identities.) Under within-round dropouts, Arv excludes updates that v cannot reconstruct by smax ; a client may disconnect after seeding chunks, yet its update can still belong to Arv if chunks have been sufficiently replicated. 
+
+Observations. Let Ov [s] denote client v’s observations up to slot s: received piece indices (chunk identifiers), sender round-pseudonyms, timestamps/order, and (during warm-up) tracker coordination messages it receives. Round pseudonyms are stable within a round (accounting/tit-for-tat) and rotate across rounds to mitigate cross-round linkability. 
+
+C. Threat Model 
+
+Goal. We target peer-side within-round source unlinkability 
+
+(§II-D) against inference from proximity-visible metadata. Be-cause clients publish torrent descriptors, the tracker inherently learns the chunk-to-owner mapping; hiding it from the tracker is not our objective. 
+
+Channels and scope. We assume secure and authenticated channels (e.g., TLS), which protect contents but not traffic metadata (endpoints/timing/volume); thus Internet-scale traffic analysis remains out of scope. We assume round pseudonyms are tracker-issued and authenticated over these channels; spoofing another client’s pseudonym reduces to credential compromise or Sybil admission and is out of scope. 
+
+> 1When update sizes vary significantly, an attacker could narrow down candidate owners by matching observed chunk counts to known update sizes. Mitigations include padding updates to a common size or grouping clients with similar update sizes; we leave such extensions to future work.
+
+Adversary A (HBC peers). A static attacker corrupts a subset of clients before a round begins. Corrupted clients follow the protocol but infer attribution from (i) chunk indices received from each neighbor (identified by sender pseudonym), (ii) transfer timing/ordering, and (iii) warm-up directives received from the tracker. They may collude by pooling observations. Our attacks in §IV-C instantiate this adversary. 
+
+Adversary B (Byzantine peers). We additionally consider Byzantine clients that may deviate arbitrarily (e.g., lie in bitfields, selectively forward/withhold chunks, or delay trans-missions). Payload tampering is detectable via chunk-hash verification from the torrent descriptor [22]; thus undetectable content manipulation is out of scope. Our unlinkability bounds (§IV-A) apply to transfers sent by honest peers ; liveness under deviations is handled operationally (§III-E). 
+
+Tracker integrity assumption. The tracker coordinates over-lay formation and warm-up directives but is not on the data path. We assume a trusted tracker by default; an op-tional auditable (accountability) variant is described in §III-D. Tracker–client collusion is excluded since the tracker knows the chunk-to-owner mapping from descriptors and collusion would trivially reveal attribution. 
+
+Out of scope. (i) Global network adversaries (traffic-pattern analysis; defense requires anonymous routing, orthogonal to our focus). (ii) Sybil attacks (we assume permissioned mem-bership). (iii) Denial-of-service (e.g., forcing timeouts/fail-open) beyond our operational handling. (iv) Update-content attacks (complementary to secure aggregation/DP). 
+
+D. Privacy Objective and Metrics 
+
+Within-round source unlinkability. Under the above adver-saries, BitTorrent-style dissemination introduces an attribution channel: early in a round, a sender is more likely to transmit its own chunks, enabling neighbors to infer sender–source associations. For any observed transfer of chunk c, let snd (c)
+
+be the sender (round-pseudonym) and src (c) the true source client of c. We say the system attains unlinkability level 
+
+P at slot s if for all observers v and observed transfers, 
+
+Pr[ src (c) = snd (c)|O v [s]] ≤ 1/P . Let TP (π) = min {s :
+
+unlinkability level P holds } be the time to reach level P .
+
+Warm-up knob k (cover-set threshold). FLTorrent uses a short warm-up phase and switches to vanilla BitTorrent once each peer has accumulated at least k chunks. Here, k is a 
+
+mechanism parameter controlling the sender’s minimum cover set (inventory) size before high-rate swarming begins. In our experiments, we report the threshold as a percentage α =
+
+k/K of a single update ’s chunk count (e.g., α = 10% ); under homogeneous update sizes, Krv = K for all v and k = ⌈αK ⌉
+
+(e.g., K ≈ 206 for a 51 MB update with 256 KB chunks, so 
+
+k ≈ 21 at α = 10% ). Our analysis (Section IV-A) relates this cover-set threshold to an attribution-posterior cap: for any honest sender, the per-transfer posterior is bounded by κu/k 
+
+(and tightens as early non-owner mass increases). TABLE I: Notation summary.                                                                   
+
+> Sym. Meaning Sym. Meaning
+> System & Network
+> TTracker Vnclients
+> GrOverlay (V,Er)Nr(v)Neighbors of vmAvg. degree rFL round index
+> s, ∆Slot index, duration smax Round deadline
+> sBT BT-phase start Uv, D vUp/down capacity
+> uv, d vPer-slot chunk budget CChunk size
+> Updates & Chunks
+> grv, S rvUpdate, size Krv#chunks of grv
+> CrvChunk IDs of grvCrS
+> vCrv
+> Crv[s]Chunks held at slot s
+> Warm-up & Scheduling
+> πDissem. policy R, σ Spray ratio, copies
+> k, α Cover-set threshold, % of KTlag , ℓ rvLag window, start lag
+> Analysis & Privacy
+> Bru[s], B uEligible buffer, size κu, O uOwner throttle, count
+> XuNon-owner count ZR, Z TNon-owner terms
+> Ov[s]Observations snd ,src Sender, source
+> P, T PUnlinkability level, time ρu, ϕ Coalition frac., strength
+> Aggregation
+> ArvReconstructable set
+
+Efficiency metrics. Over H slots, aggregate throughput and normalized utilization are 
+
+¯U (π; H) = 1
+
+> H
+
+P 
+
+> s,v
+
+uv [s; π],
+
+Util( π; H) = ¯U (π; H)P  
+
+> v
+
+Uv ∈ [0 , 1] .
+
+Goal. We seek policies π that (i) reach a target unlinkability level quickly (small TP ), (ii) maintain high utilization, and (iii) minimize completion time Tfull .III. FLTorrent DESIGN 
+
+We present FLTorrent as a BitTorrent-based dissemination framework for serverless aggregation, with a warm-up phase that hardens the dissemination layer against within-round source attribution. Section II defines the system and threat model , and our unlinkability objective; this section focuses on how it works. 
+
+A. Overview and Round Workflow FLTorrent runs in synchronous FL rounds. In each round r,clients disseminate their local updates via a BitTorrent-style swarm, with an explicit warm-up that hardens the dissemina-tion layer against within-round source attribution . Each round consists of: (1) Local training —each client v computes a local update grv
+
+from its private data; (2) Chunking & metadata publication —v splits grv into fixed-size chunks and publishes a torrent descriptor desc rv
+
+(with per-chunk hashes [22]) and a round pseudonym pid rv
+
+(stable within-round, rotated across rounds); (3) Warm-up —the tracker coordinates early transfers so each active client accumulates at least k chunks before normal BitTorrent announcements dominate; (4) BitTorrent swarming —clients switch to vanilla BitTorrent to fetch remaining chunks; (5) Aggregation —by the deadline, each client performs Fe-dAvg over its reconstructable set Arv (Section II-B); (6) Audit (optional) —under the auditable tracker model, the tracker reveals per-round randomness and logs for post-hoc verification (Section III-D). We parameterize k relative to a single update’s chunk count (e.g., k = ⌈αK ⌉ with α = 10% under homogeneous update sizes), consistent with Section II-D. 
+
+Protocol skeleton. At round r, each client v ∈ V publishes 
+
+(desc rv , pid rv ), where desc rv defines its chunk set Crv and per-chunk hashes. The tracker distributes all published descriptors, samples an overlay Gr , and (optionally) executes a one-shot pre-round spray that seeds a small fraction of chunks to random non-neighbors via ephemeral tunnels. During warm-up ( s < s BT ), the tracker uses collected bitfields to issue stage schedules Sched r [s] satisfying feasibility constraints (adjacency, availability, per-stage capacity caps), preferring non-owner senders when available. Warm-up ends at sBT =min {s : ∀v ∈ V r
+
+> active
+
+[s], |C rv [s]| ≥ k} ∧ smax , after which clients run vanilla BitTorrent until smax . A peer attacker at client w observes sender pseudonyms, chunk indices, and transfer timing throughout the round. At the deadline, each client aggregates over its reconstructable set Arv (Section II-B). 
+
+B. Warm-Up Phase for Source Unlinkability 
+
+Why warm-up is necessary. At round start, each client holds only its own local chunks. If clients immediately request a vanilla BitTorrent announcement, early transfers are biased toward “owner to neighbors,” making attribution easy. Warm-up mitigates this by ensuring each sender has a sufficiently large cover set before normal BitTorrent dynamics dominate. 
+
+Warm-up knob k and unlinkability level. We use k as a 
+
+mechanism parameter : warm-up ends once each active client has accumulated at least k chunks (we set k = ⌈αK ⌉ as a fraction α of a single update’s chunk count K under homogeneous update sizes). Intuitively, when a sender chooses which chunk to transmit from a larger inventory, the prob-ability that an observed early transfer reveals the sender as the source decreases. Section IV-A formalizes this as a 1/P -type posterior bound, where the effective unlinkability level P
+
+increases with k (and with the strength of obfuscation). 
+
+1) Pre-round Obfuscation Phase 
+
+Pre-round obfuscation occurs before the round begins and injects a small amount of non-owner chunk mass into the system. We parameterize its strength by a ratio R ∈ (0 , 1) 
+
+(or R in %): for each source client v with Krv chunks, the tracker randomly selects ⌊R · Krv ⌋ chunk identifiers from Crv
+
+and assigns each selected identifier to a randomly chosen non-neighbor recipient. To execute a spray transfer, the tracker sends control instructions (containing the chunk identifier) to both the owner v and the designated recipient, directing them to establish an ephemeral direct tunnel, perform exactly one chunk transmission, and then tear the tunnel down. Crucially, the tracker operates only on chunk identifiers and client identifiers—it never receives or forwards chunk payloads, and observes completion acknowledgments. We choose a small R
+
+(default R = 0 .2) to balance the injected non-owner mass against control-plane coordination overhead. 2) Time Obfuscation 
+
+Pre-round obfuscation alone is insufficient if all clients start transmitting at the same time: receivers can still correlate first-arrival times with sender ownership, yielding strong within-round attribution signals. We therefore add randomized start-time lags. At the beginning of each round, each client v sam-ples a lag ℓv ∼ Unif {0, 1, . . . , T lag − 1} and delays initiating transmissions by ℓv slots. This blurs temporal correlation and increases the likelihood that early transfers are relayed (non-owner) rather than owner chunks. However, time obfusca-tion can waste uplink capacity during idle waits, motivating tracker-assisted scheduling below. In our default configuration, 
+
+∆ = 1 s and Tlag = 3 , i.e., ℓv ∼ Unif {0, 1, 2} seconds. 
+
+3) Tracker-assisted Non-owner-first Scheduling 
+
+Pre-round and time obfuscation improve unlinkability but can add coordination overhead (spray) and/or transient under-utilization (lags). To reach the target unlinkability level quickly 
+
+without sacrificing throughput, FLTorrent lets the tracker coor-dinate warm-up transfers. During warm-up, the tracker collects per-client bitfields and assigns transmissions so that, whenever possible, a requested chunk is served by a non-owner holder (a client that previously obtained the chunk), rather than by its original source. This non-owner-first preference reduces early owner bias: once a sender has accumulated sufficient non-local chunks, an observer cannot treat “sender” as a reliable proxy for “source.” Formally, in a warm-up stage starting at slot s < s BT , the tracker knows each client’s inventory Crv [s]
+
+and its missing-chunk set Mrv [s] =  S    
+
+> u∈N r(v)
+
+Cru[s] \ C rv [s].It schedules feasible missing-chunk transmissions (respecting per-stage capacity and avoiding duplicates) until all active 
+
+clients reach the k-chunk cover-set threshold (or until smax ); at sBT FLTorrent switches to vanilla BitTorrent. 
+
+Lemma 1 (Hardness of optimal warm-up scheduling). Min-imizing the warm-up makespan (time until all clients have at least k chunks) is NP-complete, by a standard reduction from precedence-constrained makespan scheduling (e.g., P | prec |
+
+Cmax ) [23], [24]. Accordingly, we use tractable heuristics that aim to maxi-mize warm-up bandwidth utilization, which empirically yields low makespan in our settings. 
+
+C. Warm-up Scheduling 1) Bandwidth-optimal Scheduling as a Max-flow Upper Bound: A bandwidth-optimal stage-wise warm-up schedule maximizes the group throughput within a stage (sum of used uplink, equivalently downlink), given current inventories and per-stage chunk budgets. We schedule in discrete stages of duration ∆. Each client v can upload at most uv = ⌊Uv ∆/C ⌋
+
+chunks and download at most dv = ⌊Dv ∆/C ⌋ chunks per stage. Stage-wise throughput maximization reduces to a max-flow over a bipartite construction with supply uv and demand 
+
+dv , plus availability edges ensuring a chunk is only sent by a neighbor that already possesses it. Figure 1 illustrates an example topology and its corresponding max-flow network. We do not run max-flow online; we use it only as an (offline) 
+
+Fig. 1: a) Example overlay for a group with 4 nodes and 4 chunks. Each node is depicted with the chunks it holds. b) The resulting max-flow network. upper bound computed with full knowledge of the stage state. 
+
+2) Practical Schedulers: Since max-flow is impractical at scale, we implement centralized and distributed heuristics, as well as flooding-style dissemination. 
+
+3) Centralized RandomFIFO: The tracker assigns each missing-chunk request to a random client that holds the chunk. Clients serve assigned chunks FIFO. A client can send up to 
+
+τ chunks simultaneously (BitTorrent commonly uses τ = 4 ). 
+
+4) Centralized RandomFastestFirst: Like RandomFIFO, but a sender prioritizes the τ fastest requesters based on available sender uplink and available downlink at the requester. 
+
+5) Centralized GreedyFastestFirst: Like RandomFastestFirst, but the tracker assigns each missing-chunk request to the fastest feasible sender. 
+
+6) Distributed Scheduling (Neighborhood-level announce-ments): In distributed scheduling, clients decide which re-quests to issue and who to serve. To avoid revealing which specific neighbor holds which chunk during warm-up, the tracker can provide neighborhood-level availability: for each client v, it announces CTA (v, s ) = S   
+
+> u∈N r(v)
+
+Cru[s], without disclosing the exact mapping chunk → neighbor. 
+
+7) Flooding: In flooding, each client sends chunks to neighbors randomly without repetition. Combined with randomized lags, flooding increases relaying likelihood but wastes bandwidth and performs worse than coordinated warm-up heuristics. 
+
+Non-owner-first refinement. When multiple feasible senders can serve a missing chunk, we apply a non-owner-first tie-breaking preference to the centralized schedulers: the tracker prioritizes a sender that is not the original source of that chunk; otherwise it falls back to the source. 
+
+D. Auditability Under a Deviating Tracker 
+
+Motivation. Although the tracker is not a privacy target (torrent descriptors reveal the chunk-to-owner mapping), a deviating tracker can still amplify peer-side attribution by shaping the environment—e.g., generating sparse/imbalanced overlays or issuing warm-up directives that slow early mixing. This matters in permissioned cross-silo consortia where a biased or faulty operator may selectively weaken some partic-ipants’ unlinkability, increasing the success probability of any observation-only peer attacker (honest-but-curious neighbors), even without tracker–client collusion. In permissioned consor-tia, this mechanism supports external governance; engineering extensions such as replicated trackers or threshold-controlled coordination are complementary and left to future work. 
+
+Commit-then-reveal accountability. Before seeing per-round inputs, the tracker commits to a public seed hr =H(seed r );after the round it reveals seed r and a log Log r (overlay and warm-up directives). Clients can recompute the overlay and verify hard constraints (adjacency, configured per-stage caps, and no redundant deliveries except logged retries); otherwise they fail open to vanilla BitTorrent and treat unlinkability guarantees for that round as void. 
+
+E. Fault Tolerance in FLTorrent BitTorrent swarming is naturally robust to intermittent con-nectivity and heterogeneous bandwidth once multiple replicas exist. Thus, FLTorrent’s key reliability objective is to safely transition through warm-up; after that, BitTorrent provides standard resilience mechanisms (retries, resumption, multi-source downloads, tit-for-tat, dynamic choking). 
+
+Within-round dropouts. If a client disconnects during a round, the tracker excludes it from further scheduling deci-sions (it no longer issues or serves warm-up assignments). If the client had already uploaded chunks that have been replicated, dissemination can still complete for remaining participants, and the disconnected client’s update may remain in the active set if it is reconstructable by the deadline. If the disconnected client was the sole holder of some chunks (disconnects before replication), those chunks become unavail-able; the round completes over the remaining active set, as in partial participation in practical FL deployments. Disconnected clients can rejoin in the next round with fresh pseudonyms. 
+
+Cross-round churn (joins/leaves). Joiners are incorporated at the next round boundary. Persistent leavers are removed from the next round’s overlay generation. The tracker regenerates a fresh overlay each round, preventing long-lived neighbor relationships that could amplify cross-round linkage. 
+
+Byzantine behavior handling. We distinguish (a) integrity-violating deviations and (b) liveness-degrading deviations. For (a), invalid-chunk injection or payload tampering is de-tectable via descriptor hash checks [22] and such content is discarded; under authenticated channels, spoofing another client’s round pseudonym is excluded (otherwise it reduces to Sybil/credential compromise as in §II-C). For (b), Byzantine peers may lie in bitfields, selectively forward/withhold chunks, or delay transmissions to slow warm-up. These behaviors pri-marily impact efficiency/liveness rather than enabling stealthy attribution increases for transfers sent by honest peers that enforce eligibility rules; accordingly, our unlinkability bounds apply to honest senders. Operationally, we mitigate slowdown by (i) per-peer progress timeouts (clients that fail to make progress are marked inactive), and (ii) evaluating warm-up completion over the remaining active set. If warm-up cannot complete within smax , the system fails open to vanilla BitTor-rent, preserving liveness but voiding unlinkability guarantees for that round (a DoS objective beyond our formal scope). 
+
+Privacy implications. Because unlinkability guarantees rely on cover-set size and non-owner mass, we evaluate the warm-up threshold over the currently active participants. A dropout reduces available capacity but does not invalidate unlinkability for other clients, as long as the warm-up threshold is satisfied for the remaining active set. IV. U NLINKABILITY ANALYSIS AND ATTACKS 
+
+A. Adversary Success Bounds 
+
+Setting and objective. We analyze within-round source un-linkability defined in Section II-D under the threat model in Section II-C. Concretely, an adversary (possibly a coali-tion of clients) observes protocol-level signals Ov [s] (sender round-pseudonyms, piece indices (chunk identifiers), times-tamps/order, and warm-up scheduling directives received by v)and attempts to attribute an observed transfer to its true source. We focus on the within-round attribution event src (c) = snd (c)
+
+for an observed chunk transfer of c. Unless stated otherwise, the bounds below apply to transfers sent by honest senders 
+
+under origin-oblivious chunk selection (e.g., uniform or rarest-first independent of origin), consistent with Adversary A (and the honest-sender portion of Adversary B). 
+
+Eligible serving buffer and knobs. A client always possesses 
+
+its own update chunks locally, but FLTorrent controls which chunks are eligible for upload during warm-up. For a sender 
+
+u at a serving instant (round r, slot s), let Bru[s] be the set of currently eligible chunks for upload, and let Bu := |B ru[s]|.The buffer contains (i) non-owner chunks received from other clients and (ii) a limited number of owner chunks from u’s update. Let Ou be the number of eligible owner chunks and 
+
+Xu := Bu − Ou the eligible non-owner mass at that instant. 
+
+Notation clarification. Throughout this section, u denotes the sender (the client transmitting a chunk) and v denotes the receiver/observer (the client receiving the chunk and potentially acting as an attacker), matching Ov [s].FLTorrent uses two enforcement knobs during warm-up: (1) cover-set gating: an honest sender enables any owner chunk only after Bu ≥ k, and (2) owner throttling: at any time Ou ≤ κu (default κu = 1 ). When serving, honest senders apply an origin-oblivious chunk-selection rule: conditioned on 
+
+Bru[s], the rule does not explicitly privilege owner chunks beyond what is implied by availability/state (e.g., uniform-at-random over Bru[s], or rarest-first restricted to Bru[s]). 
+
+Per-transfer posterior and the 1/P -type bound. Consider a transfer u → v of chunk c observed by v at some warm-up time. Under origin-oblivious selection, the (per-transfer) attribution posterior equals the eligible owner fraction: Pr[ src (c)= u |Ov ] = Ou/B u. By cover-set gating ( Bu ≥ k) and throttling (Ou ≤ κu), we obtain: 
+
+Pr src (c)= u | O v
+
+ = Ou 
+
+> Bu
+
+≤ κu 
+
+> k
+
+. (1) With κu=1 , each warm-up transfer from an honest sender satisfies Pr( correct attribution ) ≤ 1/k , matching the 1/P -style objective in §II-D with P ≥ k/κ u. For intuition, a neighborhood-level “random guessing” baseline corresponds to posteriors on the order of 1/|N r (v)| for an observer v;our goal is to drive per-transfer attribution toward this regime while keeping warm-up short. 
+
+Warm-up mixing further tightens the posterior (high probability). Warm-up increases the eligible non-owner mass 
+
+Xu, making Ou/B u typically smaller than the worst-case cap 
+
+κu/k . Write Xu = ZR(u) + ZT (u), where ZR(u) is injected by pre-round spray and ZT (u) is gained early via randomized lags and non-owner-first scheduling. 
+
+Pre-round obfuscation. Each sender sprays σ = ⌊R · Kru⌋
+
+chunks to uniformly random non-neighbors. For a fixed u,let μu := E[ZR(u)] ; under random assignment, 
+
+μu = P       
+
+> v:u / ∈N r(v)∪{ v}σn−1−|N r(v)|
+
+,
+
+so μu = σ for an m-regular overlay and μu ≈ σ for near-regular overlays. Since ZR(u) is a Poisson-binomial sum, a Chernoff-type bound yields Pr[ ZR(u) ≤ (1 −ϵ)μu] ≤
+
+exp( −ϵ2μu/2) for ϵ ∈ (0 , 1) .
+
+Time obfuscation and non-owner-first scheduling. If lags are i.i.d. uniform on {0, . . . , T lag −1}, then plead = Pr[ ℓv <ℓu] = ( Tlag −1) /(2 Tlag ). With average degree m and avail-ability factor q ∈ (0 , 1] , we have E[ZT (u)] ≥ m p lead q and 
+
+Pr[ ZT (u) ≤ (1 −ϵ)E[ZT (u)]] ≤ exp( −ϵ2E[ZT (u)] /2) .By a union bound, with probability at least 1 − η where 
+
+η = exp( −ϵ2μu/2) + exp( −ϵ2E[ZT (u)] /2) , we have Xu ≥
+
+(1 −ϵ) μu + m Tlag −12Tlag q, hence  
+
+> Ou
+> Bu
+
+= Ou 
+
+> Ou+Xu
+
+≤ κu
+
+> κu+(1 −ϵ)
+
+ μu+m Tlag −12Tlag q
+
+ . (2) Thus, warm-up mechanisms never violate the cap κu/k in Eq. (1) and typically tighten it further. 
+
+Conditionality under an auditable tracker. Under the au-ditable tracker model in §II-C, the bounds above are con-ditional on the published round log passing verification of the verifiable constraints in §III-D. If violations are detected, clients fail open to vanilla BitTorrent and treat unlinkability guarantees for that round as void. 
+
+B. Collusion-aware Bounds (Alliance Filtering) 
+
+We incorporate a strong coalition that can recognize and discount some non-owner traffic originating from coalition members. Fix an honest sender u at a serving instant. Let ρu ∈
+
+[0 , 1] denote the fraction of Xu originating from the coalition, and let ϕ ∈ [0 , 1] be the coalition’s recognition strength (ϕ=0 :no filtering; ϕ=1 : perfect erasure). We treat ϕ as an analysis parameter capturing coalition side information; in evaluation we report envelopes spanning ϕ ∈ { 0, 1} to bracket practical recognition strength. Alliance filtering reduces effective non-owner mass to Xeff  
+
+> u
+
+= (1 −ϕρ u)Xu, giving 
+
+θAF  
+
+> u
+
+= Ou
+
+> Ou+Xeff
+> u
+
+≤ min 
+
+n κu 
+
+> k
+
+, κu
+
+> κu+(1 −ϕρ u)Xu
+
+o
+
+. (3) Coalition filtering loosens mixing by (1 −ϕρ u) but cannot beat the gating cap κu/k for honest senders. 
+
+High-probability mixing under collusion. Let Xu =
+
+ZR(u) + ZT (u) as before. With probability at least 1−η,
+
+θAF  
+
+> u
+
+≤ min 
+
+n κu 
+
+> k
+
+, κu  
+
+> κu+(1 −ϕρ u)(1 −ϵ)( σ+m Tlag −12Tlag q)
+
+o
+
+. (4) These reduce to baseline bounds when ϕ=0 and give the ideal-collusion envelope when ϕ=1 .
+
+Repeated observations with collusion. For su observations from the same sender, Eq. (5) extends to 
+
+Pr ∃ owner in su draws  ≤ su min  κu 
+
+> k
+
+, κu 
+
+> κu+(1 −ϕρ u)Xu
+
+.
+
+(5) Collusion increases the effective observation count and reduces obfuscating mass, but the cap κu/k continues to govern attribution success for honest senders (the bound is a union bound and may be loose for large su). 
+
+C. Attack Strategies and Metrics 
+
+Why we focus on attribution attacks. Standard defenses against membership inference or reconstruction attacks [6]–[8] are orthogonal and can be layered atop FLTorrent. Our focus is solely on within-round attribution introduced by BitTorrent-style dissemination, i.e., inferring whether an observed sender is also the true source of the transmitted chunk/update. 
+
+Metric: Attribution Success Rate (ASR). For a receiver v,consider all warm-up transfers it observes in a round. An attacker outputs, for each observed transfer, a binary attribution decision (or a ranked guess) for whether src (c) = snd (c).We report ASR as the fraction of observed transfers that are attributed correctly; in evaluation we often use the maximum 
+
+ASR over receivers (and over coalition members) as a con-servative summary. This metric is empirically related to the bounds in Section IV-A: Eq. (1) caps per-transfer attribution for honest senders, while Eq. (5) captures how aggregating evidence across multiple transfers can increase success. 
+
+Three observation-only attack strategies. All attacks below are observation-only and fit Adversary A in Section II-C (honest-but-curious, possibly colluding). They do not inspect payload contents or manipulate protocol state. (1) Sequential Greedy Strategy. The attacker labels the first 
+
+chunk received from each sender pseudonym as its owner, targeting the strongest early-round signal and instantiating the “early owner bias” that warm-up aims to suppress. (2) Amount Greedy Strategy. For each observed sender pseudonym, the attacker aggregates evidence across transfers by grouping received pieces by their update/torrent descriptor (the adversary does not know the producing client’s real identity, only descriptor identities). It then attributes the sender to the descriptor that appears most frequently among the sender’s early transfers. Intuitively, if a sender transmits dis-proportionately many chunks from its own (unknown-to-peers) update early, frequency becomes a strong attribution cue. (3) Clustering Strategy. The attacker forms a feature vector per sender pseudonym using (i) temporal features (arrival order statistics) and (ii) frequency features (counts per observed descriptor/chunk family), then clusters sender pseudonyms against descriptor-level IDs and outputs the best match. This combines the early-time and volume signals and captures more sophisticated inference without requiring payload inspection. 
+
+Relation to our bounds. Sequential Greedy approximates the strongest single-shot posterior, while Amount Greedy and Clustering exploit multiple observations ( su) from a sender. Equations (1) and (5) therefore upper-bound attacker advan-tage as k grows (and tighten further with mixing in Eq. (2)), matching the empirical ASR trends reported in our evaluation. V. P ERFORMANCE EVALUATION 
+
+This section evaluates FLTorrent along four axes: (i) learn-ing utility (accuracy vs. CFL and GossipDFL), (ii) warm-up efficiency (bandwidth utilization vs. a max-flow upper bound and heuristics), (iii) end-to-end round cost (warm-up share and scalability), and (iv) privacy efficacy under within-round source unlinkability objective ( attack success rate , ASR). 
+
+Semantics and scope of evaluation. FLTorrent follows the FedAvg update rule and differs from CFL only in the dissem-ination substrate . As in Section II-B, each client aggregates over the reconstructable active set by the round deadline. In our learning experiments, we set the deadline so updates are reconstructable with high probability; otherwise, we fall back to standard partial-participation semantics (FedAvg over the reconstructable active set) under stragglers or disconnects. 
+
+Metrics. We report: (1) Bandwidth utilization during warm-up; (2) Warm-up duration Twarm (until active clients reach the warm-up threshold and switch to vanilla BitTorrent); (3) 
+
+Round duration Tround (warm-up + BitTorrent dissemination; local aggregation is executed after dissemination); (4) ASR :the fraction of correct attributions under the attack models in Section IV-C and threat model in Section II-C. 
+
+A. Setting 
+
+Model and chunking. Unless otherwise stated, we slice a 
+
+GoogLeNet update into 206 chunks of 256 KiB each ( 206 ×
+
+256 KiB = 51 .5 MiB ≈ 54 .0 MB in decimal units, consistent with the ∼ 51 –54 MB scale reported in [25]). 
+
+Access links. We sample heterogeneous uplink/downlink capacities based on European residential broadband statis-tics [26]: uplink 15 .5–25 .3 Mbps and downlink 36 .5–
+
+121 Mbps , corresponding to roughly [7 , 12] and [18 , 60] 
+
+chunks/s respectively for 256 KiB chunks. 
+
+Overlay. We use a random overlay with minimum degree m
+
+(default m=10 ) and heterogeneous neighbor counts above m.
+
+Warm-up knobs (unlinkability hardening). We evaluate the three warm-up mechanisms from Section III-B: K (cover-set gating / warm-up threshold), PR (pre-round obfuscation), and 
+
+TL (time obfuscation). By default, we use PR ratio R=0 .2
+
+(i.e., ⌊0.2 × 206 ⌋ = 41 chunks per update) and time-lags ℓv ∼
+
+Unif {0, 1, 2} seconds (slotted time with ∆ = 1 s). When we sweep the warm-up threshold, we report it as K in percentage of the swarm-wide chunk universe (Figure 5); the default is 
+
+K= 10% . Equivalently, in the analysis notation (Section II-D) this corresponds to k = ⌈K · |C r |⌉ where the global chunk universe |C r | = P 
+
+> v∈V
+
+Krv (here |C r | = 206 n for n clients TABLE II: Test accuracy (mean ±std) on CIFAR-10 and MNIST ( n=50 clients, local epochs = 5 , batch size = 32 ,50 communication rounds). FLTorrent consistently surpasses GossipDFL and remains close to CFL.                            
+
+> Distribution CFL GossipDFL FLTorrent CIFAR-10  Dir( α=0.1) 0.624 ±0.025 0.379 ±0.031 0.621 ±0.027 Dir( α=0.5) 0.667 ±0.023 0.633 ±0.027 0.671 ±0.024 Dir( α=1.0) 0.724 ±0.023 0.709 ±0.025 0.722 ±0.022 IID 0.793 ±0.017 0.734 ±0.021 0.791 ±0.019 MNIST  Dir( α=0.1) 0.979 ±0.006 0.907 ±0.007 0.978 ±0.007 Dir( α=0.5) 0.987 ±0.005 0.965 ±0.004 0.988 ±0.004 Dir( α=1.0) 0.989 ±0.003 0.972 ±0.004 0.990 ±0.003 IID 0.992 ±0.002 0.986 ±0.003 0.992 ±0.002
+
+each contributing 206 chunks). For example, at n=500 and 
+
+K= 10% , we have |C r |=103 ,000 and k=10 ,300 pieces ( ≈
+
+2.5 GiB per client at 256 KiB/piece). We use K (a fraction of 
+
+|C r |) so that the cover-set knob scales with swarm size and yields comparable unlinkability across n.
+
+B. FLTorrent vs. Gossip DFL vs. CFL 
+
+To assess convergence and final accuracy, we compare 
+
+FLTorrent with centralized federated learning (CFL, a prag-matic upper bound) and a representative mix-and-forward decentralized method, Gossip DFL [27], [28]. We evaluate on MNIST and CIFAR-10 under IID and Non-IID client data. Non-IID partitions follow a Dirichlet sampler with 
+
+α ∈ { 0.1, 0.5, 1.0} (smaller α implies stronger heterogene-ity). Each experiment runs for 50 communication rounds. For readability, Figure 2 plots representative non-IID cases (α ∈ {0.1, 0.5}) plus IID; Table II additionally reports 
+
+α = 1 .0. Unless otherwise stated, we report mean test accuracy across 10 seeds, with variability summarized as mean ±std. All methods use identical hyperparameters (optimizer, learning rate, etc.) on each dataset to ensure fair comparison.                
+
+> 025 50
+> 0%
+> 50%
+> 100%
+> IID
+> MNIST
+> 025 50
+> 0%
+> 50%
+> 100% CIFAR-10
+> CFL GossipDFL FLTorrent
+> 025 50
+> 0%
+> 50%
+> 100%
+> Dir  α=0 .5
+> 025 50
+> 0%
+> 50%
+> 100%
+> 025 50
+> 0%
+> 50%
+> 100%
+> Communication Round
+> Dir  α=0 .1
+> 025 50
+> 0%
+> 50%
+> 100%
+> Communication Round
+
+Fig. 2: Convergence on MNIST and CIFAR-10 under IID and Dirichlet non-IID splits ( α ∈ { 0.5, 0.1}). Test accuracy vs. communication rounds for CFL, GossipDFL, and FLTorrent. 0 50 100 150        
+
+> 0
+> 50
+> 100
+> (a) Transmission Stage
+> Utilization (%)
+> RandFIFO RandFF GreedyFF
+> Flooding Maxflow
+> 050 100
+> 0
+> 50
+> 100 Maxflow: ∼8000 s (not shown)
+> (b) Time (seconds)
+> Utilization (%)
+
+Fig. 3: Warm-up bandwidth utilization for online heuristics vs. a max-flow upper bound. 
+
+> Base
+> K
+> PR
+> TL
+> K+PR
+> K+TL
+> PR+TL
+> Full
+
+0
+
+500 
+
+1,000 
+
+1,500 
+
+2,000 
+
+2,500  
+
+> Execution Time (s)  BitTorrent Warm-up
+
+Fig. 4: End-to-end time decomposition under privacy ablations (K, PR , TL ), splitted into the BitTorrent and the warm-up. Overall, FLTorrent matches (closely tracks) CFL and con-sistently outperforms GossipDFL, especially under strong het-erogeneity where local mixing attenuates global information. 
+
+C. End-to-End Round Communication Cost 
+
+We next quantify the communication overhead of unlink-ability hardening, focusing on (i) warm-up bandwidth effi-ciency and (ii) end-to-end round time decomposition. Figure 3 shows that warm-up sustains high utilization across heuris-tics. GreedyFastestFirst completes warm-up earlier while approaching the max-flow upper bound in the high-utilization regime; unless otherwise stated, we use it below. 
+
+Control plane. Bitfields and stage schedules are only a few KiB per client and are negligible relative to the multi-GiB data plane; tracker integrity is discussed in §III-D. Figure 4(a) decomposes the round time (100 nodes). With all defenses enabled ( Full ), warm-up takes 243 .32 s and the subsequent BitTorrent phase takes 1721 .75 s (total 1965 .07 s). Compared to BitTorrent-only ( Base , 1891 .75 s), the total overhead is modest ( ≈ 3.9% ), because warm-up improves early chunk diversity and shortens the later BitTorrent phase. Within Full ,adding PR and TL on top of K has small marginal cost (warm-up 238 .78 s → 243 .32 s). Figure 5 quantifies the deployment-time privacy–cost knob K. Warm-up ends once every active 
+
+client reaches the minimum cover set (§III-B); in evalua-tion we report this as K, which corresponds to the k-chunk         
+
+> 10 20 30 40 50
+> 0
+> 400
+> 800
+> 1,200
+> Opt. Acc. High Overhead
+> 200s
+> Initial Distribution K(%)
+> Warm-up Duration (s)
+
+Fig. 5: Warm-up duration as the warm-up threshold K increases (expressed as % of the swarm-wide chunk universe). TABLE III: End-to-end round cost under Full privacy (GreedyFastestFirst, 51 MB model, chunk=256 KiB).                           
+
+> nTwarm (s) Share (%) Util. (%) Tround (s) 100 243 12.4 80.5 1965 200 472 11.5 76.3 4118 300 730 11.7 77.1 6229 400 939 11.5 79.4 8192 500 1229 11.7 75.4 10501
+
+threshold in our analysis. As K increases, warm-up grows monotonically: ≈ 99 .5 s at K= 5% , ≈ 238 .8 s at K= 10% , and 
+
+≈ 1084 .7 s at K= 50% . Thus, moderate thresholds provide substantial early-round mixing at manageable cost, whereas aggressive thresholds can dominate end-to-end time. Table III shows stable scaling from 100 to 500 peers: warm-up remains a consistent ≈ 11 .5% –12 .4% share of round time and utilization stays in the 75% –80% range. 
+
+D. Privacy Evaluation: Within-round Source Unlinkability 
+
+We now quantify privacy under the threat model in Sec-tion II-C using the attacks in Section IV-C. Unless otherwise stated, we use a 100-node overlay with minimum degree 
+
+m=10 . As a coarse reference point, if an adversary cannot do better than uniform guessing among m candidate neighbors 
+
+for first-hop attribution, its success rate is ≈ 1/m (10% at 
+
+m=10 ). Our goal is to push empirical ASR toward this regime. 
+
+Connecting ASR to the analysis. Section IV-A bounds the 
+
+per-transfer attribution posterior for honest senders (Eq. (1)) and its warm-up tightening (Eq. (2)), whereas ASR aggregates 
+
+multiple observations from a sender (cf. Eq. (5)); hence empirical ASR need not match the single-transfer cap. Fig-ure 6 shows that hardening is necessary: without defenses ASR is near-perfect; pre-round obfuscation gives the largest drop; time-lags alone are insufficient; and combining them approaches the neighborhood random-guess baseline. Figure 7 shows that overlay density is the strongest lever: increasing m
+
+from 5 to 25 reduces max ASR from 26.99% to 4.29%, with Figure 7(a) plotting the moving ≈ 1/m baseline. Pre-round volume has diminishing returns: increasing R from 10% to 50% changes max ASR only from 11.43% to 11.27%. Larger networks further amplify privacy: as n grows from 100 to 500, Sequence ASR drops from 10.90% to 7.31%, while Count ASR rises slightly from 5.58% to 6.78%, still below 1/m ;with fixed m = 10 , all attacks remain close to or below random guessing, consistent with more relaying and larger non-owner cover mass. Finally, with a colluding attackers, the None Pre-round Time-lag Both   
+
+> 0
+> 25
+> 50
+> 75
+> 100
+> Attack Success Rate (%)
+> Sequence Count Cluster
+
+Fig. 6: Privacy ablation: maximum ASR under three inference strategies (Sequence, Count, Cluster).                       
+
+> 510 15 20 25
+> 0
+> 10
+> 20
+> 30
+> 1
+> m
+> (a) Min. Connections ( m)
+> Max ASR (%)  Max ASR
+> 10 20 30 40 50
+> 10 .5
+> 11
+> 11 .5
+> 12
+> (b) Initial Chunk Distribution R(%)
+> Max ASR (%)  Max ASR
+> 100 200 300 400 500
+> 0
+> 5
+> 10
+> 15 1
+> m=10%
+> (c) Number of Peers
+> ASR (%)  Sequence Count Cluster
+> 510 15 20 25
+> 0
+> 10
+> 20
+> 30
+> (d) Number of Attackers ( a)
+> Max ASR (%)  Any succeeds
+> Per-attacker avg.
+
+Fig. 7: ASR under warm-up defenses. chance that at least one succeeds rises from 13.56% ( a=5 )to 30.82% ( a=25 ), but per-attacker ASR stays low, 11.31%– 14.32%, indicating resilience to observation-only collusion. 
+
+E. LLM-Scale Round-Time Overhead 
+
+We use LLM-scale runs as systems stress tests for dis-semination: they validate end-to-end relative overheads under very large artifacts, without requiring the (much costlier) end-to-end fine-tuning convergence evaluation. Accordingly, we do not use the LLM setting to argue learning convergence; learning utility is evaluated above on MNIST/CIFAR-10 under residential broadband conditions (15–25 Mbps uplink). LLM-scale experiments use datacenter-class links (7–10 Gbps) to stress-test dissemination at artifact sizes where residential links   
+
+> Gemma-7B
+> DeepSeek-R1-14B
+> Qwen2.5-32B
+> Llama-3.3-70B
+> 0
+> 0.5
+> 1
+> 1.5
+> ·10 4
+> +9.97% +6.60%
+> +7.09%
+> +10.01%
+> Duration (s)
+> Only Torrent Sched.+Torrent
+
+Fig. 8: Round duration overhead of FLTorrent (with unlinka-bility hardening) vs. BitTorrent-only for LLM-scale updates. would be impractically slow. The unlinkability mechanisms (warm-up, pre-round obfuscation, scheduling) are identical in both settings; we therefore interpret Figure 8 strictly as dis-semination overhead (%), not as an end-to-end learning claim. Figure 8 compares FLTorrent against BitTorrent-only for four LLMs (Gemma-7B [29], DeepSeek-R1-14B [30], Qwen2.5-32B [31], and Llama-3.3-70B [32]) over 7–10 Gbps access links. FLTorrent adds a modest end-to-end overhead (9.97%, 6.60%, 7.09%, and 10.01% respectively), while providing the unlinkability gains quantified in Figures 6–7. VI. R ELATED WORK 
+
+Decentralized learning and communication efficiency. De-centralized learning (DL) replaces a central aggregator with peer-to-peer mixing over an overlay graph. Representative lines include compression-aware decentralized optimization (e.g., CHOCO-style) and unified convergence analyses [14], [28], as well as relay- and topology-accelerated designs to improve mixing speed [33], [34]. Systems work further stud-ies deployment factors such as bandwidth heterogeneity and communication overhead [35], [36]. These efforts optimize learning and communication, but typically do not treat the 
+
+dissemination layer as a first-class privacy surface. 
+
+BitTorrent and P2P dissemination. BitTorrent achieves high-throughput dissemination via chunked parallel swarming un-der heterogeneity and churn [17], and has been used to exchange learning artifacts [37]. Yet vanilla BitTorrent lacks 
+
+source unlinkability : early peers mostly hold their own chunks, making transfers attributable, while metadata can support identification/profiling [38]. Privacy-enhanced overlays reduce linkability but add throughput/deployment costs. FLTorrent instead mitigates within-round source attribution with a short cover-set warm-up before standard swarming. 
+
+Privacy leakage and attribution risks in FL. FL privacy work mainly addresses content leakage , such as membership inference and reconstruction [6]–[8], via defenses like secure aggregation and differential privacy [10]. These are comple-mentary: dissemination can still leak attribution metadata link-ing updates to participants, and source-inference work shows such links can be actionable [19]. FLTorrent targets swarming-induced within-round attribution and can be combined with secure aggregation/DP; cross-round linkability remains impor-tant but outside our formal guarantee. Anonymity and unlinkability for FL communication. Prior work provides anonymous participation or unlinkable sub-mission/authentication using cryptography or redesigned sub-strates [39], [40], often with stronger anonymity goals and heavier protocol changes. FLTorrent is orthogonal: it retains BitTorrent-grade efficiency while mitigating attribution even when participants are known , e.g., in permissioned cross-silo consortia, via a short warm-up before vanilla swarming. 
+
+Positioning. DL optimizes convergence/efficiency and most FL privacy defenses protect update contents ; BitTorrent-style dissemination instead leaks attribution through early owner bias and proximity-visible metadata. FLTorrent addresses this gap with a privacy-preserving warm-up, then returns to swarm-ing for scalable heterogeneous deployment. VII. C ONCLUSIONS 
+
+We presented FLTorrent , a BitTorrent-based dissemina-tion layer for decentralized FL that mitigates within-round source attribution while retaining swarming efficiency. Vanilla BitTorrent lacks source unlinkability : early owner bias and proximity-visible metadata can reveal “who sent what.” FLTor-rent addresses this with a short warm-up that enforces a minimum cover set via a k-threshold, owner throttling, and non-owner-first scheduling before returning to vanilla swarm-ing. We bound per-transfer attribution confidence by a 1/k -type term (more generally κu/k ), and extend the analysis to collusion and a malicious-but-detectable tracker. Empirically, GreedyFastestFirst reaches ∼92% of a max-flow upper bound; warm-up stays near ∼12% of round time with 75% –80% 
+
+utilization over 100–500 peers; and LLM-scale tests over 7– 10 Gbps links add modest overhead vs. BitTorrent-only while pushing ASR below random guessing under our observation-only threat model. Future work includes stronger adversaries, Sybil resistance, and decentralized auditable tracking. REFERENCES [1] B. McMahan, E. Moore, D. Ramage, S. Hampson, and B. A. y Arcas, “Communication-efficient learning of deep networks from decentralized data,” in AISTATS , 2017. [2] B. Luo, Y. Feng, S. Wang, J. Huang, and L. Tassiulas, “Incentive mechanism design for unbiased federated learning with randomized client participation,” in ICDCS , 2023. [3] X. Wu, Z. Ji, and C.-L. Wang, “Embedding communication for federated graph neural networks with privacy guarantees,” in ICDCS , 2023. [4] H. Zhang, Y. Xie, S. Hu, M. He, P. He, J. Zheng, and D. Feng, “Fedlth: A privacy-preserving federated learning framework with model pruning on edge clients,” in ICDCS , 2025. [5] J. Xia, W. Wu, L. Luo, G. Cheng, D. Guo, and Q. Nian, “Accelerating and securing federated learning with stateless in-network aggregation at the edge,” in ICDCS , 2024. [6] R. Shokri, M. Stronati, C. Song, and V. Shmatikov, “Membership inference attacks against machine learning models,” in IEEE S&P , 2017. [7] L. Zhu, Z. Liu, and S. Han, “Deep leakage from gradients,” NeurIPS ,2019. [8] J. Geiping, H. Bauermeister, H. Dr¨ oge, and M. Moeller, “Inverting gradients-how easy is it to break privacy in federated learning?,” 
+
+NeurIPS , 2020. [9] F. Diana, A. Nusser, C. Xu, and G. Neglia, “Cutting through privacy: A hyperplane-based data reconstruction attack in federated learning,” 2025. arXiv:2505.10264. [10] K. Bonawitz, V. Ivanov, B. Kreuter, A. Marcedone, H. B. McMahan, S. Patel, D. Ramage, A. Segal, and K. Seth, “Practical secure aggregation for privacy-preserving machine learning,” in ACM CCS , 2017. [11] D. Pasquini, D. Francati, and G. Ateniese, “Eluding secure aggregation in federated learning via model inconsistency,” in ACM CCS , 2022. [12] K.-H. Ngo, J. ¨Ostman, G. Durisi, and A. Graell i Amat, “Secure aggregation is not private against membership inference attacks,” 2024. arXiv:2403.17775. [13] M. Assran, N. Loizou, N. Ballas, and M. Rabbat, “Stochastic gradient push for distributed deep learning,” in ICML , 2019. [14] A. Koloskova, N. Loizou, S. Boreiri, M. Jaggi, and S. Stich, “A unified theory of decentralized sgd with changing topology and local updates,” in ICML , 2020. [15] L. Yuan, Z. Wang, L. Sun, P. S. Yu, and C. G. Brinton, “Decentralized federated learning: A survey and perspective,” IEEE Internet Things J. ,vol. 11, no. 21, 2024. [16] D. Pasquini, M. Raynal, and C. Troncoso, “On the (in)security of peer-to-peer decentralized machine learning,” in IEEE S&P , 2023. [17] B. Cohen, “Incentives build robustness in bittorrent,” in Workshop on Economics of P2P Systems , 2003. [18] R. Cuevas, N. Laoutaris, X. Yang, G. Siganos, and P. Rodriguez, “Deep diving into bittorrent locality,” ACM SIGMETRICS Perform. Eval. Rev. ,vol. 38, no. 1, 2010. [19] H. Hu, Z. Salcic, L. Sun, G. Dobbie, and X. Zhang, “Source inference attacks in federated learning,” in ICDM , 2021. [20] H. Chen, X. Xu, X. Zhu, X. Zhou, F. Dai, Y. Gao, X. Chen, S. Wang, and H. Hu, “Where does this data come from? enhanced source inference attacks in federated learning,” in IJCAI , 2025. [21] B. Pej´ o and G. Bicz´ ok, “Quality inference in federated learning with secure aggregation,” IEEE Trans. Big Data , vol. 9, no. 5, 2023. [22] BitTorrent Enhancement Proposals, “Bep 0003: The bittorrent protocol specification.” https://www.bittorrent.org/beps/bep 0003.html, 2003. [23] J. D. Ullman, “Np-complete scheduling problems,” J. Comput. Syst. Sci. ,vol. 10, no. 3, 1975. [24] M. R. Garey and D. S. Johnson, Computers and Intractability: A Guide to the Theory of NP-Completeness . W.H. Freeman, 1979. [25] G. Shu, W. Liu, X. Zheng, and J. Li, “If-cnn: Image-aware inference framework for cnn with the collaboration of mobile devices and cloud,” 
+
+IEEE Access , vol. 6, 2018. [26] “Oecd.” https://www.oecd.org, 2024. [27] X. Lian, C. Zhang, H. Zhang, C.-J. Hsieh, W. Zhang, and J. Liu, “Can decentralized algorithms outperform centralized algorithms? a case study for decentralized parallel stochastic gradient descent,” NeurIPS , 2017. [28] A. Koloskova, S. Stich, and M. Jaggi, “Decentralized stochastic opti-mization and gossip algorithms with compressed communication,” in 
+
+ICML , 2019. [29] “Gemma open models.” https://blog.google/technology/developers/ gemma-open-models/, 2024. [30] D. Guo, D. Yang, H. Zhang, et al. , “Deepseek-r1: Incentivizing reason-ing capability in llms via reinforcement learning,” arXiv:2501.12948 ,2025. [31] Qwen Team, “Qwen2 technical report,” arXiv:2407.10671 , 2024. [32] A. Dubey, A. Jauhri, A. Pandey, et al. , “The llama 3 herd of models,” 
+
+arXiv:2407.21783 , 2024. [33] T. Vogels, L. He, A. Koloskova, S. P. Karimireddy, T. Lin, S. U. Stich, and M. Jaggi, “Relaysum for decentralized deep learning on heterogeneous data,” in NeurIPS , 2021. [34] B. Ying, K. Yuan, Y. Chen, H. Hu, P. Pan, and W. Yin, “Exponential graph is provably efficient for decentralized deep training,” NeurIPS ,2021. [35] A. Dhasade, A.-M. Kermarrec, R. Pires, R. Sharma, M. Vujasinovic, and J. Wigger, “Get more for less in decentralized learning systems,” in 
+
+ICDCS , 2023. [36] C. Chen, M. Li, and C. Yang, “bbtopk: Bandwidth-aware sparse allre-duce with blocked sparsification for efficient distributed training,” in 
+
+ICDCS , 2023. [37] O. Carl and T. Weis, “Bittorrent-based gossip learning,” in ACM IoT ,2024. [38] S. Le Blond, A. Legout, F. Lefessant, W. Dabbous, and M. A. Kaafar, “Spying the world from your laptop: identifying and profiling content providers and big downloaders in bittorrent,” in USENIX LEET , 2010. [39] G. Almashaqbeh and Z. Ghodsi, “Anofel: Supporting anonymity for privacy-preserving federated learning,” PoPETs , 2025. [40] A. Agiollo, E. Bardhi, M. Conti, N. Dal Fabbro, and R. Lazzeretti, “Anonymous federated learning via named-data networking,” Future Gener. Comput. Syst. , vol. 152, 2024. APPENDIX ANP-C OMPLETENESS OF THE CHUNK SCHEDULING 
+
+PROBLEM IN FLTorrent 
+
+We establish NP-completeness by formulating the decision version of the Chunk Scheduling Problem (CSP), arguing that it lies in NP, and proving NP-hardness via polynomial reduc-tions from the classical scheduling problem P | prec | Cmax 
+
+and from 3-P ARTITION . The former is a canonical precedence-constrained identical-machines makespan problem known to be NP-hard (see, e.g., [23]), while 3-P ARTITION is strongly NP-complete [24]; together these imply NP-hardness and, in fact, strong NP-hardness of CSP under standard encodings. 
+
+A. Chunk Scheduling Problem (Decision Version) 
+
+We consider a round-limited scheduling model that captures 
+
+FLTorrent ’s warm-up dissemination. Let the peer connectivity be a graph GP = ( VP , E P ) with per-peer bandwidth capacities 
+
+cP : VP → R>0. For each data chunk c ∈ C initially residing at a designated producer s(c) ∈ VP and required by a designated consumer t(c) ∈ VP , the chunk transmission graph GC = ( VC , E C ) encodes which transfers are possible and (optionally) which transfers must precede others before a given transfer may start. A schedule chooses, for each chunk 
+
+c, a (here: direct) peer-to-peer transmission (u, v ) ∈ EP that realizes s(c) → t(c) , and assigns a start time so that peer-capacity constraints are never violated (i.e., a peer cannot send/receive more than its capacity allows), and all declared precedence relations in GC are respected. Each transfer has a processing time Tc = size( c)/rate , which we treat as a given positive integer after suitable scaling. The objective is to minimize the makespan Cmax of the warm-up; the decision version asks whether there exists a feasible schedule with 
+
+Cmax ≤ T ⋆. It is immediate that CSP is in NP: given a schedule (assignment of links and start times), one can verify in polynomial time that (i) every precedence constraint is respected, (ii) at all times each peer’s incident transmissions do not exceed its bandwidth (no overlap beyond capacity), and (iii) all chunks complete by T ⋆.
+
+B. NP-Hardness via P | prec | Cmax 
+
+We reduce P | prec | Cmax to CSP by embedding identical-machine precedence-constrained scheduling as a spe-cial case of chunk scheduling over a star-like overlay (cf. [23]). Consider an instance with m identical machines, jobs 
+
+J, processing times {pj }j∈J , precedence DAG (J, ≺), and deadline T ⋆. Build GP as a star with a central peer s and leaves v1, . . . , v m. Calibrate capacities so that each leaf vi
+
+receives at most one chunk at a time while different leaves can receive concurrently—mirroring m identical machines. For each job j create chunk cj initially at s and required at some leaf; set Tcj = pj . Sending cj on (s, v i) simulates processing job j on machine i. Encode precedence by zero-time unlock relations that allow cj to start at s only after all predecessors’ chunks have arrived at their leaves. Any CSP schedule with makespan ≤ T ⋆ corresponds one-to-one to a feasible P | prec | Cmax schedule (and conversely), establishing P | prec | Cmax ≤p CSP and NP-hardness. 
+
+C. Strong NP-Hardness via 3-P ARTITION 
+
+For strong NP-hardness we reduce 3-P ARTITION [24, pp. 96–101] to CSP. Given integers A = {a1, . . . , a 3m} with P 
+
+> i
+
+ai = mB and B/ 4 < a i < B/ 2, it is NP-complete to decide whether A can be partitioned into m triples each summing to B. Consider the special case of P | prec | Cmax 
+
+with no precedences, m identical machines, and job lengths 
+
+pi = ai; a schedule of makespan ≤ B exists iff there is a perfect 3-partition (standard reduction; see [24]). Applying the star construction above with chunks ci of lengths Tci = ai and deadline T ⋆ = B yields a CSP instance that is feasible iff the original 3-P ARTITION instance is a YES-instance. Because 3-PARTITION is strongly NP-complete, CSP is strongly NP-hard under this encoding. CSP belongs to NP and is NP-hard via P | prec | Cmax ; it is, moreover, strongly NP-hard via 3-P ARTITION . Consequently, optimizing warm-up chunk schedules in FLTorrent —even under simplified star overlays and direct transfers—is com-putationally intractable in general. This extends to variants that additionally require each node to accumulate at least k
+
+chunks before warm-up ends: such constraints do not reduce complexity.
