@@ -1,0 +1,3835 @@
+Title: Rethinking the Security of DP-SGD: A Corrected Analysis of Differentially Private Machine Learning
+
+URL Source: https://arxiv.org/pdf/2605.15648v1
+
+Published Time: Mon, 18 May 2026 00:34:46 GMT
+
+Number of Pages: 24
+
+Markdown Content:
+# Rethinking the Security of DP-SGD: A Corrected Analysis of Differentially Private Machine Learning 
+
+# Wenhao Wang 
+
+Monash University Australia wenhao.wang@monash.edu 
+
+# Shujie Cui 
+
+Monash University Australia shujie.cui@monash.edu 
+
+# Hui Cui 
+
+Monash University Australia hui.cui@monash.edu 
+
+# Xingliang Yuan 
+
+University of Melbourne Australia xingliang.yuan@unimelb.edu.au 
+
+## Abstract 
+
+Differentially Private Stochastic Gradient Descent (DP-SGD) has been widely adopted to protect training data in machine learning. The privacy guarantee of DP -SGD and the DP-mechanisms built upon it is usually analyzed through a formal security game, in which an adversary infers whether a particular individual data record is included in the training dataset based on the mechanism’s output. Privacy leakage is characterized by the adversary’s privacy curve, which reports the false negative rate (FNR) as a function of the false positive rate (FPR). The privacy guarantee is defined as the lower bound of this curve. We observe that the privacy guarantees claimed for these mech-anisms in many existing papers are derived from a mismatched game setting. Specifically, they formalize the mechanisms as the Subsampled Gaussian Mechanism (SGM), where Gaussian noise is added to the sum of gradients computed from a Poisson-sampled batch of data. Indeed, the training procedure in these mechanisms intro-duces an additional normalization step: the noisy sum is further normalized either by the expected batch size or by the sampled batch size. Thus, these mechanisms should be formalized as either the Expected-Averaged SGM (EASGM) or the Batch-Averaged SGM (ASGM). The privacy auditing of DP-SGD suffers from the same issue, as it assesses the privacy guarantee of DP-SGD by treating it as an SGM. We therefore re-analyze the privacy guarantee of these mecha-nisms under the corresponding EASGM and ASGM formalizations. Our analysis shows that, in theory, these DP - SGD mechanisms can yield weaker privacy guarantees than the SGM-based guaran-tee, suggesting that, in some settings, the true privacy leakage can exceed the reported SGM-based guarantee. We also empirically audit the leakage of implementations of four state-of-the-art DP - SGD algorithms, including the implementation used in Meta’s Opacus library, and show that empirical leakage exceeds the SGM-based guarantees. Finally, we conduct a thorough code audit of Opacus versions v0.9.0–v1.5.4 and derive a privacy guarantee for the latest Opacus implementation. 
+
+## Keywords 
+
+Differential privacy, DP-SGD, Correctness 
+
+## 1 Introduction 
+
+Deep learning models leak sensitive information of the training data [ 13 , 50 ]. Differential Privacy (DP) is the de facto standard and has been widely adopted for mitigating such risks [ 2 ]. For example, Google recently introduced VaultGemma [ 17 ], a large language model (LLM) trained with DP to provide strong privacy guarantees, which they describe as “the world’s most capable differentially private LLM.” 
+
+DP-SGD brief and privacy analysis. The state-of-the-art differ-entially private training method is Differentially Private Stochastic Gradient Descent (DP-SGD) [ 1], and it has been used by companies including Google [ 16 ], Meta [ 51 ] for privacy protection in machine learning services. Meta also provides an open-source DP-SGD im-plementation through its Opacus library [ 51 ]. DP-SGD updates the model round by round, and each round consists of three basic steps: (i) Form a batch 𝐵 via Poisson sampling, including each data point with probability 𝑞 ; (ii) Compute the gradient 𝑔 𝑖 of each sample in the batch; and (iii) Clip each 𝑔 𝑖 at the threshold 𝐶 into 𝑔 𝑖 , get the aggregated value Í𝑖 ∈𝐵 𝑔 𝑖 , and add calibrated Gaussian noise 𝐺 with standard deviation 𝜎 to obtain the noisy sum S = Í𝑖 ∈𝐵 𝑔 𝑖 +𝐺 . These three steps are called Subsampled Gaussian Mechanism (SGM) . In dif-ferent DP-SGD mechanisms, S could be normalized and then used to update the model. For instance, in the initial DP - SGD proposed by Google [ 1], the noisy sum of clipped gradients S is normalized by the expected batch size 𝑁 · 𝑞 , which we denote as the Expected-Averaged SGM (EASGM) [ 1 , 28 ], where 𝑁 is the size of the training dataset. In a recent DP -SGD variant [ 7] (Algorithm 1 of [ 8]), S is normalized by the batch size |𝐵 |, and is referred to as Batch-Averaged SGM (ASGM) .The privacy guarantee of the DP-SGD training process can be decomposed into per-round guarantees, which are then composed using standard composition techniques [ 12 ]. DP-SGD’s per-round privacy guarantee is typically analyzed through a formalized game between a challenger and an adversary [ 7 , 32 ]. In this game, the challenger applies one round of DP-SGD to generate a model update on one of two neighboring datasets, 𝐷 and 𝐷 ′, which differ by a single individual 𝑑 , and then releases the update. The adversary has the knowledge of both neighboring datasets and the parameters of DP-SGD, including the sampling ratio 𝑞 and the noise scale 𝜎 ,and aims to determine which dataset has been used to generate the model update. Privacy leakage is characterized by the adversary’s privacy curve, which reports the false negative rate (FNR) as a                                                    
+
+> arXiv:2605.15648v1 [cs.CR] 15 May 2026 Wenhao Wang, Shujie Cui, Hui Cui, and Xingliang Yuan
+> Game Parameters: (𝑑, D,M ( 𝑞, 𝐶, 𝜎 ) )
+> Adversary Challenger
+> 𝐷 −∼ D 𝑁
+> 𝐷 0:=𝐷 −,𝐷 1:=𝐷 −∪ { 𝑑 }𝑏 ∼ { 0,1}A ( 𝑂, M, 𝐷 0, 𝐷 1) → ˆ𝑏 𝑂 =M ( 𝐷 𝑏 )
+> 𝐷 0, 𝐷 1
+> 𝑂
+> Correct Mechanism formalization:
+> 1. EASGM (def 2.8): M ( 𝐷 𝑏 )=
+> Í𝑖 ∈𝐵 ¯𝑔 𝑖 +𝐺
+>  (𝑁 ·𝑞 )
+> 2. ASGM (def 2.9): M ( 𝐷 𝑏 )=
+> Í𝑖 ∈𝐵 ¯𝑔 𝑖 +𝐺
+>  |𝐵 |
+> Incorrect Mechanism formalization:
+> 3. SGM (def 2.7): M ( 𝐷 𝑏 )=∑︁
+> 𝑖 ∈𝐵
+> ¯𝑔 𝑖 +𝐺
+
+Figure 1: The left figure illustrates the procedure of the DP game, while the right figure presents the correct mechanism formalization proposed in this paper and the incorrect mechanism formalizations used in prior works [1, 7, 15]. 
+
+function of the false positive rate (FPR). The privacy guarantee is defined as the lower bound of this function [ 12 ]. Depending on the tool or framework (e.g., RDP [ 31 ] and f-DP [ 12 ]) used for the analysis, the obtained privacy guarantee could be close or far away from the optimal lower bound. For instance, Edgeworth Expansion [ 53 ] can yield a tighter privacy guarantee than the Central Limit Theorem [ 12 ]. The closer to the optimal lower bound, the tighter the privacy guarantee. Tighter guarantees are desirable because they certify the same privacy level with less noise and improved output quality. However, exact tightness is often difficult to obtain; thus, prior work often derives nearly tight guarantees instead [ 46 ]. 
+
+Mismatched formalization of normalized DP-SGD. However, for the privacy analysis, as shown in Fig. 1, prior studies [ 1 , 7 ] for-malize one-round EASGM-based and ASGM-based DP - SGD as SGM in the game, thereby omitting the normalization step in the training procedure, and accordingly use the SGM guarantee to bound their per-round privacy leakage. Indeed, the SGM-based guarantee may be unsound for the actual mechanism, because privacy guaran-tees depend directly on the output distribution of the mechanism, whereas this mismatch changes the distribution. Previous work [ 27 ]identifies this issue for EASGM-based mechanisms, but does not formally analyze the real privacy guarantees. 
+
+Privacy auditing of DP-SGD. Theoretical bounds assume ide-alized, bug-free implementations, which may not hold in practice due to implementation errors [ 9]. Thus, the privacy leakage of implementations could deviate from theoretical expectations [ 32 ]. Numerous studies [ 32 , 33 , 50 ] have attempted to audit whether DP-SGD implementations violate theoretical privacy guarantees. Following the DP security game, they instantiate the adversary as a distinguisher 𝜙 , repeatedly execute the DP-SGD implementations with two neighboring datasets, and use 𝜙 to infer which dataset was used based on obtained model updates. Finally, they compare the empirical privacy leakage, measured by FNR at a fixed FPR, with the corresponding theoretical value. If the empirical FNR is above the FNR at the same fixed FPR implied by the privacy guar-antee, no privacy violation is considered to have been found in the implementation. Many studies have found no violation in DP-SGD implementations in practice [ 24 , 32 , 34 , 38 , 50 ]. However, prior au-diting works, including [ 24 , 32 , 34 , 38 , 50 ], have primarily focused on auditing per-round SGM-based DP-SGD, without considering the normalization variants used in practice. For instance, Steinke et al. [ 38 ] audit the DP-SGD implementation in Algorithm 2 of [ 39 ], and Xiang et al. [ 50 ] follow the same setting. Nasr et al. [ 32 ] audit the implementation in Algorithm 2 of [ 32 ], and Koskela et al. [ 24 ]follow the setting in Algorithm 4 of [ 23 ]. Consequently, these works do not audit the privacy leakage of implementations of EASGM-and ASGM-based DP-SGD algorithms, leaving it unclear whether such implementations truly satisfy the theoretical SGM privacy guarantee. 
+
+Mismatched formalization of other DP mechanisms. Many other state-of-the-art differentially private mechanisms are built on EASGM-based or ASGM-based DP-SGD, including DP–FETA [ 28 ], PrivImage [ 29 ], dp–promise [ 47 ], DP–SUR [ 15 ], DISK [ 52 ], and TrainDPGAN [ 6]. These mechanisms also rely on SGM-based pri-vacy analysis to derive their privacy guarantees. Consequently, the privacy analysis of these mechanisms suffers from the same mismatch as that of normalized DP-SGD. The theoretical privacy analysis guides the configuration of model training in reality to achieve the required privacy guar-antee. However, these mismatches may underestimate the actual privacy leakage, resulting in a training procedure failing to satisfy the claimed privacy guarantee. Thus, it is necessary to re-examine the privacy guarantees used for EASGM-based and ASGM-based DP-SGD and their derivatives in the correct game setting. 
+
+Our contributions. In this paper, we revisit the security analysis of per-round EASGM- and ASGM-based DP -SGD by explicitly incor-porating their normalization steps into the privacy game, and derive corresponding privacy guarantees. Our analysis is conducted in the 
+
+𝑓 -DP framework, a de facto standard framework for differential privacy analysis [ 12 , 32 , 50 ], which characterizes privacy through a trade-off function between the false positive rate (FPR) and false negative rate (FNR). We compare the derived guarantees with the one-round SGM guarantee established in [ 7]. To the best of our knowledge, only Bu et al. [ 7 ] provide a tight one-round privacy guarantee in the 𝑓 -DP framework and an explicit trade-off function, making their work a natural baseline for comparison. Our analysis reveals that the privacy guarantees of EASGM and ASGM become weaker as the output dimension increases, and they are generally weaker than that of SGM when the output dimension exceeds certain values. For instance, our analysis shows that, in some cases, under the same FNR of 0.5, the FPRs of EASGM and ASGM fall below 0.2, whereas the previously claimed value is above 0.4 (Fig. 5). Furthermore, when the sampling ratio is 1, our analysis is tight: the FNR–FPR trade-off is achievable by an adversary without any amplification or relaxation introduced by analytical approximation. This finding suggests that the privacy Rethinking the Security of DP-SGD: A Corrected Analysis of Differentially Private Machine Learning 
+
+leakage of EASGM- and ASGM-based DP - SGD implementations can exceed the guarantee claimed under SGM. We also audit the privacy of EASGM- and ASGM-based imple-mentations to assess whether their privacy leakage can exceed the SGM guarantee with both synthetic and real-world datasets. We perform tight auditing to detect maximum privacy leakage. How-ever, because tight auditing is computationally prohibitive on large datasets when the output dimension matches real-world scenar-ios, our auditing focuses on small datasets. We observe that the audited privacy leakage increases with the output dimension and can exceed the SGM guarantee. We also conduct a code audit of privacy_engine.py across Opacus versions v0.9.0 to v1.5.4 and identify an additional DP -SGD variant in recent v1. ∗ releases that normalizes the noisy gradi-ent by ⌊𝑁𝑞 ⌋. We denote this variant by FEASGM (Definition A.1). Although a previous Opacus bug report suggests that, for large datasets, the privacy guarantee of FEASGM is tightly bounded by that of SGM (Issue #571 [ 45 ]), our analysis shows that FEASGM can still provide a significantly weaker privacy guarantee than SGM even in the large-dataset regime (Appendix A.4). To the best of our knowledge, this is the first work to provide a systematic per-round privacy analysis of EASGM- and ASGM-based DP-SGD. We summarize our contributions as follows: 
+
+Re-analyzing privacy guarantee of DP-SGD. We conduct a com-prehensive analysis of the per-round privacy guarantees of EASGM-and ASGM-based DP -SGD using tight analysis tools and derive a bound that can be used to estimate the actual strength of these guar-antees. Moreover, we visualize this bound using a Central Limit Theorem (CLT)-based approximation, providing an intuitive un-derstanding of their privacy behavior. Our analysis shows that the privacy guarantees of EASGM and ASGM can become substantially weaker than the corresponding SGM-based guarantees, especially in high-dimensional settings. 
+
+Auditing the privacy leakage of DP - SGD implementations. 
+
+We audit the per-round DP - SGD procedures used in four state-of-the-art differentially private machine learning methods—DP-SUR [ 15 ], DPSGD-HF [ 44 ], DP-FETA [ 28 ], and PrivImage [ 29 ]. DPSGD-HF, DP-FETA, and PrivImage rely on Meta’s Opacus li-brary for their DP-SGD implementations. For these three methods, we audit the implementations using Opacus versions consistent with their algorithmic descriptions. Empirical evaluations on widely used public datasets—CIFAR-10, MNIST, and FMNIST—show that, under the audited settings, all four implementations exhibit privacy leakage exceeding the SGM guarantee established in [7]. 
+
+Thorough code auditing of the Opacus library. We examine the evolution of the privacy_engine.py file in the Opacus library from v0.9.0 to v1.5.4 and find that version v0.13.0 use ASGM, ver-sions v0.14.0–v1.4. ∗ use EASGM, and versions v1.5. ∗ use FEASGM (Section 5.5). We further analyze the privacy guarantee of multi-round FEASGM-based DP-SGD and show that FEASGM can yield a weaker privacy guarantee than SGM (Appendix A.4). 
+
+## 2 Preliminary 2.1 Differential Privacy 
+
+Definition 2.1. Differential Privacy [ 15 ]. A randomized algo-rithm M satisfies (𝜖, 𝛿 )-differential privacy if, for any two adjacent 
+
+Table 1: Notation used in the analysis.                                                                                  
+
+> Symbol Description
+> 𝐷, 𝐷 ′Neighboring datasets, 𝐷 ={𝑑 1, . . . , 𝑑 𝑁 },𝐷 ′=𝐷 ∪𝑑 𝑁 +1
+> 𝐷 −Shared subset of neighboring datasets, 𝐷 −=𝐷 ∩𝐷 ′
+> 𝑃 Standard normal distribution N ( 0,1)
+> 𝐵 Sampled batch from 𝐷 ,𝐵 ⊆𝐷
+> |𝑆 |Number of elements in set 𝑆 𝑄 𝐵 N ( 0,( | 𝐵 |/( | 𝐵 | + 1) ) 2)
+> 𝑄 𝜇 𝐵 N ( 𝜇, ( | 𝐵 |/( | 𝐵 | + 1) ) 2)
+> 𝑄 𝑥 For any positive integer 𝑥 ,N
+> 
+> 0, 𝑥 𝑥 +1
+> 2
+> 𝑄 𝜇 𝑥 For any positive integer 𝑥 and any 𝜇 ∈R,N
+> 
+> 𝜇,  𝑥 𝑥 +1
+> 2
+> 𝑞 Sampling ratio
+> 𝑛 Dimension of the output distribution
+> ID Identical trade-off function (Definition 2.5)
+> 𝐺 𝜇 Gaussian trade-off function (Definition 2.4)
+> 𝑇 (𝑃 𝑤 , 𝑄 𝑤 )Trade-off function in Lemma 2.10
+> 𝑇 (𝑃 𝐼 |𝐼, 𝑄 𝐼 |𝐼 )Lower bound (privacy guarantee) of 𝑇 (𝑃 𝑤 , 𝑄 𝑤 )in Lemma 2.10
+
+datasets 𝐷 and 𝐷 ′, and for all possible output sets 𝑂 , Pr [M ( 𝐷 ) ∈ 
+
+𝑂 ] ≤ 𝑒 𝜖 Pr [M ( 𝐷 ′) ∈ 𝑂 ] + 𝛿 , where 𝜖 > 0 and 𝛿 ∈ [ 0, 1] are pri-vacy parameters. Here, 𝜖 and 𝛿 (collectively referred to as the privacy budget) quantify the level of privacy loss: smaller values of either parameter imply stronger privacy guarantees. Datasets 𝐷 and 𝐷 ′ are said to be neighboring if they differ by at most one individual record, i.e., 𝐷 = 𝐷 ′ ∪ { 𝑑 } or 𝐷 ′ = 𝐷 ∪ { 𝑑 }.
+
+A functional view of DP: 𝑓 -DP. To interpret the privacy guaran-tee of a mechanism M, prior work uses the security game illustrated in Fig 1 [3, 12]. The adversary’s guess in the DP game can be formalized as the following hypothesis test, H0 : 𝑂 ∼ M ( 𝐷 ), and H1 : 𝑂 ∼ M ( 𝐷 ′).Consider a rejection rule R : Y → { 0, 1} in above hypothesis testing setup. Two key types of errors are: Type I error (false positive rate): 𝛼 = Pr [R ( 𝑦 ) = 1 | H0], the chance of incorrectly rejecting H0 when it is actually true; Type II error (false negative rate): 𝛽 = Pr [R ( 𝑦 ) = 0 | H1], the chance of incorrectly accepting 
+
+H0 when H1 is true. The adversary aims to reduce one type of error while fixing the other, by determining the smallest achievable 𝛽 for a given 𝛼 ,leading to the following definition. 
+
+Definition 2.2. Trade-off function [ 12 ]. Given two distribu-tions 𝑃 and 𝑄 , the trade-off function is defined as: 𝑇 (𝑃, 𝑄 )( 𝛼 ) =
+
+inf R {𝛽 R : 𝛼 R ≤ 𝛼 }. Let R be a rejection rule for the hypothesis test-ing problem (𝑃, 𝑄 ), which aims to determine whether a given sample 
+
+O is drawn from 𝑃 or 𝑄 . That is, 𝐻 0 : O ∼ 𝑃, 𝐻 1 : O ∼ 𝑄 . The infimum is taken over all such rejection rules R.
+
+In the DP game, the trade–off function 𝑓 = 𝑇 (𝑃, 𝑄 ) for neigh-boring outputs 𝑃 = M ( 𝐷 ) and 𝑄 = M ( 𝐷 ′) provides the tightest characterization of the mechanism’s privacy leakage for the pair 
+
+(𝐷, 𝐷 ′). It determines the adversary’s minimum Type II error un-der a fixed Type I error 𝛼 [ 22 ]: 𝑓 (𝛼 ). Hence, the trade–off func-tion directly characterizes the pairwise privacy leakage of M; In particular, if 𝑇 (𝑃, 𝑄 ) ≥ 𝑇 (𝑃 ′, 𝑄 ′), then the pairwise privacy leak-age corresponding to (𝑃, 𝑄 ) is smaller than that corresponding to 
+
+(𝑃 ′, 𝑄 ′).Based on the trade–off function 𝑓 , an 𝑓 -DP mechanism was defined in prior work (Definition 2.3), which guarantees that, for any pair of neighboring datasets 𝐷 and 𝐷 ′, the privacy leakage induced by the 𝑓 -DP mechanism is at most 𝑓 .Wenhao Wang, Shujie Cui, Hui Cui, and Xingliang Yuan 
+
+Definition 2.3. 𝑓 -differential privacy [ 12 ]. Let 𝑓 be a trade-off function. A mechanism M is said to be 𝑓 -differentially private if 
+
+𝑇  M ( 𝐷 ), M ( 𝐷 ′) ≥ 𝑓 for all neighbouring datasets 𝐷 and 𝐷 ′.Following [ 12 ], (𝜖, 𝛿 )-DP can be expressed through the trade-off function 
+
+𝑓 𝜖,𝛿 (𝛼 ) = max {0, 1 − 𝛿 − 𝑒 𝜖 𝛼, 𝑒 −𝜖 (1 − 𝛿 − 𝛼 )} (1) A more commonly used form of the trade-off function 𝑓 is defined based on two normal distributions, as follows: 
+
+Definition 2.4. 𝜇 -Gaussian DP ( 𝜇 -GDP) [ 12 ]. The trade-off func-tion for distinguishing between N ( 0, 1) and N ( 𝜇, 1) is defined as 
+
+𝐺 𝜇 (𝑥 ) = 𝑇 (N ( 0, 1), N ( 𝜇, 1))( 𝑥 ) = Φ  Φ−1 (1 − 𝑥 ) − 𝜇 , where Φ de-notes the cumulative distribution function (c.d.f.) of the standard normal distribution. A mechanism M is said to satisfy 𝜇 -GDP if it is 𝐺 𝜇 -DP. In the 𝑓 -DP framework, there exists a special trade–off function 
+
+ID , defined by two identical distributions, which corresponds to no privacy leakage. We overload ⊗ to denote both product distributions and tensoring of trade-off functions; in particular, if 𝑓 = 𝑇 (𝑃, 𝑄 ),then 𝑓 ⊗𝑛 = 𝑇 (𝑃 ⊗𝑛 , 𝑄 ⊗𝑛 ).
+
+Definition 2.5. Identical trade-off function [ 12 ]. For any dis-tribution 𝑃 , let ID = 𝑇 (𝑃, 𝑃 ), where ID (𝛼 ) = 1 − 𝛼 . The function ID 
+
+is referred to as the identical trade-off function, which represents the case of no privacy leakage. Moreover, for any trade-off function 
+
+𝑓 , it holds that ID ⊗ 𝑓 = 𝑓 and ID ≥ 𝑓 .Here, we present several algebraic properties of the trade-off function, which serve as the foundation for our privacy analysis. 
+
+Property 1. [12 ] Let 𝑃 , 𝑃 ′, 𝑄 , and 𝑄 ′ be independent distributions. Then 𝑇 (𝑃 ⊗ 𝑄, 𝑃 ′ ⊗ 𝑄 ′) = 𝑇 (𝑃, 𝑃 ′) ⊗ 𝑇 (𝑄, 𝑄 ′).
+
+Property 2. [12 ] Let 𝑃 , 𝑃 ′, 𝑄 , 𝑄 ′, 𝑃 1, and 𝑃 ′ 
+
+> 1
+
+be independent distri-butions. Suppose 𝑇 (𝑃, 𝑃 ′) = 𝑓 1, 𝑇 (𝑄, 𝑄 ′) = 𝑓 2, 𝑇 (𝑃 1, 𝑃 ′
+
+> 1
+
+) = 𝑓 3.If 𝑓 2 ≤ 𝑓 3, then 𝑓 1 ⊗ 𝑓 2 ≤ 𝑓 1 ⊗ 𝑓 3.
+
+Property 3. Let 𝑃 , 𝑄 , and 𝑄 ′ be probability distributions. Suppose 
+
+𝑇 (𝑃, 𝑄 ) = 𝑓 and 𝑇 (𝑃, 𝑄 ′) = 𝑓 ′. For 𝑛 ≥ 1, let 𝑓 ⊗𝑛 := 𝑇 (𝑃 ⊗𝑛 , 𝑄 ⊗𝑛 ).Then 𝑓 ⊗𝑛 ≥ 𝑓 ⊗𝑛 ⊗ 𝑓 ′. Indeed, since ID ≥ 𝑓 ′, Property 2 gives 
+
+𝑓 ⊗𝑛 = 𝑓 ⊗𝑛 ⊗ ID ≥ 𝑓 ⊗𝑛 ⊗ 𝑓 ′.Finally, we present an established result in 𝑓 -DP [ 12 ], which is used in our analysis. 
+
+Lemma 2.6 (Proposition D.2 in [ 12 ]). For any trade-off function 
+
+𝑓 that is not ID (Definition 2.5), 
+
+lim  
+
+> 𝑛 →∞
+
+𝑓 ⊗𝑛 (𝛼 ) = 0, ∀ 𝛼 ∈ ( 0, 1].
+
+In fact, the convergence is exponentially fast. 
+
+## 2.2 Differentially Private Mechanisms in Machine Learning 
+
+The per-round update of DP-SGD can be categorized into three implementation forms in the literature: the Subsampled Gaussian Mechanism (SGM) (Definition 2.7) [ 10 ], the Expected-Averaged SGM (EASGM)[ 1 ] (Definition 2.8), and the Averaged SGM (ASGM) (Definition 2.9)[7]. 
+
+Definition 2.7. Subsampled Gaussian Mechanism (SGM) [ 10 ]. 
+
+Given a dataset 𝐷 = {𝑑 1, 𝑑 2, . . . , 𝑑 𝑁 } containing 𝑁 data points, the SGM proceeds in three main steps: 1. Independently sample each data point with probability 𝑞 ≤ 1 to form a minibatch 𝐵 ; 2. Compute an information vector 𝑔 𝑖 for each sampled data point 𝑑 𝑖 ∈ 𝐵 , and clip its norm to be at most 𝐶 , i.e., ¯𝑔 𝑖 = 𝑔 𝑖 /max (1, ∥𝑔 𝑖 ∥ 
+
+> 𝐶
+
+); 3. Aggregate the clipped vectors and add isotropic Gaussian noise: Í𝑖 ∈𝐵 ¯𝑔 𝑖 + 𝐺 ,
+
+𝐺 ∼ N ( 0, 𝜎 2𝐶 2I).
+
+Definition 2.8. Expected-Averaged Subsampled Gaussian Mechanism (EASGM) [ 1 ]. Following the same setting as Definition 2.7, the output of EASGM can be formalized as Í𝑖 ∈𝐵 ¯𝑔 𝑖 +N ( 0,𝜎 2𝐶 2I) 
+
+> 𝑁 𝑞
+
+, where 𝑁 denotes the total number of data points in the dataset 𝐷 .
+
+Definition 2.9. Batch-Averaged Subsampled Gaussian Mech-anism (ASGM) [ 7]1. Following the same setting as Definition 2.7, the output of ASGM can be formalized as      
+
+> Í𝑖 ∈𝐵 ¯𝑔 𝑖 +N ( 0,𝜎 2𝐶 2I)|𝐵 |
+
+, where 
+
+|𝐵 | denotes the number of data points in the sampled batch 𝐵 .
+
+## 2.3 Privacy Analysis 
+
+In the security analysis, it is desirable to derive a tight privacy guarantee, as a tighter bound enables achieving the same privacy level with less noise, which in turn leads to higher output qual-ity of the mechanism. To derive the privacy guarantee of M, one must compute the trade–off function for each pair of neighboring datasets, identify the tightest lower bound among these functions, and adopt this bound as the privacy guarantee. The trade-off func-tion between two distributions follows from the Neyman-Pearson lemma, which states that the likelihood-ratio test is uniformly most powerful. By thresholding the likelihood ratio, the optimal Type II error 𝛽 corresponding to each Type I error 𝛼 can be obtained [12]. However, when the output distribution of a mechanism is highly complex, directly deriving the trade-off function via likelihood-ratio thresholding becomes computationally infeasible. In such cases, performing a tight privacy analysis is no longer tractable. Instead, one can only establish a lower bound of the trade-off function and derive a corresponding nearly tight privacy guarantee from these lower bounds. Prior work derives a tight and computable lower bound on the trade–off function under a stronger adversary by granting the ad-versary additional information beyond the mechanism’s output [ 46 ]. Let 𝑃 𝑤 = Í𝑖 𝑤 𝑖 𝑃 𝑖 and 𝑄 𝑤 = Í𝑖 𝑤 𝑖 𝑄 𝑖 be mixture distributions gen-erated by first sampling an index 𝐼 ∼ 𝑤 (i.e., choosing index 𝑖 with probability 𝑤 𝑖 ) and then drawing a sample from 𝑃 𝐼 or 𝑄 𝐼 . Here, 
+
+𝑤 = (𝑤 1, 𝑤 2, . . . , 𝑤 𝑚 ) is a discrete probability distribution such that 
+
+𝑤 𝑖 ≥ 0 and Í𝑚 𝑖 =1 𝑤 𝑖 = 1.
+
+Lemma 2.10. Joint concavity of trade-off functions [ 46 ]. Let 
+
+{𝑃 𝑖 }𝑚 𝑖 =1 and {𝑄 𝑖 }𝑚 𝑖 =1 be two sequences of probability distributions. Denote the probability density functions (pdfs) of 𝑃 𝑖 and 𝑄 𝑖 as 𝑝 𝑖 
+
+and 𝑞 𝑖 , respectively. Consider the mixture distributions 𝑃 𝑤 and 𝑄 𝑤 
+
+with pdfs 𝑝 𝑤 = Í𝑚 𝑖 =1 𝑤 𝑖 𝑝 𝑖 and 𝑞 𝑤 = Í𝑚 𝑖 =1 𝑤 𝑖 𝑞 𝑖 , where the weight 
+
+w = (𝑤 1, · · · , 𝑤 𝑚 ) is such that 𝑤 𝑖 ≥ 0 and Í𝑚 𝑖 =1 𝑤 𝑖 = 1. For two mixture distributions 𝑃 𝑤 and 𝑄 𝑤 , it holds 𝑇 (𝑃 𝑤 , 𝑄 𝑤 )( 𝛼 (𝑡, 𝑐 )) ≥
+
+> 1A full and explicit description of ASGM is provided as Algorithm 1 in the full paper [8]. Rethinking the Security of DP-SGD: A Corrected Analysis of Differentially Private Machine Learning
+
+𝑇 (( 𝑃 𝐼 |𝐼, 𝐼 ), (𝑄 𝐼 |𝐼, 𝐼 ))( 𝛼 (𝑡, 𝑐 )) = Í𝑚 𝑖 =1 𝑤 𝑖 𝑇 (𝑃 𝑖 , 𝑄 𝑖 )( 𝛼 𝑖 (𝑡, 𝑐 )) , where 
+
+𝛼 𝑖 (𝑡, 𝑐 ) = P𝑋 ∼𝑃 𝑖 
+
+h 𝑞 𝑖  
+
+> 𝑝 𝑖
+
+(𝑋 ) > 𝑡 
+
+i
+
++ 𝑐 P𝑋 ∼𝑃 𝑖 
+
+h 𝑞 𝑖  
+
+> 𝑝 𝑖
+
+(𝑋 ) = 𝑡 
+
+i
+
+is the type I er-ror for testing 𝑃 𝑖 v.s. 𝑄 𝑖 using the likelihood ratio test, and 𝛼 (𝑡, 𝑐 ) =
+
+Í𝑚 𝑖 =1 𝑤 𝑖 𝛼 𝑖 (𝑡, 𝑐 ).
+
+Lemma 2.10 formalizes the construction of a lower bound on the trade–off function 𝑇 (𝑃 𝑤 , 𝑄 𝑤 ), where revealing the auxiliary vari-able 𝐼 to the adversary induces the conditional output distributions 
+
+(𝑃 𝐼 | 𝐼, 𝐼 ) and (𝑄 𝐼 | 𝐼, 𝐼 ), for which the trade–off function can be expressed in terms of the component functions 𝑇 (𝑃 𝑖 , 𝑄 𝑖 ). By the post–processing property of differential privacy [ 46 ], revealing 𝐼 in-creases the adversary’s distinguishing power; hence, 𝑇 (𝑃 𝑤 , 𝑄 𝑤 ) ≥
+
+𝑇  (𝑃 𝐼 | 𝐼, 𝐼 ), (𝑄 𝐼 | 𝐼, 𝐼 ), as stated in Lemma 2.10. This result pro-vides a computable and tight lower bound for 𝑇 (𝑃 𝑤 , 𝑄 𝑤 ) in terms of the component trade-off functions {𝑇 (𝑃 𝑖 , 𝑄 𝑖 )} .
+
+## 2.4 Privacy Auditing 
+
+Privacy auditing aims to experimentally assess whether a mech-anism violates a claimed 𝑓 -DP guarantee [ 4, 49 ]. It proceeds by constructing a distinguisher and a pair of neighboring datasets 
+
+(𝐷, 𝐷 ′), and then estimating the empirical Type I and Type II errors from the mechanism’s outputs. The auditing process follows the DP security game illustrated in Fig. 1. Specifically, the distinguisher is repeatedly applied to outputs generated from the neighboring datasets, yielding empirical estimates of the Type I and Type II errors, denoted by 𝛼 and 𝛽 , respectively. Based on the empirical results, confidence intervals for the false positive rate 𝛼 ∈ ( 𝛼 𝑙 , 𝛼 𝑟 ) and the false negative rate 𝛽 ∈ ( 𝛽 𝑙 , 𝛽 𝑟 )
+
+at confidence level 𝛾 are derived from the observed values (𝛼, 𝛽 )
+
+and the total number of auditing trials 𝑡 . This is typically achieved using the Clopper–Pearson method [ 11 , 32 ], which models 𝛼 and 𝛽 
+
+as the success probabilities of two binomial distributions. Following prior work [ 32 , 49 ], we compare the empirical auditing result with the claimed privacy guarantee in the (𝜀, 𝛿 )-DP view. For the claimed trade-off function 𝑓 , we first derive the tightest 
+
+(𝜀, 𝛿 )-DP guarantee it implies by fixing 𝜀 and finding the smallest 𝛿 
+
+such that 𝑓 ≥ 𝑓 𝜀,𝛿 , where 𝑓 𝜀,𝛿 is given in Eq. 1. We then translate the auditing results into empirical lower bounds on the corresponding (𝜀, 𝛿 )-DP guarantee. For a fixed 𝛿 , the empirical lower bound on 𝜀 is 
+
+𝜀 𝐿 = max 
+
+
+
+log 1 − 𝛿 − 𝛼 𝑟 
+
+𝛽 𝑟 
+
+, log 1 − 𝛿 − 𝛽 𝑟 
+
+𝛼 𝑟 
+
+, 0
+
+
+
+. (2) Alternatively, for a fixed 𝜀 , the empirical lower bound on 𝛿 is 
+
+𝛿 𝐿 = max {0, 1 − 𝛼 𝑟 − 𝑒 𝜀 𝛽 𝑟 , 1 − 𝛽 𝑟 − 𝑒 𝜀 𝛼 𝑟 } . (3) To determine whether a violation occurs, these empirical lower bounds are compared with the claimed guarantees. If 𝜀 𝐿 > 𝜀 or 𝛿 𝐿 >
+
+𝛿 , then the neighboring pair (𝐷, 𝐷 ′) provides empirical evidence that the mechanism violates its claimed privacy guarantee. 
+
+## 3 Privacy Analysis of EASGM and ASGM 
+
+In this section, we analyze the privacy guarantees of EASGM and ASGM, focusing on neighboring dataset pairs where both datasets have sizes greater than 1.
+
+Analytical setting. For neighboring datasets 𝐷 and 𝐷 ′, we derive the privacy guarantee only for pairs (𝐷, 𝐷 ′) with a fixed order-ing, i.e., not for (𝐷 ′, 𝐷 ). This is because the trade-off function for 
+
+(𝐷 ′, 𝐷 ) can be obtained from that for (𝐷, 𝐷 ′) [ 12 ]: interchanging the output distributions 𝑃 = M ( 𝐷 ) and 𝑄 = M ( 𝐷 ′) yields the in-verse function 𝑓 −1 = 𝑇 (𝑄, 𝑃 ), which is the reflection of 𝑓 = 𝑇 (𝑃, 𝑄 )
+
+across the line 𝑦 = 𝑥 .To avoid division-by-zero in the per-round normalization, we adopt the following convention: (i) in EASGM, if the nominal nor-malization factor 𝑁𝑞 = 0 (e.g., 𝑞 = 0 or 𝑁 = 0), we set the factor to 1; (ii) in ASGM, if the mini-batch size |𝐵 | = 0, we also set the normalization factor to 1. This convention ensures numerical sta-bility without altering the mechanism’s behavior. When no data are sampled ( 𝑞 = 0 or |𝐵 | = 0), the aggregated gradient becomes a zero vector, and no privacy-relevant computation occurs. We first fix the notation used throughout our analysis. Let the neighboring datasets be 𝐷 = {𝑑 1, . . . , 𝑑 𝑁 } and 𝐷 ′ = 𝐷 ∪ { 𝑑 𝑁 +1 },and write 𝑁 = |𝐷 |. All symbols are summarized in Table 1. The following theoretical tools are used in our analysis. 
+
+Use of the theoretical results. These results are used to sim-plify and compare trade-off functions, and to derive a computation-ally efficient upper bound for visualizing the resulting guarantees. Lemma 3.1 provides the foundation for the remaining results. Build-ing on Lemma 3.1, Lemma 3.2 establishes 𝑇 (𝑃 𝐼 | 𝐼, 𝑄 𝐼 | 𝐼 ) as a lower bound for 𝑇 (𝑃 𝐼 | 𝐼, 𝑄 𝐼 | 𝐼 ), while Lemma 3.3 derives an analytic upper bound for 𝑇 (𝑃 𝐼 | 𝐼, 𝑄 𝐼 | 𝐼 ). This upper bound is computationally efficient because it only requires evaluating each component 𝑇 (𝑃 𝑖 , 𝑄 𝑖 )( 𝛼 ), rather than the likelihood-based expres-sion 𝑇 (𝑃 𝑖 , 𝑄 𝑖 )( 𝛼 (𝑡, 𝑐 )) . Finally, Theorems 3.4 and 3.5 are used to compare the trade-off functions induced by Gaussian distributions with different variances. 
+
+Lemma 3.1. Given mixture distributions 𝑃 𝑤 = Í𝑚 𝑖 =1 𝑤 𝑖 𝑃 𝑖 ,
+
+𝑄 𝑤 = Í𝑚 𝑖 =1 𝑤 𝑖 𝑄 𝑖 , let 𝐸 𝛼 = (𝛼 1, . . . , 𝛼 𝑚 ) ∈ [ 0, 1]𝑚 Í𝑚 𝑖 =1 𝑤 𝑖 𝛼 𝑖 = 𝛼 .Then, for any 𝛼 ∈ [0, 1], 𝑇 (( 𝑃 𝐼 | 𝐼, 𝐼 ), (𝑄 𝐼 | 𝐼, 𝐼 ))( 𝛼 ) =
+
+min (𝛼 1,...,𝛼 𝑚 ) ∈ 𝐸 𝛼 
+
+Í𝑚 𝑖 =1 𝑤 𝑖 𝑇 (𝑃 𝑖 , 𝑄 𝑖 )( 𝛼 𝑖 ). The proof is given in Appen-dix D.1. 
+
+Lemma 3.2. For a fixed 𝑦 ∈ [ 𝑚 ], suppose that 𝑇 (𝑃 𝑦 , 𝑄 𝑦 )( 𝛼 ) ≤ 
+
+𝑇 (𝑃 𝑦 , 𝑄 𝑦 )( 𝛼 ) for all 𝛼 ∈ [ 0, 1]. Let 𝑄 𝑤 = Í𝑖 ∈ [ 𝑚 ]\{ 𝑦 } 𝑤 𝑖 𝑄 𝑖 + 𝑤 𝑦 𝑄 𝑦 
+
+and 𝑃 𝑤 = Í𝑖 ∈ [ 𝑚 ]\{ 𝑦 } 𝑤 𝑖 𝑃 𝑖 + 𝑤 𝑦 𝑃 𝑦 . Then, for any 𝛼 ∈ [ 0, 1], 𝑇 (( 𝑃 𝐼 |
+
+𝐼, 𝐼 ), (𝑄 𝐼 | 𝐼, 𝐼 ))( 𝛼 ) ≥ 𝑇 (( 𝑃 𝐼 | 𝐼, 𝐼 ), (𝑄 𝐼 | 𝐼, 𝐼 ))( 𝛼 ). The proof is given in Appendix D.2. 
+
+Lemma 3.3. Let w = (𝑤 1, 𝑤 2, . . . , 𝑤 𝑚 ), where 𝑤 𝑖 ≥ 0 and 
+
+Í𝑚 𝑖 =1 𝑤 𝑖 = 1, and let 𝐼 be the random variable such that P[𝐼 =
+
+𝑖 ] = 𝑤 𝑖 . Then, for any 𝛼 ∈ [ 0, 1], 𝑇 (( 𝑃 𝐼 | 𝐼, 𝐼 ), (𝑄 𝐼 | 𝐼, 𝐼 ))( 𝛼 ) ≤ 
+
+Í𝑚 𝑖 =1 𝑤 𝑖 𝑇 (𝑃 𝑖 , 𝑄 𝑖 )( 𝛼 ). The proof is given in Appendix D.3. 
+
+Theorem 3.4. Let 0 < 𝜎 < 1. For any 𝜇 1 ≥ 𝜇 2 ≥ 0
+
+and any 𝛼 ∈ [0, 1], it holds that 𝑇  N ( 0, 1), N ( 𝜇 1, 𝜎 2) (𝛼 ) ≤
+
+𝑇  N ( 0, 1), N ( 𝜇 2, 𝜎 2) (𝛼 ). The proof is given in Appendix D.4. 
+
+Theorem 3.5. Let 0 < 𝜎 2 ≤ 𝜎 1 ≤ 1. Then, for any 𝛼 ∈ [ 0, 1], it holds that 𝑇  N ( 0, 1), N ( 0, 𝜎 22 ) (𝛼 ) ≤ 𝑇  N ( 0, 1), N ( 0, 𝜎 21 ) (𝛼 ). The proof is given in Appendix D.5. Wenhao Wang, Shujie Cui, Hui Cui, and Xingliang Yuan 
+
+## 3.1 Analysis Roadmap 
+
+We now provide a high-level overview of the analysis for EASGM and ASGM. Our goal is to establish valid privacy guarantees for these mechanisms and to understand how these guarantees com-pare with the closed-form privacy guarantee of SGM. 
+
+Step 1: Characterize the privacy leakage. For each mecha-nism, we first characterize the output distributions induced by an ordered neighboring pair (𝐷, 𝐷 ′) and rewrite the corresponding trade-off function in mixture form. For EASGM, this takes the form 
+
+𝑇 (𝑃 𝑤 , 𝑄 𝑤 ). The ASGM case is handled analogously. 
+
+Step 2: Derive valid privacy guarantees. Using this mixture representation, we construct lower bounds of the corresponding trade-off functions to derive valid privacy guarantees. In particular, we first obtain a valid per-pair privacy guarantee, denoted by 𝑇 (𝑃 𝐼 |
+
+𝐼, 𝑄 𝐼 | 𝐼 ), and then further derive a valid guarantee that applies to all neighboring pairs with |𝐷 | = 𝑁 and |𝐷 ′ | = 𝑁 + 1, namely 
+
+𝑇 (𝑃 𝐼 | 𝐼, 𝑄 𝐼 | 𝐼 ). The privacy guarantee for ASGM is derived in the same manner. 
+
+Step 3: Derive tractable upper bounds and compare with SGM. 
+
+A direct comparison between the derived guarantees of EASGM and ASGM and the closed-form privacy guarantee of SGM is chal-lenging, because the guarantees of EASGM and ASGM do not admit simple closed-form expressions. We therefore derive analytic up-per bounds 𝑓 for the corresponding per-pair guarantees such that 
+
+𝑓 ≥ 𝑇 (𝑃 𝐼 | 𝐼, 𝑄 𝐼 | 𝐼 ). These tractable conservative bounds allow us to visualize the privacy guarantees and compare them with the SGM guarantee. For both EASGM and ASGM, the resulting upper bound 𝑓 con-tains a term of the form 𝑇 (𝑃 ⊗ ( 𝑛 −1) , 𝑄 ⊗ ( 𝑛 −1) ), where 𝑃 and 𝑄 are two different Gaussian distributions. As the output dimension 𝑛 
+
+increases, this term approaches zero (Lemma 2.6), and hence 𝑓 de-creases, whereas the SGM guarantee does not depend on the output dimension. In other words, unlike SGM, the privacy guarantees of EASGM and ASGM degrade with the output dimension. This asymptotic behavior allows us to identify regimes in which the guarantees of EASGM and ASGM can become weaker than the SGM guarantee. 
+
+## 3.2 Privacy Guarantee of EASGM 
+
+Let M denote the EASGM mechanism (Definition 2.8). The first step in establishing the trade-off function is to formally char-acterize the output distributions of M ( 𝐷 ) and M ( 𝐷 ′) 2, as de-tailed in Section 2.3. We can express the distribution of M ( 𝐷 )
+
+as Í𝐵 𝑃 (𝐵 )
+
+ Í𝑖 ∈𝐵 𝑔 𝑖 +𝐺 𝑁 ·𝑞 
+
+
+
+, where 𝐺 ∼ N ( 0, 𝜎 2𝐶 2I) is 𝑛 -dimensional isotropic Gaussian noise, 𝑃 (𝐵 ) = 𝑞 |𝐵 | (1 − 𝑞 )𝑁 − | 𝐵 | denotes the prob-ability of sampling batch 𝐵 , and 𝑔 𝑖 denotes the clipped gradient information computed from the data point 𝑑 𝑖 . Similarly, the distri-bution of M ( 𝐷 ′) can be written as (1 − 𝑞 ) Í𝐵 𝑃 (𝐵 )
+
+ Í𝑖 ∈𝐵 𝑔 𝑖 +𝐺  
+
+> (𝑁 +1) · 𝑞
+
+
+
++
+
+𝑞 Í𝐵 𝑃 (𝐵 )
+
+ Í𝑖 ∈𝐵 𝑔 𝑖 +𝑔 𝑁 +1+𝐺  
+
+> (𝑁 +1) · 𝑞
+
+
+
+.
+
+> 2By a slight abuse of notation, we use random variables and their induced distributions interchangeably when the meaning is clear from context.
+
+Directly computing the trade-off function is computation-ally infeasible, as discussed in Section 2.3. Therefore, leverag-ing Lemma 2.10, we establish a lower bound and obtain the fol-lowing result (Eq. 4), where 𝑓 1 
+
+> 𝐵
+
+= 𝑇 
+
+ Í𝑖 ∈𝐵 𝑔 𝑖 +𝐺 𝑁 𝑞 ,    
+
+> Í𝑖 ∈𝐵 𝑔 𝑖 +𝐺
+> (𝑁 +1)𝑞
+
+
+
+and 
+
+𝑓 2 
+
+> 𝐵
+
+= 𝑇 
+
+ Í𝑖 ∈𝐵 𝑔 𝑖 +𝐺 𝑁 𝑞 ,     
+
+> Í𝑖 ∈𝐵 𝑔 𝑖 +𝑔 𝑁 +1+𝐺
+> (𝑁 +1)𝑞
+
+
+
+.
+
+𝑇 (M ( 𝐷 ), M ( 𝐷 ′))( 𝛼 (𝑡, 𝑐 )) ≥ 𝑓 (𝛼 (𝑡, 𝑐 )) 
+
+=∑︁ 
+
+> 𝐵
+
+𝑃 (𝐵 )(( 1 − 𝑞 )𝑓 1 
+
+> 𝐵
+
+(𝛼 1 
+
+> 𝐵
+
+(𝑡, 𝑐 )) + 𝑞 𝑓 2 
+
+> 𝐵
+
+(𝛼 2 
+
+> 𝐵
+
+(𝑡, 𝑐 ))) , (4) To simplify the privacy analysis, we apply distinct reversible (bijective) transformations to the distributions underlying 𝑓 1 
+
+> 𝐵
+
+and 
+
+𝑓 2 
+
+> 𝐵
+
+; as these preserve the trade-off function [ 12 ], we define them as follows: Proc 𝐵 𝑗 : 𝑥 ↦ → Rot 𝐵 𝑗 
+
+h 
+
+𝑥 −  
+
+> Í𝑖 ∈𝐵 𝑔 𝑖
+> 𝑁 𝑞
+
+ 𝑁 𝑞 𝐶𝜎 
+
+i
+
+, 𝑗 ∈ { 1, 2}. Here, 
+
+Rot 𝐵  
+
+> 1
+
+is the rotation operation that aligns the direction vector of the last dimension with the vector     
+
+> Í𝑖 ∈𝐵 𝑔 𝑖
+> (𝑁 +1) · 𝑞
+
+−    
+
+> Í𝑖 ∈𝐵 𝑔 𝑖
+> 𝑁 ·𝑞
+
+, and Rot 𝐵  
+
+> 2
+
+is the rotation operation that aligns the direction vector of the last dimension with the vector 𝑔 𝑁 +1+Í𝑖 ∈𝐵 𝑔 𝑖   
+
+> (𝑁 +1) · 𝑞
+
+−    
+
+> Í𝑖 ∈𝐵 𝑔 𝑖
+> 𝑁 ·𝑞
+
+. By applying Proc 𝐵 
+
+> 1
+
+to the distributions underlying 𝑓 1 
+
+> 𝐵
+
+, we obtain 
+
+𝑇 (𝑃 ⊗𝑛 , 𝑄 ⊗ ( 𝑛 −1) 
+
+> 𝑁
+
+⊗ 𝑄 𝜇 1 
+
+> 𝐵
+> 𝑁
+
+). (5) Similarly, by applying Proc 𝐵  
+
+> 2
+
+to the distributions that constitute 𝑓 2 
+
+> 𝐵
+
+,
+
+𝑓 2 
+
+> 𝐵
+
+can be simplified as 
+
+𝑇 (𝑃 ⊗𝑛 , 𝑄 ⊗ ( 𝑛 −1) 
+
+> 𝑁
+
+⊗ 𝑄 𝜇 2 
+
+> 𝐵
+> 𝑁
+
+), (6) where 𝑃 , 𝑄 𝑁 , 𝑄 𝜇 1 
+
+> 𝐵
+> 𝑁
+
+and 𝑄 𝜇 2 
+
+> 𝐵
+> 𝑁
+
+are defined in Table 1, and 𝜇 1 
+
+> 𝐵
+
+= ∥ − 
+
+Í𝑖 ∈𝐵 ¯𝑔 𝑖 ∥2/(( 𝑁 + 1)𝐶𝜎 ), 𝜇 2 
+
+> 𝐵
+
+= ∥𝑁 ¯𝑔 𝑁 +1 − Í𝑖 ∈𝐵 ¯𝑔 𝑖 ∥2/(( 𝑁 + 1)𝐶𝜎 ).By establishing the lower bounds of 𝑓 1 
+
+> 𝐵
+
+and 𝑓 2 
+
+> 𝐵
+
+, we derive the privacy guarantee for neighboring datasets of sizes 𝑁 and 𝑁 + 1.The following theorem establishes the privacy guarantee. 
+
+Theorem 3.6. For each neighboring pair 𝐷 = {𝑑 1, . . . , 𝑑 𝑁 } and 
+
+𝐷 ′ = 𝐷 ∪ { 𝑑 𝑁 +1 }, the EASGM mechanism admits the following privacy guarantee: 
+
+𝑓 (𝛼 (𝑡, 𝑐 )) = Í𝐵 𝑃 (𝐵 ) [( 1 − 𝑞 ) 𝑓 1 
+
+> 𝐵
+
+(𝛼 1 
+
+> 𝐵
+
+(𝑡, 𝑐 )) + 𝑞𝑓 2 
+
+> 𝐵
+
+(𝛼 2 
+
+> 𝐵
+
+(𝑡, 𝑐 ))] .Here, 𝑓 1 
+
+> 𝐵
+
+= 𝑇 (𝑃 ⊗𝑛 , 𝑄 ⊗ ( 𝑛 −1) 
+
+> 𝑁
+
+⊗𝑄 𝜇 1 
+
+> 𝐵
+> 𝑁
+
+) and 𝑓 2 
+
+> 𝐵
+
+= 𝑇 (𝑃 ⊗𝑛 , 𝑄 ⊗ ( 𝑛 −1) 
+
+> 𝑁
+
+⊗𝑄 𝜇 2 
+
+> 𝐵
+> 𝑁
+
+),where 𝑃 , 𝑄 𝑁 , and 𝑄 𝜇 𝑁 are defined in Table 1, and 𝜇 1 
+
+> 𝐵
+
+= |𝐵 |(𝑁 +1)𝜎 ,
+
+𝜇 2 
+
+> 𝐵
+
+= 𝑁 +| 𝐵 |(𝑁 +1)𝜎 . The proof is in Appendix D.6. 
+
+## 3.3 Privacy Guarantee of ASGM 
+
+Following the notation in Section 3.2, let M denote the ASGM mechanism (Definition 2.9). We can write the distribution of M ( 𝐷 )
+
+as Í𝐵 ≠∅ 𝑃 (𝐵 )(      
+
+> Í𝑖 ∈𝐵 𝑔 𝑖 +𝐺
+> |𝐵 |
+
+) + 𝑃 (𝐵 = ∅) 𝐺 . Similarly, the distribu-tion of M ( 𝐷 ′) can be written as Í𝐵 ≠∅ 𝑃 (𝐵 ) [( 1 − 𝑞 )(      
+
+> Í𝑖 ∈𝐵 𝑔 𝑖 +𝐺
+> |𝐵 |
+
+) + (𝑞 )(       
+
+> Í𝑖 ∈𝐵 𝑔 𝑖 +𝑔 𝑁 +1+𝐺
+> |𝐵 |+ 1
+
+)] + 𝑃 (𝐵 = ∅) [ 𝐺 · ( 1 − 𝑞 ) + 𝑞 (𝑔 𝑁 +1 + 𝐺 )] . Using the same analytical approach as in Section 3.2, we establish a lower bound on the trade-off function as follows. 
+
+𝑇  M ( 𝐷 ), M ( 𝐷 ′)  𝛼 (𝑡, 𝑐 ) ≥ 𝑓 (𝛼 (𝑡, 𝑐 )) 
+
+=∑︁ 
+
+> 𝐵 ≠∅
+
+𝑃 (𝐵 )(( 1 − 𝑞 )𝑓 1 
+
+> 𝐵
+
+(𝛼 1 
+
+> 𝐵
+
+(𝑡, 𝑐 )) + 𝑞 𝑓 2 
+
+> 𝐵
+
+(𝛼 2 
+
+> 𝐵
+
+(𝑡, 𝑐 ))) + 𝑃 (𝐵 = ∅)(( 1 − 𝑞 )𝑓 1 
+
+> ∅
+
+(𝛼 1 
+
+> ∅
+
+(𝑡, 𝑐 )) + 𝑞𝑓 2 
+
+> ∅
+
+(𝛼 2 
+
+> ∅
+
+(𝑡, 𝑐 ))) .
+
+(7) Rethinking the Security of DP-SGD: A Corrected Analysis of Differentially Private Machine Learning 
+
+Here, 𝑓 1 
+
+> 𝐵
+
+= 𝑇 (     
+
+> Í𝑖 ∈𝐵 𝑔 𝑖 +𝐺
+> |𝐵 |
+
+,     
+
+> Í𝑖 ∈𝐵 𝑔 𝑖 +𝐺
+> |𝐵 |
+
+) and 𝑓 2 
+
+> 𝐵
+
+=
+
+𝑇 (     
+
+> Í𝑖 ∈𝐵 𝑔 𝑖 +𝐺
+> |𝐵 |
+
+,      
+
+> Í𝑖 ∈𝐵 𝑔 𝑖 +𝑔 𝑁 +1+𝐺
+> |𝐵 |+ 1
+
+), 𝑓 1 
+
+> ∅
+
+= 𝑇 (𝐺, 𝐺 ),𝑓 2 
+
+> ∅
+
+= 𝑇 (𝐺, 𝐺 + 𝑔 𝑁 +1).For 𝐵 ≠ ∅ the expressions of 𝑓 1 
+
+> 𝐵
+
+and 𝑓 2 
+
+> 𝐵
+
+can be simplified using an invertible transformation defined as follows: 
+
+Proc 𝐵 : 𝑥 ↦ → Rot 𝐵 
+
+ 
+
+𝑥 −
+
+Í𝑖 ∈𝐵 𝑔 𝑖 
+
+|𝐵 |
+
+ |𝐵 |
+
+𝐶𝜎 
+
+
+
+. (8) Here, Rot 𝐵 is the rotation that aligns the direction vector of the last dimension with that of 𝑔 𝑁 +1+Í𝑖 ∈𝐵 𝑔 𝑖   
+
+> |𝐵 |+ 1
+
+−    
+
+> Í𝑖 ∈𝐵 𝑔 𝑖
+> |𝐵 |
+
+. Then, 𝑓 1 
+
+> 𝐵
+
+can be simplified as 
+
+𝑇 (𝑃 ⊗𝑛 , 𝑃 ⊗𝑛 ) (9) , and 𝑓 2 
+
+> 𝐵
+
+can be simplified as 
+
+𝑇 (𝑃 ⊗𝑛 , 𝑄 ⊗ ( 𝑛 −1) 
+
+> 𝐵
+
+⊗ 𝑄 𝜇 𝐵  
+
+> 𝐵
+
+) (10) , where 𝑃 , 𝑄 𝐵 and 𝑄 𝜇 𝐵  
+
+> 𝐵
+
+are defined in Table 1, and 𝜇 𝐵 = ∥ | 𝐵 |𝑔 𝑁 +1 −
+
+Í𝑖 ∈𝐵 𝑔 𝑖 ∥2/((| 𝐵 | + 1)𝐶𝜎 ).By establishing lower bounds for 𝑓 1 
+
+> 𝐵
+
+, 𝑓 2 
+
+> 𝐵
+
+, 𝑓 1 
+
+> ∅
+
+, and 𝑓 2 
+
+> ∅
+
+, we derive the privacy guarantee for neighboring datasets of sizes 𝑁 and 𝑁 + 1.The following theorem presents the established guarantee. 
+
+Theorem 3.7. For every neighboring pair of datasets 𝐷 =
+
+{𝑑 1, 𝑑 2, . . . , 𝑑 𝑁 } and 𝐷 ′ = 𝐷 ∪ { 𝑑 𝑁 +1 }, the ASGM mechanism admits the following privacy guarantee: 
+
+𝑓 (𝛼 (𝑡, 𝑐 )) =∑︁ 
+
+> 𝐵 ≠∅
+
+𝑃 (𝐵 ) (1 − 𝑞 )𝑓 1 
+
+> 𝐵
+
+(𝛼 1 
+
+> 𝐵
+
+(𝑡, 𝑐 )) + 𝑞 𝑓 2 
+
+> 𝐵
+
+(𝛼 2 
+
+> 𝐵
+
+(𝑡, 𝑐 )) 
+
++ ( 1 − 𝑞 )𝑁 [( 1 − 𝑞 )𝑓 1 
+
+> ∅
+
+(𝛼 1 
+
+> ∅
+
+(𝑡, 𝑐 )) + 𝑞𝑓 2 
+
+> ∅
+
+(𝛼 2 
+
+> ∅
+
+(𝑡, 𝑐 ))] .
+
+(11) 
+
+Here, 𝑓 1 
+
+> 𝐵
+
+= ID and 𝑓 2 
+
+> 𝐵
+
+= 𝑇 (𝑃 ⊗𝑛 , 𝑄 ⊗ ( 𝑛 −1) 
+
+> 𝐵
+
+⊗ 𝑄 𝜇 𝐵  
+
+> 𝐵
+
+), 𝑓 1 
+
+> ∅
+
+= ID , 𝑓 2 
+
+> ∅
+
+= 𝐺 1/𝜎 ,where ID , 𝐺 1/𝜎 , 𝑃 , 𝑄 𝐵 , and 𝑄 𝜇 𝐵  
+
+> 𝐵
+
+are defined in Table 1, with 𝜇 𝐵 =   
+
+> 2|𝐵 |( | 𝐵 |+ 1)𝜎
+
+. The proof is in Appendix D.7. 
+
+## 3.4 Comparison with SGM 
+
+In this section, we compare the privacy guarantees of EASGM and ASGM with the SGM guarantee derived in [ 7], as it provides a closed-form 𝑓 -DP baseline for comparison. Our comparison follows the accounting convention: EASGM- and ASGM-based implemen-tations are typically analyzed using the SGM guarantee [1, 7]. Before making comparisons, we first clarify the distinction be-tween privacy leakage and privacy guarantees, so as to distinguish potential violations from actual ones. The privacy leakage for a neighboring pair 𝐷 and 𝐷 ′ un-der a mechanism M is represented by the trade-off function 
+
+𝑇 (M ( 𝐷 ), M ( 𝐷 ′)) (see Section 2.1). In contrast, a privacy guar-antee 𝑓 for the pair is a lower bound on 𝑇 (M ( 𝐷 ), M ( 𝐷 ′)) , that is, 𝑇 (M ( 𝐷 ), M ( 𝐷 ′)) ≥ 𝑓 . Due to approximations in the analysis, equality does not generally hold. A violation means that the privacy leakage of EASGM or ASGM exceeds the claimed SGM guarantee 𝑔 , namely, there exists some 
+
+𝛼 such that 𝑇 (M ( 𝐷 ), M ( 𝐷 ′))( 𝛼 ) < 𝑔 (𝛼 ), where 𝑔 denotes the privacy guarantee claimed for SGM. Comparing 𝑓 with 𝑔 can only indicate a potential viola-tion. If 𝑓 (𝛼 ) < 𝑔 (𝛼 ) for some 𝛼 , then it is possible that 
+
+𝑇 (M ( 𝐷 ), M ( 𝐷 ′))( 𝛼 ) < 𝑔 (𝛼 ). A potential violation becomes an actual violation only when the guarantee 𝑓 is tight, that is, when 
+
+𝑇 (M ( 𝐷 ), M ( 𝐷 ′)) = 𝑓 .
+
+3.4.1 EASGM vs. SGM. We now compare the privacy guarantees achieved by EASGM and SGM under identical parameter settings. The per-pair privacy guarantee 𝑓 of EASGM, defined in Eq. 4, does not admit a simple closed-form expression. To enable comparison, we therefore derive an upper bound 𝑓 on 𝑓 that has a tractable analytic form. For a fixed 𝛼 , if the upper bound 𝑓 (𝛼 ) lies below the SGM guarantee 𝑔 (𝛼 ), then the derived guarantee for EASGM can be weaker than the claimed SGM guarantee, indicating a regime where a potential privacy violation may occur. 
+
+Theorem 3.8. Let 𝑓 be the trade-off function defined in Eq. 4, and let 𝑃 and 𝑄 𝑁 be the distributions defined in Table 1. Then, 
+
+𝑓 = 𝑇 (𝑃 ⊗ ( 𝑛 −1) , 𝑄 ⊗ ( 𝑛 −1) 
+
+> 𝑁
+
+) ≥ 𝑓 . (12) 
+
+The proof is in Appendix D.8. 
+
+We now show that, as the output dimension 𝑛 increases, the EASGM privacy guarantee collapses for all neighboring pairs. 
+
+Theorem 3.9. Privacy flaw of EASGM. Let 𝑓 be the upper bound function defined in Theorem 3.8. Then 
+
+lim  
+
+> 𝑛 →∞
+
+𝑓 (𝛼 ) = 0, ∀𝛼 ∈ ( 0, 1]. (13) 
+
+The proof is in Appendix D.9. 
+
+The privacy guarantee of SGM is given by 𝑞 𝐺 1/𝜎 + ( 1 −𝑞 ) ID [7 ], where 𝐺 1/𝜎 and ID are the trade-off functions defined in Defini-tions 2.4 and 2.5, respectively. We observe that, for every 𝛼 ∈ ( 0, 1),the per-pair upper bound of EASGM’s privacy guarantee satisfies 
+
+𝑓 (𝛼 ) < 𝑞𝐺 1/𝜎 (𝛼 ) + ( 1 −𝑞 )ID (𝛼 ) when 𝑛 is sufficiently large. Conse-quently, the per-pair privacy guarantee of EASGM is weaker than the SGM guarantee 𝑞𝐺 1/𝜎 + ( 1 − 𝑞 ) ID .The per-pair privacy guarantee 𝑓 in Eq. 4 becomes tight when the sampling ratio 𝑞 = 1, indicating that for each neighboring pair (𝐷, 𝐷 ′), 𝑇 (M ( 𝐷 ), M ( 𝐷 ′)) = 𝑓 . This is because the privacy guarantee 𝑓 in Eq. 4 is derived from the approximation introduced in Lemma 2.10. When 𝑞 = 1, there is only one distribution in the mixtures 𝑃 𝑤 and 𝑄 𝑤 ; thus, 𝑇 (𝑃 𝑤 , 𝑄 𝑤 ) = 𝑇 (( 𝑃 𝐼 | 𝐼 ), (𝑄 𝐼 | 𝐼 )) .In this case, the approximation becomes exact, and there is no overestimation of the per-pair privacy leakage. As shown above, when 𝑛 is large, the upper bound already falls below the claimed SGM guarantee, indicating that a potential pri-vacy violation can occur in EASGM. Moreover, when 𝑞 = 1, the privacy guarantee becomes tight, so this potential violation turns into an actual privacy violation. 
+
+3.4.2 ASGM vs. SGM. Following the same comparison procedure as in Section 3.4.1, we first derive an upper bound 𝑓 on the per-pair ASGM privacy guarantee 𝑓 , defined in Eq. 7. 
+
+Theorem 3.10. Let 𝑓 be the trade-off function defined in Eq. 7, and let the distributions 𝑃 and 𝑄 𝑁 , as well as the trade-off function 
+
+ID , be as defined in Table 1. Then 
+
+𝑓 = (𝑞 − 𝑞 (1 − 𝑞 )𝑁 )𝑇 (𝑃 ⊗ ( 𝑛 −1) , 𝑄 ⊗ ( 𝑛 −1) 
+
+> 𝑁
+
+)+ ( 1 − 𝑞 + 𝑞 (1 − 𝑞 )𝑁 )ID ≥ 𝑓 . (14) 
+
+The proof is in Appendix D.10. Wenhao Wang, Shujie Cui, Hui Cui, and Xingliang Yuan 
+
+We now show that, as the output dimension 𝑛 increases, the upper bound 𝑓 for the ASGM per-pair privacy guarantee converges to (1 − 𝑞 + 𝑞 (1 − 𝑞 )𝑁 )ID .
+
+Theorem 3.11. Privacy flaw of ASGM. Let 𝑓 be the upper bound defined in Theorem 3.10. Then we have 
+
+lim  
+
+> 𝑛 →∞
+
+𝑓 (𝛼 ) = (1 − 𝑞 + 𝑞 (1 − 𝑞 )𝑁 )ID (𝛼 ), ∀𝛼 ∈ ( 0, 1]. (15) 
+
+The proof is in Appendix D.11. 
+
+The privacy guarantee of SGM is given by 𝑞𝐺 1/𝜎 + ( 1 − 𝑞 )ID [7 ], where 𝐺 1/𝜎 and ID are the trade-off functions defined in Table 1. We observe that, for any fixed 𝛼 ∈ ( 0, 1), when 𝑁 is sufficiently large and 𝑞 is sufficiently close to one, lim 𝑛 →∞ 𝑓 (𝛼 ) − 𝑞 𝐺 1/𝜎 (𝛼 ) + ( 1 −
+
+𝑞 )ID (𝛼 ) = 𝑞 (1−𝑞 )𝑁 ID (𝛼 )− 𝑞 𝐺 1/𝜎 (𝛼 ) < 0. Consequently, ASGM’s per-pair privacy guarantee is weaker than the SGM guarantee, indicating a potential privacy violation. When the sampling ratio is 1, the two mechanisms, EASGM and ASGM, become equivalent. According to Definitions 2.8 and 2.9, their output distributions on any neighboring pair are identical when the sampling ratio equals 1. Consequently, for any neighbor-ing pair, the privacy guarantee provided by ASGM is identical to that of EASGM. As shown above, when the sampling ratio 𝑞 equals 1, the privacy guarantee of ASGM is the same as that of EASGM. According to Section 3.4.1, the actual privacy leakage can exceed the SGM guarantee, revealing the existence of a privacy violation in ASGM. 
+
+## 3.5 Privacy Upper Bound Visualization 
+
+Visualizing the privacy guarantees of EASGM and ASGM provides intuition about their privacy behavior. However, since directly vi-sualizing the exact guarantees is computationally expensive, we instead illustrate their upper bounds 𝑓 , defined in Theorems 3.8 and 3.10, respectively. The challenge is that the upper bound 𝑓 contains a component 
+
+𝑓 ⊗ ( 𝑛 −1)∗ = 𝑇 (𝑃 ⊗ ( 𝑛 −1) , 𝑄 ⊗ ( 𝑛 −1) 
+
+> 𝑁
+
+). To visualize the upper bound 𝑓 , we therefore need to characterize 𝑓 ⊗ ( 𝑛 −1)∗ . Our strategy is to derive an analytic upper bound for this term. Specifically, we first derive an upper bound for 𝑓 ∗. Let 𝑓 ∗ = max {𝑓 ∗, 𝑓 −1 
+
+> ∗
+
+}. According to Proposi-tion 2.2 in [ 12 ], 𝑓 ∗ is itself a trade-off function and satisfies 𝑓 ∗ ≥ 𝑓 ∗.By Property 2, this further implies that 𝑓 ∗⊗ ( 𝑛 −1) ≥ 𝑓 ⊗ ( 𝑛 −1)∗ . Using Theorem 3.12, we then derive an analytic upper bound for 𝑓 ∗⊗ ( 𝑛 −1) .Substituting this bound for 𝑓 ⊗ ( 𝑛 −1)∗ into the expressions of Theo-rems 3.8 and 3.10 then yields an analytic upper bound for 𝑓 (Theo-rem 3.13). We further establish upper bounds for the multi-round EASGM and ASGM training processes in Appendix BTheorem B.1, and visualize the multi-round upper bound for EASGM in Appendix B Corollary B.2. 
+
+Theorem 3.12. (Theorem 5 in [ 12 ]) Let 𝑓 1, . . . , 𝑓 𝑛 be symmetric trade-off functions such that 𝜅 3 (𝑓 𝑖 ) < ∞ for all 1 ≤ 𝑖 ≤ 𝑛 . Denote 
+
+𝜇 := 2∥kl ∥1√︃    
+
+> ∥𝜿 2∥1− ∥ kl ∥22
+
+, 𝛾 := 0.56 ∥𝜿 3 ∥1
+
+ ∥𝜿 2 ∥1 − ∥ kl ∥22
+
+3/2 . Assume 𝛾 < 12 . Then, for all 
+
+𝛼 ∈ [ 𝛾, 1 − 𝛾 ], we have 𝐺 𝜇 (𝛼 + 𝛾 ) − 𝛾 ≤ (𝑓 1 ⊗ 𝑓 2 ⊗ · · · ⊗ 𝑓 𝑛 )( 𝛼 ) ≤
+
+𝐺 𝜇 (𝛼 − 𝛾 ) + 𝛾 . 
+
+Theorem 3.13. Let 𝑓 ∗ = 𝑇 (𝑃, 𝑄 𝑁 ), where 𝑃 and 𝑄 𝑁 are defined in Table 1, and let 𝑓 ∗ = max {𝑓 ∗, 𝑓 −1 
+
+> ∗
+
+}. For all 𝛼 ∈ [ 𝛾, 1−𝛾 ], the following bounds hold: 1. For 𝑓 in Theorem 3.8, we have 𝑓 (𝛼 ) ≤ 𝐺 𝜇 (𝛼 − 𝛾 ) + 𝛾 .2. For 𝑓 in Theorem 3.10, we have 𝑓 (𝛼 ) ≤ ( 𝑞 − 𝑞 (1 − 𝑞 )𝑁 ) ( 𝐺 𝜇 (𝛼 −
+
+𝛾 ) + 𝛾 ) + ( 1 − 𝑞 + 𝑞 (1 − 𝑞 )𝑁 ) 𝐼𝐷 (𝛼 ), where 𝜇 and 𝛾 are derived from the composition of (𝑛 − 1) independent copies of 𝑓 ∗. The proof is in Appendix D.15. 
+
+## 3.6 Takeaways 
+
+Using the upper bounds derived in Theorems 3.8 and 3.10, we now summarize several key observations about the privacy behavior of EASGM and ASGM under different conditions. For both EASGM and ASGM, our analysis shows that the ana-lytical upper bound 𝑓 decreases as the output dimension increases (Lemma 3.15). For EASGM, 𝑓 further decreases as the dataset size becomes smaller (Lemma 3.14). For ASGM, 𝑓 further decreases as the sampling ratio 𝑞 increases (Lemma 3.16). 
+
+Lemma 3.14. Let 𝑓 be the function defined in Theorem 3.8. For any 
+
+𝛼 ∈ [ 0, 1] and 𝑛 ∈ Z>0, 𝑓 (𝛼 ) weakly decreases as 𝑁 decreases. The proof is given in Appendix D.12. 
+
+Lemma 3.15. Let 𝑓 be the function defined in Theorems 3.10 and 3.8. For any 𝛼 ∈ [ 0, 1] and 𝑁 ∈ Z>0, 𝑓 (𝛼 ) weakly decreases as 𝑛 increases. The proof is given in Appendix D.13. 
+
+Lemma 3.16. Let 𝑓 be the function defined in Theorem 3.10. Given fixed 𝑁 ∈ Z>0 and 𝑛 ∈ Z>0, for any 𝛼 ∈ [ 0, 1], 𝑓 (𝛼 ) weakly decreases as 𝑞 increases. The proof is given in Appendix D.14. 
+
+## 4 EASGM and ASGM Auditing 
+
+In this section, we propose an auditing method for EASGM- and ASGM-based DP-SGD implementations to test whether the privacy leakage in their per-round training procedures violates the SGM privacy guarantee. Since our goal is to detect privacy violations, we focus on the parameter regime in which the privacy guarantee is weakest. The main challenge lies in performing tight auditing in a high-dimensional output space: directly applying the likelihood-ratio test given by the Neyman–Pearson lemma is computationally inefficient. To address this issue, we exploit the fact that, under each hypothesis, the output can be normalized by a suitable invertible linear transfor-mation so that the transformed output has i.i.d. standard Gaussian coordinates. This allows us to replace direct likelihood-ratio testing with a normality-based auditing procedure. 
+
+Distinguisher design. Lemma 2.10 provides a design principle for distinguishers. When the adversary observes the auxiliary in-formation 𝐼 , the optimal distinguisher is obtained by conditioning on 𝐼 and applying the corresponding per-condition optimal test. When 𝐼 is unobservable but takes only a small number of values, the adversary can instead apply all per-condition distinguishers and aggregate their outputs. By Lemma 2.10, the privacy analysis reduces to distinguishing the pair of distributions defining each trade-off function 𝑓 𝑖 𝐵 . Following the notation in Sections 3.3 and 3.2, we construct a distinguisher 𝐴 𝑖 𝐵 
+
+for the associated distributions 𝑃 𝑖 𝐵 and 𝑄 𝑖 𝐵 . Both are 𝑛 -dimensional distributions with independent components, but generally have Rethinking the Security of DP-SGD: A Corrected Analysis of Differentially Private Machine Learning 
+
+different means and standard deviations, denoted by (𝜇 𝑖 𝑃,𝐵 , 𝜎 𝑖 𝑃,𝐵 )
+
+and (𝜇 𝑖 𝑄,𝐵 , 𝜎 𝑖 𝑄,𝐵 ), respectively. We define Proc 𝑃 𝑖 𝐵 (𝑥 ) = 𝑥 −𝜇 𝑖 𝑃,𝐵 
+
+> 𝜎 𝑖 𝑃,𝐵
+
+and 
+
+Proc 𝑄 𝑖 𝐵 (𝑥 ) = 𝑥 −𝜇 𝑖 𝑄,𝐵 
+
+> 𝜎 𝑖 𝑄,𝐵
+
+, which map 𝑃 𝑖 𝐵 and 𝑄 𝑖 𝐵 to 𝑛 -dimensional vec-tors with i.i.d. standard normal components. Let Test (·) denote a statistical test for whether an 𝑛 -dimensional vector has i.i.d. standard normal components. Given an observed output 𝑥 , 𝐴 𝑖 𝐵 applies Test to both Proc 𝑃 𝑖 𝐵 (𝑥 ) and Proc 𝑄 𝑖 𝐵 (𝑥 ): it out-puts 1 if only Proc 𝑃 𝑖 𝐵 (𝑥 ) passes, 0 if only Proc 𝑄 𝑖 𝐵 (𝑥 ) passes, and a uniformly random bit in {0, 1} otherwise. The outputs of all 𝐴 𝑖 𝐵 are then aggregated by the final distinguisher 𝐴 ∗ to decide whether the underlying dataset is 𝐷 or 𝐷 ′.
+
+Auditing algorithm. Algorithm 1 in Appendix C summarizes the auditing procedure. 
+
+## 5 Experiment 5.1 Experiment Setup 
+
+All experiments are performed on a dual-socket Intel Xeon Gold 5320 server equipped with a single NVIDIA A40 GPU fea-turing 40 GB of device memory. 
+
+Baseline. Since our experiments aim to compare the audited pri-vacy leakage of EASGM- and ASGM-based DP - SGD implementa-tions in the one-round setting with the SGM-based privacy guar-antee they claim to satisfy, we adopt the state-of-the-art DP - SGD analysis of [ 7] as the baseline. This guarantee has been adopted in privacy accounting, including by the DPSUR implementation (see [ 21 ]) and by the dp-promise algorithm (see Lemma 3 of [ 47 ]). Although Opacus implements a GDP accountant [ 36 ] based on [ 18 ], it targets multi-round DP-SGD and relies on numerical approxi-mation. In our one-round setting, the guarantee of [ 7] is tight and analytic, making it the appropriate baseline. 
+
+Audited algorithms. We evaluate four state-of-the-art differen-tially private machine learning methods based on DP-SGD: DPSGD-HF [ 44 ], DPSUR [ 15 ], DP-FETA [ 28 ], and PrivImage [ 30 ]. Their im-plementations are publicly available, and we audit their one-round DP-SGD updates. Three of these methods—DPSGD-HF, DP-FETA, and PrivIm-age—are built on Meta’s open-source library Opacus [51 ], but rely on different library versions. In particular, PrivImage [ 40 ] and DP-FETA [ 42 ] rely on Opacus v1.0, whose update rule corresponds to FEASGM, while DPSGD-HF [ 14 ] relies on Opacus v0.13.0, whose update rule corresponds to ASGM (Table 2 in Appendix presents more details). However, according to their paper descriptions, these methods are based on the EASGM update rule. To control for this confounding factor, we reimplement these three methods under the Opacus version corresponding to the up-date rule stated in their papers. Specifically, since these methods are described based on EASGM, we audit them using Opacus version v0.15.0; see Table 2. In contrast, DPSUR manually implements the ASGM variant of DP-SGD and therefore is not affected by version-dependent differences in Opacus [ 20 ]. We therefore directly audit its implementation. Collectively, these four methods cover both EASGM- and ASGM-based DP-SGD implementations, making them natural targets for our auditing. 
+
+Privacy metric. Following previous work [ 10 ], we use the trade-off function and the privacy profile 𝛿 (𝜖 ) as our privacy metrics. The value 𝛿 (𝜖 ) ∈ [ 0, 1] is derived from the audited results under a fixed 
+
+𝜖 using the method in Eq. 3. A larger 𝛿 (𝜖 ) indicates higher privacy leakage. 
+
+Parameter settings. Tight auditing [ 5 ] aims to audit the maximum privacy leakage of a mechanism. It typically requires performing auditing on two small neighboring datasets that are easy to distin-guish, i.e., two datasets 𝐷 and 𝐷 ′ with a small overlap 𝐷 − = 𝐷 ∩ 𝐷 ′.For example, in [ 33 ] and [ 5], 𝐷 − = ∅ and |𝐷 − | = 2, respectively. Annamalai et al. [ 5] introduce the principle of tight auditing and suggest conducting audits on small neighboring datasets, as this facilitates the detection of maximum privacy leakage while sub-stantially reducing computational cost. To audit EASGM and ASGM, we follow the tight auditing setup and design an auditing procedure tailored to small-sized neigh-boring datasets 3. Specifically, we set the size of the shared subset of neighboring datasets to |𝐷 − | = 𝑁 , where 𝐷 − = 𝐷 ∩ 𝐷 ′, with 
+
+𝑁 ∈ { 2, 3, 4, 5}. Another reason for targeting small datasets is that our theoretical analysis (Lemma 3.14) shows that, for EASGM, the upper bound of the privacy guarantee, 𝑓 , decreases as the dataset size decreases. This indicates a weaker privacy guarantee for each pair of neighboring datasets of smaller size. Consequently, privacy auditing is more likely to detect the maximum leakage when per-formed on smaller datasets. We set the clipping bound to 𝐶 = 0.1 and the noise scale to 𝜎 = 10 .In theory, a large noise scale makes the SGM’s derived privacy guarantee appear strong, while the privacy guarantees of EASGM and ASGM remain weak, thereby making the discrepancy between their actual guarantees and the SGM guarantee more apparent. For EASGM, we vary the sampling ratio 𝑞 ∈ { 0.005 , 0.1, 0.5, 0.6, 0.9, 1},ranging from small to large values. According to the privacy anal-ysis, the sampling ratio does not affect the upper bound of the privacy guarantee of EASGM. (Theorem 3.8). For ASGM, we vary 
+
+𝑞 ∈ { 0.5, 0.6, 0.7, 0.8, 0.9}, since larger sampling ratios make the privacy guarantee weaker (Lemma 3.16). 
+
+Auditing time and confidence interval. For each audited result, we perform 10 ,000 auditing trials and adopt a 95% confidence inter-val, following prior work [ 5], to ensure the statistical reliability of the audited results. 
+
+## 5.2 Auditing with Synthetic Datasets 
+
+Synthetic data can be generated in arbitrary dimensions, which allows us to examine how the audited leakage scales with different output dimension 𝑛 . So we first use a synthetic dataset to system-atically audit whether the privacy leakage of EASGM and ASGM follows the trends predicted by our theoretical analysis. The experimental results are shown in Figs. 2 and 3. Fig. 2 shows how the privacy leakage changes with different data sizes and sam-pling rates, where we fix the dimension 𝑛 = 100 . From the figure,     
+
+> 3The cost of tight auditing grows rapidly with the dataset size, making large-𝑁 au-diting computationally prohibitive. In particular, to achieve tight auditing for high-dimensional outputs, we trade off efficiency against scalability to larger datasets. This limitation should not be interpreted as evidence that the SGM-based guarantee remains sound for normalized DP-SGD mechanisms at larger 𝑁 ; rather, it reflects the current scalability limit of the auditing algorithm. Wenhao Wang, Shujie Cui, Hui Cui, and Xingliang Yuan (a)EASGM, n=100 (b)ASGM, n=100
+
+Figure 2: Audited privacy leakage 𝛿 (𝜖 ) evaluated at 𝜖 = 0, with the output dimension fixed at 𝑛 = 100 . The x-axis indicates the number of data points 𝑁 , and the y-axis reports the audited leakage 𝛿 (𝜖 ).(a)ASGM, q=0.7 (b)EASGM, q=0.005 
+
+Figure 3: Audited leakage using the (𝜖, 𝛿 )-trade-off function compared against the privacy guarantee claimed under SGM, with 𝛿 = 10 −5 and 𝑁 = 4 fixed. 
+
+we can see that, regardless of what 𝑞 is, the audited privacy leak-age show a generally decrease trend as the number of data points increases for both EASGM and ASGM, which follows the trends predicted by our theoretical analysis in Section 3.6. In particular, for ASGM (Fig. 2(b)), we observe two trends in the audited privacy leakage. First, the leakage does not always decrease monotonically with 𝑁 , as shown by the cases 𝑞 = 0.6 and 𝑞 = 0.7. This non-monotonicity arises because the privacy guarantee depends on two terms that vary in opposite directions as 𝑁 increases, as discussed in Section 5.4. Second, the audited leakage generally increases with the sampling ratio 𝑞 , consistent with the trend predicted by Lemma 3.16. Fig. 3 shows the (𝜖, 𝛿 )-trade-off function for 6 different 𝑛 values with 𝑞 = 0.7 for ASGM and 𝑞 = 0.05 for EASGM. If the mechanism has more privacy leakage, the adversary can take advantage of more information to win the game with fewer type-I or type-II errors. Thus, for the (𝜖, 𝛿 )-trade-off curve, getting closer to the origin point indicates more privacy leakage. From Fig. 3, we can first observe that for both EASGM and ASGM, the red curves get lower as the dimension 𝑛 increases, which means the audited privacy leakage increases as the output dimension 𝑛 becomes larger, following our theoretical analysis. Fig. 3 also shows that all the red curves are under the green curves, indicating the audited privacy leakage of both EASGM and ASGM exceeds the privacy guarantee predicted by the SGM analysis, which also follows our theoretical analysis. Notably, when 𝑛 ≥ 100 , the distance from the green curve gets remarkably larger, showing that the privacy guarantees of EASGM and ASGM can be substantially weaker than the SGM guarantee 4.
+
+## 5.3 Auditing with Real-world Datasets 
+
+We also audit the one-round model updates of EASGM- and ASGM-based DP-SGD implementations on real-world datasets. Specifically, we use CIFAR-10 [ 15 ], MNIST [ 43 ], and FMNIST [ 48 ] to evaluate privacy leakage in practical DP-SGD implementations. These widely used benchmark datasets are compatible with many differentially private learning algorithms [ 2, 15 , 30 , 44 ], making them suitable for auditing such implementations. We fix the neighboring dataset sizes to |𝐷 | = 4 and |𝐷 ′ | = 5. For each dataset, we randomly select 
+
+5 data points to form neighboring pairs. To examine whether the privacy leakage exceeds the claimed SGM guarantee under the weakest regime, we follow the setup in Section 5.1 and use the SGM guarantee established in [7] as the claimed baseline. The experimental results are shown in Fig. 4. From the figure, we can observe that all audited implementations exhibit privacy violations. This is because all four algorithms use models with large numbers of trainable parameters: DPSUR and DPSGD-HF each con-tain more than 20 ,000 parameters, while PrivImage and DP-FETA each contain more than one million. This leads to a very large output dimension 𝑛 , which, combined with the small dataset size (𝑁 = 4), weakens the privacy guarantee, as discussed in Section 3.6. The discrepancy between the audited leakage and the SGM guar-antee is substantial for EASGM and relatively smaller for ASGM, which is consistent with the theoretical predictions in Section 5.4. Moreover, for ASGM, the discrepancy becomes larger as the sam-pling ratio increases to 0.8, because our analysis predicts a weaker privacy guarantee as 𝑞 increases (Lemma 3.16). 
+
+## 5.4 Privacy Guarantees for Large Datasets 
+
+Due to the heavy computational overhead, our tight auditing method is not effective for auditing large datasets. To show how the privacy guarantees vary across large dataset sizes, we use the method described in Theorem 3.12 to visualize upper bounds on the privacy guarantees of the EASGM- and ASGM-based DP-SGD implementations audited in Section 5.3. For the EASGM-based implementations, we set the sampling ra-tio to 𝑞 = 0.005 , whereas for the ASGM-based implementation, we set 𝑞 = 0.7. We use the models adopted by these implementations for MNIST and FMNIST. Specifically, DP-SUR and DPSGD-HF use mod-els with 26 ,010 trainable parameters, whereas PrivImage and DP-FETA use models with 1,485 ,217 trainable parameters. To assess how the privacy guarantees vary with the neighboring dataset size, we vi-sualize the upper bounds for four values of |𝐷 − | ∈ { 1, 4, 999 , 59 ,999 }.Here, |𝐷 − | = 59 ,999 corresponds to the full MNIST/FMNIST train-ing set, which contains 60 ,000 samples. The results are shown in Figure 5. For small datasets, namely 
+
+|𝐷 − | ∈ { 1, 4, 999 }, all methods exhibit guarantees weaker than their claimed SGM guarantees. For larger datasets such as the full MNIST and FMNIST training sets, all EASGM-based implementations, in-cluding PrivImage, DP-FETA, and DPSGD-HF, still show noticeably weaker guarantees than claimed, whereas the upper bound for the  
+
+> 4𝑞 should also be large for ASGM. Rethinking the Security of DP-SGD: A Corrected Analysis of Differentially Private Machine Learning (a)PrivImage, q=0.005
+> (b)PrivImage, q=0.5
+> (c)DP-FETA, q=0.005
+> (d)DP-FETA, q=0.5
+> (e)DPSGD-HF, q=0.005
+> (f)DPSGD-HF, q=0.5
+> (g)DPSUR, q=0.7
+> (h)DPSUR, q=0.8
+
+Figure 4: Audited privacy leakage of real-world DP - SGD implementations, computed from the (𝜖, 𝛿 )-trade-off function with 
+
+𝛿 = 10 −5 under the fixed setting 𝑁 = 4, and compared with their claimed privacy guarantees. (a)DPSUR (b)DPSGD-HF (c)DP-FETA (d)PrivImage 
+
+Figure 5: Theoretical upper bounds on the per-round privacy guarantees of real-world implementations, with each privacy guarantee lying below its corresponding upper bound. 
+
+ASGM-based implementation DP-SUR remains close to the claimed SGM guarantee. These trends are consistent with our theoretical analysis. For the ASGM-based implementation, the upper bound does not vary monotonically with the dataset size. This is because the upper bound in Eq. (14) contains two competing effects: As 𝑁 increases, the term (𝑞 − 𝑞 (1 − 𝑞 )𝑁 )𝑇 (𝑃 ⊗ ( 𝑛 −1) , 𝑄 ⊗ ( 𝑛 −1) 
+
+> 𝑁
+
+) increases, while the term (1 −𝑞 +𝑞 (1 −𝑞 )𝑁 )ID decreases. In contrast, for EASGM-based implementations, the upper bound increases with the dataset size and decreases with the output dimension, matching the theoretical trends established in Lemma 3.14 and Lemma 3.15. 
+
+## 5.5 Opacus Code Audit 
+
+We conduct a code audit of Opacus across versions to identify the normalization schemes used in its DP-SGD implementations. Opa-cus has supported Poisson sampling since v0.13.0 and introduced explicit handling of Poisson-sampled batches in v0.15.0. Under 
+
+poisson_sampling=True , the loss_reduction argument deter-mines whether aggregated gradients are normalized before the update; in particular, loss_reduction=mean , the default setting, averages the batch gradient. We therefore focus on this default case. The audited normalization schemes are summarized in Table 2 in the Appendix. We observe that Opacus involves a floor-based normalization, where the summed noisy gradients are normalized by ⌊𝑁 · 𝑞 ⌋. We call it FEASGM and define it in Definition A.1. Although this normal-ization behavior has been documented in prior auditing work [ 9], to Wenhao Wang, Shujie Cui, Hui Cui, and Xingliang Yuan 
+
+the best of our knowledge, it has not been studied as a mechanism design in the DP literature. We therefore analyze its privacy behav-ior in detail. Cebere et al. [ 9 ] reported a privacy issue in Opacus’s FEASGM implementation on small datasets [ 45 ]. Their audit found a gap between the built-in accountant’s guarantee, approximately 
+
+1.2, and the audited leakage, approximately 2.5, while observing tight accounting for large datasets. We have two new findings: 1) for small datasets, when the output dimension is high, the audited leakage can be significantly higher than the SGM guarantee; see Section A.3; and 2) for large datasets under practical training set-tings, the privacy guarantee can still be significantly weaker than that of SGM; see Section A.4. 
+
+## 6 Related Work 
+
+Poisson-Sampled DP-SGD. DP-SGD was first introduced by Abadi et al. [ 1]. Its per-round update normalizes the summed gra-dients by the expected batch size, an averaging operation that we formalize as EASGM. However, in their original privacy analysis, each per-round update was modeled as a subsampled Gaussian mechanism (SGM), and the privacy guarantee was derived under a security game in which the adversary is assumed to know the sampling ratio 𝑞 and noise scale 𝜎 , while the expected batch size remains unknown. A variety of differentially private learning meth-ods, including DP-FETA [ 28 ], PrivImage [ 30 ], DP-SUR [ 15 ], and DPSGD-HF [ 44 ], build on the DP-SGD training framework and adopt the same SGM-based privacy analysis. Dong et al. [ 12 ] proposed the 𝑓 -DP framework, which character-izes privacy guarantees through a trade-off function between Type I and Type II errors. This operational view has been widely adopted in privacy auditing [ 24 , 32 , 49 ]. Building on this framework, the same research team later derived the state-of-the-art one-round privacy analysis for DP -SGD and proposed an ASGM variant [ 7]. By modeling each per-round update as an SGM, they obtained an explicit trade-off function and established a tight one-round guarantee. Recent investigations have highlighted inconsistencies between certain DP - SGD implementations and their claimed privacy guar-antees. Chua et al. [ 10 ] reported that some implementations use shuffled sampling while reporting SGM-based guarantees, and re-analyzed the privacy of shuffle-based DP-SGD under this mismatch. Lebeda et al. [ 27 ] pointed out that the expected-averaging operation used in EASGM-based DP - SGD may cause the per-round update to violate the privacy guarantee of SGM, although no formal privacy analysis or auditing was provided. Motivated by these observations, we reexamine the per-round 
+
+𝑓 -DP guarantees of EASGM- and ASGM-based DP -SGD [ 7, 12 ]under the same adversary assumption as [1]. 
+
+Privacy Auditing of DP-SGD. Nasr et al. [ 33 ] systematically in-troduced privacy auditing for DP - SGD by evaluating a hierarchy of adversaries with increasing capabilities. They showed that stronger adversaries reveal greater leakage, with the strongest matching the theoretical upper bound. Their later tight auditing work [ 32 ]proposed a canary-based tight auditing framework for DP -SGD. In white-box settings, they set the canary sampling rate to 𝑞 𝑐 = 1, and their audits found no violations in SGM-based DP - SGD implemen-tations. Annamalai et al. [ 5 ] later formalized the tight auditing princi-ple, arguing that auditing should be performed on small datasets. Steinke et al. [ 38 ] proposed a one-run auditing method to reduce computational cost. Xiang et al. [ 49 ] further extended this approach by formalizing the auditing process as a bit-transmission problem, characterizing the feasible and infeasible conditions for applying the technique, and proposing methods to tighten the resulting privacy bounds. Koskela et al. [ 25 ] adopted the same SGM-based formalization, auditing each per-round DP - SGD update using a density-estimation–based method. Despite extensive auditing of DP-SGD implementations in prior work, the per-round training procedures of EASGM- and ASGM-based DP-SGD have not been specifically examined, and the privacy behavior of these implementations has therefore remained unex-plored. Cebere et al. [ 9 ] audited Opacus’s FEASGM-based DP-SGD im-plementation on small synthetic datasets with low-dimensional outputs and found tight accounting for large datasets. In contrast, we show that real-world FEASGM implementations can exhibit substantially larger privacy leakage in high-dimensional output spaces; see Appendix A.3. We further derive a multi-round upper bound for FEASGM-based DP-SGD (Theorem A.6) and show that, for certain neighboring dataset pairs, its privacy guarantee can be significantly weaker than the SGM guarantee; see Appendix A.4. 
+
+## 7 Conclusion and Limitations 
+
+In this paper, we revisit and re-audit the per-round privacy guaran-tees of EASGM- and ASGM-based DP-SGD under 𝑓 -DP. We show that these guarantees can weaken as the output dimension increases and can be weaker than the corresponding SGM guarantee. Since Opacus implementations use FEASGM, we further extend our anal-ysis to FEASGM and visualize the multi-round privacy guarantees for both EASGM (Corollary B.2) and FEASGM (Theorem A.7). This analysis is challenging because the relevant trade-off functions involve Gaussian distributions with unequal variances, whereas prior theoretical results mainly focus on the equal-variance case. We therefore derive new theoretical tools tailored to trade-off functions between Gaussian distributions with unequal variances. Our analysis and auditing have the following limitations: 
+
+No privacy-guarantee visualization for multi-round ASGM. 
+
+For ASGM, we do not derive a closed-form characterization or visualization of the multi-round guarantee because its per-round upper bound contains an analytically intractable trade-off term. We leave it to future work. 
+
+Limited auditing scope. Our tight auditing method is computa-tionally expensive in high-dimensional output spaces, and its cost grows rapidly with dataset size. We therefore focus on small neigh-boring datasets and parameter regimes where privacy leakage is expected to be large. Moreover, the current audit covers only single-step training and does not extend to multi-step settings. Scaling the audit to more practical settings remains future work. 
+
+## References   
+
+> [1] Abadi, M., Chu, A., Goodfellow, I., McMahan, H. B., Mironov, I., Talwar, K., and Zhang, L. Deep learning with differential privacy. In Proceedings of the 2016 ACM SIGSAC conference on computer and communications security (2016), pp. 308–318.
+
+Rethinking the Security of DP-SGD: A Corrected Analysis of Differentially Private Machine Learning 
+
+[2] Aerni, M., Zhang, J., and Tramèr, F. Evaluations of machine learning privacy defenses are misleading. In Proceedings of the 2024 on ACM SIGSAC Conference on Computer and Communications Security (New York, NY, USA, 2024), CCS ’24, Association for Computing Machinery, p. 1271–1284. [3] Annamalai, M. S. M. S., Balle, B., Hayes, J., and De Cristofaro, E. To shuffle or not to shuffle: Auditing dp-sgd with shuffling. arXiv preprint arXiv:2411.10614 (2024). [4] Annamalai, M. S. M. S., Balle, B., Hayes, J., Kaissis, G., and De Cristofaro, E. The hitchhiker’s guide to efficient, end-to-end, and tight dp auditing. arXiv preprint arXiv:2506.16666 (2025). [5] Annamalai, M. S. M. S., Ganev, G., and De Cristofaro, E. " what do you want from theory alone?" experimenting with tight auditing of differentially private synthetic data generation. In 33rd USENIX Security Symposium (USENIX Security 24) (2024), pp. 4855–4871. [6] Bie, A., Kamath, G., and Zhang, G. Private gans, revisited. arXiv preprint arXiv:2302.02936 (2023). [7] Bu, Z., Dong, J., Long, Q., and Su, W. J. Deep learning with gaussian differential privacy. Harvard data science review 2020, 23 (2020), 10–1162. [8] Bu, Z., Dong, J., Long, Q., and Su, W. J. Deep learning with gauss-ian differential privacy. Harvard Data Science Review 2 , 3 (2020). Full PDF available at: https://www.researchgate.net/profile/Weijie-Su/publication/343329517_Deep_Learning_with_Gaussian_Differential_ Privacy/links/60386b16299bf1cc26efb705/Deep-Learning-with-Gaussian-Differential-Privacy.pdf. Accessed: Mar. 18, 2026. [9] Cebere, T., Erb, D., Desfontaines, D., Bellet, A., and Fitzsimons, J. Privacy in theory, bugs in practice: Grey-box auditing of differential privacy libraries. arXiv preprint arXiv:2602.17454 (2026). [10] Chua, L., Ghazi, B., Kamath, P., Kumar, R., Manurangsi, P., Sinha, A., and Zhang, C. How private are dp-sgd implementations? In Proceedings of the 41st International Conference on Machine Learning (2024), pp. 8904–8918. [11] Clopper, C. J., and Pearson, E. S. The use of confidence or fiducial limits illustrated in the case of the binomial. Biometrika 26, 4 (1934), 404–413. [12] Dong, J., Roth, A., and Su, W. J. Gaussian differential privacy. arXiv preprint arXiv:1905.02383 (2019). [13] Du, Y., Li, J., Chen, Y., Zhang, K., Yuan, Z., Xiao, H., Ribeiro, B., and Li, N. Cas-cading and proxy membership inference attacks. arXiv preprint arXiv:2507.21412 (2025). [14] ftramer . Handcrafted-DP: requirements.txt, line 37. GitHub repository. Avail-able: https://github.com/ftramer/Handcrafted-DP/blame/main/requirements.txt# L37, 2021. Accessed: Apr. 25, 2026. [15] Fu, J., Ye, Q., Hu, H., Chen, Z., Wang, L., Wang, K., and Ran, X. Dpsur: Accel-erating differentially private stochastic gradient descent using selective update and release. Proceedings of the VLDB Endowment 17, 6 (2024), 1200–1213. [16] Google Privacy Sandbox . Differential privacy semantics for on-device per-sonalization (odp). https://privacysandbox.google.com/protections/on-device-personalization/differential-privacy-semantics-for-odp, 2025. Accessed: 2025-10-10. [17] Google Research . VaultGemma: The world’s most capable differentially pri-vate llm. https://research.google/blog/vaultgemma-the-worlds-most-capable-differentially-private-llm/, 2025. Accessed: 2026-04-24. [18] Gopi, S., Lee, Y. T., and Wutschitz, L. Numerical composition of differential privacy. Advances in Neural Information Processing Systems 34 (2021), 11631– 11642. [19] Gradshteyn, I. S., and Ryzhik, I. M. Table of integrals, series, and products .Academic press, 2014. [20] JeffffffFu . DPSUR: Dpsur.py. GitHub repository. Available: https://github.com/ JeffffffFu/DPSUR/blame/main/algorithm/DPSUR.py#L146, 2023. Accessed: Apr. 25, 2026. [21] JeffffffFu . DPSUR GDP accountant implementation. https: //github.com/JeffffffFu/DPSUR/blame/main/privacy_analysis/GDP/compute_ gdp.py#L25C11-L25C11, 2023. Accessed: Apr. 27, 2026. [22] Kaissis, G., Kolek, S., Balle, B., Hayes, J., and Rueckert, D. Beyond the calibration point: Mechanism comparison in differential privacy. arXiv preprint arXiv:2406.08918 (2024). [23] Koskela, A., and Mohammadi, J. Auditing differential privacy guarantees using density estimation. https://arxiv.org/pdf/2406.04827, 2024. arXiv version. Accessed: Apr. 27, 2026. [24] Koskela, A., and Mohammadi, J. A. Auditing differential privacy guarantees using density estimation. In 2025 IEEE Conference on Secure and Trustworthy Machine Learning (SaTML) (2025), IEEE, pp. 1007–1026. [25] Koskela, A., and Mohammadi, J. A. Auditing differential privacy guarantees using density estimation. In 2025 IEEE Conference on Secure and Trustworthy Machine Learning (SaTML) (2025), pp. 1007–1026. [26] Krantz, S. G., and Parks, H. R. A primer of real analytic functions . Springer Science & Business Media, 2002. [27] Lebeda, C. J., Regehr, M., Kamath, G., and Steinke, T. Avoiding pitfalls for privacy accounting of subsampled mechanisms under composition. In 2025 IEEE Conference on Secure and Trustworthy Machine Learning (SaTML) (2025), IEEE, pp. 996–1006. [28] Li, K., Gong, C., Li, X., Zhao, Y., Hou, X., and Wang, T. From easy to hard: Building a shortcut for differentially private image synthesis. In 2025 IEEE Symposium on Security and Privacy (SP) (2025), pp. 3988–4006. [29] Li, K., Gong, C., Li, Z., Zhao, Y., Hou, X., and Wang, T. PrivImage: Differen-tially private synthetic image generation using diffusion models with Semantic-Aware pretraining. In 33rd USENIX Security Symposium (USENIX Security 24) (Philadelphia, PA, Aug. 2024), USENIX Association, pp. 4837–4854. [30] Li, K., Gong, C., Li, Z., Zhao, Y., Hou, X., and Wang, T. {PrivImage }: Differen-tially private synthetic image generation using diffusion models with {Semantic-Aware } pretraining. In 33rd USENIX Security Symposium (USENIX Security 24) (2024), pp. 4837–4854. [31] Mironov, I., Talwar, K., and Zhang, L. R\’enyi differential privacy of the sampled gaussian mechanism. arXiv preprint arXiv:1908.10530 (2019). [32] Nasr, M., Hayes, J., Steinke, T., Balle, B., Tramèr, F., Jagielski, M., Carlini, N., and Terzis, A. Tight auditing of differentially private machine learning. In 32nd USENIX Security Symposium (USENIX Security 23) (2023), pp. 1631–1648. [33] Nasr, M., Song, S., Thakurta, A., Papernot, N., and Carlini, N. Adversary instantiation: Lower bounds for differentially private machine learning. In 2021 IEEE Symposium on security and privacy (SP) (2021), IEEE, pp. 866–882. [34] Nasr, M., Steinke, T., Balle, B., Choqette-Choo, C. A., Ganesh, A., Jagielski, M., Hayes, J., Thakurta, A. G., Smith, A., and Terzis, A. The last iterate advan-tage: Empirical auditing and principled heuristic analysis of differentially private sgd. In The Thirteenth International Conference on Learning Representations (2025). [35] Opacus Team . Opacus: privacy_engine.py sgm implementation. GitHub reposi-tory. Available: https://github.com/meta-pytorch/opacus/blame/v1.5.4/opacus/ privacy_engine.py#L488, 2021. Commit hash: 9b1d19c . Accessed: Apr. 25, 2026. [36] Opacus Team . Opacus GDP accountant implementation. https://github.com/ meta-pytorch/opacus/blame/v1.5.4/opacus/accountants/gdp.py#L23, 2022. Ac-cessed: Apr. 27, 2026. [37] Rudin, W. Real and complex analysis. [38] Steinke, T., Nasr, M., and Jagielski, M. Privacy auditing with one (1) train-ing run. Advances in Neural Information Processing Systems 36 (2023), 49268– 49280. [39] Steinke, T., Nasr, M., and Jagielski, M. Privacy auditing with one (1) training run. https://arxiv.org/pdf/2305.08846, 2023. arXiv version. Accessed: Apr. 27, 2026. [40] SunnierLee . DP-ImaGen: Opacus readme. https://github.com/SunnierLee/DP-ImaGen/blob/main/src/opacus/README.md, 2023. Accessed: Apr. 25, 2026. [41] SunnierLee . DP-FETA RDP accountant implementation. https://github.com/ SunnierLee/DP-FETA/tree/main/opacus/opacus/accountants, 2024. Accessed: Apr. 27, 2026. [42] SunnierLee . DP-FETA: Opacus version. GitHub repository. Available: https: //github.com/SunnierLee/DP-FETA/tree/main/opacus, 2025. Accessed: Apr. 25, 2026. [43] Thudi, A., Jia, H., Meehan, C., Shumailov, I., and Papernot, N. Gradients look alike: Sensitivity is often overestimated in {DP-SGD }. In 33rd USENIX Security Symposium (USENIX Security 24) (2024), pp. 973–990. [44] Tramer, F., and Boneh, D. Differentially private learning needs better features (or much more data). arXiv preprint arXiv:2011.11660 (2020). [45] tudorcebere . Opacus GitHub Issue #571: Privacy Leakage at Low Sample Size. https://github.com/meta-pytorch/opacus/issues/571#issue-1609246665, 2023. Ac-cessed: Apr. 27, 2026. [46] Wang, C., Su, B., Ye, J., Shokri, R., and Su, W. Unified enhancement of privacy bounds for mixture mechanisms via 𝑓 -differential privacy. Advances in Neural Information Processing Systems 36 (2023), 55051–55063. [47] Wang, H., Pang, S., Lu, Z., Rao, Y., Zhou, Y., and Xue, M. dp-promise: Differen-tially private diffusion probabilistic models for image synthesis. In 33rd USENIX Security Symposium (USENIX Security 24) (2024), pp. 1063–1080. [48] Wei, J., Bao, E., Xiao, X., and Yang, Y. Dpis: An enhanced mechanism for differentially private sgd with importance sampling. In Proceedings of the 2022 ACM SIGSAC Conference on Computer and Communications Security (2022), pp. 2885–2899. [49] Xiang, Z., Wang, T., and Wang, D. Privacy audit as bits transmission:(im) possibilities for audit by one run. [50] Xiang, Z., Wang, T., Xiao, H., Tian, Y., and Wang, D. Tight privacy audit in one run. arXiv preprint arXiv:2509.08704 (2025). [51] Yousefpour, A., Shilov, I., Sablayrolles, A., Testuggine, D., Prasad, K., Malek, M., Nguyen, J., Ghosh, S., Bharadwaj, A., Zhao, J., et al. Opacus: User-friendly differential privacy library in pytorch. In NeurIPS 2021 Workshop on Privacy in Machine Learning (2021). [52] Zhang, X., Bu, Z., Balle, B., Hong, M., Razaviyayn, M., and Mirrokni, V. DiSK: Differentially private optimizer with simplified kalman filter for noise reduction. In The Thirteenth International Conference on Learning Representations (2025). [53] Zheng, Q., Dong, J., Long, Q., and Su, W. Sharp composition bounds for gaussian differential privacy via edgeworth expansion. In International Conference on Wenhao Wang, Shujie Cui, Hui Cui, and Xingliang Yuan 
+
+> Machine Learning (2020), PMLR, pp. 11420–11435.
+
+## A Privacy Analysis of FEASGM 
+
+To understand the privacy behavior of FEASGM, we analyze its pri-vacy guarantee under the same setting as that used for the privacy analysis of EASGM and ASGM in Section 2.3. The derivation di-rectly follows the analytical framework and techniques introduced there. 
+
+Definition A.1. Floor-based Expected Average Subsampled Gaussian Mechanism (FEASGM)[ 9 ]. Following the same set-ting as Definition 2.7, the output of FEASGM can be formalized as Í𝑖 ∈𝐵 ¯𝑔 𝑖 +N ( 0,𝜎 2𝐶 2I)⌊𝑁 ·𝑞 ⌋ , where 𝑁 denotes the total number of data points in the dataset 𝐷 .
+
+Analysis roadmap. We begin by identifying the conditions under which the privacy behavior of FEASGM reduces to that of SGM and those under which it follows the EASGM-style regime. In particular, this distinction is determined by whether the normalization factors 
+
+⌊𝑁 · 𝑞 ⌋ and ⌊( 𝑁 + 1) · 𝑞 ⌋ are equal. When they are equal, the normalization step is identical on both neighboring datasets and can therefore be treated as post-processing, so the privacy guarantee reduces to that of SGM. Otherwise, the two normalization factors differ by exactly 1, and the privacy behavior follows the EASGM-style regime. We therefore focus on the EASGM-style scenario. Building on the EASGM analysis in Sections 3.2 and 3.4.1, we derive the corre-sponding FEASGM results by replacing 𝑁 in those theorems with 
+
+𝐾 = ⌊𝑁𝑞 ⌋. Finally, using the CLT-based result in Theorem 3.12, we establish and visualize an upper bound on the privacy guarantee of 
+
+𝑇 -round FEASGM training in Theorem A.7. 
+
+## A.1 Formal Results. 
+
+Overview. We present the formal results as follows. We first es-tablish the per-pair guarantee in Theorem A.2, and then derive the worst-case guarantee in Theorem A.3. Next, we construct an upper bound on the per-pair guarantee to facilitate visualization of the FEASGM per-pair guarantee. Finally, we extend this upper bound to the 𝑇 -round setting and derive a corresponding upper bound for visualizing the privacy guarantee of 𝑇 -round training in Theorem A.7. 
+
+Theorem A.2 (Per-pair Privacy Guarantee of FEASGM). Let 
+
+𝐷 = {𝑑 1, 𝑑 2, . . . , 𝑑 𝑁 } and 𝐷 ′ = 𝐷 ∪ { 𝑑 𝑁 +1 } be two neighboring datasets, and let 𝑞 be a fixed sampling ratio. If ⌊𝑁 ·𝑞 ⌋ = 𝐾 and ⌊( 𝑁 +1) · 𝑞 ⌋ = 𝐾 +1, then the privacy guarantee is given by 
+
+𝑓 (𝛼 (𝑡, 𝑐 )) =∑︁ 
+
+> 𝐵
+
+𝑃 (𝐵 ) [( 1 − 𝑞 ) 𝑓 1 
+
+> 𝐵
+
+(𝛼 1 
+
+> 𝐵
+
+(𝑡, 𝑐 )) + 𝑞 𝑓 2 
+
+> 𝐵
+
+(𝛼 2 
+
+> 𝐵
+
+(𝑡, 𝑐 ))] .
+
+(16) 
+
+Here, 𝑓 1 
+
+> 𝐵
+
+= 𝑇 (𝑃 ⊗𝑛 , 𝑄 ⊗ ( 𝑛 −1) 
+
+> 𝐾
+
+⊗ 𝑄 𝜇 1 
+
+> 𝐵
+> 𝐾
+
+) and 𝑓 2 
+
+> 𝐵
+
+= 𝑇 (𝑃 ⊗𝑛 , 𝑄 ⊗ ( 𝑛 −1) 
+
+> 𝐾
+
+⊗
+
+𝑄 𝜇 2 
+
+> 𝐵
+> 𝐾
+
+), where 𝑃 , 𝑄 𝐾 , and 𝑄 𝜇 𝐾 are defined in Table 1, and 𝜇 1 
+
+> 𝐵
+
+= ∥ − 
+
+Í𝑖 ∈𝐵 ¯𝑔 𝑖 ∥2/(( 𝐾 + 1)𝐶𝜎 ), 𝜇 2 
+
+> 𝐵
+
+= ∥𝐾 ¯𝑔 𝑁 +1 − Í𝑖 ∈𝐵 ¯𝑔 𝑖 ∥2/(( 𝐾 + 1)𝐶𝜎 ).
+
+Proof. The theorem follows directly by substituting 𝐾 for 𝑁 in the 𝑓 defined in Eq. 4. □
+
+Following the same proof procedure as in Section 2.3, we can establish the privacy guarantee for any neighboring pair of datasets with |𝐷 | = 𝑁 and |𝐷 ′ | = 𝑁 + 1, as follows. 
+
+Theorem A.3 (Privacy guarantee of FEASGM). Let 𝐷 =
+
+{𝑑 1, 𝑑 2, . . . , 𝑑 𝑁 } and 𝐷 ′ = 𝐷 ∪ { 𝑑 𝑁 +1 } be two neighboring datasets under the add/remove notion of adjacency, and let 𝑞 be a fixed sam-pling ratio. If ⌊𝑁 · 𝑞 ⌋ = ⌊( 𝑁 + 1) · 𝑞 ⌋, then the privacy guarantee of FEASGM reduces to SGM guarantee in [ 7] which is 𝑞 𝐺 1/𝜎 + ( 1 −𝑞 )ID ,where ID and 𝐺 1/𝜎 denote the trade-off functions defined in Table 1. Otherwise, if ⌊𝑁 · 𝑞 ⌋ = 𝐾 𝑎𝑛𝑑 ⌊( 𝑁 + 1) · 𝑞 ⌋ = 𝐾 + 1, then the privacy guarantee is 
+
+𝑓 (𝛼 (𝑡, 𝑐 )) =∑︁ 
+
+> 𝐵
+
+𝑃 (𝐵 ) [( 1 − 𝑞 ) 𝑓 1 
+
+> 𝐵
+
+(𝛼 1 
+
+> 𝐵
+
+(𝑡, 𝑐 )) + 𝑞 𝑓 2 
+
+> 𝐵
+
+(𝛼 2 
+
+> 𝐵
+
+(𝑡, 𝑐 ))] .
+
+(17) 
+
+Here, 𝑓 1 
+
+> 𝐵
+
+= 𝑇 (𝑃 ⊗𝑛 , 𝑄 ⊗ ( 𝑛 −1) 
+
+> 𝐾
+
+⊗ 𝑄 𝜇 1 
+
+> 𝐵
+> 𝐾
+
+) and 𝑓 2 
+
+> 𝐵
+
+= 𝑇 (𝑃 ⊗𝑛 , 𝑄 ⊗ ( 𝑛 −1) 
+
+> 𝐾
+
+⊗
+
+𝑄 𝜇 2 
+
+> 𝐵
+> 𝐾
+
+), where 𝑃 , 𝑄 𝐾 , and 𝑄 𝜇 𝐾 are defined in Table 1, and 𝜇 1 
+
+> 𝐵
+
+=  
+
+> |𝐵 |(𝐾 +1)𝜎
+
+, 𝜇 2 
+
+> 𝐵
+
+= 𝐾 +| 𝐵 |(𝐾 +1)𝜎 .
+
+Proof. If ⌊𝑁 ·𝑞 ⌋ = ⌊( 𝑁 + 1) · 𝑞 ⌋, then both neighboring datasets are normalized by the same factor. Therefore, the normalization step is identical across the neighboring pair and can be treated as post-processing, so the privacy guarantee reduces directly to that of SGM in [ 7]. If instead ⌊𝑁 · 𝑞 ⌋ ≠ ⌊( 𝑁 + 1) · 𝑞 ⌋ = 𝐾 + 1, then the neighboring datasets are normalized by two different factors, 𝐾 and 
+
+𝐾 + 1. In this case, the guarantee follows by substituting 𝐾 into the EASGM guarantee derived in Theorem 3.6. □
+
+Similarly to estimate the EASGM guarantee using upperbound, we can derive a analytic upperbound 𝑓 as follow. 
+
+Theorem A.4. Let 𝑓 be the privacy trade-off function defined in Eq. 16, and let 𝑃 and 𝑄 𝐾 be the distributions defined in Table 1, where 
+
+𝐾 = ⌊𝑁𝑞 ⌋. Then the following inequality holds: 
+
+𝑓 = 𝑇 (𝑃 ⊗ ( 𝑛 −1) , 𝑄 ⊗ ( 𝑛 −1) 
+
+> 𝐾
+
+) ≥ 𝑓 . (18) 
+
+Proof. The proof follows directly from that of Theorem 3.8 by replacing 𝑁 with 𝐾 . □
+
+According to Theorem 3.9, when 𝑛 is large, 𝑓 can approach 0.This implies that the privacy guarantee of FEASGM can be signifi-cantly weaker than that of SGM for certain pairs of neighboring datasets satisfying ⌊𝑁 · 𝑞 ⌋ ≠ ⌊( 𝑁 + 1) · 𝑞 ⌋. The theorem A.6 extends Theorem A.4 to the 𝑇 -round setting and gives the upper bound 
+
+𝑓 ⊗𝑇 .
+
+Theorem A.5 (Comparison composition theorem). Let M1 :
+
+𝑋 × 𝐼 1 → 𝑌 1 be the first mechanism, and let M2 : 𝑋 × 𝑌 1 × 𝐼 2 → 𝑌 2
+
+be the second mechanism, where 𝐼 1 and 𝐼 2 are independent random variables following distribution 𝑤 . Define the joint mechanism M :
+
+𝑋 → 𝑌 1 × 𝑌 2 by M ( 𝐷 ) = (𝑌 1, 𝑌 2), where 𝑌 1 = M1 (𝐷, 𝐼 1) and 
+
+𝑌 2 = M2 (𝐷, 𝑌 1, 𝐼 2). Define the transparent mechanism M𝐼 : 𝑋 →
+
+𝑌 1 × 𝐼 1 × 𝑌 2 × 𝐼 2 by M𝐼 (𝐷 ) = (𝑌 1, 𝐼 1, 𝑌 2, 𝐼 2). Also define M1,𝐼 1 (𝐷 ) =
+
+(𝑌 1, 𝐼 1) and M2,𝐼 2 (𝐷, 𝑦 1) = (M 2 (𝐷, 𝑦 1, 𝐼 2), 𝐼 2).Then, for any neighboring datasets 𝐷 and 𝐷 ′, we have 
+
+𝑇 (M ( 𝐷 ), M ( 𝐷 ′)) ≥ 𝑇 (M 𝐼 (𝐷 ), M𝐼 (𝐷 ′)) .Rethinking the Security of DP-SGD: A Corrected Analysis of Differentially Private Machine Learning 
+
+Moreover, let 𝑔 1 and 𝑔 2 be two trade-off functions. If 
+
+𝑔 1 ≥ 𝑇 (M 1,𝐼 1 (𝐷 ), M1,𝐼 1 (𝐷 ′)) and, for every fixed 𝑦 1, 𝑔 2 ≥
+
+𝑇 (M 2,𝐼 2 (𝐷, 𝑦 1), M2,𝐼 2 (𝐷 ′, 𝑦 1)) , then 𝑔 1 ⊗ 𝑔 2 ≥ 𝑇 (M 𝐼 (𝐷 ), M𝐼 (𝐷 ′)) .
+
+Proof. The first inequality follows directly from the post-processing property. Indeed, M is obtained from M𝐼 by hiding the released indices 𝐼 1 and 𝐼 2, and hence 𝑇 (M ( 𝐷 ), M ( 𝐷 ′)) ≥
+
+𝑇 (M 𝐼 (𝐷 ), M𝐼 (𝐷 ′)) .We now prove the second claim using Lemma 11 and Lemma 12 in [ 12 ]. Let 𝐴 = M1,𝐼 1 (𝐷 ) and 𝐴 ′ = M1,𝐼 1 (𝐷 ′). By the definition of trade-off functions, choose distributions 𝑃, 𝑄, 𝑃 ′, 𝑄 ′ such that 
+
+𝑔 1 = 𝑇 (𝑃, 𝑄 ) and 𝑔 2 = 𝑇 (𝑃 ′, 𝑄 ′).Since 𝑔 1 ≥ 𝑇 (𝐴, 𝐴 ′), Lemma 12 gives 𝑔 1 ⊗𝑔 2 = 𝑇 (𝑃 ×𝑃 ′, 𝑄 ×𝑄 ′) ≥ 
+
+𝑇 (𝐴 × 𝑃 ′, 𝐴 ′ ×𝑄 ′). Therefore, it remains to show that 𝑇 (𝐴 × 𝑃 ′, 𝐴 ′ ×
+
+𝑄 ′) ≥ 𝑇 (M 𝐼 (𝐷 ), M𝐼 (𝐷 ′)) .To this end, let the input space be the common measurable space of 𝐴 and 𝐴 ′. For each input 𝑎 = (𝑦 1, 𝑖 1), define four randomized al-gorithms as follows: 𝐾 1 (𝑎 ) = 𝑃 ′, 𝐾 ′ 
+
+> 1
+
+(𝑎 ) = 𝑄 ′, 𝐾 2 (𝑎 ) = M2,𝐼 2 (𝐷, 𝑦 1),and 𝐾 ′ 
+
+> 2
+
+(𝑎 ) = M2,𝐼 2 (𝐷 ′, 𝑦 1). Note that 𝐾 1 and 𝐾 ′ 
+
+> 1
+
+ignore the in-put and simply output random variables distributed as 𝑃 ′ and 
+
+𝑄 ′, respectively. Hence, for every input 𝑎 = (𝑦 1, 𝑖 1), we have 
+
+𝑇 (𝐾 1 (𝑎 ), 𝐾 ′ 
+
+> 1
+
+(𝑎 )) = 𝑇 (𝑃 ′, 𝑄 ′) = 𝑔 2. By assumption, for every 𝑦 1, we also have 𝑔 2 ≥ 𝑇 (M 2,𝐼 2 (𝐷, 𝑦 1), M2,𝐼 2 (𝐷 ′, 𝑦 1)) = 𝑇 (𝐾 2 (𝑎 ), 𝐾 ′ 
+
+> 2
+
+(𝑎 )) .Therefore, 𝑇 (𝐾 1 (𝑎 ), 𝐾 ′ 
+
+> 1
+
+(𝑎 )) ≥ 𝑇 (𝐾 2 (𝑎 ), 𝐾 ′ 
+
+> 2
+
+(𝑎 )) holds for every in-put 𝑎 .Applying Lemma 11 with input distributions 𝐴 and 𝐴 ′, we obtain 
+
+𝑇 (𝐴 × 𝑃 ′, 𝐴 ′ × 𝑄 ′) ≥ 𝑇  (𝐴, 𝐾 2 (𝐴 )) , (𝐴 ′, 𝐾 ′ 
+
+> 2
+
+(𝐴 ′)) . By construction, 
+
+(𝐴, 𝐾 2 (𝐴 )) is exactly M𝐼 (𝐷 ), and (𝐴 ′, 𝐾 ′ 
+
+> 2
+
+(𝐴 ′)) is exactly M𝐼 (𝐷 ′).Hence, 𝑇 (𝐴 × 𝑃 ′, 𝐴 ′ × 𝑄 ′) ≥ 𝑇 (M 𝐼 (𝐷 ), M𝐼 (𝐷 ′)) .Combining this inequality with the previous bound from Lemma 12 yields 𝑔 1 ⊗ 𝑔 2 ≥ 𝑇 (M 𝐼 (𝐷 ), M𝐼 (𝐷 ′)) . This completes the proof. 
+
+□
+
+Theorem A.6. Let 𝑓 be as defined in Theorem A.4. Let M𝐼 denote the transparent per-round mechanism whose trade-off function is upper bounded by 𝑓 , and let M denote the corresponding FEASGM mechanism obtained by hiding the additional released information 𝐼 .For each 𝑇 ∈ Z>0, let M⊗𝑇 𝐼 and M⊗𝑇 denote the 𝑇 -round composi-tions of M𝐼 and M, respectively. Then, for any neighboring datasets 
+
+𝐷 and 𝐷 ′, we have 
+
+𝑇 (M ⊗𝑇 (𝐷 ), M⊗𝑇 (𝐷 ′)) ≥ 𝑇 (M ⊗𝑇 𝐼 (𝐷 ), M⊗𝑇 𝐼 (𝐷 ′)) 
+
+and 
+
+𝑓 ⊗𝑇 ≥ 𝑇 (M ⊗𝑇 𝐼 (𝐷 ), M⊗𝑇 𝐼 (𝐷 ′)) .
+
+We refer to 𝑇 (M ⊗𝑇 𝐼 (𝐷 ), M⊗𝑇 𝐼 (𝐷 ′)) as the transparent per-pair 𝑇 -round privacy guarantee of FEASGM. Consequently, 𝑓 ⊗𝑇 is an upper bound on this transparent per-pair guarantee. 
+
+Proof. The first inequality again follows from the post-processing property. Indeed, M⊗𝑇 is obtained from M⊗𝑇 𝐼 by hiding the additional information 𝐼 released in each round. Therefore, 
+
+𝑇 (M ⊗𝑇 (𝐷 ), M⊗𝑇 (𝐷 ′)) ≥ 𝑇 (M ⊗𝑇 𝐼 (𝐷 ), M⊗𝑇 𝐼 (𝐷 ′)) .We now prove 𝑓 ⊗𝑇 ≥ 𝑇 (M ⊗𝑇 𝐼 (𝐷 ), M⊗𝑇 𝐼 (𝐷 ′)) by induction on 
+
+𝑇 . For the base case 𝑇 = 1, the claim follows directly from the assumption that 𝑓 ≥ 𝑇 (M 𝐼 (𝐷 ), M𝐼 (𝐷 ′)) . Assume now that the claim holds for some 𝑇 ≥ 1, namely, 𝑓 ⊗𝑇 ≥ 𝑇 (M ⊗𝑇 𝐼 (𝐷 ), M⊗𝑇 𝐼 (𝐷 ′)) .Consider the (𝑇 + 1)-round composition. View M⊗ ( 𝑇 +1) 
+
+> 𝐼
+
+as a two-stage mechanism: the first stage consists of the first 𝑇 transparent rounds, and the second stage consists of the (𝑇 + 1)-st transparent round. The second stage may depend on the previous transparent transcript, but by Theorem A.4, for every fixed previous transcript, its trade-off function is still upper bounded by 𝑓 . Therefore, the first stage is upper bounded by 𝑓 ⊗𝑇 by the induction hypothesis, and the second stage is upper bounded by 𝑓 uniformly over every fixed previous transcript. Applying Theorem A.5 with 𝑔 1 = 𝑓 ⊗𝑇 and 𝑔 2 = 𝑓 , we obtain 
+
+𝑓 ⊗ ( 𝑇 +1) = (𝑓 ⊗𝑇 ) ⊗ 𝑓 ≥ 𝑇 (M ⊗ ( 𝑇 +1) 
+
+> 𝐼
+
+(𝐷 ), M⊗ ( 𝑇 +1) 
+
+> 𝐼
+
+(𝐷 ′)) .Thus, by induction, 𝑓 ⊗𝑇 ≥ 𝑇 (M ⊗𝑇 𝐼 (𝐷 ), M⊗𝑇 𝐼 (𝐷 ′)) holds for every 𝑇 ∈ Z>0. This completes the proof. □
+
+## A.2 Visualizing the Privacy Guarantee of FEASGM 
+
+Using the same notation as in Theorem A.6, let 
+
+𝑇 (M ⊗𝑇 (𝐷 ), M⊗𝑇 (𝐷 ′)) denote the per-pair privacy leakage of 𝑇 -round training, let 𝑇 (M ⊗𝑇 𝐼 (𝐷 ), M⊗𝑇 𝐼 (𝐷 ′)) denote the corresponding 𝑇 -round per-pair privacy guarantee, and let 𝑓 ⊗𝑇 
+
+denote the upper bound on the 𝑇 -round guarantee. Following the same approach used to visualize the privacy guarantee of EASGM in Section 3.5, we estimate 𝑓 ⊗𝑇 . This estimate upper bounds 
+
+𝑇 (M ⊗𝑇 𝐼 (𝐷 ), M⊗𝑇 𝐼 (𝐷 ′)) , thereby enabling us to characterize the privacy guarantee of 𝑇 -round FEASGM-based DP-SGD training. The following theorem formalizes this result. 
+
+Theorem A.7. Let 𝑓 ∗ = 𝑇 (𝑃, 𝑄 𝐾 ), where 𝑃 and 𝑄 𝐾 are defined in Table 1, and 𝐾 = ⌊𝑁𝑞 ⌋. Let 𝑓 ∗ = max {𝑓 ∗, 𝑓 −1 
+
+> ∗
+
+}. Then, for 𝑓 defined in Theorem A.6, the following bound holds for all 𝛼 ∈ [ 𝛾, 1 − 𝛾 ]:
+
+𝑓 ⊗𝑇 (𝛼 ) ≤ 𝐺 𝜇 (𝛼 − 𝛾 ) + 𝛾 . 
+
+Here, 𝜇 and 𝛾 are derived from the composition of 𝑇 ·( 𝑛 −1) independent copies of 𝑓 ∗.
+
+Proof. The proof follows the same argument as that of Theo-rem 3.13 in Appendix D.15, with 𝑁 replaced by 𝐾 = ⌊𝑁𝑞 ⌋. □
+
+## A.3 Auditing Opacus’s FEASGM Implementation 
+
+We now audit the FEASGM implementation. Our goal is to examine the weak regime and show that, when the output dimension is high, the privacy leakage of FEASGM can significantly exceed the SGM guarantee. We follow the same experimental setting used for auditing the EASGM and ASGM implementations in Section 5.1. 
+
+Audited algorithm. We use the implementation of DP-FETA, as it is based on Opacus v1.0 (see [42]). 
+
+Parameter setting. We use the same setting as that for EASGM in Section 5.1. We focus on the weak regime and set 𝑞 = 0.5, |𝐷 | = 3,
+
+|𝐷 ′ | = 4, 𝜎 = 10 , and 𝐶 = 0.1. Under this setting, the normalization factors differ across the neighboring datasets. 
+
+Dataset. We use the MNIST dataset for auditing. Where we ran-domly select 4 data point to constitute the neighboring datasets. 
+
+Baseline. Following Section 5.1, we compare our results with the privacy guarantee in [7]. Wenhao Wang, Shujie Cui, Hui Cui, and Xingliang Yuan 
+
+Results. Fig. 6 shows that the audited privacy leakage of the FEASGM implementation exceeds the level implied by the claimed SGM privacy guarantee. 
+
+## A.4 Visualizing the Privacy Guarantee of Opacus’s FEASGM Implementation 
+
+We now visualize the privacy guarantee of FEASGM in the real-world setting with a low sample rate and large datasets. The case 
+
+⌊𝑁 · 𝑞 ⌋ = ⌊( 𝑁 + 1) · 𝑞 ⌋ is not our focus, as it follows the SGM guarantee. Instead, we focus on the case ⌊𝑁 · 𝑞 ⌋ ≠ ⌊( 𝑁 + 1) · 𝑞 ⌋.
+
+Setting. We follow the setting in Section 5.4. Specifically, we set the number of training rounds to 𝑇 = 200 and consider neighboring datasets with |𝐷 − | = |𝐷 | = 140199 and |𝐷 ′ | = 140200 . We evaluate two model sizes: a 26,010-parameter model used by DP-SGD-HF and DP-SUR on MNIST, and a 1,485,217-parameter model used by DP-FETA and PrivImage on MNIST. We set the sampling ratio to 
+
+𝑞 = 0.005 , since the Opacus FEASGM implementation uses 𝑞 = 1/𝑇 .We set 𝜎 = 10 and use Theorem A.7 to estimate the upper bound of the privacy guarantee. 
+
+Baseline. To compare the multi-round privacy guarantee of FEASGM under our estimated guarantee with that under the SGM privacy guarantee, we adopt Opacus’s RDP privacy accountant [ 41 ], which is also used by DP-FETA in [28]. 
+
+Results. The results are shown in Fig. 7. It shows that FEASGM’s guarantee in multi-round training can be weaker than the claimed guarantee. 
+
+Figure 6: Audited privacy leakage of the real-world Opacus FEASGM implementation in DP-FETA, computed using the 
+
+(𝜖, 𝛿 )-trade-off function with 𝛿 = 10 −5, and compared with the claimed privacy guarantees. 
+
+## B Multiround Guarantees for EASGM and ASGM 
+
+For both EASGM and ASGM, we can combine the per-round upper bounds in Theorems 3.8 and 3.10 with the comparison theorem (Theorem A.5) to obtain valid upper bounds for their 𝑇 -round com-positions. 
+
+Theorem B.1 (Multiround upper bound for EASGM and ASGM). Consider either EASGM or ASGM, and let 𝑓 denote the corre-sponding per-round upper bound given in Theorem 3.8 or Theorem 3.10. Let M𝐼 denote the transparent per-round mechanism, and let M de-note the corresponding hidden mechanism obtained by suppressing the additional released information 𝐼 . Assume that the randomness is independent across rounds. For each 𝑇 ∈ Z>0, let M⊗𝑇 𝐼 and M⊗𝑇 
+
+denote the 𝑇 -round compositions of M𝐼 and M, respectively. Then, for any neighboring datasets 𝐷 and 𝐷 ′, we have 
+
+𝑇 
+
+
+
+M⊗𝑇 (𝐷 ), M⊗𝑇 (𝐷 ′)
+
+
+
+≥ 𝑇 
+
+
+
+M⊗𝑇 𝐼 (𝐷 ), M⊗𝑇 𝐼 (𝐷 ′)
+
+
+
+,
+
+and 
+
+𝑓 ⊗𝑇 ≥ 𝑇 
+
+
+
+M⊗𝑇 𝐼 (𝐷 ), M⊗𝑇 𝐼 (𝐷 ′)
+
+
+
+.
+
+Consequently, 𝑓 ⊗𝑇 is a valid upper bound on the 𝑇 -round privacy guarantee of the corresponding EASGM or ASGM mechanism. 
+
+Proof. By Theorem A.5, in each round the hidden mechanism 
+
+M is at least as private as its transparent counterpart M𝐼 , and the trade-off function of M𝐼 is upper bounded by 𝑓 . Composing these per-round relations over 𝑇 independent rounds yields 
+
+𝑇 
+
+
+
+M⊗𝑇 (𝐷 ), M⊗𝑇 (𝐷 ′)
+
+
+
+≥ 𝑇 
+
+
+
+M⊗𝑇 𝐼 (𝐷 ), M⊗𝑇 𝐼 (𝐷 ′)
+
+
+
+,
+
+and 
+
+𝑓 ⊗𝑇 ≥ 𝑇 
+
+
+
+M⊗𝑇 𝐼 (𝐷 ), M⊗𝑇 𝐼 (𝐷 ′)
+
+
+
+.
+
+This proves the claim. □
+
+For EASGM, this abstract multiround upper bound can be further approximated in closed form by using the same argument as in Theorem A.6. 
+
+Corollary B.2. Let 𝑓 denote the per-round upper bound for EASGM given in Theorem 3.8. Define 
+
+𝑓 ∗ = 𝑇 (𝑃, 𝑄 𝑁 ), 𝑓 ∗ = max {𝑓 ∗, 𝑓 −1 
+
+> ∗
+
+},
+
+where 𝑃 and 𝑄 𝑁 are defined in Table 1. Then, using the same Gaussian approximation as in Theorem A.6, for all 𝛼 ∈ [ 𝛾, 1 − 𝛾 ],
+
+𝑓 ⊗𝑇 (𝛼 ) ≤ 𝐺 𝜇 (𝛼 − 𝛾 ) + 𝛾, 
+
+where 𝜇 and 𝛾 are obtained from the composition of 𝑇 (𝑛 − 1) copies of 𝑓 ∗.
+
+Proof. The proof follows the same argument as that of Theo-rem A.6, after replacing the FEASGM per-round upper bound with the EASGM per-round upper bound in Theorem 3.8. We therefore omit the repeated details. □
+
+For ASGM, Theorem B.1 still provides a valid 𝑇 -round upper bound 𝑓 ⊗𝑇 . However, the per-round upper bound in Theorem 3.10 contains the term 
+
+𝑇 
+
+
+
+𝑃 ⊗ ( 𝑛 −1) , 𝑄 ⊗ ( 𝑛 −1)
+
+> 𝑁
+
+
+
+,
+
+for which we do not derive a closed-form analytic expression in this paper. Therefore, unlike EASGM, we do not provide a closed-form visualization of the multiround ASGM guarantee. Obtaining such a visualization would require a numerical approximation of this Rethinking the Security of DP-SGD: A Corrected Analysis of Differentially Private Machine Learning (b) DP-FETA (a) DPSGD-HF 
+
+Figure 7: Theoretical upper bounds on the 200-round privacy guarantees of the real-world Opacus FEASGM implementations, showing that each privacy guarantee lies below its corresponding upper bound. Table 2: Overview of the audited Opacus versions, focusing on privacy_engine.py , together with the associated commit hashes for reproducibility and re-auditing. The six columns report: (1) the audited Opacus version(s); (2) the GitHub link to the corresponding privacy_engine.py file; (3) the associated commit hash; (4) the normalization operation used under Poisson sampling, where A denotes averaging over the realized batch size |𝐵 |, EA denotes averaging over the expected batch size 𝑁 ·𝑞 ,and FEA denotes averaging over ⌊𝑁 ·𝑞 ⌋; (5) whether the version provides built-in support for Poisson sampling (e.g., through a dedicated interface such as poisson_sampling=True , as in v1.5.4); and (6) the overall model-update mechanism used when Poisson sampling is enabled and the loss_reduction is set to mean . Here, Not supported means that Poisson-based data selection cannot be directly applied because the implementation imposes an upper bound on the batch size, whereas Poisson sampling produces variable-size batches that may exceed this bound. ASGM, EASGM, and FEASGM are defined in Definitions 2.9, 2.8, and A.1, respectively. Opacus also supports standard SGM. In v1.5.4, when loss_reduction="sum" , the gradient sum is not normalized before the parameter update, making this code path consistent with the standard SGM update rule [35].                                                                       
+
+> Version Link Commit Hash Normalization Built-in Poisson update logic Mechanism
+> v0.9.0-v0.9.1 GitHub 33a7ca4 A×Not supported v0.10.0-v0.10.1 GitHub 9d76ea5 A×Not supported v0.11.0 GitHub 9d76ea5 A×Not supported v0.12.0 GitHub 9d76ea5 A×ASGM v0.13.0 GitHub 9d76ea5 A×ASGM v0.14.0 GitHub e9983ec EA ✓EASGM v0.15.0 GitHub e9983ec EA ✓EASGM v1.0.0-v1.0.2 GitHub 1241e62 FEA ✓FEASGM v1.1.0-v1.1.3 GitHub 1241e62 FEA ✓FEASGM v1.2.0 GitHub 1241e62 FEA ✓FEASGM v1.3 GitHub 1241e62 FEA ✓FEASGM v1.4-v1.4.1 GitHub 1241e62 FEA ✓FEASGM v1.5-v1.5.4 GitHub 1241e62 FEA ✓FEASGM
+
+composition term, for example using the method in [ 18 ], which we leave to future work. 
+
+## B.1 Impact of One-Round Unsoundness on Multi-Round Guarantees 
+
+In differential privacy, a multiround guarantee obtained by compo-sition is sound only if the per-round guarantee being composed is itself sound for the underlying mechanism [ 12 ]. Therefore, if the Wenhao Wang, Shujie Cui, Hui Cui, and Xingliang Yuan 
+
+one-round SGM guarantee does not correctly characterize the actual EASGM or ASGM mechanism, then the corresponding multi-round SGM-based estimate is not soundly justified for that mechanism. This observation does not, by itself, establish a numerical violation of the multi-round estimate; rather, it shows that the multi-round SGM guarantee lacks a valid per-round foundation. 
+
+## C Auditing Algorithm 
+
+Algorithm 1 Tight auditing of EASGM/ASGM 
+
+Require: Neighboring datasets 𝐷 = {𝑑 1, ..., 𝑑 𝑁 }, 𝐷 ′ = 𝐷 ∪ { 𝑑 𝑁 +1 };statistical test Test (·) ; intermediate distinguisher set A = {𝐴 𝑖 𝐵 =
+
+(Test , Proc 𝑃 𝑖 𝐵 
+
+, Proc 𝑄 𝑖 𝐵 
+
+) } ; final distinguisher 𝐴 ∗; auditing time 𝑡 ; au-dited mechanism M (·) .
+
+Ensure: Empirical type I / type II errors (𝛼 𝑟 , 𝛽 𝑟 ). 
+
+> 1:
+
+𝑇 𝑦𝑝𝑒 𝐼 𝑐 ← 0, 𝑇 𝑦𝑝𝑒 𝐼 𝑖𝑐 ← 0, 𝑇 𝑦𝑝𝑒 𝐼 𝐼 𝑐 ← 0, 𝑇 𝑦𝑝𝑒 𝐼 𝐼 𝑖𝑐 ← 0 
+
+> 2:
+
+for 𝑟 = 1 to 𝑡 do  
+
+> 3:
+
+𝐷 in ← ∅ 
+
+> 4:
+
+Randomly sample 𝑏 ∈ { 0, 1} 
+
+> 5:
+
+if 𝑏 == 0 then  
+
+> 6:
+
+𝐷 in ← 𝐷  
+
+> 7:
+
+else  
+
+> 8:
+
+𝐷 in ← 𝐷 ′ 
+
+> 9:
+
+end if  
+
+> 10:
+
+𝑂 ← M ( 𝐷 in ); 𝑆𝑐𝑜𝑟𝑒 ← ∅ 
+
+> 11:
+
+for all 𝐴 𝑖 𝐵 ∈ A do  
+
+> 12:
+
+𝑆𝑐𝑜𝑟𝑒 ← ( 𝑆𝑐𝑜𝑟𝑒, 𝐴 𝑖 𝐵 (𝑂 ) )  
+
+> 13:
+
+end for  
+
+> 14:
+
+𝑏 𝑔𝑢𝑒𝑠𝑠 ← 𝐴 ∗ (𝑆𝑐𝑜𝑟𝑒 ) 
+
+> 15:
+
+if 𝑏 == 0 and 𝑏 == 𝑏 𝑔𝑢𝑒𝑠𝑠 then  
+
+> 16:
+
+𝑇 𝑦𝑝𝑒 𝐼 𝑐 + +  
+
+> 17:
+
+else if 𝑏 == 0 and 𝑏 ≠ 𝑏 𝑔𝑢𝑒𝑠𝑠 then  
+
+> 18:
+
+𝑇 𝑦𝑝𝑒 𝐼 𝑖𝑐 + +  
+
+> 19:
+
+else if 𝑏 == 1 and 𝑏 == 𝑏 𝑔𝑢𝑒𝑠𝑠 then  
+
+> 20:
+
+𝑇 𝑦𝑝𝑒 𝐼 𝐼 𝑐 + +  
+
+> 21:
+
+else if 𝑏 == 1 and 𝑏 ≠ 𝑏 𝑔𝑢𝑒𝑠𝑠 then  
+
+> 22:
+
+𝑇 𝑦𝑝𝑒 𝐼 𝐼 𝑖𝑐 + +  
+
+> 23:
+
+end if  
+
+> 24:
+
+end for  
+
+> 25:
+
+Compute (𝛼 𝑟 , 𝛽 𝑟 ) using the Clopper–Pearson method  
+
+> 26:
+
+return (𝛼 𝑟 , 𝛽 𝑟 )
+
+## D Proof D.1 Proof of Lemma 3.1 
+
+Proof. Let 
+
+𝐸 𝛼 =
+
+(
+
+(𝛼 1, . . . , 𝛼 𝑚 ) ∈ [ 0, 1]𝑚 :
+
+> 𝑚
+
+∑︁ 
+
+> 𝑖 =1
+
+𝑤 𝑖 𝛼 𝑖 = 𝛼 
+
+)
+
+.
+
+We prove that 
+
+𝑇 (( 𝑃 𝐼 | 𝐼, 𝐼 ), (𝑄 𝐼 | 𝐼, 𝐼 ))( 𝛼 ) = min  
+
+> (𝛼 1,...,𝛼 𝑚 ) ∈ 𝐸 𝛼
+> 𝑚
+
+∑︁ 
+
+> 𝑖 =1
+
+𝑤 𝑖 𝑇 (𝑃 𝑖 , 𝑄 𝑖 )( 𝛼 𝑖 ).
+
+Let 
+
+(𝛼 ∗
+
+> 1
+
+, . . . , 𝛼 ∗ 
+
+> 𝑚
+
+) ∈ arg min  
+
+> (𝛼 1,...,𝛼 𝑚 ) ∈ 𝐸 𝛼
+> 𝑚
+
+∑︁ 
+
+> 𝑖 =1
+
+𝑤 𝑖 𝑇 (𝑃 𝑖 , 𝑄 𝑖 )( 𝛼 𝑖 ).
+
+We first prove the “ ≥” direction. Let 𝜙 be an optimal decision rule for 
+
+𝐻 0 : (𝑃 𝐼 | 𝐼, 𝐼 ) vs. 𝐻 1 : (𝑄 𝐼 | 𝐼, 𝐼 )
+
+with Type I error 𝛼 . For each 𝑖 , let 𝜙 𝑖 denote the restriction of 𝜙 to the slice 𝐼 = 𝑖 , and let 𝛼 𝑖 and 𝛽 𝑖 be the Type I and Type II errors of 
+
+𝜙 𝑖 , respectively. Then 
+
+𝛼 =
+
+> 𝑚
+
+∑︁ 
+
+> 𝑖 =1
+
+𝑤 𝑖 𝛼 𝑖 , 𝑇 (( 𝑃 𝐼 | 𝐼, 𝐼 ), (𝑄 𝐼 | 𝐼, 𝐼 ))( 𝛼 ) =
+
+> 𝑚
+
+∑︁ 
+
+> 𝑖 =1
+
+𝑤 𝑖 𝛽 𝑖 .
+
+Moreover, for each 𝑖 , 𝜙 𝑖 must be optimal for testing 
+
+𝐻 0 : 𝑃 𝑖 vs. 𝐻 1 : 𝑄 𝑖 
+
+among all tests with Type I error 𝛼 𝑖 . Otherwise, replacing 𝜙 𝑖 by another test with the same Type I error 𝛼 𝑖 and a strictly smaller Type II error would yield a global test with the same total Type I error 𝛼 but a smaller total Type II error, contradicting the optimality of 𝜙 . Hence, 
+
+𝛽 𝑖 = 𝑇 (𝑃 𝑖 , 𝑄 𝑖 )( 𝛼 𝑖 ), ∀𝑖 ∈ [ 𝑚 ].
+
+Therefore, 
+
+𝑇 (( 𝑃 𝐼 | 𝐼, 𝐼 ), (𝑄 𝐼 | 𝐼, 𝐼 ))( 𝛼 ) =
+
+> 𝑚
+
+∑︁ 
+
+> 𝑖 =1
+
+𝑤 𝑖 𝑇 (𝑃 𝑖 , 𝑄 𝑖 )( 𝛼 𝑖 ).
+
+Since (𝛼 1, . . . , 𝛼 𝑚 ) ∈ 𝐸 𝛼 , by the definition of (𝛼 ∗
+
+> 1
+
+, . . . , 𝛼 ∗ 
+
+> 𝑚
+
+), we have 
+
+> 𝑚
+
+∑︁ 
+
+> 𝑖 =1
+
+𝑤 𝑖 𝑇 (𝑃 𝑖 , 𝑄 𝑖 )( 𝛼 𝑖 ) ≥ 
+
+> 𝑚
+
+∑︁ 
+
+> 𝑖 =1
+
+𝑤 𝑖 𝑇 (𝑃 𝑖 , 𝑄 𝑖 )( 𝛼 ∗ 
+
+> 𝑖
+
+).
+
+Thus, 
+
+𝑇 (( 𝑃 𝐼 | 𝐼, 𝐼 ), (𝑄 𝐼 | 𝐼, 𝐼 ))( 𝛼 ) ≥ 
+
+> 𝑚
+
+∑︁ 
+
+> 𝑖 =1
+
+𝑤 𝑖 𝑇 (𝑃 𝑖 , 𝑄 𝑖 )( 𝛼 ∗ 
+
+> 𝑖
+
+).
+
+Next, we prove the “ ≤” direction. For each 𝑖 , let ¯𝜙 𝑖 be an optimal decision rule for 
+
+𝐻 0 : 𝑃 𝑖 vs. 𝐻 1 : 𝑄 𝑖 
+
+with Type I error 𝛼 ∗ 
+
+> 𝑖
+
+, so that its Type II error is 𝑇 (𝑃 𝑖 , 𝑄 𝑖 )( 𝛼 ∗ 
+
+> 𝑖
+
+). Define a global decision rule ¯𝜙 by applying ¯𝜙 𝑖 on the slice 𝐼 = 𝑖 . Then the Type I error of ¯𝜙 is 𝑚 ∑︁ 
+
+> 𝑖 =1
+
+𝑤 𝑖 𝛼 ∗ 
+
+> 𝑖
+
+= 𝛼, 
+
+and its Type II error is 
+
+> 𝑚
+
+∑︁ 
+
+> 𝑖 =1
+
+𝑤 𝑖 𝑇 (𝑃 𝑖 , 𝑄 𝑖 )( 𝛼 ∗ 
+
+> 𝑖
+
+).
+
+Since 𝑇 (( 𝑃 𝐼 | 𝐼, 𝐼 ), (𝑄 𝐼 | 𝐼, 𝐼 ))( 𝛼 ) is the minimum achievable Type II error among all tests with Type I error 𝛼 , we obtain 
+
+𝑇 (( 𝑃 𝐼 | 𝐼, 𝐼 ), (𝑄 𝐼 | 𝐼, 𝐼 ))( 𝛼 ) ≤ 
+
+> 𝑚
+
+∑︁ 
+
+> 𝑖 =1
+
+𝑤 𝑖 𝑇 (𝑃 𝑖 , 𝑄 𝑖 )( 𝛼 ∗ 
+
+> 𝑖
+
+).
+
+Combining the two inequalities yields 
+
+𝑇 (( 𝑃 𝐼 | 𝐼, 𝐼 ), (𝑄 𝐼 | 𝐼, 𝐼 ))( 𝛼 ) =
+
+> 𝑚
+
+∑︁ 
+
+> 𝑖 =1
+
+𝑤 𝑖 𝑇 (𝑃 𝑖 , 𝑄 𝑖 )( 𝛼 ∗ 
+
+> 𝑖
+
+),
+
+which proves the claim. □Rethinking the Security of DP-SGD: A Corrected Analysis of Differentially Private Machine Learning 
+
+## D.2 Proof of Lemma 3.2 
+
+Proof. Let 
+
+𝐸 𝛼 =
+
+(
+
+(𝛼 1, . . . , 𝛼 𝑚 ) ∈ [ 0, 1]𝑚 :
+
+> 𝑚
+
+∑︁ 
+
+> 𝑖 =1
+
+𝑤 𝑖 𝛼 𝑖 = 𝛼 
+
+)
+
+.
+
+By Lemma 3.1, we have 
+
+𝑇 (( 𝑃 𝐼 | 𝐼, 𝐼 ), (𝑄 𝐼 | 𝐼, 𝐼 ))( 𝛼 ) = min  
+
+> (𝛼 1,...,𝛼 𝑚 ) ∈ 𝐸 𝛼
+> 𝑚
+
+∑︁ 
+
+> 𝑖 =1
+
+𝑤 𝑖 𝑇 (𝑃 𝑖 , 𝑄 𝑖 )( 𝛼 𝑖 ).
+
+Since 𝐸 𝛼 is compact and the component trade-off functions are continuous, the minimum is attained. Let (𝛼 ∗
+
+> 1
+
+, . . . , 𝛼 ∗ 
+
+> 𝑚
+
+) ∈ 𝐸 𝛼 be a minimizer. For each 𝑖 ∈ [ 𝑚 ], by the Neyman–Pearson lemma, allowing randomized rejection rules if necessary, there exists an optimal rejection rule 𝜙 𝑖 : (𝑥, 𝑖 ) ↦ → [ 0, 1] for 
+
+𝐻 0 : (𝑃 𝑖 , 𝑖 ) vs. 𝐻 1 : (𝑄 𝑖 , 𝑖 )
+
+with Type I error 𝛼 ∗ 
+
+> 𝑖
+
+. Define the global rejection rule 𝜙 by setting 
+
+𝜙 (𝑥, 𝑖 ) = 𝜙 𝑖 (𝑥, 𝑖 ). Then 𝜙 has Type I error Í𝑚 𝑖 =1 𝑤 𝑖 𝛼 ∗ 
+
+> 𝑖
+
+= 𝛼 , and its Type II error is 
+
+> 𝑚
+
+∑︁ 
+
+> 𝑖 =1
+
+𝑤 𝑖 𝑇 (𝑃 𝑖 , 𝑄 𝑖 )( 𝛼 ∗ 
+
+> 𝑖
+
+) = 𝑇 (( 𝑃 𝐼 | 𝐼, 𝐼 ), (𝑄 𝐼 | 𝐼, 𝐼 ))( 𝛼 ).
+
+Thus, 𝜙 is an optimal rejection rule for 
+
+𝐻 0 : (𝑃 𝐼 | 𝐼, 𝐼 ) vs. 𝐻 1 : (𝑄 𝐼 | 𝐼, 𝐼 ).
+
+For notational convenience, set 𝑃 𝑖 = 𝑃 𝑖 and 𝑄 𝑖 = 𝑄 𝑖 for all 𝑖 ≠ 𝑦 .We now construct a rejection rule 𝜙 sub : (𝑥, 𝑖 ) ↦ → [ 0, 1] with Type I error 𝛼 for 
+
+𝐻 0 : (𝑃 𝐼 | 𝐼, 𝐼 ) vs. 𝐻 1 : (𝑄 𝐼 | 𝐼, 𝐼 ).
+
+Let 𝜙 𝑦  
+
+> sub
+
+be an optimal rejection rule for 
+
+𝐻 0 : (𝑃 𝑦 , 𝑦 ) vs. 𝐻 1 : (𝑄 𝑦 , 𝑦 )
+
+with Type I error 𝛼 ∗ 
+
+> 𝑦
+
+. Then 
+
+E(𝑥,𝑦 )∼( 𝑄 𝑦 ,𝑦 ) [1 − 𝜙 𝑦  
+
+> sub
+
+(𝑥, 𝑦 )] = 𝑇 (𝑃 𝑦 , 𝑄 𝑦 )( 𝛼 ∗ 
+
+> 𝑦
+
+)≤ 𝑇 (𝑃 𝑦 , 𝑄 𝑦 )( 𝛼 ∗ 
+
+> 𝑦
+
+) = E(𝑥,𝑦 )∼( 𝑄 𝑦 ,𝑦 ) [1 − 𝜙 𝑦 (𝑥, 𝑦 )] , (19) where the inequality follows from the pointwise assumption 
+
+𝑇 (𝑃 𝑦 , 𝑄 𝑦 )( 𝑎 ) ≤ 𝑇 (𝑃 𝑦 , 𝑄 𝑦 )( 𝑎 ) for all 𝑎 ∈ [ 0, 1], applied at 𝑎 = 𝛼 ∗ 
+
+> 𝑦
+
+.Define 𝜙 sub by replacing the slice 𝜙 𝑦 in 𝜙 with 𝜙 𝑦 
+
+> sub
+
+, while keeping all other slices unchanged. Since 𝑃 𝑖 = 𝑃 𝑖 for 𝑖 ≠ 𝑦 , and since 𝜙 𝑦 
+
+> sub
+
+has Type I error 𝛼 ∗ 
+
+> 𝑦
+
+under 𝑃 𝑦 , the rule 𝜙 sub has Type I error ∑︁ 
+
+> 𝑖 ≠𝑦
+
+𝑤 𝑖 𝛼 ∗ 
+
+> 𝑖
+
++ 𝑤 𝑦 𝛼 ∗ 
+
+> 𝑦
+
+= 𝛼 
+
+under (𝑃 𝐼 | 𝐼, 𝐼 ). We now compare the Type II errors: 
+
+𝑇 (( 𝑃 𝐼 | 𝐼, 𝐼 ), (𝑄 𝐼 | 𝐼, 𝐼 ))( 𝛼 )
+
+> (1)
+
+= E𝑖 ∼𝑤 E(𝑥,𝑖 )∼( 𝑄 𝑖 ,𝑖 ) [1 − 𝜙 (𝑥, 𝑖 )] 
+
+> (2)
+
+=∑︁   
+
+> 𝑖 ∈ [ 𝑚 ]\{ 𝑦 }
+
+𝑤 𝑖 E(𝑥,𝑖 )∼( 𝑄 𝑖 ,𝑖 ) [1 − 𝜙 𝑖 (𝑥, 𝑖 )] + 𝑤 𝑦 E(𝑥,𝑦 )∼( 𝑄 𝑦 ,𝑦 ) [1 − 𝜙 𝑦 (𝑥, 𝑦 )] 
+
+> (3)
+
+≥∑︁   
+
+> 𝑖 ∈ [ 𝑚 ]\{ 𝑦 }
+
+𝑤 𝑖 E(𝑥,𝑖 )∼( 𝑄 𝑖 ,𝑖 ) [1 − 𝜙 𝑖 (𝑥, 𝑖 )] + 𝑤 𝑦 E(𝑥,𝑦 )∼( 𝑄 𝑦 ,𝑦 ) [1 − 𝜙 𝑦  
+
+> sub
+
+(𝑥, 𝑦 )] 
+
+> (4)
+
+= E𝑖 ∼𝑤 E(𝑥,𝑖 )∼( 𝑄 𝑖 ,𝑖 ) [1 − 𝜙 sub (𝑥, 𝑖 )] 
+
+> (5)
+
+≥ 𝑇 (( 𝑃 𝐼 | 𝐼, 𝐼 ), (𝑄 𝐼 | 𝐼, 𝐼 ))( 𝛼 ).
+
+(20) Here, (1)
+
+= follows from the optimality of 𝜙 and the definition of the trade-off function. Equality (2)
+
+= decomposes the Type II error over the slices 𝐼 = 𝑖 . Inequality (3)
+
+≥ follows from Eq. (19) and the identities 
+
+𝑄 𝑖 = 𝑄 𝑖 for all 𝑖 ≠ 𝑦 . Equality (4)
+
+= follows from the definition of 𝜙 sub .Finally, (5)
+
+≥ holds because 𝜙 sub is a valid rejection rule for 
+
+𝐻 0 : (𝑃 𝐼 | 𝐼, 𝐼 ) vs. 𝐻 1 : (𝑄 𝐼 | 𝐼, 𝐼 )
+
+with Type I error 𝛼 , and its Type II error is therefore no smaller than the optimal Type II error. Hence, 
+
+𝑇 (( 𝑃 𝐼 | 𝐼, 𝐼 ), (𝑄 𝐼 | 𝐼, 𝐼 ))( 𝛼 ) ≥ 𝑇 (( 𝑃 𝐼 | 𝐼, 𝐼 ), (𝑄 𝐼 | 𝐼, 𝐼 ))( 𝛼 ).
+
+This completes the proof. □
+
+## D.3 Proof of Lemma 3.3 
+
+Let 𝜙 denote the optimal rejection rule with Type I error 𝛼 for the hypothesis test 
+
+𝐻 0 : (𝑃 𝐼 | 𝐼, 𝐼 ) vs. 𝐻 1 : (𝑄 𝐼 | 𝐼, 𝐼 ).
+
+Then, by definition, 
+
+1 − E(𝑥,𝑖 )∼( 𝑄 𝐼 |𝐼,𝐼 ) [𝜙 (𝑥, 𝑖 )] = 𝑇 (( 𝑃 𝐼 | 𝐼, 𝐼 ), (𝑄 𝐼 | 𝐼, 𝐼 ))( 𝛼 ).
+
+To prove the claim, we construct a rejection rule 𝜙 for the same testing problem. For each 𝑖 ∈ [ 𝑚 ], let 𝜙 𝑖 be the optimal rejection rule for testing 
+
+𝐻 0 : 𝑃 𝑖 vs. 𝐻 1 : 𝑄 𝑖 
+
+with Type I error 𝛼 . Thus, 
+
+E𝑥 ∼𝑃 𝑖 [𝜙 𝑖 (𝑥 )] = 𝛼, 1 − E𝑥 ∼𝑄 𝑖 [𝜙 𝑖 (𝑥 )] = 𝑇 (𝑃 𝑖 , 𝑄 𝑖 )( 𝛼 ).
+
+Now define the rejection rule 𝜙 by 
+
+𝜙 (𝑥, 𝑖 ) = 𝜙 𝑖 (𝑥 ).
+
+Then its Type I error is 
+
+E(𝑥,𝑖 )∼( 𝑃 𝐼 |𝐼,𝐼 ) [𝜙 (𝑥, 𝑖 )] =∑︁  
+
+> 𝑖 ∈ [ 𝑚 ]
+
+𝑤 𝑖 E𝑥 ∼𝑃 𝑖 [𝜙 𝑖 (𝑥 )] =∑︁  
+
+> 𝑖 ∈ [ 𝑚 ]
+
+𝑤 𝑖 𝛼 = 𝛼. Wenhao Wang, Shujie Cui, Hui Cui, and Xingliang Yuan 
+
+Similarly, its Type II error is 
+
+1 − E(𝑥,𝑖 )∼( 𝑄 𝐼 |𝐼,𝐼 ) [𝜙 (𝑥, 𝑖 )] =∑︁  
+
+> 𝑖 ∈ [ 𝑚 ]
+
+𝑤 𝑖 
+
+
+
+1 − E𝑥 ∼𝑄 𝑖 [𝜙 𝑖 (𝑥 )] 
+
+
+
+=∑︁  
+
+> 𝑖 ∈ [ 𝑚 ]
+
+𝑤 𝑖 𝑇 (𝑃 𝑖 , 𝑄 𝑖 )( 𝛼 ).
+
+Since 𝜙 is the optimal rejection rule at Type I error 𝛼 , its Type II error is no larger than that of any feasible rejection rule. Therefore, 
+
+𝑇 (( 𝑃 𝐼 | 𝐼, 𝐼 ), (𝑄 𝐼 | 𝐼, 𝐼 ))( 𝛼 ) ≤ ∑︁  
+
+> 𝑖 ∈ [ 𝑚 ]
+
+𝑤 𝑖 𝑇 (𝑃 𝑖 , 𝑄 𝑖 )( 𝛼 ).
+
+This completes the proof. 
+
+## D.4 Proof of Theorem 3.4 
+
+Let 𝑃 = N ( 0, 1) and 𝑄 𝑦 = N ( 𝑦, 𝜎 2), where 0 < 𝜎 < 1 and 𝑦 > 0.We fix a Type I error level 𝛼 ∈ ( 0, 1).First, the likelihood ratio between 𝑄 𝑦 and 𝑃 is 
+
+Λ𝑦 (𝑥 ) = 𝑓 𝑄 𝑦 (𝑥 )
+
+𝑓 𝑃 (𝑥 ) = 1
+
+𝜎 exp 
+
+
+
+− 12
+
+ (𝑥 − 𝑦 )2
+
+𝜎 2 − 𝑥 2
+
+  
+
+= 1
+
+𝜎 exp  𝜆 (𝑥, 𝑦 ),
+
+(21) where 
+
+𝜆 (𝑥, 𝑦 ) = −( 1 − 𝜎 2)𝑥 2 + 2𝑦𝑥 − 𝑦 2
+
+2𝜎 2 .
+
+Since 0 < 𝜎 < 1, 𝜆 (𝑥, 𝑦 ) is a concave quadratic function of 𝑥 , and hence is symmetric about 
+
+𝑧 = 𝑦 
+
+1 − 𝜎 2 .
+
+Therefore, by the Neyman–Pearson lemma, for fixed Type I error 𝛼 ,the rejection region minimizing the Type II error 𝛽 is of the form 
+
+[𝑧 − 𝑡, 𝑧 + 𝑡 ]
+
+for some 𝑡 > 0, determined by 
+
+∫ 𝑧 +𝑡 𝑧 −𝑡 
+
+𝑓 𝑃 (𝑥 ) 𝑑𝑥 = 𝛼 ⇐⇒ Φ(𝑧 + 𝑡 ) − Φ(𝑧 − 𝑡 ) = 𝛼. 
+
+Define 
+
+𝐹 (𝑦, 𝑡 ) = Φ(𝑧 (𝑦 ) + 𝑡 ) − Φ(𝑧 (𝑦 ) − 𝑡 ) − 𝛼, 𝑧 (𝑦 ) = 𝑦 
+
+1 − 𝜎 2 .
+
+Since 𝜕𝐹 𝜕𝑡 = 𝜙 (𝑧 (𝑦 ) + 𝑡 ) + 𝜙 (𝑧 (𝑦 ) − 𝑡 ) > 0,
+
+the implicit function theorem implies that the solution 𝑡 = 𝑡 (𝑦 ) is locally continuously differentiable in 𝑦 .Thus, 
+
+1 − 𝛽 =
+
+∫ 𝑧 +𝑡 𝑧 −𝑡 
+
+𝑓 𝑄 𝑦 (𝑥 ) 𝑑𝑥 
+
+= Φ
+
+ 𝜎 
+
+1 − 𝜎 2 𝑦 + 𝑡 𝜎 
+
+
+
+− Φ
+
+ 𝜎 
+
+1 − 𝜎 2 𝑦 − 𝑡 𝜎 
+
+
+
+.
+
+(22) We now differentiate 𝑡 with respect to 𝑦 . From 
+
+Φ(𝑧 + 𝑡 ) − Φ(𝑧 − 𝑡 ) = 𝛼, 
+
+we obtain 
+
+𝜙 (𝑧 + 𝑡 )
+
+ 𝜕𝑧 𝜕𝑦 + 𝜕𝑡 𝜕𝑦 
+
+
+
+− 𝜙 (𝑧 − 𝑡 )
+
+ 𝜕𝑧 𝜕𝑦 − 𝜕𝑡 𝜕𝑦 
+
+
+
+= 0. (23) Since 𝜕𝑧 𝜕𝑦 = 11−𝜎 2 , it follows that 
+
+𝜕𝑡 𝜕𝑦 = 𝜙 (𝑧 − 𝑡 ) − 𝜙 (𝑧 + 𝑡 )
+
+𝜙 (𝑧 − 𝑡 ) + 𝜙 (𝑧 + 𝑡 ) · 11 − 𝜎 2 . (24) Next, differentiating (22) with respect to 𝑦 , we get 
+
+𝜕 (1 − 𝛽 )
+
+𝜕𝑦 =
+
+ 𝜎 
+
+1 − 𝜎 2 + 1
+
+𝜎 𝜕𝑡 𝜕𝑦 
+
+
+
+𝜙 
+
+ 𝜎 
+
+1 − 𝜎 2 𝑦 + 𝑡 𝜎 
+
+
+
+−
+
+ 𝜎 
+
+1 − 𝜎 2 − 1
+
+𝜎 𝜕𝑡 𝜕𝑦 
+
+
+
+𝜙 
+
+ 𝜎 
+
+1 − 𝜎 2 𝑦 − 𝑡 𝜎 
+
+
+
+= 𝜎 
+
+1 − 𝜎 2
+
+h
+
+𝜙 
+
+ 𝜎 
+
+1 − 𝜎 2 𝑦 + 𝑡 𝜎 
+
+
+
+− 𝜙 
+
+ 𝜎 
+
+1 − 𝜎 2 𝑦 − 𝑡 𝜎 
+
+i 
+
++ 1
+
+𝜎 𝜕𝑡 𝜕𝑦 
+
+h
+
+𝜙 
+
+ 𝜎 
+
+1 − 𝜎 2 𝑦 + 𝑡 𝜎 
+
+
+
++ 𝜙 
+
+ 𝜎 
+
+1 − 𝜎 2 𝑦 − 𝑡 𝜎 
+
+i 
+
+.
+
+(25) Define 
+
+Γ(𝑦 ) = 𝜕 (1 − 𝛽 )
+
+𝜕𝑦 · 𝜎 (1 − 𝜎 2)  𝜙 (𝑧 − 𝑡 ) + 𝜙 (𝑧 + 𝑡 ).
+
+Since 𝜎 > 0, 1 −𝜎 2 > 0, and 𝜙 (𝑧 −𝑡 ) + 𝜙 (𝑧 +𝑡 ) > 0, Γ(𝑦 ) and 𝜕 (1−𝛽 )
+
+> 𝜕𝑦
+
+have the same sign. Using (24), we obtain 
+
+Γ(𝑦 ) = 𝜎 2  𝜙 (𝑧 + 𝑡 ) + 𝜙 (𝑧 − 𝑡 ) h
+
+𝜙 
+
+ 𝜎 
+
+1 − 𝜎 2 𝑦 + 𝑡 𝜎 
+
+
+
+− 𝜙 
+
+ 𝜎 
+
+1 − 𝜎 2 𝑦 − 𝑡 𝜎 
+
+i 
+
++  𝜙 (𝑧 − 𝑡 ) − 𝜙 (𝑧 + 𝑡 ) h
+
+𝜙 
+
+ 𝜎 
+
+1 − 𝜎 2 𝑦 + 𝑡 𝜎 
+
+
+
++ 𝜙 
+
+ 𝜎 
+
+1 − 𝜎 2 𝑦 − 𝑡 𝜎 
+
+i 
+
+.
+
+(26) Now define 
+
+Γ∗ (𝑦 ) = 2𝜋 Γ(𝑦 ) 𝑒 (𝑧 +𝑡 )22 𝑒 (𝑧 −𝑡 )22 𝑒     
+
+> 𝜎
+> 1−𝜎 2𝑦 +𝑡 𝜎
+> 22
+
+𝑒     
+
+> 𝜎
+> 1−𝜎 2𝑦 −𝑡 𝜎
+> 22
+
+.
+
+Since the multiplying factor is strictly positive, Γ∗ (𝑦 ) and Γ(𝑦 ) have the same sign. A direct expansion gives 
+
+Γ∗ (𝑦 ) = (1 + 𝜎 2)
+
+
+
+𝑒      
+
+> (𝑧 +𝑡 )2+
+> 𝜎
+> 1−𝜎 2𝑦 −𝑡 𝜎
+> 22
+
+− 𝑒     
+
+> (𝑧 −𝑡 )2+
+> 𝜎
+> 1−𝜎 2𝑦 +𝑡 𝜎
+> 22
+
+
+
++ ( 1 − 𝜎 2)
+
+
+
+𝑒      
+
+> (𝑧 +𝑡 )2+
+> 𝜎
+> 1−𝜎 2𝑦 +𝑡 𝜎
+> 22
+
+− 𝑒     
+
+> (𝑧 −𝑡 )2+
+> 𝜎
+> 1−𝜎 2𝑦 −𝑡 𝜎
+> 22
+
+
+
+.
+
+(27) Substituting 𝑧 = 𝑦  
+
+> 1−𝜎 2
+
+, define 
+
+𝑋 =
+
+ 𝑦  
+
+> 1−𝜎 2
+
++ 𝑡 
+
+2
+
++
+
+ 𝜎  
+
+> 1−𝜎 2
+
+𝑦 − 𝑡 𝜎 
+
+2
+
+2 , 𝑌 =
+
+ 𝑦  
+
+> 1−𝜎 2
+
+− 𝑡 
+
+2
+
++
+
+ 𝜎  
+
+> 1−𝜎 2
+
+𝑦 + 𝑡 𝜎 
+
+2
+
+2 ,
+
+and 
+
+𝑍 =
+
+ 𝑦  
+
+> 1−𝜎 2
+
++ 𝑡 
+
+2
+
++
+
+ 𝜎  
+
+> 1−𝜎 2
+
+𝑦 + 𝑡 𝜎 
+
+2
+
+2 ,𝑊 =
+
+ 𝑦  
+
+> 1−𝜎 2
+
+− 𝑡 
+
+2
+
++
+
+ 𝜎  
+
+> 1−𝜎 2
+
+𝑦 − 𝑡 𝜎 
+
+2
+
+2 .
+
+Then 
+
+Γ∗ (𝑦 ) = (1 + 𝜎 2)( 𝑒 𝑋 − 𝑒 𝑌 ) + ( 1 − 𝜎 2)( 𝑒 𝑍 − 𝑒 𝑊 ).
+
+We now compare these exponents. First, 
+
+𝑋 − 𝑌 = 2
+
+ 𝑦 
+
+1 − 𝜎 2
+
+
+
+𝑡 − 2
+
+ 𝜎𝑦 
+
+1 − 𝜎 2
+
+  𝑡 𝜎 
+
+
+
+= 0. (28) Hence 𝑒 𝑋 − 𝑒 𝑌 = 0. Second, 
+
+𝑍 − 𝑊 = 4𝑡𝑦 
+
+1 − 𝜎 2 > 0, (29) Rethinking the Security of DP-SGD: A Corrected Analysis of Differentially Private Machine Learning 
+
+because 𝑡 > 0, 𝑦 > 0, and 0 < 𝜎 < 1. Therefore 𝑒 𝑍 − 𝑒 𝑊 > 0. Since 
+
+1 − 𝜎 2 > 0, we conclude that 
+
+Γ∗ (𝑦 ) > 0.
+
+Hence Γ(𝑦 ) > 0, and therefore 
+
+𝜕 (1 − 𝛽 )
+
+𝜕𝑦 > 0.
+
+Equivalently, 
+
+𝜕𝛽 𝜕𝑦 < 0.
+
+Thus, for fixed 𝛼 ∈ ( 0, 1), the Type II error is strictly decreasing in 𝑦 . Therefore, if 𝑦 2 > 𝑦 1 > 0, then 
+
+𝑇 (N ( 0, 1), N ( 𝑦 2, 𝜎 2))( 𝛼 ) < 𝑇 (N ( 0, 1), N ( 𝑦 1, 𝜎 2))( 𝛼 ).
+
+For 𝛼 ∈ ( 0, 1), the above argument shows that, for any 𝜇 1 > 𝜇 2 >
+
+0,
+
+𝑇 (N ( 0, 1), N ( 𝜇 1, 𝜎 2))( 𝛼 ) < 𝑇 (N ( 0, 1), N ( 𝜇 2, 𝜎 2))( 𝛼 ).
+
+The boundary case 𝜇 2 = 0 follows by continuity of the trade-off function with respect to the mean parameter. Indeed, for fixed 
+
+𝛼 ∈ ( 0, 1), the threshold 𝑡 = 𝑡 (𝜇 ) is determined by 
+
+Φ
+
+ 𝜇 
+
+1 − 𝜎 2 + 𝑡 
+
+
+
+− Φ
+
+ 𝜇 
+
+1 − 𝜎 2 − 𝑡 
+
+
+
+= 𝛼. 
+
+Since the derivative of the left-hand side with respect to 𝑡 is 
+
+𝜙 
+
+ 𝜇 
+
+1 − 𝜎 2 + 𝑡 
+
+
+
++ 𝜙 
+
+ 𝜇 
+
+1 − 𝜎 2 − 𝑡 
+
+
+
+> 0,
+
+the implicit function theorem implies that 𝑡 (𝜇 ) is continuous in 𝜇 .Hence 
+
+𝑇  N ( 0, 1), N ( 𝜇, 𝜎 2) (𝛼 )
+
+is continuous in 𝜇 . Therefore, for any 0 < 𝜀 < 𝜇 1,
+
+𝑇  N ( 0, 1), N ( 𝜇 1, 𝜎 2) (𝛼 ) < 𝑇  N ( 0, 1), N ( 𝜀, 𝜎 2) (𝛼 ).
+
+Letting 𝜀 ↓ 0 gives 
+
+𝑇  N ( 0, 1), N ( 𝜇 1, 𝜎 2) (𝛼 ) ≤ 𝑇  N ( 0, 1), N ( 0, 𝜎 2) (𝛼 ), 𝛼 ∈ ( 0, 1).
+
+At the endpoints 𝛼 = 0 and 𝛼 = 1, the trade-off functions coincide, since 
+
+𝑇 (𝑃, 𝑄 )( 0) = 1, 𝑇 (𝑃, 𝑄 )( 1) = 0.
+
+Therefore, for any 𝜇 1 > 𝜇 2 ≥ 0,
+
+𝑇  N ( 0, 1), N ( 𝜇 1, 𝜎 2) (𝛼 ) ≤ 𝑇  N ( 0, 1), N ( 𝜇 2, 𝜎 2) (𝛼 ), ∀𝛼 ∈ [ 0, 1].
+
+## D.5 Proof of Theorem 3.5 
+
+Proof. Let 𝑃 = N ( 0, 1) and 𝑄 𝜎 = N ( 0, 𝜎 2) with 0 < 𝜎 < 1. Fix 
+
+𝛼 ∈ ( 0, 1).For 0 < 𝜎 < 1, the likelihood ratio is 
+
+Λ(𝑥 ) = 𝑓 𝑄 𝜎 (𝑥 )
+
+𝑓 𝑃 (𝑥 ) = 1
+
+𝜎 exp 
+
+
+
+− 12
+
+ 𝑥 2
+
+𝜎 2 − 𝑥 2
+
+  
+
+= 1
+
+𝜎 exp 
+
+
+
+− 1 − 𝜎 2
+
+2𝜎 2 𝑥 2
+
+
+
+.
+
+(30) Since Λ(𝑥 ) is symmetric about 0 and strictly decreasing in |𝑥 |,the Neyman–Pearson most-powerful test with Type I error 𝛼 has rejection region [− 𝑡, 𝑡 ] for some 𝑡 > 0, where 
+
+𝛼 =
+
+∫ 𝑡 
+
+> −𝑡
+
+𝑓 𝑃 (𝑥 ) 𝑑𝑥 = Φ(𝑡 ) − Φ(− 𝑡 ) = 2Φ(𝑡 ) − 1.
+
+Hence 𝑡 is determined by 𝛼 alone and does not depend on 𝜎 .Under 𝑄 𝜎 , we have 
+
+1 − 𝛽 =
+
+∫ 𝑡 
+
+> −𝑡
+
+𝑓 𝑄 𝜎 (𝑥 ) 𝑑𝑥 = Φ
+
+ 𝑡 𝜎 
+
+
+
+− Φ
+
+
+
+− 𝑡 𝜎 
+
+
+
+= 2Φ
+
+ 𝑡 𝜎 
+
+
+
+− 1.
+
+Differentiating with respect to 𝜎 , and using the fact that 𝑡 is inde-pendent of 𝜎 , yields 
+
+𝜕 (1 − 𝛽 )
+
+𝜕𝜎 = − 2𝑡 𝜎 2 𝜙 
+
+ 𝑡 𝜎 
+
+
+
+< 0.
+
+Therefore, 
+
+𝜕𝛽 𝜕𝜎 > 0.
+
+Thus, for any fixed 𝛼 ∈ (0, 1), the trade-off function 
+
+𝑇 (N ( 0, 1), N ( 0, 𝜎 2))( 𝛼 ) is strictly increasing in 𝜎 on 0 < 𝜎 ≤ 1.When 𝜎 = 1, we have 𝑄 𝜎 = 𝑃 , and hence 
+
+𝑇 (𝑃, 𝑄 𝜎 )( 𝛼 ) = ID (𝛼 ) = 1 − 𝛼. 
+
+Moreover, as 𝜎 ↑ 1, we have 
+
+2Φ
+
+ 𝑡 𝜎 
+
+
+
+− 1 → 2Φ(𝑡 ) − 1 = 𝛼, 
+
+and hence 
+
+𝑇 (𝑃, 𝑄 𝜎 )( 𝛼 ) = 𝛽 → 1 − 𝛼 = 𝑇 (𝑃, 𝑃 )( 𝛼 ).
+
+Thus the monotonicity extends to 0 < 𝜎 ≤ 1.For the endpoint cases in 𝛼 , we have 
+
+𝑇 (𝑃, 𝑄 𝜎 )( 0) = 1, 𝑇 (𝑃, 𝑄 𝜎 )( 1) = 0.
+
+Hence the monotonicity also holds for 𝛼 ∈ [ 0, 1].Therefore, if 1 ≥ 𝜎 1 ≥ 𝜎 2 > 0, then 
+
+𝑇 (N ( 0, 1), N ( 0, 𝜎 21 ))( 𝛼 ) ≥ 𝑇 (N ( 0, 1), N ( 0, 𝜎 22 ))( 𝛼 ), ∀𝛼 ∈ [ 0, 1].
+
+□
+
+## D.6 Proof of Theorem 3.6 
+
+First, we note that the trade-off function 𝑇 (𝑃, 𝑄 𝜇 1 
+
+> 𝐵
+> 𝑁
+
+) ≥ 𝑇 (𝑃, 𝑄 𝜇 1 
+
+> 𝐵
+> 𝑁
+
+)
+
+holds, where 𝜇 1 
+
+> 𝐵
+
+is defined in Eq. 5. This result follows from the inequality ∥ Í𝑖 ∈𝐵 𝑔 𝑖 ∥2  
+
+> (𝑁 +1)𝐶𝜎
+
+≤ |𝐵 |(𝑁 +1)𝜎 , and from Theorem 3.4, which guar-antees that 𝑇 (𝑃, 𝑄 𝜇 1 
+
+> 𝐵
+> 𝑁
+
+) ≥ 𝑇 (𝑃, 𝑄 𝜇 1 
+
+> 𝐵
+> 𝑁
+
+). Similarly, we can show that 
+
+𝑇 (𝑃, 𝑄 𝜇 2 
+
+> 𝐵
+> 𝑁
+
+) ≥ 𝑇 (𝑃, 𝑄 𝜇 2 
+
+> 𝐵
+> 𝑁
+
+) holds, where 𝜇 2 
+
+> 𝐵
+
+is defined in Eq. 6. Hence, we have 
+
+𝑓 𝑖 𝐵 = 𝑇 (𝑃 ⊗ ( 𝑛 −1) , 𝑄 ⊗ ( 𝑛 −1) 
+
+> 𝑁
+
+) ⊗ 𝑇 (𝑃, 𝑄 𝜇 𝑖 𝐵  
+
+> 𝑁
+
+)
+
+> (2)
+
+≥ 𝑇 (𝑃 ⊗ ( 𝑛 −1) , 𝑄 ⊗ ( 𝑛 −1) 
+
+> 𝑁
+
+) ⊗ 𝑇 (𝑃, 𝑄 𝜇 𝑖 𝐵  
+
+> 𝑁
+
+)
+
+> (3)
+
+= 𝑇 (𝑃 ⊗𝑛 , 𝑄 ⊗ ( 𝑛 −1) 
+
+> 𝑁
+
+⊗ 𝑄 𝜇 𝑖 𝐵  
+
+> 𝑁
+
+) = 𝑓 𝑖 𝐵 , 𝑖 ∈ { 1, 2}.
+
+(31) Here, (3)
+
+= holds due to Property 1, while (2)
+
+≥ is justified by Property 2. Finally, according to Lemma 3.2, we have 𝑇 (M ( 𝐷 ), M ( 𝐷 ′)) ≥ 𝑓 ≥
+
+𝑓 , where 𝑓 is defined in Eq. 4. Wenhao Wang, Shujie Cui, Hui Cui, and Xingliang Yuan 
+
+## D.7 Proof of Theorem 3.7 
+
+Proof. Following the same proof strategy as in Theorem 3.6, by the definitions of the corresponding component trade-off functions, we have 
+
+𝑓 1 
+
+> ∅
+
+= 𝑓 1
+
+> ∅
+
+, 𝑓 1 
+
+> 𝐵
+
+= 𝑓 1 
+
+> 𝐵
+
+.
+
+Moreover, since the Gaussian trade-off function 𝐺 𝜇 is decreasing in 
+
+𝜇 , and since ∥𝑔 𝑁 +1 ∥2 ≤ 𝐶 , we have 
+
+𝑓 2 
+
+> ∅
+
+≥ 𝐺 1/𝜎 .
+
+Thus, it remains to show that 
+
+𝑓 2 
+
+> 𝐵
+
+≥ 𝑓 2 
+
+> 𝐵
+
+.
+
+For 𝑄 𝜇 𝐵  
+
+> 𝐵
+
+defined in Eq. 10, the clipping condition gives 
+
+|𝐵 |𝑔 𝑁 +1 −∑︁  
+
+> 𝑖 ∈𝐵
+
+𝑔 𝑖 
+
+> 2
+
+≤ | 𝐵 |∥ 𝑔 𝑁 +1 ∥2 +∑︁  
+
+> 𝑖 ∈𝐵
+
+∥𝑔 𝑖 ∥2 ≤ 2|𝐵 |𝐶. 
+
+Therefore, 
+
+𝜇 𝐵 = |𝐵 |𝑔 𝑁 +1 − Í𝑖 ∈𝐵 𝑔 𝑖 2
+
+(| 𝐵 | + 1)𝐶𝜎 ≤ 2|𝐵 |(| 𝐵 | + 1)𝜎 = 𝜇 𝐵 .
+
+By Theorem 3.4, this implies 
+
+𝑇 (𝑃, 𝑄 𝜇 𝐵  
+
+> 𝐵
+
+) ≥ 𝑇 (𝑃, 𝑄 𝜇 𝐵  
+
+> 𝐵
+
+).
+
+Thus, given 𝑓 2 
+
+> 𝐵
+
+defined in Eq. 10, we have 
+
+𝑓 2 
+
+> 𝐵
+
+= 𝑇 (𝑃 ⊗ ( 𝑛 −1) , 𝑄 ⊗ ( 𝑛 −1) 
+
+> 𝐵
+
+) ⊗ 𝑇 (𝑃, 𝑄 𝜇 𝐵  
+
+> 𝐵
+
+)≥ 𝑇 (𝑃 ⊗ ( 𝑛 −1) , 𝑄 ⊗ ( 𝑛 −1) 
+
+> 𝐵
+
+) ⊗ 𝑇 (𝑃, 𝑄 𝜇 𝐵  
+
+> 𝐵
+
+)
+
+= 𝑇 (𝑃 ⊗𝑛 , 𝑄 ⊗ ( 𝑛 −1) 
+
+> 𝐵
+
+⊗ 𝑄 𝜇 𝐵  
+
+> 𝐵
+
+) = 𝑓 2 
+
+> 𝐵
+
+.
+
+Here, the inequality follows from Property 2, and the equalities follow from Property 1. Since these component-wise inequalities hold for all relevant 𝐵 ,Lemma 3.2 implies 
+
+𝑓 ≥ 𝑓 . 
+
+Combining this with the per-pair guarantee 
+
+𝑇 (M ( 𝐷 ), M ( 𝐷 ′)) ≥ 𝑓 
+
+gives 
+
+𝑇 (M ( 𝐷 ), M ( 𝐷 ′)) ≥ 𝑓 ≥ 𝑓 . 
+
+□
+
+## D.8 Proof of Theorem 3.8 
+
+First, according to Property 3, we have 𝑓 ≥ 𝑓 1 
+
+> 𝐵
+
+and 𝑓 ≥ 𝑓 2 
+
+> 𝐵
+
+, where 
+
+𝑓 1 
+
+> 𝐵
+
+and 𝑓 2 
+
+> 𝐵
+
+are defined in Eqs. 5 and 6, respectively. By replacing 𝑓 𝑖 𝐵 
+
+with 𝑓 for 𝑖 ∈ { 1, 2} in the definition of 𝑓 , we obtain 𝑓 ′. Then, by Lemma 3.2, we have 𝑓 ≤ 𝑓 ′, and by Lemma 3.3, we have 𝑓 ′ ≤ 𝑓 .The proof is complete. 
+
+## D.9 Proof of Theorem 3.9 
+
+First, let 𝑓 ∗ = 𝑇 (𝑃, 𝑄 𝑁 ), where 𝑃 and 𝑄 𝑁 are defined in table 1. Note that 𝑓 ∗ ≠ ID . Then, according to Lemma 2.6, we have 
+
+lim 𝑛 →∞ (𝑓 ∗)⊗ ( 𝑛 −1) (𝛼 ) = 0 for all 𝛼 ∈ ( 0, 1]. Then, by Property 1, we have (𝑓 ∗)⊗ ( 𝑛 −1) = 𝑓 . Therefore, lim 𝑛 →∞ 𝑓 (𝛼 ) = 0, ∀𝛼 ∈ ( 0, 1].
+
+## D.10 Proof of Theorem 3.10 
+
+Let 𝑓 1 
+
+> 𝐵
+
+and 𝑓 2 
+
+> 𝐵
+
+be defined in Eqs. 9 and 10, respectively, and let 𝑓 1 
+
+> ∅
+
+= ID and 𝑓 2 
+
+> ∅
+
+= 𝑇 (𝐺, 𝐺 + 𝑔 𝑁 +1). We first show that 
+
+𝑇  𝑃 ⊗ ( 𝑛 −1) , 𝑄 ⊗ ( 𝑛 −1)
+
+> 𝑁
+
+ ≥ 𝑓 2 
+
+> 𝐵
+
+.Define 𝐹 (𝑥 ) = 𝑥 2/( 𝑥 + 1)2 for 𝑥 ≥ 0. Since 𝐹 ′ (𝑥 ) = 2𝑥 /( 𝑥 +
+
+1)3 ≥ 0, the function 𝐹 is monotonically increasing, and hence 
+
+𝐹 (𝑁 ) ≥ 𝐹 (| 𝐵 |) . Let 𝑃 , 𝑄 𝑁 , and 𝑄 𝐵 be defined in Table 1, and let 
+
+𝑄 𝜇 𝐵  
+
+> 𝐵
+
+be defined in Eq. 10. Then we have 
+
+𝑇  𝑃 ⊗ ( 𝑛 −1) , 𝑄 ⊗ ( 𝑛 −1)
+
+> 𝑁
+
+ = 𝑇  𝑃 ⊗ ( 𝑛 −1) , 𝑄 ⊗ ( 𝑛 −1)
+
+> 𝑁
+
+ ⊗ ID 
+
+> (1)
+
+≥ 𝑇  𝑃 ⊗ ( 𝑛 −1) , 𝑄 ⊗ ( 𝑛 −1)
+
+> 𝐵
+
+ ⊗ 𝑇 (𝑃, 𝑄 𝜇 𝐵  
+
+> 𝐵
+
+) (2)
+
+= 𝑓 2 
+
+> 𝐵
+
+.
+
+(32) Here, (1)
+
+≥ follows from Theorem 3.5, which establishes that 
+
+𝑇 (𝑃, 𝑄 𝑁 ) ≥ 𝑇 (𝑃, 𝑄 𝐵 ), together with Properties 1 and 2. Equality (2)
+
+=
+
+follows from Property 1. Moreover, since ID = 𝑓 1 
+
+> 𝐵
+
+and ID ≥ 𝑓 𝑖  
+
+> ∅
+
+for 𝑖 ∈ { 1, 2}, substi-tuting 𝑓 1 
+
+> 𝐵
+
+, 𝑓 2 
+
+> 𝐵
+
+, and 𝑓 𝑖  
+
+> ∅
+
+(𝑖 ∈ { 1, 2}) in the definition of 𝑓 with ID ,
+
+𝑇  𝑃 ⊗ ( 𝑛 −1) , 𝑄 ⊗ ( 𝑛 −1)
+
+> 𝑁
+
+, and ID , respectively, yields a new trade-off function 𝑓 ∗.By Lemma 3.2, we have 𝑓 ∗ ≥ 𝑓 . Combined with Lemma 3.3, which gives 𝑓 ≥ 𝑓 ∗, we conclude that 𝑓 ≥ 𝑓 .
+
+## D.11 Proof of Theorem 3.11 
+
+We only need to prove that 
+
+lim  
+
+> 𝑛 →∞
+
+𝑓 (𝛼 ) =  1 − 𝑞 + 𝑞 (1 − 𝑞 )𝑁 ID (𝛼 ), ∀𝛼 ∈ ( 0, 1].
+
+Let 
+
+𝑓 ∗ := 𝑇 (𝑃, 𝑄 𝑁 ),
+
+where 𝑃 and 𝑄 𝑁 are defined in Table 1. Since 𝑓 ∗ ≠ ID , Lemma 2.6 implies that 
+
+lim 
+
+> 𝑛 →∞
+
+(𝑓 ∗)⊗ ( 𝑛 −1) (𝛼 ) = 0, ∀𝛼 ∈ ( 0, 1].
+
+Moreover, by Property 1, 
+
+(𝑓 ∗)⊗ ( 𝑛 −1) = 𝑇 (𝑃 ⊗𝑛 −1, 𝑄 ⊗𝑛 −1 
+
+> 𝑁
+
+).
+
+According to the definition of 𝑓 in Theorem 3.10, 
+
+𝑓 (𝛼 ) = 𝑞  1−( 1−𝑞 )𝑁  𝑇 (𝑃 ⊗𝑛 −1, 𝑄 ⊗𝑛 −1 
+
+> 𝑁
+
+)( 𝛼 )+  1−𝑞 +𝑞 (1−𝑞 )𝑁 ID (𝛼 ).
+
+Taking the limit as 𝑛 → ∞ , we obtain 
+
+lim  
+
+> 𝑛 →∞
+
+𝑓 (𝛼 ) = 𝑞  1 − ( 1 − 𝑞 )𝑁  · 0 +  1 − 𝑞 + 𝑞 (1 − 𝑞 )𝑁 ID (𝛼 )
+
+=  1 − 𝑞 + 𝑞 (1 − 𝑞 )𝑁 ID (𝛼 ),
+
+for all 𝛼 ∈ ( 0, 1].Finally, since Theorem 3.10 shows that 
+
+𝑓 (𝛼 ) ≥ 𝑓 (𝛼 ), ∀𝛼 ∈ ( 0, 1],
+
+taking the limit yields 
+
+ 1 − 𝑞 + 𝑞 (1 − 𝑞 )𝑁 ID (𝛼 ) ≥ 𝑓 (𝛼 ), ∀𝛼 ∈ ( 0, 1].
+
+This completes the proof. Rethinking the Security of DP-SGD: A Corrected Analysis of Differentially Private Machine Learning 
+
+## D.12 Proof of Lemma 3.14 
+
+Proof. For 𝑓 in Theorem 3.8, we follow the same notation as in that theorem. According to the definition of 𝑓 , it suffices to prove that if 𝑁 1 ≥ 𝑁 2, then 
+
+𝑇 (𝑃 ⊗ ( 𝑛 −1) , 𝑄 ⊗ ( 𝑛 −1) 
+
+> 𝑁 1
+
+) ≥ 𝑇 (𝑃 ⊗ ( 𝑛 −1) , 𝑄 ⊗ ( 𝑛 −1) 
+
+> 𝑁 2
+
+).
+
+Note that 𝑃 = N ( 0, 1) and 𝑄 𝑁 = N ( 0, 𝐹 (𝑁 )) , where 𝐹 (𝑥 ) = 𝑥 2 
+
+> (𝑥 +1)2
+
+.As established in the proof of Theorem 3.10, 𝐹 (𝑥 ) increases as 𝑥 
+
+increases. Thus, according to Theorem 3.5, we have 
+
+𝑇 (𝑃, 𝑄 𝑁 1 ) ≥ 𝑇 (𝑃, 𝑄 𝑁 2 ).
+
+Further, by Properties 1 and 2, 
+
+𝑇 (𝑃 ⊗ ( 𝑛 −1) , 𝑄 ⊗ ( 𝑛 −1) 
+
+> 𝑁 1
+
+) = 𝑇 (𝑃, 𝑄 𝑁 1 )⊗ ( 𝑛 −1) ≥ 𝑇 (𝑃, 𝑄 𝑁 2 )⊗ ( 𝑛 −1)
+
+= 𝑇 (𝑃 ⊗ ( 𝑛 −1) , 𝑄 ⊗ ( 𝑛 −1) 
+
+> 𝑁 2
+
+).
+
+This completes the proof. □
+
+## D.13 Proof of Lemma 3.15 
+
+Proof. We first consider 𝑓 in Theorem 3.10. By the definition of 𝑓 , it suffices to show that, if 𝑛 1 ≥ 𝑛 2, then 
+
+𝑇 (𝑃 ⊗ ( 𝑛 1 −1) , 𝑄 ⊗ ( 𝑛 1 −1) 
+
+> 𝑁
+
+) ≤ 𝑇 (𝑃 ⊗ ( 𝑛 2 −1) , 𝑄 ⊗ ( 𝑛 2 −1) 
+
+> 𝑁
+
+).
+
+By Properties 1 and 2, we have 
+
+𝑇 (𝑃 ⊗ ( 𝑛 2 −1) , 𝑄 ⊗ ( 𝑛 2 −1) 
+
+> 𝑁
+
+)
+
+= 𝑇 (𝑃 ⊗ ( 𝑛 2 −1) , 𝑄 ⊗ ( 𝑛 2 −1) 
+
+> 𝑁
+
+) ⊗ ID ⊗ ( 𝑛 1 −𝑛 2 )
+
+≥ 𝑇 (𝑃 ⊗ ( 𝑛 2 −1) , 𝑄 ⊗ ( 𝑛 2 −1) 
+
+> 𝑁
+
+) ⊗ 𝑇 (𝑃 ⊗ ( 𝑛 1 −𝑛 2 ) , 𝑄 ⊗ ( 𝑛 1 −𝑛 2 ) 
+
+> 𝑁
+
+)
+
+= 𝑇 (𝑃 ⊗ ( 𝑛 1 −1) , 𝑄 ⊗ ( 𝑛 1 −1) 
+
+> 𝑁
+
+).
+
+Thus, 𝑓 decreases pointwise as 𝑛 increases. The EASGM case follows by the same argument, since its upper bound depends on 𝑛 through the same term 
+
+𝑇 (𝑃 ⊗ ( 𝑛 −1) , 𝑄 ⊗ ( 𝑛 −1) 
+
+> 𝑁
+
+).
+
+This completes the proof. □
+
+## D.14 Proof of Lemma 3.16 
+
+Let 𝑎 (𝑞 ) := 𝑞 − 𝑞 (1 − 𝑞 )𝑁 , 𝑏 (𝑞 ) := 1 − 𝑞 + 𝑞 (1 − 𝑞 )𝑁 , so that 
+
+𝑎 (𝑞 ) + 𝑏 (𝑞 ) = 1. Then 
+
+𝑓 𝑞 (𝛼 ) = 𝑎 (𝑞 ) 𝑇 
+
+
+
+𝑃 ⊗ ( 𝑛 −1) , 𝑄 ⊗ ( 𝑛 −1)
+
+> 𝑁
+
+
+
+(𝛼 ) +  1 − 𝑎 (𝑞 ) ID (𝛼 ).
+
+We first show that 𝑎 (𝑞 ) is strictly increasing in 𝑞 on [0, 1]. For 
+
+𝑞 ∈ ( 0, 1),
+
+𝑎 ′ (𝑞 ) = 𝑑 𝑑𝑞 
+
+ 𝑞 − 𝑞 (1 − 𝑞 )𝑁  = 1 − 𝑑 𝑑𝑞 
+
+ 𝑞 (1 − 𝑞 )𝑁 .
+
+By the product rule, 
+
+𝑑 𝑑𝑞 
+
+ 𝑞 (1 − 𝑞 )𝑁  = (1 − 𝑞 )𝑁 − 𝑁𝑞 (1 − 𝑞 )𝑁 −1,
+
+and therefore 
+
+𝑎 ′ (𝑞 ) = 1 − ( 1 − 𝑞 )𝑁 + 𝑁𝑞 (1 − 𝑞 )𝑁 −1.
+
+Since 𝑞 ∈ ( 0, 1) and 𝑁 ≥ 1, we have 
+
+1 − ( 1 − 𝑞 )𝑁 > 0, 𝑁𝑞 (1 − 𝑞 )𝑁 −1 ≥ 0,
+
+which implies 𝑎 ′ (𝑞 ) > 0. Hence 𝑎 (𝑞 ) is strictly increasing on (0, 1),and by continuity also increasing on [0, 1]. In particular, for any 
+
+0 ≤ 𝑞 1 < 𝑞 2 ≤ 1, if we write 
+
+𝑎 1 := 𝑎 (𝑞 1), 𝑎 2 := 𝑎 (𝑞 2),
+
+then 𝑎 1 < 𝑎 2.Now compute the difference: 
+
+𝑓 𝑞 1 (𝛼 ) − 𝑓 𝑞 2 (𝛼 ) = (𝑎 1 − 𝑎 2)
+
+
+
+𝑇 
+
+
+
+𝑃 ⊗ ( 𝑛 −1) , 𝑄 ⊗ ( 𝑛 −1)
+
+> 𝑁
+
+
+
+(𝛼 ) − ID (𝛼 )
+
+
+
+.
+
+Since ID is the maximal trade-off function, we have 
+
+𝑇 
+
+
+
+𝑃 ⊗ ( 𝑛 −1) , 𝑄 ⊗ ( 𝑛 −1)
+
+> 𝑁
+
+
+
+(𝛼 ) ≤ ID (𝛼 ), ∀𝛼 ∈ [ 0, 1].
+
+Since 𝑎 1 − 𝑎 2 < 0, it follows that 
+
+𝑓 𝑞 1 (𝛼 ) − 𝑓 𝑞 2 (𝛼 ) ≥ 0 for all 𝛼 ∈ [ 0, 1].
+
+Therefore, 
+
+𝑓 𝑞 1 (𝛼 ) ≥ 𝑓 𝑞 2 (𝛼 ) for all 𝛼 ∈ [ 0, 1],
+
+which proves that 𝑓 𝑞 is pointwise monotonically decreasing in 
+
+𝑞 ∈ [ 0, 1].Moreover, if 
+
+𝑇 
+
+
+
+𝑃 ⊗ ( 𝑛 −1) , 𝑄 ⊗ ( 𝑛 −1)
+
+> 𝑁
+
+
+
+(𝛼 ) < ID (𝛼 )
+
+for some 𝛼 , then 
+
+𝑇 
+
+
+
+𝑃 ⊗ ( 𝑛 −1) , 𝑄 ⊗ ( 𝑛 −1)
+
+> 𝑁
+
+
+
+(𝛼 ) − ID (𝛼 ) < 0.
+
+Since 𝑎 1 − 𝑎 2 < 0, we obtain 
+
+𝑓 𝑞 1 (𝛼 ) − 𝑓 𝑞 2 (𝛼 ) > 0,
+
+and hence 
+
+𝑓 𝑞 1 (𝛼 ) > 𝑓 𝑞 2 (𝛼 ).
+
+This proves the strict version. 
+
+## D.15 Proof of Theorem 3.13 
+
+Proof. Let 𝑓 ∗ = 𝑇 (𝑃, 𝑄 ) with 𝑃 ∼ N ( 0, 1) and 𝑄 ∼ N ( 0, 𝜎 2) for 
+
+0 < 𝜎 < 1, and define 
+
+𝑓 ∗ = max {𝑓 ∗, 𝑓 −1 
+
+> ∗
+
+}.
+
+To prove the theorem, it suffices to show that 
+
+𝜅 3 (𝑓 ∗) :=
+
+∫ 10
+
+log |𝑓 ∗′ (𝛼 )| 3 𝑑𝛼 < ∞,
+
+which is the prerequisite for applying Theorem 3.12. Let the trade-off function 𝑓 ∗ = 𝑇 (𝑃, 𝑄 ) be induced by the Neyman–Pearson most-powerful test with rejection region [− 𝑡, 𝑡 ].Specifically, 
+
+𝛼 (𝑡 ) = P(| 𝑍 | ≤ 𝑡 ) = 2Φ(𝑡 )− 1, 𝛽 (𝑡 ) = P(| 𝑋 | > 𝑡 ) = 2 1−Φ(𝑡 /𝜎 ),
+
+where 𝑍 ∼ N ( 0, 1), 𝑋 ∼ N ( 0, 𝜎 2), and Φ denotes the standard normal CDF. We write 𝑓 ∗ (𝛼 (𝑡 )) = 𝛽 (𝑡 ).
+
+Step 1: Proving 𝜅 3 (𝑓 ∗) < ∞. Differentiating with respect to 𝑡 gives 
+
+𝑑𝛼 𝑑𝑡 = 2 𝜙 (𝑡 ), 𝑑𝛽 𝑑𝑡 = − 2
+
+𝜎 𝜙 
+
+ 𝑡 𝜎 
+
+
+
+,
+
+where 𝜙 (𝑢 ) = (2𝜋 )−1/2𝑒 −𝑢 2/2 is the standard normal pdf. Conse-quently, 
+
+𝑓 ′∗
+
+ 𝛼 (𝑡 ) = 𝑑𝛽 /𝑑𝑡 𝑑𝛼 /𝑑𝑡 = − 1
+
+𝜎 𝜙 (𝑡 /𝜎 )
+
+𝜙 (𝑡 ) = − 1
+
+𝜎 exp 
+
+
+
+− 1 − 𝜎 2
+
+2𝜎 2 𝑡 2
+
+
+
+.Wenhao Wang, Shujie Cui, Hui Cui, and Xingliang Yuan 
+
+In particular, 𝑓 ′∗ (𝛼 (𝑡 )) < 0 for all 𝑡 . Moreover, 
+
+𝑑 𝑓 ′∗ (𝛼 (𝑡 )) 
+
+𝑑𝑡 = 1
+
+𝜎 exp 
+
+
+
+− 1 − 𝜎 2
+
+2𝜎 2 𝑡 2
+
+
+
+· 1 − 𝜎 2
+
+𝜎 2 𝑡 . 
+
+Since 𝑑𝛼 /𝑑𝑡 = 2𝜙 (𝑡 ) > 0, the second derivative satisfies 
+
+𝑓 ′′ ∗ (𝛼 (𝑡 )) =    
+
+> 𝑑 𝑓 ′∗(𝛼 (𝑡 ) )
+> 𝑑𝑡
+
+𝑑𝛼 /𝑑𝑡 =
+
+√2𝜋 
+
+21 − 𝜎 2
+
+𝜎 3 𝑡 exp 
+
+ 2𝜎 2 − 12𝜎 2 𝑡 2
+
+
+
+,
+
+which has the same sign as 𝑡 . Hence, on the usual parametrization 
+
+𝑡 ∈ [ 0, ∞) (which covers 𝛼 ∈ [ 0, 1)), we have 𝑓 ′′ ∗ (𝛼 ) ≥ 0, i.e. 𝑓 ∗ is convex and strictly decreasing on (0, 1).Using 𝛼 = 𝛼 (𝑡 ) as a change of variables, we have 
+
+𝑑𝛼 = 2𝜙 (𝑡 ) 𝑑𝑡 =√︃ 2 
+
+> 𝜋
+
+𝑒 −𝑡 2/2 𝑑𝑡, 
+
+and 
+
+log |𝑓 ′∗ (𝛼 (𝑡 ))| = log 
+
+ 1
+
+𝜎 
+
+
+
+− 1 − 𝜎 2
+
+2𝜎 2 𝑡 2.
+
+Let 
+
+𝑡 0 :=√︄ 2𝜎 2
+
+1 − 𝜎 2 log 
+
+ 1
+
+𝜎 
+
+
+
+∈ ( 0, ∞) ,
+
+so that log |𝑓 ′∗ (𝛼 (𝑡 0))| = 0. Then 
+
+𝜅 3 (𝑓 ∗) =√︂ 2
+
+𝜋 
+
+∫ ∞
+
+> 0
+
+log 
+
+ 1
+
+𝜎 
+
+
+
+− 1 − 𝜎 2
+
+2𝜎 2 𝑡 2 3
+
+𝑒 −𝑡 2/2 𝑑𝑡 . 
+
+Split the integral at 𝑡 0. On [0, 𝑡 0], the integrand is continuous and bounded, hence integrable. On [𝑡 0, ∞) , there exists a constant 𝐶 1 >
+
+0 such that 
+
+log 
+
+ 1
+
+𝜎 
+
+
+
+− 𝑐 𝑡 2 3
+
+≤ 𝐶 1 (1 + 𝑡 6), 𝑐 = 1 − 𝜎 2
+
+2𝜎 2 .
+
+Therefore, 
+
+𝜅 3 (𝑓 ∗) ≤ √︂ 2
+
+𝜋 
+
+∫ ∞
+
+> 0
+
+𝐶 1 (1 + 𝑡 6)𝑒 −𝑡 2/2 𝑑𝑡 < ∞,
+
+because a polynomial times a Gaussian tail is integrable [19]. 
+
+Step 2: Proving 𝜅 3 (𝑓 −1 
+
+> ∗
+
+) < ∞. A standard change of variables [ 37 ]gives 
+
+𝜅 3 (𝑓 −1 
+
+> ∗
+
+) =
+
+∫ 10
+
+log 1
+
+|𝑓 ′∗ (𝛼 )| 
+
+> 3
+
+|𝑓 ′∗ (𝛼 )| 𝑑𝛼. 
+
+Substituting the parametrization above yields 
+
+𝜅 3 (𝑓 −1 
+
+> ∗
+
+) =√︂ 2
+
+𝜋 
+
+1
+
+𝜎 
+
+∫ ∞
+
+> 0
+
+log 𝜎 + 1 − 𝜎 2
+
+2𝜎 2 𝑡 2 3
+
+exp 
+
+
+
+− 𝑡 2
+
+2𝜎 2
+
+
+
+𝑑𝑡 . 
+
+Again, the integrand is bounded on compact intervals and has the form (polynomial in 𝑡 ) × 𝑒 −𝑡 2/( 2𝜎 2 )
+
+for large 𝑡 , hence it is integrable. Therefore 𝜅 3 (𝑓 −1 
+
+> ∗
+
+) < ∞.
+
+Step 3: Proving 𝜅 3 (𝑓 ∗) < ∞. Since 𝛼 (𝑡 ) is analytic and strictly increasing on (0, ∞) , its inverse 
+
+𝑡 (𝛼 ) = Φ−1
+
+ 1 + 𝛼 
+
+2
+
+
+
+is analytic on (0, 1). Hence 
+
+𝑓 ∗ (𝛼 ) = 2
+
+
+
+1 − Φ 𝑡 (𝛼 )/ 𝜎 
+
+is real analytic on (0, 1). Because 𝑓 ∗ is real analytic on (0, 1) and 
+
+𝑓 ′∗ (𝛼 ) < 0 for all 𝛼 ∈ ( 0, 1), the real analytic inverse function theorem [ 26 , Theorem 1.5.3] implies that 𝑓 −1 
+
+> ∗
+
+is real analytic on 
+
+(0, 1).Now define 
+
+ℎ(𝛼 ) := 𝑓 ∗ (𝛼 ) − 𝑓 −1 
+
+> ∗
+
+(𝛼 ).
+
+Then ℎ is real analytic on (0, 1). If ℎ ≡ 0, then 𝑓 ∗ = 𝑓 ∗, and the conclusion follows immediately from Step 1. Otherwise, ℎ . 0.Since ℎ is real analytic, Corollary 1.2.7 of [ 26 ] implies that the zero set of ℎ has no accumulation point in (0, 1). Hence the zero set 
+
+𝑍 := {𝛼 ∈ ( 0, 1) : ℎ(𝛼 ) = 0}
+
+is discrete, countable, and of Lebesgue measure zero. On each connected component of (0, 1) \ 𝑍 , the sign of ℎ is constant. Therefore, on each such component, 𝑓 ∗ coincides either with 𝑓 ∗ or with 𝑓 −1 
+
+> ∗
+
+. Consequently, for almost every 𝛼 ∈ ( 0, 1),
+
+(𝑓 ∗)′ (𝛼 ) =
+
+
+
+𝑓 ′∗ (𝛼 ), if 𝑓 ∗ (𝛼 ) > 𝑓 −1 
+
+> ∗
+
+(𝛼 ),
+
+(𝑓 −1 
+
+> ∗
+
+)′ (𝛼 ), if 𝑓 ∗ (𝛼 ) < 𝑓 −1 
+
+> ∗
+
+(𝛼 ).
+
+Since 𝑍 is a null set, we obtain 
+
+𝜅 3 (𝑓 ∗) =
+
+∫
+
+> {ℎ>0}
+
+log |𝑓 ′∗ (𝛼 )| 3 𝑑𝛼 +
+
+∫
+
+> {ℎ<0}
+
+log |( 𝑓 −1 
+
+> ∗
+
+)′ (𝛼 )| 3 𝑑𝛼. 
+
+Hence 
+
+𝜅 3 (𝑓 ∗) ≤ 𝜅 3 (𝑓 ∗) + 𝜅 3 (𝑓 −1 
+
+> ∗
+
+) < ∞.
+
+Thus 𝜅 3 (𝑓 ∗) < ∞, completing the proof. □

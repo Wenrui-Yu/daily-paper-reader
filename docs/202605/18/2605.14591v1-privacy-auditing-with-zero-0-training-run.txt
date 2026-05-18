@@ -1,0 +1,4494 @@
+Title: Privacy Auditing with Zero (0) Training Run
+
+URL Source: https://arxiv.org/pdf/2605.14591v1
+
+Published Time: Fri, 15 May 2026 00:51:19 GMT
+
+Number of Pages: 36
+
+Markdown Content:
+# Privacy Auditing with Zero (0) Training Run 
+
+Tudor Cebere ∗
+
+PreMeDICaL team, Inria Idesp, Inserm, Univ. de Montpellier 
+
+Mathieu Even ∗
+
+PreMeDICaL team, Inria Idesp, Inserm, Univ. de Montpellier 
+
+Linus Bleistein 
+
+School of Computer and Communication Sciences and School of Life Sciences (EPFL) 
+
+Aurélien Bellet 
+
+PreMeDICaL team, Inria Idesp, Inserm, Univ. de Montpellier 
+
+## Abstract 
+
+Privacy auditing provides empirical lower bounds on the differential privacy pa-rameters of learning algorithms. Existing methods, however, require interventional access to the training pipeline, either to retrain multiple times or to randomize data inclusion. This is often infeasible for large deployed systems such as foundation models. We introduce Zero-Run privacy auditing, a post-hoc framework for audit-ing models using two fixed datasets: examples known to be training-set members and examples known to be non-members. In this observational regime, membership is no longer randomized; instead, member and non-member data often differ in dis-tribution, so membership inference scores may reflect a distribution shift rather than algorithmic leakage. Drawing on ideas from causal inference, we formalize this confounding effect and propose two complementary corrections that yield valid pri-vacy audits. Our first approach models the combined effect of distribution shift and algorithmic leakage as an adaptive composition, producing conservative global cor-rections. Our second approach conditions on observed data and adjusts pointwise membership guesses, yielding sharper instance-dependent bounds. Experiments on synthetic data and large-scale models show that Zero-Run auditing enables practical privacy evaluation when retraining or controlled data insertion is infeasible. 
+
+## 1 Introduction 
+
+As AI systems increasingly process sensitive data, mitigating privacy leakage (i.e., the inadvertent disclosure of training examples) has become a critical priority. This risk is exacerbated by high-capacity foundation models trained across various modalities [ 39 , 21 , 32 , 7, 18 , 8]. Trained on massive, web-crawled corpora, they are inherently susceptible to memorizing personal or proprietary information [ 3, 2, 24 ], and Carlini et al. [4] show that this memorization scales log-linearly with model size. Moreover, these vulnerabilities introduce challenges in domain-specific contexts; for instance, clinical foundation models memorize rare patient profiles despite rigorous data de-identification [ 38 ]. A countermeasure to these risks is differential privacy (DP) [ 13 ], the de facto standard for privacy-preserving algorithms. By bounding the impact of any individual’s data on the result, DP protects against privacy attacks that infer sensitive information from released outputs. However, despite offering worst-case guarantees over the privacy leakage, its adoption in large-scale training pipelines is limited due to steep utility penalties [ 20 ] and the prohibitive cost of overhauling existing data-processing infrastructure [35]. Motivated by these practical barriers, privacy auditing offers an empirical complement to DP by lower-bounding an algorithm’s privacy parameters [ 9 , 19 , 30 , 5]. By probing a model’s behavior 
+
+> ∗Equal contribution Preprint.
+> arXiv:2605.14591v1 [cs.CR] 14 May 2026
+
+on its training data, audits can expose implementation flaws [ 40 ], identify misconfigured privacy mechanisms [ 6], or demonstrate that theoretical guarantees are tight (i.e., the auditing lower bound closely matches the DP upper bound) [ 29 , 30 ]. In contrast to worst-case theoretical upper bounds, auditing quantifies empirical leakage for a specific model architecture, dataset, and threat model, yielding deployment-relevant evidence for privacy claims, compliance, and risk assessment [15]. While traditional privacy auditing requires repeatedly retraining models on randomized datasets [ 19 , 30 , 5], recent advances condense this requirement to a single randomized training run [ 37 , 25 ]. Yet, even this approach fails to scale to modern AI models. Their training consumes thousands of GPU days and relies on rigid, distributed data pipelines. Large language models perfectly capture this dilemma. Despite being trained on vast web corpora loaded with sensitive data, their immense scale, opaque data mixtures, and blackbox deployments render privacy auditing nearly impossible. Consequently, researchers and regulators lack tools to verify privacy guarantees, relying on trust and the voluntary cooperation of model providers. This creates an accountability gap: the systems posing the greatest privacy risks are the most insulated from independent privacy evaluation. 
+
+Contributions. To address this gap, we introduce a Zero-Run auditing framework that enables auditors to assess the privacy leakage of an algorithm post-hoc from its release , without modifying the algorithm or data pipeline. We ground our approach in a fundamental analogy to causal inference. Ex-isting privacy audits based on randomized data insertion are inherently interventional—analogous to randomized controlled trials—which avoid confounding by design. In contrast, our Zero-Run frame-work is the observational counterpart, estimating privacy leakage from static member and non-member datasets. Since these datasets often follow different underlying distributions, this distribution shift acts as a confounding factor [ 33 , 42 ]. Guided by this analogy, our main contributions are as follows: 1. Formalizing Zero-Run Auditing (Section 3). We formalize the post-hoc auditing regime where the auditor relies on disjoint datasets of known members and non-members. We demonstrate that naive audits on such data can substantially overestimate privacy leakage: membership inference attacks can succeed merely by exploiting distributional shift rather than algorithmic leakage, causing standard procedures to wrongly attribute this spurious signal to the model. We explicitly connect this setting to observational causal inference, where valid correction requires overlap (positivity) between the member and non-member distributions. 2. Privacy Leakage Correction (Sections 4 and 5). We extend One-Run analyses [ 37 , 25 ] to the post-hoc regime, correcting distribution shift effects on empirical privacy curves via: • The Composition Viewpoint (Section 4) models the observed leakage as an adaptive composi-tion of a distribution-shift mechanism and the audited algorithm, yielding a deconvolution-based estimate of privacy leakage, albeit a conservative one under severe distribution shift. • The Conditional Viewpoint (Section 5) characterizes pointwise privacy leakage conditional on the example. We tamper an adversary’s membership guesses to remove overconfidence induced by confounding, yielding a robust, shift-dependent correction. 3. Propensity Scores and Uncertainty Quantification (Section 6). Our composition and conditional correction principles rely on propensity scores (the probability that an example is a member, based solely on its features), which must be estimated. We explicitly quantify uncertainty in propensity score estimation in our privacy lower bounds via bootstrapping [14]. 4. Practical Scalability (Section 7). We demonstrate that Zero-Run auditing enables scalable privacy audits of large, deployed models where retraining is computationally or logistically infeasible. 
+
+## 2 Background on Differential Privacy and Privacy Auditing 
+
+Differential Privacy. Informally, Differential Privacy (DP) [ 13 , 12 ] ensures that a randomized algorithm’s output remains largely unchanged whether a single individual’s data is included or not in the input. DP is widely considered the standard for privacy-preserving data analysis because it provides a mathematically rigorous guarantee against adversaries with arbitrary side information. DP is immune to post-processing (protections cannot be degraded by further computation) and composes gracefully, enabling accurate tracking of the cumulative privacy loss across multiple analyses. 
+
+Definition 1 ((ε, δ )-DP) . Let ε, δ > 0. A randomized algorithm A that takes as input a dataset 
+
+D ⊂ X and outputs A(D) ∈ Θ is said to satisfy (ε, δ )-differential privacy if, for any pair of adjacent 2datasets D and D′ (i.e., which are the same except one data sample) and any measurable set E ⊂ Θ:
+
+P (A(D) ∈ E ) ≤ eεP (A(D′) ∈ E ) + δ . 
+
+Pure ε-DP corresponds to the special case where δ = 0 . In this work, we will also rely on the more expressive notion of f -DP [ 10 ], which is based on trade-off functions that lower bound the Type II error given a Type I error of α for testing z ∼ P versus z ∼ Q. We denote by TZ,Z ′ the trade-off function between the distributions of two random variables Z, Z ′.
+
+Definition 2 (Trade-off function) . For two distributions P and Q on some space Z, the trade-off function TP,Q is the function [0 , 1] → [0 , 1] defined as TP,Q(α) = inf {βϕ | αϕ ≤ α}, where the infimum is taken over all measurable functions Z → { 0, 1}, αϕ = EPϕ and βϕ = EQϕ.
+
+Definition 3 (f -DP) . A randomized algorithm A is said to satisfy f -differential privacy for f adecreasing and convex function satisfying f (t) ≤ 1 − t for t ∈ [0 , 1] if, for any pair of adjacent datasets D and D′, we have, for all α ∈ [0 , 1] , TA(D),A(D′)(α) ≥ f (α). Equivalently, for any measurable set E, P (A(D) ∈ E ) ≤ ¯f  P (A(D′) ∈ E ) , where ¯f = 1 − f. 
+
+For two mechanisms A1 and A2, respectively f1-DP and f2-DP, their composition A2 ⊙ A 1 satisfies 
+
+f -DP, with f given by the convolution f = f1 ⊗ f2, which characterizes the optimal testing error after observing both outputs. This remains valid even if A2 depends on the outputs of A1 [ 10 ]. Two special cases of f -DP will be used throughout: (ε, δ )-DP (Definition 1), summarized by parameters 
+
+(ε, δ ), and Gaussian DP ( μ-GDP, [ 10 ]), summarized by a scalar μ, with respective trade-off functions 
+
+fε,δ (p) = max(0 , 1 − eεp − δ, e −ε(1 − δ − p)) and Gμ(p) = Φ(Φ −1(1 − p) − μ)) . For μ-GDP, the function f coincides with the false negative rate as a function of the false positive rate for the optimal test distinguishing two unit-variance Gaussians with means differing by μ. While (ε, δ )-DP summarizes privacy using two worst-case parameters, f -DP and GDP characterize the full trade-off between false positives and false negatives. This finer description provides a complete view of an adversary’s inference capability and enables more expressive privacy reporting and accounting [ 17 ]. 
+
+Privacy Auditing. An auditing algorithm takes as input an algorithm A (e.g., DP-SGD) and a privacy hypothesis H (e.g., “ A satisfies f -DP”), outputting a bit indicating whether A satisfies H.Standard auditing follows a three-step procedure: (1) a randomized experiment evaluating A on a dataset D; (2) a membership inference attack (MIA) outputting guesses (Ti)i∈[m] ∈ {− 1, 0, 1}m
+
+for the true membership Si of Xi based on the output of the experiment, with Ti = 0 denoting abstention; and (3) an audit evaluation outputting b ∈ { TRUE , FALSE } based on H, the MIA output T , and the experiment’s observations (including true memberships). For an error probability 
+
+p ∈ [0 , 1] , the audit is p-valid if P (b = FALSE |A satisfies H) ≤ p. From such procedures, one can derive empirical privacy parameters —high-probability lower bounds on leakage—by identifying the largest privacy level confidently ruled out by the audit (see Section 6). In step (1) , both Multi-Run [ 19 ] and One-Run [37 ] auditing randomize data inclusions—executing 
+
+A repeatedly for individual points Xi, or once for multiple points (Xi)i∈[m], respectively. Both rely fundamentally on membership indicators Si ∈ {− 1, 1} being independent, centered random variables. This randomized assignment is the core statistical assumption validating interventional audits, an assumption that our Zero-Run auditing framework explicitly eliminates. 
+
+## 3 Zero-Run Privacy Auditing Framework 
+
+Traditional privacy auditing techniques rely on randomized experiments (see Section 2) that demand computationally prohibitive re-executions and randomized data insertions, making them infeasible for complex, large-scale systems. We address this bottleneck by replacing the interventional experiment with an observational study . Instead of randomizing input data and re-running the algorithm A, our 
+
+Zero-Run auditor passively evaluates its existing output. This approach requires zero control over or access to the original execution pipeline. 
+
+Zero-Run Auditing. As illustrated in Figure 1, our Zero-Run auditing framework operates as follows: 1. (Algorithm Output & Observational Data Formulation) The auditor observes θ = A(Dtrain ),the result of the algorithm A executed on a private dataset Dtrain . This output might be accessible via direct inspection or indirectly through a query interface. Crucially, the auditor lacks access to the full dataset Dtrain and the algorithm’s internal mechanics. Instead, the auditor relies on 3Algorithm Output                          
+
+> θ∼A(Dtrain )
+> Observational Data
+> Xi∈D1∪ D 0
+> Members (Si= 1 )
+> Xi∈ D 1⊆ D train ∼P1
+> Non-members (Si=−1)
+> Xi∈ D 0⊆ D c
+> train ∼P0
+> Confounding Shift: P1̸=P0
+> Membership Inference
+> Guesses Ti
+> Propensity Estimator
+> Scores ˆπ(Xi)
+> Zero-Run Correction Compositional (Global)
+> Conditional (Pointwise)
+> Empirical Lower Bounds
+> θ
+> Xi
+> Xi
+> Ti
+> ˆπ(Xi)
+> Si
+
+Figure 1: Overview of the Zero-Run Privacy Auditing framework. Observational data ( Xi) from members and non-members introduces a confounding distribution shift ( P1̸ = P0). By modeling this shift, a propensity score estimator ˆπ(Xi) adjusts raw membership guesses ( Ti) via global composition or pointwise conditioning, isolating true algorithmic leakage to yield valid empirical DP lower bounds. 
+
+observational data : known members D1 ⊂ D train and known non-members D0 ⊂ X \ D train .Let {X1, . . . , X m} = D1 ∪ D 0 represent the combined data, with true membership indicators defined by Si = 1 if Xi ∈ D 1 and Si = −1 if Xi ∈ D 0. Unlike traditional randomized experiments, the membership variables Si ∈ {− 1, 1} are not centered; rather, Si inherently depends on the data features Xi, as D0 and D1 may exhibit a distribution shift. 2. (Membership Inference) Leveraging the accessible algorithm output θ and the features Xi
+
+from the observational data, the auditor runs a Membership Inference Attack (MIA). This step produces raw membership guesses Ti for each Xi. Formally, the MIA is a mapping 
+
+(θ, (Xi)i∈[m]) 7 → T ∈ {− 1, 0, 1}m, where a guess of Ti = 1 indicates membership, Ti = −1
+
+indicates non-membership, and Ti = 0 corresponds to abstention (e.g., low confidence). Further details on the MIA meta-algorithm are provided in Algorithm 5 (Section B.3). 3. (Propensity Estimator) To mitigate bias in raw MIA estimates caused by distribution shifts between members and non-members, we calculate an estimated propensity score , ˆπ(Xi). This approximates the true propensity π : X → [0 , 1] , defined formally as π(x) = P(Si = 1 | Xi = x).By capturing the inherent probability that a data point belongs to the training set based solely on its features, this score isolates structural selection likelihood from the signal contained in the algorithm’s output. Section 6 details this estimation and its induced uncertainty propagation. 4. (Zero-Run Correction) Finally, the framework combines the true labels Si, the raw MIA guesses Ti, and the propensity scores ˆπ(Xi) to produce a statistically valid audit evaluation. This correction stage effectively disentangles the algorithm’s actual privacy leakage from the underlying data distribution shift, and stems from our main theoretical contributions (Sections 4 and 5). The correction can be applied compositionally (yielding global bounds) or conditionally 
+
+(yielding pointwise bounds), outputting empirical DP lower bounds. This four-step meta-algorithm forms the backbone of our Zero-Run auditing framework. To ensure a provably valid audit, a specific assumption for the generation of datasets D1 and D0 is required. 
+
+Assumption 1 (Data Generation) . Datasets D1 = {Xi : Si = 1 } and D0 = {Xi : Si = −1}, rep-resenting members and non-members respectively, consist of independent samples drawn from distributions P1 and P0, of identical sizes n1 = n0.There are several strategies for sourcing members and non-members, depending on the use case. 
+
+Member dataset D1. This dataset can be any subset of the training set of the audited model, such as a random subsample or a curated subset selected to maximize potential privacy leakage. Even when the complete primary dataset is unknown to the auditor, it is often possible to identify some 
+
+included examples. For instance, when auditing large-scale models, D1 may consist of public records, historical archives, or corpora published prior to the algorithm’s execution phase [34, 27, 28]. 
+
+Non-member dataset D0. The most straightforward scenario occurs when a randomized test split is available, yielding a dataset D0 ⊂ X \ D train with zero distribution shift. When such a split is unavailable, alternative construction strategies are necessary. Following empirical evaluations for large language models [ 28 ], one approach is to utilize data generated after the algorithm’s execution timestamp, ensuring D0 is strictly excluded; however, a distribution shift ( P1̸ = P0) is naturally 4expected here due to temporal changes. Alternatively, one can synthesize non-members from a continuous approximation of the member distribution by training a generative model on D1 and sampling from it, yielding non-members with a close distributional match ( P0 ≈ P1), as seen in PANORAMIA [23]. Our framework seamlessly integrates these varied choices of D0.
+
+Remark 1. We emphasize that, as in [ 37 , 25 ], our meta-algorithm does not restrict the auditor to algorithms that formally satisfy DP. Because our framework treats A as a black box and evaluates privacy leakage purely based on its outputs and observational data, it can be applied to arbitrary algorithms, regardless of whether they were designed with formal privacy guarantees. 
+
+## 4 A Global Correction via Adaptive Composition 
+
+If P1 = P0, membership is independent of the features Xi, so One-Run audits apply directly: the observed member/non-member labels behave like randomized inclusion bits. Under distribution shift ( P1̸ = P0), however, the features themselves carry information about the membership bits Si.An auditor may therefore appear to perform well by exploiting distribution-shift signals rather than privacy leakage from the algorithm’s output. 
+
+Distribution Shift as Adaptive Composition. We account for this baseline distribution-shift leakage by modeling the auditor’s observations—the audit dataset (Xi)i∈[m] and the output θ = A(Dtrain )—as the composition of two randomized mechanisms: a distribution-shift mechanism MDS , which generates the audit data (Xi)i∈[m] from the membership bits, and the algorithm A, which outputs 
+
+θ = A(Dtrain ). This composition view lets us use DP composition to separate spurious leakage due to distribution shift from the algorithm’s actual privacy leakage. Formally, let MTot be a virtual global randomized mechanism acting on a private membership vector 
+
+s ∈ {− 1, 1}m. The auditor’s available observations are thus the output of two composed mechanisms applied to the hidden bits: MTot (s) =  MDS (s), MA(MDS (s), s ), where : 
+
+MDS (s) ∼ Qmi=1 
+
+ 1{si=1 }P1 + 1{si=−1}P0
+
+, MA(x, s ) = A D ∪ { xi : si = 1 } ,
+
+with D = Dtrain \D 1. MDS samples the audit examples from the member or non-member distribution according to their membership bits, and MA runs the algorithm on the examples whose bits indicate membership, such that the following holds. 
+
+Theorem 4.1. Under Assumption 1 and if A is f -DP, MDS is fDS -DP, then MTot is fTot -DP with 
+
+fTot = f ⊗ fDS , where ⊗ is the tensor product between trade-off functions [10, Section 3]. 
+
+Remark 2. In Theorem 4.1, A takes as input elements of X (data points), and DP for A is defined using the Add/Remove definition of adjacency. MTot and MDS take as inputs elements of {− 1, 1}
+
+(bits): DP for these two mechanisms is thus defined using the Replace definition of adjacency. Replace 
+
+for membership bits is equivalent to Add/Remove for data points. 
+
+Theorem 4.1 accounts for distribution shift in the observed privacy leakage by formalizing how leakage from the algorithm A combines with that of the audit data. However, the fDS -DP guarantee becomes vacuous if severe distribution shift causes the raw features Xi to completely leak membership information, driving the underlying trade-off function TP0,P1 to zero, effectively shadowing out the algorithmic leakage of A and yielding uninformative lower bounds. Consequently, we require the likelihood ratio between P0 and P1 to be bounded almost surely, which motivates our next assumption. Recall that π(x) = P(Si = 1 | Xi = x) denotes the propensity score function. 
+
+Assumption 2 (Approximate overlap) . There exists η ∈ (0 , 1/2) and δDS ∈ (0 , 1) such that 
+
+P1(π(Xi) ∈ [η, 1 − η]) ≥ 1 − δDS and P0(π(Xi) ∈ [η, 1 − η]) ≥ 1 − δDS .Under overlap, upper-bounding the MDS trade-off function enables standard One-Run auditing on 
+
+MTot . Excess leakage beyond MDS is then attributed to A to provide valid empirical lower bounds. 
+
+Corollary 1. Under Assumptions 1 and 2, let ε, δ, μ > 0, ¯εDS = log( 1−ηη ), and ¯μDS =Φ−1( e¯εDS  
+
+> 1+ e¯εDS
+
+) − Φ−1( 11+ e¯εDS ). Then, (1) if MTot is not (ε + ¯ εDS , 1 − (1 − δ)(1 − δDS )) -DP, then A is not (ε, δ )-DP; (2) if MTot is not G√μ2+¯ μ2DS 
+
+⊗ f0,δ DS -DP, then A is not μ-GDP. 
+
+According to the above compositional view, a valid Zero-Run audit (which rejects with probability 
+
+1 − p′) of hypothesis H on A can thus be obtained by interpreting it as applying a One-Run audit 5(which rejects with probability 1−p) to mechanism MTot using a deflated hypothesis H′. Corollary 1 yields two practical instances of this reduction argument. If MTot violates the deflated hypothesis 
+
+H′ below, then A violates the target hypothesis H: (1) for (ε, δ )-DP Auditing: H′ is “ MTot is 
+
+(ε + ¯ εDS , 1 − (1 − δ)(1 − δDS )) -DP” and p′ = p [37 ]; and (2) for μ-GDP Auditing: H′ is “ MTot is 
+
+(μ + μDS )-GDP” and p′ = p + δDS [ 25 ]. The resulting audit algorithms (Sections B.4 and B.5) are however conservative, as they assign worst-case distribution-shift leakage uniformly across all data points, even when propensity scores are highly heterogeneous. We address this by conditioning on the observed examples and adjusting each membership guess using its corresponding propensity score. 
+
+## 5 A Pointwise Correction via Conditional Auditing 
+
+Modeling distribution shift globally via MDS imposes a pessimistic, worst-case DP leakage, 
+
+¯εDS = sup x∈X εDS (x) where εDS (x) = |log π(x) − log (1 − π(x)) | . This supremum reduces the audit’s statistical power, as the local leakage εDS (Xi) for most observed data points (Xi)i∈[m] is typ-ically much smaller than ¯εDS . To overcome this penalty, we leverage pointwise leakage . Conditioned on an observation Xi = xi, the distribution shift’s contribution to inferring Si reduces to the exact local log-odds εDS (xi). For an ε-DP algorithm, the combined evidence increases the correct member-ship odds by at most ε + εDS (xi), upper-bounding the probability of a successful guess ( Ti = Si) by: 
+
+pi(ε) = eε+εDS (Xi) 
+
+> 1+ eε+εDS (Xi)
+
+.
+
+Tampered Membership Guess. To leverage pointwise leakage, our conditional audit bounds the success rate of an independently tampered MIA. Intuitively, tampering acts as randomized abstention: if an example has a highly imbalanced propensity score, a correct guess is less indicative of algorithmic leakage because it could easily be inferred from Xi alone. We therefore retain such guesses with lower probability, while keeping guesses for examples with π(Xi) closer to 1/2.Formally, given initial MIA predictions (Ti)i∈[m] ∈ {− 1, 0, 1}m, we define the post-processed tampered predictions as T ′ 
+
+> i
+
+= BiTi, where (Bi)i∈[m] ∈ { 0, 1}m are independent Bernoulli variables with parameter bi conditioned on X. Because our probabilistic bounds depend on the observed features (Xi)i∈[m], this approach yields a conditional audit rather than a global worst-case one. As the following theorem demonstrates, this conditional tampering ensures that the number of correct retained guesses is stochastically controlled by the standard benchmark for One-Run auditing without distribution shift, allowing us to pay only pointwise propensity penalties. 
+
+Theorem 5.1 (Conditional Auditing) . Assume Assumption 1 holds and the attacker makes at most 
+
+r ∈ [m] guesses almost surely ( #{i : Ti̸ = 0 } ≤ r). Let (Bi)i∈[m] be independent Bernoulli variables with parameters (bi)i∈[m], independent of all other variables. 1. (ε, δ )-DP. If A is (ε, δ )-DP and bi ≤ 1+ e−ε−εDS (Xi) 
+
+> 1+ e−ε
+
+, then for any v > 0:
+
+P
+
+Pmi=1 Bi1{Ti=Si} ≥ v (Xi)i∈[m]
+
+
+
+≤ P (Z ≥ v) + αr,ε (v)mδ (1 + e−ε) , (1) 
+
+where Z ∼ Binom  r, eε
+
+> 1+ eε
+
+ and αr,ε (v) = P 
+
+> i∈[v] 1
+> i
+
+P (Z = v − i).2. f -DP. If A is f -DP and bi ≤ e−εDS (Xi), then for any subset T ⊂ [r]:
+
+P 
+
+> k∈Tkp k
+> m
+
+≤ ¯f
+
+ P  
+
+> k∈Tr−k+1
+> m
+
+pk−1
+
+
+
+, (2) 
+
+where pk = P
+
+Pmj=1 Bj 1{Sj =Tj } = k (Xi)i∈[m]
+
+
+
+is the probability of k correct tampered guesses. 
+
+Under (ε, δ )-DP, the pointwise tampering parameters bi are naturally set so that the success probability of the event {T ′ 
+
+> i
+
+= Si} is eε 
+
+> 1+ eε
+
+, by noticing that the probability of this event is bounded by pi(ε)bi. In the case of f -DP, bi can be obtained as the limit when ε → ∞ of the (ε, δ )-DP tampering parameters. In both cases, under no distribution shifts we have Bi = 1 almost surely, recovering known One-Run audit results [ 37 , 25 ]. For (ε, δ )-DP, Equation (1) directly bounds the success rate’s right tail of the tampered MIA. In the f -DP case, the indirect bound (2) can be used to upper-bound the right tail of the success rate, by applying successively Equation (2) to subsets of the form {r′, r ′ + 1 , . . . , r }
+
+6Algorithm 1 Zero-Run f -DP auditing  
+
+> 1:
+
+Inputs: Instance θ = A(Dtrain ) of the algorithm A to audit; MIA M; D1 ⊂ D train ; D0 ⊂ X \ D train ; error p;
+
+¯f ; nb of guesses r; tampering parameters (bi) 
+
+> 2:
+
+{X1, . . . , X m} ← D 1 ∪ D 0 
+
+> 3:
+
+Si ← 21{Xi∈D 1} − 1 ∈ {− 1, 1} 
+
+> 4:
+
+Run Algorithm 5 on (θ, D1, D0, M) to obtain (Ti) 
+
+> 5:
+
+c ← Pmj=1 Bernoulli( bi)1{Ti=Si} 
+
+> 6:
+
+Run Algorithm 2 on (p, ¯f , r, c ) to obtain r[0] + h[0]  
+
+> 7:
+
+Return FALSE if r[0] + h[0] ≥ rm
+
+Algorithm 2 f -DP Success Counts  
+
+> 1:
+
+Inputs: Error p; ¯f ; nb of guesses 
+
+r, nb of correct guesses c 
+
+> 2:
+
+Set h[k] = r[k] = 0 for k ∈ [c] 
+
+> 3:
+
+r[c] ← pc m , h[c] ← p(r−c) 
+
+> m
+> 4:
+
+for k ∈ { c − 1, . . . , 0} do  
+
+> 5:
+
+h[k] ← ¯f −1(r[k+1])  
+
+> 6:
+
+r[k] ← r[k+1]+ k(h[k]−h[k+1])  
+
+> r−k
+> 7:
+
+end for  
+
+> 8:
+
+Return r[0] + h[0] 
+
+for r′ ≤ r, yielding Algorithm 2. While the proof of Theorem 5.1.1 (Section C.1) draws inspiration from Steinke et al. [37] , we handle δ in a very different way, using privacy loss random variables conditioning and their relation to Hockey-stick divergences and (ε, δ )-DP. The error term αr,ε (v)
+
+differs slightly from that of Steinke et al. [37] , but is expected to be of same order O(1 /r ) for reasonable parameter values. The proof of Theorem 5.1.2 (Section E) is inspired by [25]. While adversary guesses Ti are obtained by thresholding MIA confidence scores, Theorem 5.1 sug-gests a natural propensity-aware adversary that further modulates this thresholding via the tampering parameter bi (see Section 7). 
+
+## 6 Propensity Scores Estimation and Uncertainty Quantification 
+
+As defined in Section 3 and applied in Sections 4 and 5, the propensity scores π(Xi) are critical for isolating distribution shift from true algorithmic privacy leakage. This section clarifies our methodology for estimating them and quantifying their associated uncertainty. First, our algorithms yield valid DP rejections provided that the estimated scores are either exact or pessimistic, as formalized in Corollary 2. The safety requirement for the auditor is thus one-sided: overestimating overlap can invalidate the audit by failing to penalize enough, while underestimating overlap attributes more signal to distribution shift, making the audit strictly more conservative while preserving validity. 
+
+Corollary 2. If min(ˆ πi, 1 − ˆπi) ≤ min( π(Xi), 1 − π(Xi)) for all i ∈ [m] and if the composition or conditional auditing algorithm returns FALSE for (ε, δ )-DP (respectively, for f -DP), then A is not 
+
+(ε, δ )-DP (respectively, A is not f -DP) with probability 1 − p.
+
+Extracting empirical privacy parameters. Hypothesis testing yields high-confidence empirical privacy lower bounds. Let bμ = FALSE denote Algorithm 1 rejecting Hμ: “ A is μ-GDP”. Because rejecting μ-GDP implies rejecting all μ′ ≤ μ, defining ˆμ = sup {μ ≥ 0 | bμ = FALSE } guarantees 
+
+μ⋆ ≥ ˆμ with probability at least 1 − p, given an audit failure probability p. A similar search applies to pure ε-DP and monotonic (ε, δ )-DP hypotheses via Algorithm 9. 
+
+Bootstrapped privacy lower bounds. We consider a separate dataset (X′ 
+
+> j
+
+, S ′ 
+
+> j
+
+)j ∈ [m′] used for propensity estimation, distinct from the audit dataset (Xi, S i)i ∈ [m]. To quantify the statistical uncertainty on empirical privacy lower bounds due to estimated propensity scores, we bootstrap the final empirical privacy lower bound by resampling this dataset . We consider the empirical privacy lower bound ˆμ (for GDP) as a function of propensity scores (π(Xi)) i, all the rest (model θ,MIA guesses Ti, data points Xi, and memberships Si) being fixed, and proceed as follows for K
+
+bootstrapped propensity scores. For k ∈ [K]: (1) Bootstrap sample: we draw (X′
+
+> j
+> (k)
+
+, S ′
+
+> j
+> (k)
+
+)j∈[m′]
+
+as a random bootstrap sample from (X′ 
+
+> j
+
+, S ′ 
+
+> j
+
+)j∈[m′] with replacement; (2) Propensity score training: 
+
+we train ˆπ(k) 
+
+> i
+
+on (X′
+
+> j
+> (k)
+
+, S ′
+
+> j
+> (k)
+
+)j∈[m′]; (3) Privacy lower bound: we feed (ˆ π(k)(Xi), T i, S i)i∈[m] into the auditing algorithm to extract empirical privacy lower bound ˆμ(k).Outputting the p′-lower quantile ˆμ of (ˆ μ(k))k∈[K] yields a robust empirical privacy bound valid with probability 1 − p − p′, splitting the error budget between the audit ( p) and the bootstrap ( p′). The boot-strap’s formal validity assumes standard, albeit practically unverifiable, regularity conditions—such 70.5 0.6 0.7 0.8 0.9 IID 
+
+> Distribution Shift Magnitude (Smaller is Stronger)
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> Privacy Leak Lower Bound ( μ)
+> No Correction (One-Run)
+> Global Correction
+> Conditional Correction (No Propensity)
+> Conditional Correction(Propensity-Aware)
+> Theoretical Upper Bound
+
+(a) Noisy Sum Auditing & Synthetic Data 0.55 0.60 0.65 0.70 0.75 0.80 0.85 0.90 0.95 1.00   
+
+> Bootstrapped μ
+> 0
+> 2
+> 4
+> 6
+> 8
+> 10
+> Density
+> IID (Quantile 0.025: 0.652)
+> OOD (Quantile 0.025: 0.645)
+
+(b) Wild Audit 0           
+
+> 1
+> 2
+> 3
+> IID
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> Propensity Score  ̂ π
+> 0.0
+> 0.5
+> 1.0
+> 1.5
+> 2.0 OOD
+> Density
+> Members ( y= 1) Non-Members ( y= 0)
+
+(c) Wild Propensity 
+
+Figure 2: Evaluation of zero-run auditing under both controlled synthetic conditions and real-world distribution shifts. (a) Privacy lower bounds for different distribution shifts; (b) distribution and lower quantile of the boostrapped privacy lower bounds.; (c) Propensity score distribution on iWildCam. as Hadamard differentiability [ 41 , Chapter 23]—on the mapping from propensity scores (π(Xi)) i to the privacy lower bound. The full procedure is detailed in Algorithm 3 (Section B.1). 
+
+## 7 Experiments 
+
+Auditing Setup. We measure empirical privacy leakage via μ-GDP. To manage propensity score uncertainty, we compute empirical lower bounds ˆμ using K = 600 bootstrap resamples; 0.95 overall confidence is achieved by evenly splitting 0.05 error budget between hypothesis testing ( p = 0 .025 )and bootstrap confidence intervals ( p′ = 0 .025 ). Standard One-Run baselines ignore distribution shifts and omit bootstrapping. Evaluating m = 10 , 000 points per audit, we determine the optimal active guesses r = ∥T ∥0 by sweeping abstentions across {9000 , 9500 , 9800 , 9900 , 9950 , 9975 }.
+
+Datasets. We evaluate Zero-Run auditing across two complementary scenarios: (1) a synthetic high-dimensional noisy sum mechanism (Section F), drawing members ( D1) and non-members ( D0)from Gaussian distributions with a tunable correlation parameter to control distribution shift. (2) We demonstrate real-world applicability using the WILDS iWildCam benchmark [ 26 ], where inherent geographic and environmental shifts between D1 and D0 introduce natural observational disparities. 
+
+Propensity Score Estimation. We compute the propensity scores ˆπ(Xi) using an L2-regularized logistic regression [ 31 ] with sigmoid (Platt) calibration. For the iWildCam dataset, we establish a balanced baseline by subsampling the data to equal set sizes ( n1 = n0). Image representations are derived from precomputed ViT-base embeddings [ 11 ], subsequently reduced to 50 dimensions via PCA. Figure 2(c) visualizes the resulting ˆπ(Xi) distributions: the purely IID split yields scores clus-tered loosely around 0.5, whereas the out-of-distribution (OOD) split exhibits a bimodal separation, accurately capturing the underlying structural confounding. 
+
+Adversaries. The MIA (Algorithm 5) generates raw guesses Ti ∈ {− 1, 0, 1} using the inner product 
+
+⟨Xi, θ ⟩ as its test statistic for the synthetic white-box adversary, while the iWildCam black-box MIA relies on cross-entropy loss. To optimize our conditional audit (Theorem 5.1), which tampers guesses via independent variables Bi ∼ Ber (bi) to yield T ′ 
+
+> i
+
+= BiTi, we compare two variants. A propensity-unaware adversary selects its top r guesses based solely on raw model confidence, while a propensity-aware adversary adjusts its confidence scores using the tampering probabilities bi,abstaining on structurally distinct examples to prioritize algorithmic signal over distribution shift. 
+
+Synthetic Data Results. Figure 2(a) evaluates empirical lower bounds ( ˆμ) across distribution shift magnitudes. At the IID baseline (zero shift), both uncorrected One-Run auditing and our conditional Zero-Run framework yield identically valid bounds below the theoretical μtrue = 0 .66 . However, as the shift increases and the distributions diverge, the uncorrected One-Run audit yields invalid bounds. The global compositional correction rapidly loses statistical power due to worst-case penalties, and the adversary that does not take the propensity into account eventually loses auditing power as well. In contrast, our propensity-aware conditional correction effectively deconvolves this confounding signal, with an informative empirical bound that remains relatively flat across shift levels. 
+
+Real-World Data Results. Figure 2(b) illustrates our framework on the iWildCam benchmark, showing the ˆμ(k) bootstrap density and the extracted conservative 0.025 quantile ( p′ = 0 .025 ). Due 8to severe natural distribution shifts (Figure 2(c)), the global compositional approach and propensity-unaware adversary incur overly conservative penalties, yielding non-positive bounds (and are thus omitted). Conversely, the propensity-aware conditional correction provides a strong lower bound on true memorization. Despite heavy environmental confounding, the Zero-Run audit extracts a valid privacy lower bound for OOD data ( ˆμ = 0 .645 ), closely matching the perfectly IID split bound (ˆμ = 0 .652 ). One-run auditing [ 25 ] on IID data achieves a 1.7 lower bound, showing that Zero-Run auditing incurs an ≈ 1 penalty from propensity score estimation and uncertainty quantification. 
+
+## 8 Related Work 
+
+Interventional Privacy Auditing. Ding et al. [9] , Jagielski et al. [19] introduced privacy auditing methods that rely on repeatedly running the audited algorithm with and without a specific data point. These Multi-Run techniques were later refined to obtain tighter guarantees across various settings [ 30 , 5 ], see Annamalai et al. [1] for an overview. To reduce the computational cost of rerunning the audited algorithm, Steinke et al. [37] proposed a One-Run auditing method for ε-DP and (ε, δ )-DP, later extended to f -DP by Mahloujifar et al. [25] . While our proof techniques draw on these foundational works, their validity inherently depends on randomized membership assignments controlled by the auditor. This interventional requirement motivates the development of Zero-Run 
+
+auditing methods that can estimate post hoc privacy leakage from a deployed model. 
+
+Observational Privacy Auditing. Kalemaj et al. [22] also audits without randomized insertion, but targets the weaker label-DP, assumes identical member and non-member feature distributions, and cannot correct for general feature-level shifts. More closely related is P ANORAMIA [23 ], which audits 
+
+(ε, δ )-DP using non-members drawn from a generative model. P ANORAMIA acts as a special case of our composition framework, which we strictly generalize in two ways: we support GDP auditing and employ milder overlap assumptions (Assumption 2) by permitting an approximation error δDS > 0.When δDS = 0 , this recovers P ANORAMIA ’s c-closeness assumption where c = log((1 − η)/η ).Furthermore, rather than learning a full generative model, our approach reduces the correction problem to estimating the propensity score function, i.e., a probabilistic binary classifier. 
+
+Causal Inference and Distribution Shift. Even et al. [16] evaluate membership inference attacks under distribution shift using causal principles, primarily by reweighting global attack metrics (e.g., AUC). Unlike causal reweighting approaches [ 16 ] or generative approximations [ 23 ], we do not attempt to construct non-members that approximately follow the distribution of members. Instead, we capture marginal distribution-shift leakage conditional on observations, which does not require a global overlap assumption to be valid. Our audit only requires that Assumption 1 hold, and implicitly relies on local overlaps between members and non-members rather than a global one. As explicited in Proposition 3, valid Zero-Run auditing is impossible without any local overlap (disjoint support). 
+
+## 9 Limitations & Conclusion 
+
+Propensity Estimation Limitation. Our zero-run framework relies on being able to properly estimate the propensity score. For natural, high-dimensional data, even under an IID assumption, this is challenging due to finite-sample estimation error, as illustrated in Figure 2(c): although the oracle propensity score is 0.5, the estimated scores deviate from this value and induces additional penalization. Finding better, more reliable ways to estimate propensity scores, although orthogonal to our work, will directly benefit our framework and the tightness of our audits. 
+
+One-Run & MIA Limitation. While our framework successfully enables post-hoc privacy evaluation, it naturally inherits the limitations of existing One-Run algorithms. First, as observed by the baseline gap in Figure 2, Zero-Run auditing is limited by the finite-sample inefficiency intrinsic to all One-Run methods, meaning empirical bounds will inherently sit somewhat below the theoretical limit [ 37 , 25 ]. Again, any improvement in this line of work would directly benefit our framework. Second, an audit’s success is deeply tied to the baseline strength of the underlying MIA. In heavily restricted black-box deployments, particularly against DP models [ 30 ], relying purely on loss-based attacks, the raw attack signal is often too weak to extract meaningful bounds, independent of our shift corrections. 
+
+Auditing and falsifiability of propensity score models. Our observational audit relies on estimated bounds for the propensity scores. Although these bounds cannot be formally certified, they can be empirically falsified: one can treat them as a hypothesis and audit them using Theorem C.1, 9analogously to a DP claim, rejecting the propensity model when the observed evidence contradicts the claimed bounds. This test is necessarily one-sided: passing it does not prove the bounds correct, but only indicates that no violation was found with the available data and auditing power. This motivates releasing the propensity score bounds, audit dataset, and auditing procedure together with the final audit result. A skeptic can then challenge the claimed correction for distribution shift by constructing a stronger MIA that exploits the shift beyond what the released bounds allow. Thus, while the propensity model remains unverifiable in a formal sense, openness and adversarial testing make the audit computationally falsifiable and more trustworthy in practice. The main lesson is that post-hoc privacy auditing is possible, but only as an observational inference problem. Distribution shift cannot be ignored: it is itself a source of membership information. Propensity scores provide the right language for quantifying this source, and our results show how to convert propensity bounds into valid empirical lower bounds on algorithmic privacy leakage. 
+
+## References 
+
+[1] Meenatchi Sundaram Muthu Selva Annamalai, Borja Balle, Jamie Hayes, Georgios Kaissis, and Emiliano De Cristofaro. The hitchhiker’s guide to efficient, end-to-end, and tight dp auditing. 
+
+arXiv preprint arXiv:2506.16666 , 2025. [2] Nicholas Carlini, Chang Liu, Úlfar Erlingsson, Jernej Kos, and Dawn Song. The secret sharer: Evaluating and testing unintended memorization in neural networks. In 28th USENIX security symposium (USENIX security 19) , pages 267–284, 2019. [3] Nicholas Carlini, Florian Tramer, Eric Wallace, Matthew Jagielski, Ariel Herbert-Voss, Kather-ine Lee, Adam Roberts, Tom Brown, Dawn Song, Ulfar Erlingsson, et al. Extracting training data from large language models. In 30th USENIX security symposium (USENIX Security 21) ,pages 2633–2650, 2021. [4] Nicholas Carlini, Daphne Ippolito, Matthew Jagielski, Katherine Lee, Florian Tramer, and Chiyuan Zhang. Quantifying memorization across neural language models, 2023. URL 
+
+https://arxiv.org/abs/2202.07646 .[5] Tudor Cebere, Aurélien Bellet, and Nicolas Papernot. Tighter Privacy Auditing of DP-SGD in the Hidden State Threat Model. In ICLR , 2025. [6] Tudor Cebere, David Erb, Damien Desfontaines, Aurélien Bellet, and Jack Fitzsimons. Privacy in theory, bugs in practice: Grey-box auditing of differential privacy libraries. arXiv preprint arXiv:2602.17454 , 2026. [7] Alexandre Défossez, Laurent Mazaré, Manu Orsini, Amélie Royer, Patrick Pérez, Hervé Jégou, Edouard Grave, and Neil Zeghidour. Moshi: a speech-text foundation model for real-time dialogue. arXiv preprint arXiv:2410.00037 , 2024. [8] Jiayuan Ding, Jianhui Lin, Shiyu Jiang, Yixin Wang, Ziyang Miao, Zhaoyu Fang, Jiliang Tang, Min Li, and Xiaojie Qiu. Tabula: A tabular self-supervised foundation model for single-cell transcriptomics. In The Thirty-ninth Annual Conference on Neural Information Processing Systems , 2025. [9] Zeyu Ding, Yuxin Wang, Guanhong Wang, Danfeng Zhang, and Daniel Kifer. Detecting violations of differential privacy. In Proceedings of the 2018 ACM SIGSAC Conference on Computer and Communications Security , pages 475–489, 2018. [10] Jinshuo Dong, Aaron Roth, and Weijie J Su. Gaussian differential privacy. Journal of the Royal Statistical Society: Series B (Statistical Methodology) , 84(1):3–37, 2022. [11] Alexey Dosovitskiy, Lucas Beyer, Alexander Kolesnikov, Dirk Weissenborn, Xiaohua Zhai, Thomas Unterthiner, Mostafa Dehghani, Matthias Minderer, Georg Heigold, Sylvain Gelly, Jakob Uszkoreit, and Neil Houlsby. An image is worth 16x16 words: Transformers for image recognition at scale, 2021. URL https://arxiv.org/abs/2010.11929 .[12] Cynthia Dwork and Aaron Roth. The Algorithmic Foundations of Differential Privacy. Founda-tions and Trends in Theoretical Computer Science , 9(3–4):211–407, 2014. 10 [13] Cynthia Dwork, Frank McSherry, Kobbi Nissim, and Adam Smith. Calibrating noise to sensi-tivity in private data analysis. In Proceedings of the 3rd Conference on Theory of Cryptography ,TCC ’06, pages 265–284, Berlin, Heidelberg, 2006. Springer. [14] Bradley Efron. Better bootstrap confidence intervals. Journal of the American statistical Association , 82(397):171–185, 1987. [15] European Data Protection Board. Opinion 28/2024 on certain data protection aspects related to the processing of personal data in the context of ai mod-els, 2024. URL https://www.edpb.europa.eu/our-work-tools/our-documents/ opinion-board-art-64/opinion-282024-certain-data-protection-aspects_en .[16] Mathieu Even, Clément Berenfeld, Linus Bleistein, Tudor Cebere, Julie Josse, and Aurélien Bellet. Membership inference attacks from causal principles. arXiv preprint arXiv:2602.02819 ,2026. [17] Juan Felipe Gomez, Bogdan Kulynych, Georgios Kaissis, Jamie Hayes, Borja Balle, and Antti Honkela. Gaussian dp for reporting differential privacy guarantees in machine learning, 2025. URL https://arxiv.org/abs/2503.10945 .[18] Noah Hollmann, Samuel Müller, Katharina Eggensperger, and Frank Hutter. Tabpfn: A transformer that solves small tabular classification problems in a second, 2023. URL https: //arxiv.org/abs/2207.01848 .[19] Matthew Jagielski, Jonathan Ullman, and Alina Oprea. Auditing differentially private machine learning: How private is private sgd? Advances in Neural Information Processing Systems , 33: 22205–22216, 2020. [20] Bargav Jayaraman and David Evans. Evaluating differentially private machine learning in practice. In 28th USENIX security symposium (USENIX security 19) , pages 1895–1912, 2019. [21] Albert Q. Jiang, Alexandre Sablayrolles, Arthur Mensch, Chris Bamford, Devendra Singh Chaplot, Diego de las Casas, Florian Bressand, Gianna Lengyel, Guillaume Lample, Lucile Saulnier, Lélio Renard Lavaud, Marie-Anne Lachaux, Pierre Stock, Teven Le Scao, Thibaut Lavril, Thomas Wang, Timothée Lacroix, and William El Sayed. Mistral 7b, 2023. URL 
+
+https://arxiv.org/abs/2310.06825 .[22] Iden Kalemaj, Luca Melis, Maxime Boucher, Ilya Mironov, and Saeed Mahloujifar. Observa-tional auditing of label privacy, 2025. [23] Mishaal Kazmi, Hadrien Lautraite, Alireza Akbari, Qiaoyue Tang, Mauricio Soroco, Tao Wang, Sébastien Gambs, and Mathias Lécuyer. Panoramia: Privacy auditing of machine learning models without retraining. Advances in Neural Information Processing Systems , 37:57262– 57300, 2024. [24] Nils Lukas, Ahmed Salem, Robert Sim, Shruti Tople, Lukas Wutschitz, and Santiago Zanella-Béguelin. Analyzing leakage of personally identifiable information in language models. In 
+
+2023 IEEE Symposium on Security and Privacy (SP) , pages 346–363. IEEE, 2023. [25] Saeed Mahloujifar, Luca Melis, and Kamalika Chaudhuri. Auditing f -differential privacy in one run. arXiv preprint arXiv:2410.22235 , 2024. [26] Henrik Marklund, Sang Michael Xie, Marvin Zhang, Akshay Balsubramani, Weihua Hu, Michihiro Yasunaga, Richard Lanas Phillips, Sara Beery, Jure Leskovec, Anshul Kundaje, et al. Wilds: A benchmark of in-the-wild distribution shifts. arXiv preprint arXiv:2012.07421 , 2020. [27] Matthieu Meeus, Shubham Jain, Marek Rei, and Yves-Alexandre de Montjoye. Did the neurons read your book? document-level membership inference for large language models. In 33rd USENIX Security Symposium (USENIX Security 24) , pages 2369–2385, 2024. [28] Matthieu Meeus, Igor Shilov, Shubham Jain, Manuel Faysse, Marek Rei, and Yves-Alexandre de Montjoye. Sok: Membership inference attacks on llms are rushing nowhere (and how to fix it). arXiv preprint arXiv:2406.17975 , 2024. 11 [29] Milad Nasr, Shuang Songi, Abhradeep Thakurta, Nicolas Papernot, and Nicholas Carlin. Ad-versary instantiation: Lower bounds for differentially private machine learning. In 2021 IEEE Symposium on security and privacy (SP) , pages 866–882. IEEE, 2021. [30] Milad Nasr, Jamie Hayes, Thomas Steinke, Borja Balle, Florian Tramèr, Matthew Jagielski, Nicholas Carlini, and Andreas Terzis. Tight auditing of differentially private machine learning. In 32nd USENIX Security Symposium (USENIX Security 23) , pages 1631–1648, 2023. [31] F. Pedregosa, G. Varoquaux, A. Gramfort, V. Michel, B. Thirion, O. Grisel, M. Blondel, P. Prettenhofer, R. Weiss, V. Dubourg, J. Vanderplas, A. Passos, D. Cournapeau, M. Brucher, M. Perrot, and E. Duchesnay. Scikit-learn: Machine learning in Python. Journal of Machine Learning Research , 12:2825–2830, 2011. [32] Aditya Ramesh, Mikhail Pavlov, Gabriel Goh, Scott Gray, Chelsea Voss, Alec Radford, Mark Chen, and Ilya Sutskever. Zero-shot text-to-image generation. In International conference on machine learning , pages 8821–8831. Pmlr, 2021. [33] Paul R Rosenbaum and Donald B Rubin. The central role of the propensity score in observational studies for causal effects. Biometrika , 70(1):41–55, 1983. [34] Weijia Shi, Anirudh Ajith, Mengzhou Xia, Yangsibo Huang, Daogao Liu, Terra Blevins, Danqi Chen, and Luke Zettlemoyer. Detecting pretraining data from large language models. arXiv preprint arXiv:2310.16789 , 2023. [35] Amer Sinha, Thomas Mesnard, Ryan McKenna, Daogao Liu, Christopher A Choquette-Choo, Yangsibo Huang, Da Yu, George Kaissis, Zachary Charles, Ruibo Liu, et al. Vaultgemma: A differentially private gemma model. arXiv preprint arXiv:2510.15001 , 2025. [36] David Sommer, Sebastian Meiser, and Esfandiar Mohammadi. Privacy loss classes: The central limit theorem in differential privacy. Cryptology ePrint Archive , 2018. [37] Thomas Steinke, Milad Nasr, and Matthew Jagielski. Privacy auditing with one (1) training run. 
+
+Advances in Neural Information Processing Systems , 36:49268–49280, 2023. [38] Sana Tonekaboni, Lena Stempfle, Adibvafa Fallahpour, Walter Gerych, and Marzyeh Ghas-semi. An investigation of memorization risk in healthcare foundation models. In The Thirty-ninth Annual Conference on Neural Information Processing Systems , 2025. URL 
+
+https://openreview.net/forum?id=NMvMYtRjkg .[39] Hugo Touvron, Thibaut Lavril, Gautier Izacard, Xavier Martinet, Marie-Anne Lachaux, Timo-thée Lacroix, Baptiste Rozière, Naman Goyal, Eric Hambro, Faisal Azhar, et al. Llama: Open and efficient foundation language models. arXiv preprint arXiv:2302.13971 , 2023. [40] Florian Tramer, Andreas Terzis, Thomas Steinke, Shuang Song, Matthew Jagielski, and Nicholas Carlini. Debugging differential privacy: A case study for privacy auditing. arXiv preprint arXiv:2202.12219 , 2022. [41] Aad W Van der Vaart. Asymptotic statistics , volume 3. Cambridge university press, 2000. [42] Stefan Wager. Causal inference: A statistical learning approach, 2024. 
+
+## A Additional general content and proofs 
+
+A.1 Privacy Loss Random Variable Definition 4. Define the Privacy Loss Random Variable (PLRV for short) as [36]: 
+
+PLRV AD,D′ (θ) = log 
+
+ P (A(D) = θ)
+
+P (A(D′) = θ)
+
+
+
+, (3) for two adjacent datasets D and D′ and any mechanism A.12 A.2 Proof of Theorem 4.1 
+
+Proof of Theorem 4.1. Under Assumption 1, we have that Xi ∼ D 1 if Si = 1 and Xi ∼ D 0
+
+if Si = −1, and Dtrain = D ∪ { Xi : Si = 1 }. Thus, we have that (Xi)i∈[m] ∼ M DS (S) and 
+
+θ def 
+
+= A(Dtrain ) ∼ M A(S), so that we indeed have (X, θ ) ∼ M Tot (S). The randomness in the mechanisms MDS and MA are independent from eachother, and thus fTot ≥ fMDS ⊗ fA using Dong et al. [10, Theorem 3.2] (adaptive composition theorem). 
+
+A.3 The Central Role of Propensity Scores in Privacy Auditing with Distribution Shift 
+
+Next results motivate the role of π in our analysis by showing that when P1̸ = P0, the classical inequality relating true positive and true negative rates (TPR and FPR) for a MIA on an f -DP algorithm is altered, as shown by the following result. The proof is particularly instructive due to its simplicity, illustrating how propensity scores naturally arise when auditing under distribution shift. 
+
+Proposition 1. Assume that Assumption 1 holds and that (Xi, S i, T i)i∈[m] are independent. Then, 
+
+E
+
+ Ai
+
+π(Xi) P (Ti = 1 |Si = 1 , X i)
+
+
+
+≤ ¯f
+
+
+
+E
+
+ 1 − Ai
+
+1 − π(Xi) P (Ti = 1 |Si = −1, X i)
+
+ 
+
+,
+
+(4) 
+
+where Ai = 1{Si=1 } = Si+1 2 .Proof of Proposition 1. Denoting ¯X = ( Xi)i∈[m], ¯S = ( Si)i∈[m] and ¯X(−i), ¯S(−i) the same vectors with coordinate i removed, we have: 
+
+P
+
+
+
+Ti = 1 |Si = 1 , ¯S(−i), ¯X
+
+
+
+≤ ¯f
+
+
+
+P
+
+
+
+Ti = 1 |Si = −1, ¯S(−i), ¯X
+
+ 
+
+,
+
+by definition of f −DP. Now, let’s take the average over ( ¯S(−i), ¯X(−i)) and use the independence assumption made in Proposition 1: 
+
+E ¯S(−i), ¯X(−i) P
+
+
+
+Ti = 1 |Si = 1 , ¯S(−i), ¯X
+
+
+
+≤ E ¯S(−i), ¯X(−i) ¯f
+
+
+
+P
+
+
+
+Ti = 1 |Si = −1, ¯S(−i), ¯X
+
+ 
+
+≤ ¯f
+
+
+
+E ¯S(−i), ¯X(−i) P
+
+
+
+Ti = 1 |Si = −1, ¯S(−i), ¯X
+
+ 
+
+,
+
+by concavity of ¯f , leading to: 
+
+P (Ti = 1 |Si = 1 , X i) ≤ ¯f (P (Ti = 1 |Si = −1, X i)) .
+
+Now, taking the average on both sides for Xi sampled over the whole population: 
+
+EP (Ti = 1 |Si = 1 , X i) ≤ E ¯f (P (Ti = 1 |Si = −1, X i)) 
+
+≤ ¯f (EP (Ti = 1 |Si = −1, X i)) .
+
+We now use the fact that E
+
+h Ai 
+
+> π(Xi)
+
+|Xi
+
+i
+
+= E
+
+h 1−− Ai 
+
+> 1−π(Xi)
+
+|Xi
+
+i
+
+= 1 , to obtain the final result. 
+
+A.4 Propensity Scores and Privacy Parameters of MDS 
+
+We now show the following result, linking the propensity score with privacy parameters of the distribution shift mechanism MDS .
+
+Proposition 2. MDS is εDS -DP with εDS = sup x∈X log 
+
+ π(x)1−π(x)
+
+
+
+and (ε, δ DS (ε)) -DP with 
+
+δDS (ε) = max a∈{ 0,1} Pa
+
+ π(Xi)2a−1(1 − π(Xi)) 1−2a > e ε, for all ε > 0.Proof of Proposition 2. MDS is (ε, δ )-DP with: 
+
+δ = sup 
+
+> s∼s′
+
+E
+
+
+
+(1 − eε−PLRV MDS  
+
+> s,s ′(X)
+
+)+
+
+
+
+,
+
+13 for any two adjacent bit datasets s ∼ s′. Now, for s ∼ s′ adjacent on bit i ∈ [m], we have that: 
+
+E
+
+
+
+(1 − eε−PLRV MDS  
+
+> s,s ′(X)
+
+)+
+
+
+
+≤ max( E1[(1 − eε−εDS (Xi))+], E0[(1 − eε−εDS (Xi))+]) ,
+
+for Xi ∼ P 1 if si = 1 , Xi ∼ P 0 otherwise, since PLRV MDS  
+
+> s,s ′
+
+(X) ≤ εDS (Xi). Finally, max( E1[(1 −
+
+eε−εDS (Xi))+], E0[(1 − eε−εDS (Xi))+]) ≤ δDS (ε).
+
+A.5 Proof of Corollary 1 
+
+Proof of Corollary 1. The proof follows from [10, Section 3]: 
+
+fε,δ ⊗ fε′,δ ′ = fε+ε′,1−(1 −δ)(1 −δ′) ,
+
+together with 
+
+Gμ ⊗ Gμ′ = G√μ2+μ′2 ,
+
+using Proposition 2 and Theorem 4.1. 
+
+A.6 Impossibility Result 
+
+A p-valid audit algorithm for the privacy hypothesis ’ f -DP’ is abstracted as a mapping: 
+
+Bf : ( D0, D1, θ ) ∈ P (X ) × P (X ) × Θ 7 → b ∈ { TRUE , FALSE } ,
+
+which satisfies, for any f -DP algorithm A, for any Dtrain ∈ P (X ), any D1 ⊂ D train and D0 ⊂X \ D train :
+
+P (Bf (D0, D1, A(D)) = FALSE ) ≤ p . 
+
+In other words, Bf confidently rejects the privacy hypothesis with probability 1 − p, if F ALSE is outputted. Next proposition shows that if the overlap assumption is no satisfied, no p-valid audit algorithm can make meaningful audits. 
+
+Proposition 3 (Impossibility) . There exists two distributions P1, P0 and an algorithm A′ which does not satisfy ε′-DP for any ε′ > 0, and such that if D1 and D0 are respectively samples drawn from P1
+
+and P0, any p-valid audit algorithm for any ε-DP hypothesis yields: 
+
+P (Bε(D0, D1, A′(D1)) = FALSE ) ≤ p . 
+
+In other words, no audit algorithm can reject confidently any privacy level ε, despite A′ not satisfying any ε′-DP.. Proof. To simplify, assume that X = R. Let X = X0 ∪ X 1 with X0 ∩ X 1 = ∅, and P0 and P1 be distributions having respective supports X0 and X1. Let A(D) be the algorithm defined as, for any dataset D ⊂ X :
+
+A(D) : x ∈ X 7 → 1{x∈X 1} .
+
+A is 0-DP since it is deterministic and does not depend on the dataset D. Let then A′(D) be the algorithm defined as, for any datset D ⊂ X :
+
+A′(D) : x ∈ X 7 → 1{x∈X 1 or x∈D} .
+
+A′ is not ε-DP for any ε′ > 0 (take D = {x} with x ∈ X 1 and x ∈ X 0). However, for D1 ⊂ X 1, we always have that A(D1) = A(D′
+
+> 1
+
+). Thus, 
+
+P (Bε(D0, D1, A′(D1)) = FALSE ) = P (Bε(D0, D1, A(D1)) = FALSE ) ≤ p , 
+
+for any p-valid audit algorithm Bε for the ε-DP privacy hypothesis. 14 B Privacy Auditing Algorithms 
+
+B.1 Bootstrap Algorithm 
+
+Algorithm 3 formalizes our bootstrap precedure. Given a function Ψ : [0 , 1] m → R, the bootstrap procedure yields confidence intervals around: 
+
+Ψ(( π(Xi)) i∈[m]) ,
+
+using only estimates of the propensity scores. We then use this by seeing empirical lower bounds as functions of the propensity scores, all the rest being fixed. 
+
+Algorithm 3 Bootstrap upper confidence estimate  
+
+> 1:
+
+Inputs: Confidence probability 1 − p′, function Ψ : [0 , 1] m → R, number of bootstraps K ∈ N∗,
+
+(Xi)i∈[m]X m, training dataset for propensity scores D′ ∈ (X × {− 1, 1})m′
+
+. 
+
+> 2:
+
+for k ∈ { 1, . . . , K } do  
+
+> 3:
+
+D′ 
+
+> k
+
+← subsampling of D′ of size m′ with replacement  
+
+> 4:
+
+Run Algorithm 4 on D′ 
+
+> k
+
+to obtain (˜ π(k) 
+
+> i
+
+)i∈[m] 
+
+> 5:
+
+˜vk ← Ψ((˜ π(k) 
+
+> i
+
+(Xi)) i∈[m]) 
+
+> 6:
+
+end for  
+
+> 7:
+
+Run Algorithm 4 on D to obtain (ˆ πi)i∈[m] 
+
+> 8:
+
+˜v ← Ψ((ˆ π(Xi)) i∈[m]) 
+
+> 9:
+
+ˆvk ← ˜vk + ˜ v − median((˜ vk)k∈[K] 
+
+> 10:
+
+Return Quantile  (ˆ vk)k∈[K], 1 − p′
+
+B.2 Propensity scores learning algorithm with crossfitting 
+
+When we do not have enough samples, instead of learning the propensity score on a held-out dataset as we describe in Section 6, cross-fitting can be used as follows to avoid overfitting. Bootstrap can then be done on each half of the dataset when learning the propensity score. 
+
+Algorithm 4 Propensity score learning  
+
+> 1:
+
+Inputs: (Xi, S i)i∈[m] ∈ (X × {− 1, 1})m 
+
+> 2:
+
+Construct two random balanced splits I1, I2 of [m] 
+
+> 3:
+
+for k ∈ { 1, 2} do  
+
+> 4:
+
+Fit classifier ˆπ(k) on (Xi, S i)i∈I k to predict P (Si = 1 |Xi) 
+
+> 5:
+
+end for  
+
+> 6:
+
+for i ∈ [m] do  
+
+> 7:
+
+ˆπi ←
+
+(ˆπ(2) (Xi) if i ∈ I 1
+
+ˆπ(1) (Xi) if i ∈ I 2 
+
+> 8:
+
+end for  
+
+> 9:
+
+Return (ˆ πi)i∈[m]
+
+B.3 Memberhsip Inference Attack Algorithm 
+
+Algorithm 5 describes how a MIA is performed: a confidence score Yi ∈ R is first computed for every datapoint. The larger Yi, the more confident the attacker is about Xi begin a member (i.e., 
+
+Si = 1 ). Guesses gi are then made using these scores for all datapoints. For instance, a threshold t
+
+can be computed, and the guess can be set as gi = 1{Yi≥t} − 1{Yi<t }. In order to keep datapoints for which we are most confident about their membership or non-memberhsip, an abstention step is finally performed, by setting low-confidence guesses to 0, thereby obtaining a vector of guesses and abstentions T ∈ {− 1, 0, 1}.15 Algorithm 5 Membership inference attack  
+
+> 1:
+
+Inputs: Instance θ = A(Dtrain ) ∈ Θ of the algorithm A to audit; D1 ⊂ D train and D0 ⊂X \ D train with |D 1 ∪ D 0| = m; MIA M = ( s, g, ϕ ) with score function s : Θ × X → R, guess function g : X × R → {− 1, 1}, abstention function ϕ : ( {− 1, 1} × R × X )m → {− 1, 0, 1}m 
+
+> 2:
+
+Set {Xi : i ∈ [m]} = D1 ∪ D 0 
+
+> 3:
+
+for i ∈ [m] do  
+
+> 4:
+
+Yi ← s(θ, X i) 
+
+> 5:
+
+gi ← g(Xi, Y i) 
+
+> 6:
+
+end for  
+
+> 7:
+
+(Ti)i∈[m] ← ϕ (gi)i∈[m], (Yi)i∈[m], (Xi)i∈[m]
+
+ ∈ {− 1, 0, 1}m 
+
+> 8:
+
+Return (Ti)i∈[m]
+
+B.4 (ε, δ )-DP Auditing Algorithm (under worst-case distribution shift bounds) 
+
+We use Corollary 1 and Steinke et al. [37] ’s audit algorithm for (ε, δ )-DP. To simplify the algorithm, we assume that the MIA outputs guesses (Ti)i∈[m] which satisfy ∥T ∥0 = r almost surely, for some fixed r ∈ [m]. This can be ensured by simply maximizing P 
+
+> i
+
+YiTi over T ∈ {− 1, 0, 1}m verifying 
+
+{Ti = ±1} = k±, for k+ + k− = r. Algorithm 6 instantiates Steinke et al. [37] ’s audit algorithm under this assumption. Proposition 4 then follows from Steinke et al. [37, Corollary 5.4]. 
+
+Algorithm 6 Zero-Run ε-DP auditing (under worst-case distribution shift bounds)  
+
+> 1:
+
+Inputs: Instance θ = A(Dtrain ) of the algorithm A to audit; MIA M; D1 ⊂ D train ; D0 ⊂X \ D train ; probability of error p; number of guesses r ∈ [m]; privacy parameter ε, δ > 0,
+
+¯εDS , δ DS > 0 
+
+> 2:
+
+{X1, . . . , X m} ← D 1 ∪ D 0 
+
+> 3:
+
+Si ← 21{Xi∈D 1} − 1 ∈ {− 1, 1} 
+
+> 4:
+
+Run Algorithm 5 on (θ, D1, D0, M) to obtain (Ti)i∈[m] 
+
+> 5:
+
+Compute W = Pmi=1 max(0 , T iSi) 
+
+> 6:
+
+Estimate ˆv ∈ R such that: 
+
+g(ˆ v) + 2 m(δ + δDS − δδ DS ) max 
+
+> i∈[m]
+
+ g(ˆ v) − g(ˆ v − i)
+
+i
+
+
+
+≤ p , 
+
+where 
+
+g(u) def 
+
+= P
+
+
+
+Binomial 
+
+
+
+r, eε+¯ εDS 
+
+1 + eε+¯ εDS 
+
+
+
+≥ u
+
+ 
+
+> 7:
+
+if W ≥ ˆv then  
+
+> 8:
+
+Return FALSE 9: end if Proposition 4. Let ε, δ > 0. Assume that Assumptions 1 and 2 hold and that ∥T ∥0 = r almost surely. Then, Algorithm 6 is p-valid: if Algorithm 6 outputs FALSE , A is not (ε, δ )-DP with probability 1 − p.
+
+B.5 μ-GDP Auditing Algorithm (under worst-case distribution shift bounds) 
+
+We use Corollary 1 and Mahloujifar et al. [25] ’s audit algorithm for general f -DP. We assume that the MIA outputs guesses (Ti)i∈[m] which satisfy ∥T ∥0 = r almost surely, for some fixed r ∈ [m]. This can be ensured by simply maximizing P 
+
+> i
+
+YiTi over T ∈ {− 1, 0, 1}m verifying {Ti = ±1} = k±,for k+ + k− = r. Algorithm 6 instantiates Mahloujifar et al. [25] ’s audit algorithm under this assumption, for the tradeoff function G′ = G√μ2+μ2DS 
+
+⊗ fδDS , which writes as: 
+
+G′(p) = 
+
+((1 − δDS )G√μ2+μ2DS 
+
+( p 
+
+> 1−δDS
+
+) if 0 ≤ p ≤ 1 − δDS ,
+
+0 else. (5) Proposition 5 then follows from Mahloujifar et al. [25, Theorem 10]. 16 Algorithm 7 Zero-Run μ-GDP auditing I (under worst-case distribution shift bounds)  
+
+> 1:
+
+Inputs: Instance θ = A(Dtrain ) of the algorithm A to audit; MIA M; D1 ⊂ D train ; D0 ⊂X \ D train ; probability of errors p and p′; number of guesses r; number of correct guesses c 
+
+> 2:
+
+{X1, . . . , X m} ← D 1 ∪ D 0 
+
+> 3:
+
+Si ← 21{Xi∈D 1} − 1 ∈ {− 1, 1} 
+
+> 4:
+
+Run Algorithm 5 on (θ, D1, D0, M) to obtain (Ti)i∈[m] 
+
+> 5:
+
+Set h[k] = r[k] = 0 for k ∈ [c] 
+
+> 6:
+
+Set r[c] = pc m and h[c] = p(r−c) 
+
+> m
+> 7:
+
+for k ∈ { c − 1, . . . , 0} do  
+
+> 8:
+
+h[k] = ¯G′−1(r[k + 1]) with ¯G′−1 the inverse of ¯G′ = 1 − G′ in the tradeoff function sense (G′ defined in Equation (5))  
+
+> 9:
+
+r[k] = r[k + 1] + kr−k (h[k] − h[k + 1])  
+
+> 10:
+
+end for  
+
+> 11:
+
+if r[0] + h[0] ≥ rm then  
+
+> 12:
+
+Return F ALSE if the number of correct guesses is equal to or larger than c 
+
+> 13:
+
+end if Proposition 5. Let μ > 0. Assume that Assumptions 1 and 2 hold and that ∥T ∥0 = r almost surely. Then, Algorithm 7 is p-valid: if Algorithm 7 outputs FALSE , A is not μ-GDP with probability 1 − p.
+
+The error probability δDS can also be put in the error probability of the audit, allowing us to use Mahloujifar et al. [25] ’s auditing algorithm for the GDP tradeoff function, yielding a (p + δDS )-valid audit (instead pf p-valid). This is what we describe in the discussion after Corollary 1, and what next algorithm and corollary formalize. 
+
+Algorithm 8 Zero-Run μ-GDP auditing II (under worst-case distribution shift bounds)  
+
+> 1:
+
+Inputs: Instance θ = A(Dtrain ) of the algorithm A to audit; MIA M; D1 ⊂ D train ; D0 ⊂X \ D train ; probability of errors p and p′; parameter μ; number of guesses r; number of correct guesses c 
+
+> 2:
+
+{X1, . . . , X m} ← D 1 ∪ D 0 
+
+> 3:
+
+Si ← 21{Xi∈D 1} − 1 ∈ {− 1, 1} 
+
+> 4:
+
+Run Algorithm 5 on (θ, D1, D0, M) to obtain (Ti)i∈[m] 
+
+> 5:
+
+Set h[k] = r[k] = 0 for k ∈ [c] 
+
+> 6:
+
+Set r[c] = pc m and h[c] = p(r−c) 
+
+> m
+> 7:
+
+for k ∈ { c − 1, . . . , 0} do  
+
+> 8:
+
+h[k] = ¯G−1 
+
+> μ
+
+(r[k + 1]) with ¯G−1 
+
+> μ
+
+the inverse of ¯Gμ = 1 − Gμ in the tradeoff function sense (Gμ is the μ-GDP tradeoff function)  
+
+> 9:
+
+r[k] = r[k + 1] + kr−k (h[k] − h[k + 1])  
+
+> 10:
+
+end for  
+
+> 11:
+
+if r[0] + h[0] ≥ rm then  
+
+> 12:
+
+Return F ALSE if the number of correct guesses is equal to or larger than c 
+
+> 13:
+
+end if Proposition 6. Let μ > 0. Assume that Assumptions 1 and 2 hold and that ∥T ∥0 = r almost surely. Then, Algorithm 7 is (p + δDS )-valid: if Algorithm 8 outputs FALSE , A is not μ-GDP with probability 
+
+1 − p − δDS .
+
+## C Conditional (ε, δ )-Auditing 
+
+C.1 Conditional ε-DP Auditing 
+
+We now present a relaxed version of Theorem 5.1.1 with δ = 0 . We include this simplified result for its proof simplicity and clarity of exposure, as well as for its use for rejecting propensity score models, as explained in next paragraph. 17 Rejecting propensity score models. Theorem C.1 can additionally be used to audit a propensity score model: setting ε = 0 and bi obtained using a propensity score model ˆπ, having a large success rate for the obtained tampered MIA which only hinges on distribution shift means that ˆπ does not not penalize enough distribution shifts, yielding a natural hypothesis test. 
+
+Theorem C.1 (Tampered ε-DP Auditing) . Assume that Assumption 1 holds. and let (Bi)i∈[m] be independent Bernoulli random variables of parameters ( 1+ e−ε−εDS (Xi) 
+
+> 1+ e−ε
+
+)i∈[m], independent of all the rest. Then, for any v > 0, if A is ε-DP: 
+
+P
+
+> m
+
+X
+
+> i=1
+
+Bi1{Ti=Si} ≥ v (Xi, T i)i∈[m]
+
+!
+
+≤ P
+
+
+
+Binomial 
+
+
+
+∥T ∥1, eε
+
+1 + eε
+
+
+
+≥ v (Xi, T i)i∈[m]
+
+
+
+.
+
+Proof of Theorem D.1. The proof is largely inspired by that of Steinke et al. [37 , Proposition 5.1 ] .Let θ ∈ E be an event of non-null probability. Fix some i ∈ [m] and s(−i) ∈ {− 1, 1}m. We first start by proving an upper-bound on: 
+
+P
+
+
+
+Si = 1 |θ ∈ E , S (−i) = s(−i), ¯X
+
+
+
+.
+
+Using Bayes’ theorem, 
+
+P
+
+
+
+Si = 1 |θ ∈ E , S (−i)s(−i), ¯X
+
+
+
+= P  θ ∈ E| Si = 1 , S (−i) = s(−i), ¯X × P  Si = 1 |S(−i) = s(−i), ¯X
+
+P  θ ∈ E| S(−i) = s(−i), ¯X
+
+= P  θ ∈ E| Si = 1 , S (−i) = s(−i), ¯X × P  Si = 1 |S(−i) = s(−i), ¯XP 
+
+> s∈{− 1,1}
+
+P  θ ∈ E| Si = s, S (−i) = s(−i), ¯X P  Si = s|S(−i) = s(−i), ¯X
+
+= π(Xi)P  θ ∈ E| Si = 1 , S (−i) = s(−i), ¯X
+
+π(Xi)P  θ ∈ E| Si = 1 , S (−i) = s(−i), ¯X + (1 − π(Xi)P  θ ∈ E| Si = −1, S (−i) = s(−i), ¯X ,
+
+since P  Si = 1 |S(−i) = s(−i), ¯X = π(Xi) and P  Si = −1|S(−i) = s(−i), ¯X = 1 − π(Xi).Then, using the fact that due to ε-DP we have that: 
+
+R def 
+
+= P  θ ∈ E| Si = 1 , S (−i) = s(−i), ¯X
+
+P  θ ∈ E| Si = −1, S (−i) = s(−i), ¯X ∈
+
+ 1
+
+eε , e ε
+
+
+
+,
+
+we have: 
+
+P
+
+
+
+Si = 1 |θ ∈ E , S (−i) = s(−i), ¯X
+
+
+
+≤ π(Xi)
+
+π(Xi) + (1 − π(Xi)) R−1
+
+≤ π(Xi)
+
+π(Xi) + (1 − π(Xi)) e−ε
+
+≤ 11 + 1−π(Xi) 
+
+> π(Xi)
+
+e−ε
+
+≤ 11 + e−ε−εi ,
+
+where eεi = max( π(Xi)1−π(Xi) , 1−π(Xi) 
+
+> π(Xi)
+
+). Similarly, we have that: 
+
+P
+
+
+
+Si = −1|θ ∈ E , S (−i) = s(−i), ¯X
+
+
+
+≤ 11 + e−ε−εi .
+
+We can thus prove by induction that, conditionally on (Xj , T j )j∈[m], for all i ∈ [m], Wi =
+
+P 
+
+> j≤i
+
+max(0 , T j Sj ) is stochastically dominated by ˜Wj = P 
+
+> j≤i
+
+|Tj |ξj , where ξj are independent Bernoulli random variables of parameters 11+ e−ε−εj . For i = 1 this is of course true. Then, if we assume that the result holds at some i ≤ n, we have that Wi+1 = Wi + 1{Si+1 =sign( Ti+1 )} and 18 ˜Wi+1 = ˜Wi + ξi+1 . Conditionally on the event 
+
+n
+
+Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t
+
+o
+
+for wi, ˜wi, ¯t such that this event is not of probability 0: 
+
+E
+
+h
+
+1{Si+1 =sign( Ti+1 )}|Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t
+
+i
+
+= P
+
+
+
+Si+1 = sign( Ti+1 )|Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t
+
+
+
+= P
+
+
+
+Si+1 = Ti+1 |Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t
+
+
+
+= P
+
+
+
+Si+1 = 1 |Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t, T i+1 = 1 
+
+
+
+P
+
+
+
+Ti+1 = 1 |Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t
+
+
+
++ P
+
+
+
+Si+1 = −1|Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t, T i+1 = −1
+
+
+
+P
+
+
+
+Ti+1 = −1|Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t
+
+
+
+≤ 11 + e−ε−εi P
+
+
+
+Ti+1 = 1 |Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t
+
+
+
++ 11 + e−ε−εi P
+
+
+
+Ti+1 = −1|Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t
+
+
+
+,
+
+using the above computations with the adequate event E, which leads to: 
+
+E
+
+h
+
+1{Si+1 =Ti+1 }|Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t
+
+i
+
+≤ |ti+1 |
+
+1 + e−ε−εi .
+
+Then, noticing that: 
+
+E
+
+h
+
+ξi+1 |Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t
+
+i
+
+= |ti+1 |
+
+1 + e−ε
+
+= |ti+1 |
+
+1 + e−ε × 1 + e−ε
+
+1 + e−ε−εi
+
+= |ti+1 |
+
+1 + e−ε × 1
+
+E
+
+h
+
+Bi+1 |Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t
+
+i
+
+=
+
+E
+
+h
+
+|Ti+1 |ξi+1 |Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t
+
+i
+
+E
+
+h
+
+Bi+1 |Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t
+
+i ,
+
+we have: 
+
+E
+
+h
+
+Bi+1 1{Si+1 =Ti+1 }|Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t
+
+i
+
+E
+
+h
+
+Bi+1 |Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t
+
+i
+
+E
+
+h
+
+1{Si+1 =Ti+1 }|Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t
+
+i
+
+≤ E
+
+h
+
+|Ti+1 |ξi+1 |Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t
+
+i
+
+.
+
+Thus, Bi+1 1{Si+1 =Ti+1 } is stochastically dominated by |Ti+1 |ζi+1 conditionally on Wi, ˜Wi and 
+
+T≤i+1 . Using Steinke et al. [37 , Lemma 4.9 ]: Wi+1 is stochastically dominated by ˜Wi+1 , condition-ally on Wi, ˜Wi and T≤i+1 . We conclude by unrolling the induction. 
+
+C.2 Proof of Theorem 5.1.1 
+
+We now proceed to the proof of Theorem 5.1.1, starting with the following intermediate result. 
+
+C.2.1 Intermediate Result 
+
+We first start with the following result, from which Theorem 5.1.1 will directly follow, byt plugging in γ = ε and δ′ = (1 + e−1)δ, as we then prove in Proposition 7. 
+
+Theorem C.2 (Intermediate Result) . Let γ > 0 and δ′ > 0 such that for all adjacent datasets 
+
+D ∼ D ′,
+
+E
+
+h
+
+(1 − eγ−| PLRV AD,D′ (A(D)) |)+
+
+i
+
+≤ δ′ .
+
+19 Assume that Assumption 1 holds. Let (Bi)i∈[m] be independent Bernoulli random variables of parameters ( 1+ e−ε−εDS (Xi) 
+
+> 1+ e−ε
+
+)i∈[m]. Assume that the attacker makes at most r guesses. Then, for all 
+
+v > 0,
+
+P
+
+> m
+
+X
+
+> i=1
+
+Bi1{Ti=Si} ≥ v (Xi)i∈[m]
+
+!
+
+≤ P
+
+
+
+Binomial 
+
+
+
+r, eε
+
+1 + eε
+
+
+
+≥ v
+
+
+
++ αmδ ′ ,
+
+where 
+
+α = X
+
+> i∈[m]
+
+1
+
+i P
+
+
+
+v ≥ Binomial 
+
+
+
+r, eε
+
+1 + eγ
+
+
+
+= v − i
+
+
+
+.
+
+Proof of Theorem C.2. Fix some i ∈ [m], let Di = D ∪ { Xj , S j = 1 , j ̸ = i} ∪ { Xi} and D′ 
+
+> i
+
+=
+
+D ∪ { Xj , X j = 1 , j ̸ = i}, respectively corresponding to the (random) datasets obtained by setting Si
+
+to 1 and −1. If Si = 1 , we have Dtrain = Di, while if Si = −1 we have Dtrain = D′
+
+> i
+
+. Let us define the following (random, since Sj , j ̸ = i and Si are random) set: 
+
+Eγ,i =
+
+n
+
+θ ∈ Θ : |PLRV ADi,D′ 
+
+> i
+
+(θ)| ≤ γ
+
+o
+
+.
+
+We first start by proving an upper-bound on: 
+
+P
+
+
+
+Si = 1 |θ ∈ E ∩ E γ,i , S (−i) = s(−i), ¯X
+
+
+
+,
+
+for E such that θ ∈ E ∩ E γ,i is of non-null probability. Using Bayes’ theorem, 
+
+P
+
+
+
+Si = 1 |θ ∈ E ∩ E γ,i , S (−i) = s(−i), ¯X
+
+
+
+= P  θ ∈ E ∩ E γ,i |Si = 1 , S (−i) = s(−i), ¯X × P  Si = 1 |S(−i) = s(−i), ¯X
+
+P  θ ∈ E ∩ E γ,i |S(−i) = s(−i), ¯X
+
+= P  θ ∈ E ∩ E γ,i |Si = 1 , S (−i) = s(−i), ¯X × P  Si = 1 |S(−i) = s(−i), ¯XP 
+
+> s∈{− 1,1}
+
+P  θ ∈ E ∩ E γ,i |Si = s, S (−i) = s(−i), ¯X P  Si = s|S(−i) = s(−i), ¯X
+
+= π(Xi)P  θ ∈ E ∩ E γ,i |Si = 1 , S (−i) = s(−i), ¯X
+
+π(Xi)P  θ ∈ E ∩ E γ,i |Si = 1 , S (−i) = s(−i), ¯X + (1 − π(Xi)P  θ ∈ E| Si = −1, S (−i) = s(−i), ¯X ,
+
+since P  Si = 1 |S(−i) = s(−i), ¯X = π(Xi) and P  Si = −1|S(−i) = s(−i), ¯X = 1 − π(Xi).Then, let 
+
+Ri
+
+> def
+
+= P  θ ∈ E ∩ E γ,i |Si = 1 , S (−i) = s(−i), ¯X
+
+P  θ ∈ E ∩ E γ,i |Si = −1, S (−i) = s(−i), ¯X .
+
+We have that: 
+
+P
+
+
+
+θ ∈ E ∩ E γ,i |Si = 1 , S (−i) = s(−i), ¯X
+
+
+
+= ES>i 
+
+Z
+
+1{θ∈E} 1n 
+
+> |PLRV Di,D′
+> i(θ)|≤ γ
+> o
+
+dPA(Di)(θ)
+
+≤ eγ ES>i 
+
+Z
+
+1{θ∈E} 1n 
+
+> |PLRV Di,D′
+> i(θ)|≤ γ
+> o
+
+dPA(D′
+
+> i)
+
+(θ)= eγ P
+
+
+
+θ ∈ E ∩ E γ,i |Si = −1, S (−i) = s(−i), ¯X
+
+
+
+,
+
+since PLRV Di,D′ 
+
+> i
+
+(θ) ≤ γ implies that dPA(Di)(θ) ≤ eγ dPA(D′
+
+> i)
+
+(θ). Thus, we have that Ri ≤ eγ ,and: 
+
+P
+
+
+
+Si = 1 |θ ∈ E ∩ E γ,i , S (−i) = s(−i), ¯X
+
+
+
+≤ π(Xi)
+
+π(Xi) + (1 − π(Xi)) R−1
+
+> i
+
+≤ π(Xi)
+
+π(Xi) + (1 − π(Xi)) e−γ
+
+≤ 11 + 1−π(Xi) 
+
+> π(Xi)
+
+e−γ
+
+≤ 11 + e−γ−εi ,
+
+20 where eεi = max( π(Xi)1−π(Xi) , 1−π(Xi) 
+
+> π(Xi)
+
+). Similarly, since |PLRV Di,D′ 
+
+> i
+
+(θ)| = |PLRV D′ 
+
+> i,Di
+
+(θ)| we have that: 
+
+P
+
+
+
+Si = −1|θ ∈ E ∩ E γ,i , S (−i) = s(−i), ¯X
+
+
+
+≤ 11 + e−γ−εi .
+
+As a consequence, for all i and event θ ∈ E :
+
+P
+
+
+
+Si = Ti|θ ∈ E ∩ E γ,i , S (−i) = s(−i), ¯X
+
+
+
+= P
+
+
+
+Si = 1 |θ ∈ E ∩ E γ,i , T i = 1 , S (−i) = s(−i), ¯X
+
+
+
+P
+
+
+
+Ti = 1 |θ ∈ E ∩ E γ,i , S (−i) = s(−i), ¯X
+
+
+
++ P
+
+
+
+Si = −1|θ ∈ E ∩ E γ,i , T i = −1, S (−i) = s(−i), ¯X
+
+
+
+P
+
+
+
+Ti = −1|θ ∈ E ∩ E γ,i , S (−i) = s(−i), ¯X
+
+
+
+≤ 11 + e−γ−εi .
+
+Thus, 
+
+E
+
+h
+
+Bi1{Si=Ti}|θ ∈ E ∩ E γ,i , S (−i) = s(−i), ¯X
+
+i
+
+= P
+
+
+
+Si = Ti, B i = 1 |θ ∈ E ∩ E γ,i , S (−i) = s(−i), ¯X
+
+
+
+= P (Bi = 1) P
+
+
+
+Si = Ti|θ ∈ E ∩ E γ,i , S (−i) = s(−i), ¯X
+
+
+
+= 1 + e−γ−εi
+
+1 + e−γ × 11 + e−γ−εi
+
+= 11 + e−γ .
+
+Now, for any γ′ > γ , let: 
+
+dEγ,i = θ ∈ Θ : |PLRV Di,D′ 
+
+> i
+
+(θ)| = γ′ .
+
+Although this event can be of null probability if the PLRV is continuous, we can still condition on 
+
+dEγ,i , as it amounts to conditioning on a real valued random variable. Using the same reasoning as above, 
+
+P
+
+
+
+Si = Ti|θ ∈ E ∩ dEγ′,i , S (−i) = s(−i), ¯X
+
+
+
+≤ 11 + e−γ′−εi ,
+
+and 
+
+E
+
+h
+
+Bi1{Si=Ti}|θ ∈ E ∩ dEγ′,i , S (−i) = s(−i), ¯X
+
+i
+
+≤ 11 + e−γ′−εi × 1 + e−γ−εi
+
+1 + e−γ
+
+≤ 11 + e−γ′ × 1 + e−γ′
+
+1 + e−γ′−εi × 1 + e−γ−εi
+
+1 + e−γ
+
+≤ 11 + e−γ′ ,
+
+since 1+ e−γ′ 
+
+> 1+ e−γ′−εi
+
+≤ 1+ e−γ 
+
+> 1+ e−γ−εi
+
+for γ′ ≥ γ.Let ξj (γ′) be independent Bernoulli random variables of parameters 11+ e−γ′ , independent of all the rest and coupled such that ξj (γ′) ≤ ξj (γ′′ ) for all γ′′ ≥ γ′. Such a coupling can be obtained by sampling (Ui)i∈[m] i.i.d. random variables uniformly in [0 , 1] and setting: 
+
+ξj = 1   
+
+> Uj≤11+ e−γ′
+> 
+
+.
+
+Let ξj (γ) be independent Bernoulli random variables of parameters 11+ e−γ , independent of all the rest and of the ξj (γ′). Let then: 
+
+ξ′ 
+
+> j
+
+= 1{A (D)∈E γ,i }ξj (γ) + 
+
+Z
+
+> γ′>γ
+
+1{A(D)∈dEγ′,i }ξj (γ′) ,
+
+21 which is a Bernoulli random variable, as at most only one of the ζj is “activated”. Let us prove by induction that, conditionally on (Xj , T j )j∈[m], for all i ∈ [m], Wi
+
+> def
+
+= P 
+
+> j≤i
+
+Bj 1{Tj =Sj } is stochasti-cally dominated by ˜Wi
+
+> def
+
+= P 
+
+> j≤i
+
+|Tj |ξ′ 
+
+> j
+
+. For i = 0 this is of course true since both quantities are null.. Then, if we assume that the result holds at some i ≤ n, we have that Wi+1 = Wi +Bi+1 1{Si+1 =Ti+1 }
+
+and ˜Wi+1 = ˜Wi + ξ′
+
+> i+1
+
+. Conditionally on the event 
+
+n
+
+Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t, ¯X = ¯ x
+
+o
+
+for 
+
+wi, ˜wi, ¯t, ¯x such that this event is not of probability 0, if ti+1 ̸ = 0 , using the above computations and writing θ = A(D) as the output of the training algorithm: 
+
+E
+
+h
+
+Bi+1 1{Si+1 =Ti+1 }|Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t, ¯X = ¯ x
+
+i
+
+= E
+
+h
+
+Bi+1 1{Si+1 =Ti+1 }, θ ∈ E γ,i +1 |Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t, ¯X = ¯ x
+
+i
+
++
+
+Z
+
+> γ′>γ
+
+E
+
+h
+
+Bi+1 1{Si+1 =Ti+1 }, θ ∈ dEγ′,i +1 |Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t, ¯X = ¯ x
+
+i
+
+dγ′
+
+≤ E
+
+h
+
+Bi+1 1{Si+1 =Ti+1 }|θ ∈ E γ,i +1 , W i = wi, ˜Wi = ˜ wi, ¯T = ¯ t, ¯X = ¯ x
+
+i
+
+× P
+
+
+
+θ ∈ E γ,i +1 |Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t, ¯X = ¯ x
+
+
+
++
+
+Z
+
+> γ′>γ
+
+E
+
+h
+
+Bi+1 1{Si+1 =Ti+1 }|θ ∈ dEγ′,i +1 , W i = wi, ˜Wi = ˜ wi, ¯T = ¯ t, ¯X = ¯ x
+
+i
+
+× P
+
+
+
+θ ∈ dEγ′,i +1 |Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t, ¯X = ¯ x
+
+
+
+dγ′
+
+≤ eγ
+
+1 + eγ × P
+
+
+
+θ ∈ E γ,i +1 |Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t, ¯X = ¯ x
+
+
+
++
+
+Z
+
+> γ′>γ
+
+eγ′
+
+1 + eγ′ × P
+
+
+
+θ ∈ dEγ′,i +1 |Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t, ¯X = ¯ x
+
+
+
+dγ′
+
+= E
+
+h
+
+ξ′
+
+> i+1
+
+|Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t, ¯X = ¯ x
+
+i
+
+,
+
+using the above computations with the adequate event E. Thus, 
+
+E
+
+h
+
+Bi+1 1{Si+1 =Ti+1 }|Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t, ¯X = ¯ x
+
+i
+
+≤ E
+
+h
+
+|Ti+1 |ξ′
+
+> i+1
+
+|Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t, ¯X = ¯ x
+
+i
+
+,
+
+leading to max(0 , T i+1 Si+1 ) stochastically dominated by |Ti+1 |ξ′ 
+
+> i+1
+
+since stochastic domination for Bernoulli random variables is equivalent to domination of means, conditionally on Wi, ˜Wi,
+
+X and T≤i+1 . Using Steinke et al. [37 , Lemma 4.9 ] : Wi+1 is stochastically dominated by ˜Wi+1 ,conditionally on Wi, ˜Wi and T≤i+1 . Thus, Wn is stochastichally dominated by: 
+
+W ′ 
+
+> n
+
+=
+
+> m
+
+X
+
+> i=1
+
+|Ti|ξ′ 
+
+> i
+
+.
+
+Recall that: 
+
+ξ′ 
+
+> j
+
+= 1{A (D)∈E γ,i }ξj (γ) + 
+
+Z
+
+> γ′>γ
+
+1{A(D)∈dEγ′,i }ξj (γ′) ,
+
+so that: 
+
+W ′ 
+
+> m
+
+= Am + Bm ,
+
+where 
+
+Am =
+
+> m
+
+X
+
+> i=1
+
+|Ti|ξi(γ) ,
+
+22 and 
+
+Bm
+
+> def
+
+=
+
+> m
+
+X
+
+> j=1
+
+|Tj |
+
+Z 
+
+> γ′>γ
+
+1{A(D)∈dEγ′,i }ξj (γ′) − 1{A (D) /∈E γ,i }ξj (γ)
+
+
+
+=
+
+> m
+
+X
+
+> j=1
+
+|Tj |
+
+Z 
+
+> γ′>γ
+
+1{A(D)∈dEγ′,i }
+
+ ξj (γ′) − ξj (γ)
+
+and we are left with upper bounding this second sum. Note that under our coupling of ξj (γ), ξ j (γ′),each element of the sum in Bm is non-negative, enabling us to use Markov inequality later in the proof. Let 
+
+B′ 
+
+> m
+
+=
+
+> m
+
+X
+
+> j=1
+
+Z 
+
+> γ′>γ
+
+1{A(D)∈dEγ′,i }
+
+ ξj (γ′) − ξj (γ)
+
+,
+
+so that B′ 
+
+> m
+
+≥ Bm almost surely, leading to 
+
+P (W ′ 
+
+> m
+
+≥ v) = P (Am + Bm ≥ v)
+
+≤ P (Am + B′ 
+
+> m
+
+≥ v)
+
+≤ P (Am ≥ v) + P (v > A m ≥ v − B′
+
+> m
+
+) .
+
+Our problem now is that Am, B ′ 
+
+> m
+
+are apriori not independent. However, due to our coupling of the random variables (ξi(γ′)) γ′≥γ , we can easily characterize the distribution of B′ 
+
+> m
+
+conditionally on the random variables ξi(γ). Indeed, for Ui uniform in [0 , 1] , we have ξi(γ) = 1n  
+
+> Ui≤11+ e−γ
+> o
+
+and 
+
+ξi(γ′) − ξi(γ) = 1  
+
+> 11+ e−γ′≥Ui>11+ e−γ
+> 
+
+. We are thus going to upper bound E [B′
+
+> m
+
+|Am]. First, 
+
+E
+
+Z 
+
+> γ′>γ
+
+1{A(D)∈dEγ′,j }ξj (γ′) − 1{A (D) /∈E γ,j }ξj (γ) ξj (γ) = 1 
+
+
+
+= 0 ,
+
+since ξj (γ) = 1 = ⇒ ξj (γ′) = 1 . Then, under ξj (γ) = 0 , we have that ξj (γ′) − ξj (γ) is a Bernoulli random variable of parameter:  
+
+> 11+ e−γ′
+
+− 11+ e−γ
+
+1 − 11+ e−γ
+
+=
+
+> 1+ e−γ
+> 1+ e−γ′
+
+e−γ
+
+= eγ e−γ − e−γ′
+
+1 + e−γ′
+
+≤ eγ (e−γ − e−γ′
+
+)= 1 − eγ−γ′
+
+,
+
+leading to: 
+
+E
+
+Z 
+
+> γ′>γ
+
+1{A(D)∈dEγ′,j }ξj (γ′) − 1{A (D) /∈E γ,j }ξj (γ) ξj (γ) = 0 
+
+
+
+= E
+
+
+
+1 − eγ−| PLRV ADj ,D′
+
+> j
+> (A(D)) |
+
+|PLRV ADj ,D′ 
+
+> j
+
+(A(D)) | > γ 
+
+
+
+P (A(D) /∈ E γ,j )= E
+
+"
+
+1 − eγ−| PLRV ADj ,D′
+
+> j
+> (A(D)) |
+
+
+
+> +
+
+#
+
+(where ∀z ∈ R , z+ = max(0 , z )) .
+
+Now, under Sj = 1 we have D = Dj , while under Sj = −1 we have D = D′ 
+
+> j
+
+. Either way, we have, using our assumption on the mechanism A:
+
+E
+
+Z 
+
+> γ′>γ
+
+1{A(D)∈dEγ′,j }ξj (γ′) − 1{A (D) /∈E γ,j }ξj (γ) ξj (γ) = 0 
+
+
+
+≤ max E
+
+"
+
+1 − eγ−| PLRV ADj ,D′ 
+
+> j
+> (A(Dj)) |
+
+
+
+> +
+
+#
+
+, E
+
+"
+
+1 − eγ−| PLRV ADj ,D′ 
+
+> j
+> (A(D′
+> j)) |
+
+
+
+> +
+
+#! 
+
+≤ δ′ .
+
+23 Thus, almost surely: 
+
+E
+
+Z 
+
+> γ′>γ
+
+1{A(D)∈dEγ′,j }ξj (γ′) − 1{A (D) /∈E γ,j }ξj (γ) ξj (γ)
+
+
+
+≤ δ′ ,
+
+and: 
+
+E [B′
+
+> m
+
+|Am] ≤ mδ ′ .
+
+Using conditional Markov inequality, for any t > 0, P (B′ 
+
+> m
+
+≥ t|Am) ≤ mδ ′ 
+
+> t
+
+. Using this, 
+
+P (v > A m ≥ v − B′
+
+> m
+
+) = E 1{Am<v }P (Bm ≥ v − Am|Am)
+
+≤ E
+
+
+
+1{Am<v } × mδ ′
+
+v − Am
+
+
+
+= mδ ′ × X
+
+> k<v
+
+P (Am = v − k) k−1 .
+
+We then conclude using the fact that under our assumption on the attacker, Am is a Binomial random variable. 
+
+C.2.2 Proof of Theorem 5.1.1 
+
+Proof of Theorem D.2. The proof follows by combining the following proposition with Theorem D.3. 
+
+Proposition 7. If A is (ε, δ )-DP, then for any two adjacent datasets D ∼ D ′, we have: 
+
+E
+
+
+
+1 − eε−| PLRV D,D′ (A(D)) |
+
+> +
+
+
+
+≤ (1 + e−ε)δ . 
+
+Proof. First, note that (ε, δ )-DP directly implies that: 
+
+E
+
+
+
+1 − eε−PLRV D,D′ (A(D)) 
+
+> +
+
+
+
+≤ δ . 
+
+Then, 
+
+E
+
+
+
+1 − eε−PLRV D,D′ (A(D)) 
+
+> +
+
+
+
+≤ E
+
+h 
+
+1 − eε−PLRV D,D′ (A(D)) 
+
+1{PLRV D,D′ (A(D)) ≥ε}
+
+i
+
++ E
+
+h 
+
+1 − eε+PLRV D,D′ (A(D)) 
+
+1{PLRV D,D′ (A(D)) ≤− ε}
+
+i
+
+≤ δ + E
+
+h 
+
+1 − eε+PLRV D,D′ (A(D)) 
+
+1{PLRV D,D′ (A(D)) ≤− ε}
+
+i
+
+= δ + E
+
+h
+
+ePLRV D,D′ (A(D′)) 
+
+1 − eε+PLRV D,D′ (A(D′)) 
+
+1{PLRV D,D′ (A(D′)) ≤− ε}
+
+i
+
+(change of measure )= δ + E
+
+h
+
+ePLRV D,D′ (A(D′)) 
+
+1 − eε−PLRV D′,D (A(D′)) 
+
+1{PLRV D,D′ (A(D′)) ≤− ε}
+
+i
+
+(since PLRV D′,D (A(D′)) = −PLRV D,D′ (A(D′)) )
+
+≤ δ + E
+
+h
+
+e−ε 
+
+1 − eε−PLRV D′,D (A(D′)) 
+
+1{PLRV D,D′ (A(D′)) ≤− ε}
+
+i
+
+≤ δ + e−εδ , 
+
+concluding the proof. 24 C.3 Conditional Zero-Run (ε, δ )-DP Auditing Algorithm Algorithm 9 Conditional Zero-Run (ε, δ )-DP auditing  
+
+> 1:
+
+Inputs: Instance θ = A(Dtrain ) of the algorithm A to audit; MIA M; D1 ⊂ D train ; D0 ⊂X \ D train ; probability of error p; privacy parameter ε, δ > 0 
+
+> 2:
+
+{X1, . . . , X m} ← D 1 ∪ D 0 
+
+> 3:
+
+Si ← 21{Xi∈D 1} − 1 ∈ {− 1, 1} 
+
+> 4:
+
+Run Algorithm 5 (MIA) on (θ, D1, D0, M) to obtain (Ti)i∈[m] 
+
+> 5:
+
+Run Algorithm 4 to obtain (ˆ πi)i∈[m] 
+
+> 6:
+
+W ← Pmj=1 Bernoulli 
+
+
+
+min 
+
+ ˆπi 
+
+> 1−ˆπi
+
+, 1−ˆπi
+
+> ˆπi
+
+ 
+
+1{Ti=Si} 
+
+> 7:
+
+if W ≥ Φ−1
+
+> ε,δ,u
+
+ p ·, (Ti)i∈[m]
+
+ then  
+
+> 8:
+
+Return FALSE 9: end if 
+
+## D Conditional Approximate DP Auditing Without Tampering 
+
+In this section, we show that approximate DP can be audited in Zero-Run, without tampering. In order to do so, instead of multiplying MIA guesses by independent Bernoulli variables in order to tamper with their confidence, we adapt the success rate, which need to take into account MIA overconfidence. While in the pure DP setting, both results would yield equivalent results, in the approximate DP case the tampering results are stronger, as they yield milder δ dependence. However, the obtained MIA success rate bounds here are conditioned also on Ti.
+
+D.1 ε-DP Conditional Auditing without Tampering Theorem D.1 (ε-DP Auditing) . Let ε > 0 and assume that A satisfies ε-DP. For any v ∈ R, the success rate of the guesses of the attack is upper bounded as: 
+
+P
+
+> m
+
+X
+
+> i=1
+
+max(0 , T iSi) ≥ v (Xi, T i)i∈[m]
+
+!
+
+≤ P
+
+> m
+
+X
+
+> i=1
+
+ξi|Ti| ≥ v (Xi, T i)i∈[m]
+
+!
+
+,
+
+(6) 
+
+where ξi are independent Bernoulli random variables of respective parameters given by: 
+
+pi(ε) = eεi
+
+1 + eεi , where εi = ε + log 
+
+ π(Xi)1 − π(Xi)
+
+
+
+.
+
+Proof of Theorem D.1. The proof is largely inspired by that of Steinke et al. [37 , Proposition 5.1 ] .Let θ ∈ E be an event of non-null probability. Fix some i ∈ [m] and s(−i) ∈ {− 1, 1}m. We first start by proving an upper-bound on: 
+
+P
+
+
+
+Si = 1 |θ ∈ E , S (−i) = s(−i), ¯X
+
+
+
+.
+
+Using Bayes’ theorem, 
+
+P
+
+
+
+Si = 1 |θ ∈ E , S (−i) = s(−i), ¯X
+
+
+
+= P  θ ∈ E| Si = 1 , S (−i) = s(−i), ¯X × P  Si = 1 |S(−i) = s(−i), ¯X
+
+P  θ ∈ E| S(−i) = s(−i), ¯X
+
+= P  θ ∈ E| Si = 1 , S (−i) = s(−i), ¯X × P  Si = 1 |S(−i) = s(−i), ¯XP 
+
+> s∈{− 1,1}
+
+P  θ ∈ E| Si = s, S (−i) = s(−i), ¯X P  Si = s|S(−i) = s(−i), ¯X
+
+= π(Xi)P  θ ∈ E| Si = 1 , S (−i) = s(−i), ¯X
+
+π(Xi)P  θ ∈ E| Si = 1 , S (−i) = s(−i), ¯X + (1 − π(Xi)P  θ ∈ E| Si = −1, S (−i) = s(−i), ¯X ,
+
+25 since P  Si = 1 |S(−i) = s(−i), ¯X = π(Xi) and P  Si = −1|S(−i) = s(−i), ¯X = 1 − π(Xi).Then, using the fact that due to ε-DP we have that: 
+
+R def 
+
+= P  θ ∈ E| Si = 1 , S (−i) = s(−i), ¯X
+
+P  θ ∈ E| Si = −1, S (−i) = s(−i), ¯X ∈
+
+ 1
+
+eε , e ε
+
+
+
+,
+
+we have: 
+
+P
+
+
+
+Si = 1 |θ ∈ E , S (−i) = s(−i), ¯X
+
+
+
+≤ π(Xi)
+
+π(Xi) + (1 − π(Xi)) R−1
+
+≤ π(Xi)
+
+π(Xi) + (1 − π(Xi)) e−ε
+
+≤ 11 + 1−π(Xi) 
+
+> π(Xi)
+
+e−ε
+
+≤ 11 + e−ε−εi ,
+
+where eεi = max( π(Xi)1−π(Xi) , 1−π(Xi) 
+
+> π(Xi)
+
+). Similarly, we have that: 
+
+P
+
+
+
+Si = −1|θ ∈ E , S (−i) = s(−i), ¯X
+
+
+
+≤ 11 + e−ε−εi .
+
+We can thus prove by induction that, conditionally on (Xj , T j )j∈[m], for all i ∈ [m], Wi =
+
+P 
+
+> j≤i
+
+max(0 , T j Sj ) is stochastically dominated by ˜Wj = P 
+
+> j≤i
+
+|Tj |ξj , where ξj are independent Bernoulli random variables of parameters 11+ e−ε−εj . For i = 1 this is of course true. Then, if we assume that the result holds at some i ≤ n, we have that Wi+1 = Wi + 1{Si+1 =sign( Ti+1 )} and 
+
+˜Wi+1 = ˜Wi + ξi+1 . Conditionally on the event 
+
+n
+
+Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t
+
+o
+
+for wi, ˜wi, ¯t such that this event is not of probability 0: 
+
+E
+
+h
+
+1{Si+1 =sign( Ti+1 )}|Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t
+
+i
+
+= P
+
+
+
+Si+1 = sign( Ti+1 )|Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t
+
+
+
+= P
+
+
+
+Si+1 = Ti+1 |Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t
+
+
+
+= P
+
+
+
+Si+1 = 1 |Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t, T i+1 = 1 
+
+
+
+P
+
+
+
+Ti+1 = 1 |Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t
+
+
+
++ P
+
+
+
+Si+1 = −1|Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t, T i+1 = −1
+
+
+
+P
+
+
+
+Ti+1 = −1|Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t
+
+
+
+≤ 11 + e−ε−εi P
+
+
+
+Ti+1 = 1 |Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t
+
+
+
++ 11 + e−ε−εi P
+
+
+
+Ti+1 = −1|Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t
+
+
+
+,
+
+using the above computations with the adequate event E, which leads to: 
+
+E
+
+h
+
+1{Si+1 =sign( Ti+1 )}|Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t
+
+i
+
+≤ E
+
+h
+
+ζi+1 |Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t
+
+i
+
+.
+
+Thus, 
+
+E
+
+h
+
+max(0 , T i+1 Si+1 )|Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t
+
+i
+
+≤ E
+
+h
+
+|Ti+1 |ζi+1 |Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t
+
+i
+
+.
+
+leading to max(0 , T i+1 Si+1 ) stochastically dominated by |Ti+1 |ζi+1 conditionally on Wi, ˜Wi and 
+
+T≤i+1 . We conclude using Steinke et al. [37 , Lemma 4.9 ]: Wi+1 is stochastically dominated by 
+
+˜Wi+1 , conditionally on Wi, ˜Wi and T≤i+1 .26 D.2 Conditional (ε, δ )-DP Auditing without Tampering Proposition 8. For any S ∼i S′ two bits datasets adjacent on i ∈ [m] and any x ∈ X m, we have: 
+
+log 
+
+ P (MDS (S) = x)
+
+P (MDS (S′) = x)
+
+
+
+= εDS (xi) .
+
+Given the prior that members and non-members respectively follow distributions P1 and P0, the virtual conditional mechanism M(i)DS |xi for datapoint i ∈ [m] is an exact εDS (xi)-DP mechanism. By the chain rule of the Privacy Loss Random Variable, the total instance-specific leakage M(i)Tot |xi for datapoint i, having observed xi, is bounded by the sequential composition of the two conditionally independent mechanisms M(i)DS |xi and A. Thus, if A is ε-DP, M(i)Tot |xi is (ε + εDS (xi)) -DP, and the probability of making a good guess (i.e., of the event {Ti = Si}) on the observed datapoint Xi is upper-bounded by: 
+
+pi(ε) = eε+εDS (Xi)
+
+1 + eε+εDS (Xi) . (7) Next result uses and formalizes this heuristics to upper bound the success rate of any MIA, capturing instance-specific privacy leakage. 
+
+Theorem D.2 ((ε, δ )-Conditional Auditing) . Assume that Assumption 1 holds. Let (ζi)i∈[m] be independent Bernoulli random variables of parameters (pi(ε)) i∈[m], as defined in Equation (7) . Then, for any u, v > 0, with probability 1 −
+
+q m(1+ e−ε)δv over the randomness of (Ti)i∈[m], we have: 
+
+P
+
+> m
+
+X
+
+> i=1
+
+1{Ti=Si} ≥ v (Xi, T i)i∈[m]
+
+!
+
+≤ P
+
+> m
+
+X
+
+> i=1
+
+|Ti|ξi ≥ v − u (Xi, T i)i∈[m]
+
+!
+
++
+
+r m(1 + e−ε)δv
+
+> def
+
+= Φ ε,δ,u 
+
+ v (π(Xi), T i)i∈[m]
+
+ .
+
+D.3 Intermediate Result 
+
+We first start with the following result, from which Theorem D.2 will directly follow, by plugging in 
+
+γ = ε and δ′ = (1 + e−1)δ, as we then prove in Proposition 7. 
+
+Theorem D.3 (Intermediate Result) . Let γ > 0 and δ′ > 0 such that for all adjacent datasets 
+
+D ∼ D ′,
+
+E
+
+h
+
+(1 − eγ−| PLRV AD,D′ (A(D)) |)+
+
+i
+
+≤ δ′ .
+
+Assume that Assumption 1 holds. Let (ζi)i∈[m] be independent Bernoulli random variables of parameters (pi(γ)) i∈[m], defined as: 
+
+pi(γ) = eγ+εi
+
+1 + eγ+εi ,
+
+where εi = | log( π(Xi)/(1 − π(Xi))) . Then, for all u, v > 0, with probability 1 − pmδ ′/u over the randomness of (Ti)i∈[m]:
+
+P
+
+> m
+
+X
+
+> i=1
+
+max(0 , T iSi) ≥ v (Xi, T i)i∈[m]
+
+!
+
+≤ P
+
+> m
+
+X
+
+> i=1
+
+|Ti|ξi ≥ v − u (Xi, T i)i∈[m]
+
+!
+
++ pmδ ′/u . 
+
+Proof of Theorem D.3. Fix some i ∈ [m], let Di = D ∪ { Xj , S j = 1 , j ̸ = i} ∪ { Xi} and D′ 
+
+> i
+
+=
+
+D ∪ { Xj , X j = 1 , j ̸ = i}, respectively corresponding to the (random) datasets obtained by setting Si
+
+to 1 and −1. If Si = 1 , we have Dtrain = Di, while if Si = −1 we have Dtrain = D′
+
+> i
+
+. Let us define the following (random, since Sj , j ̸ = i and Si are random) set: 
+
+Eγ,i =
+
+n
+
+θ ∈ Θ : |PLRV ADi,D′ 
+
+> i
+
+(θ)| ≤ γ
+
+o
+
+.
+
+27 We first start by proving an upper-bound on: 
+
+P
+
+
+
+Si = 1 |θ ∈ E ∩ E γ,i , S (−i) = s(−i), ¯X
+
+
+
+,
+
+for E such that θ ∈ E ∩ E γ,i is of non-null probability. Using Bayes’ theorem, 
+
+P
+
+
+
+Si = 1 |θ ∈ E ∩ E γ,i , S (−i) = s(−i), ¯X
+
+
+
+= P  θ ∈ E ∩ E γ,i |Si = 1 , S (−i) = s(−i), ¯X × P  Si = 1 |S(−i) = s(−i), ¯X
+
+P  θ ∈ E ∩ E γ,i |S(−i) = s(−i), ¯X
+
+= P  θ ∈ E ∩ E γ,i |Si = 1 , S (−i) = s(−i), ¯X × P  Si = 1 |S(−i) = s(−i), ¯XP 
+
+> s∈{− 1,1}
+
+P  θ ∈ E ∩ E γ,i |Si = s, S (−i) = s(−i), ¯X P  Si = s|S(−i) = s(−i), ¯X
+
+= π(Xi)P  θ ∈ E ∩ E γ,i |Si = 1 , S (−i) = s(−i), ¯X
+
+π(Xi)P  θ ∈ E ∩ E γ,i |Si = 1 , S (−i) = s(−i), ¯X + (1 − π(Xi)P  θ ∈ E| Si = −1, S (−i) = s(−i), ¯X ,
+
+since P  Si = 1 |S(−i) = s(−i), ¯X = π(Xi) and P  Si = −1|S(−i) = s(−i), ¯X = 1 − π(Xi).Then, let 
+
+Ri
+
+> def
+
+= P  θ ∈ E ∩ E γ,i |Si = 1 , S (−i) = s(−i), ¯X
+
+P  θ ∈ E ∩ E γ,i |Si = −1, S (−i) = s(−i), ¯X .
+
+We have that: 
+
+P
+
+
+
+θ ∈ E ∩ E γ,i |Si = 1 , S (−i) = s(−i), ¯X
+
+
+
+= ES>i 
+
+Z
+
+1{θ∈E} 1n 
+
+> |PLRV Di,D′
+> i(θ)|≤ γ
+> o
+
+dPA(Di)(θ)
+
+≤ eγ ES>i 
+
+Z
+
+1{θ∈E} 1n 
+
+> |PLRV Di,D′
+> i(θ)|≤ γ
+> o
+
+dPA(D′
+
+> i)
+
+(θ)= eγ P
+
+
+
+θ ∈ E ∩ E γ,i |Si = −1, S (−i) = s(−i), ¯X
+
+
+
+,
+
+since PLRV Di,D′ 
+
+> i
+
+(θ) ≤ γ implies that dPA(Di)(θ) ≤ eγ dPA(D′
+
+> i)
+
+(θ). Thus, we have that Ri ≤ eγ ,and: 
+
+P
+
+
+
+Si = 1 |θ ∈ E ∩ E γ,i , S (−i) = s(−i), ¯X
+
+
+
+≤ π(Xi)
+
+π(Xi) + (1 − π(Xi)) R−1
+
+> i
+
+≤ π(Xi)
+
+π(Xi) + (1 − π(Xi)) e−γ
+
+≤ 11 + 1−π(Xi) 
+
+> π(Xi)
+
+e−γ
+
+≤ 11 + e−γ−εi ,
+
+where eεi = max( π(Xi)1−π(Xi) , 1−π(Xi) 
+
+> π(Xi)
+
+). Similarly, since |PLRV Di,D′ 
+
+> i
+
+(θ)| = |PLRV D′ 
+
+> i,Di
+
+(θ)| we have that: 
+
+P
+
+
+
+Si = −1|θ ∈ E ∩ E γ,i , S (−i) = s(−i), ¯X
+
+
+
+≤ 11 + e−γ−εi .
+
+As a consequence, for all i and event θ ∈ E :
+
+P
+
+
+
+Si = Ti|θ ∈ E ∩ E γ,i , S (−i) = s(−i), ¯X
+
+
+
+= P
+
+
+
+Si = 1 |θ ∈ E ∩ E γ,i , T i = 1 , S (−i) = s(−i), ¯X
+
+
+
+P
+
+
+
+Ti = 1 |θ ∈ E ∩ E γ,i , S (−i) = s(−i), ¯X
+
+
+
++ P
+
+
+
+Si = −1|θ ∈ E ∩ E γ,i , T i = −1, S (−i) = s(−i), ¯X
+
+
+
+P
+
+
+
+Ti = −1|θ ∈ E ∩ E γ,i , S (−i) = s(−i), ¯X
+
+
+
+≤ 11 + e−γ−εi .
+
+Now, for any γ′ > γ , let: 
+
+dEγ,i = θ ∈ Θ : |PLRV Di,D′ 
+
+> i
+
+(θ)| = γ′ .
+
+28 Although this event can be of null probability if the PLRV is continuous, we can still condition on 
+
+dEγ,i , as it amounts to conditioning on a real valued random variable. Using the same reasoning as above, 
+
+P
+
+
+
+Si = Ti|θ ∈ E ∩ dEγ′,i , S (−i) = s(−i), ¯X
+
+
+
+≤ 11 + e−γ′−εi .
+
+Let ξj (γ′) be independent Bernoulli random variables of parameters 11+ e−γ′−εj , independent of all the rest and coupled such that ξj (γ) ≤ ξj (γ′) for all γ′ ≥ γ. Such a coupling can be obtained by sampling (Ui)i∈[m] i.i.d. random variables uniformly in [0 , 1] and setting, for any γ′ ≥ γ:
+
+ξj = 1{Uj ≤pj (γ′)} .
+
+Let then: 
+
+ξ′ 
+
+> j
+
+= 1{A (D)∈E γ,i }ξj (γ) + 
+
+Z
+
+> γ′>γ
+
+1{A(D)∈dEγ′,i }ξj (γ′) ,
+
+which is a Bernoulli random variable, as at most only one of the ζj is “activated”. Let us prove by induction that, conditionally on (Xj , T j )j∈[m], for all i ∈ [m], Wi = P 
+
+> j≤i
+
+max(0 , T j Sj ) is stochas-tically dominated by ˜Wi = P 
+
+> j≤i
+
+|Tj |ξ′ 
+
+> j
+
+. For i = 0 this is of course true since both quantities are null.. Then, if we assume that the result holds at some i ≤ n, we have that Wi+1 = Wi +1{Si+1 =sign( Ti+1 )}
+
+and ˜Wi+1 = ˜Wi + ξ′
+
+> i+1
+
+. Conditionally on the event 
+
+n
+
+Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t, ¯X = ¯ x
+
+o
+
+for 
+
+wi, ˜wi, ¯t, ¯x such that this event is not of probability 0, if ti+1 ̸ = 0 , using the above computations and writing θ = A(D) as the output of the training algorithm: 
+
+E
+
+h
+
+1{Si+1 =sign( Ti+1 )}|Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t, ¯X = ¯ x
+
+i
+
+= P
+
+
+
+Si+1 = sign( Ti+1 )|Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t, ¯X = ¯ x
+
+
+
+= P
+
+
+
+Si+1 = Ti+1 |Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t, ¯X = ¯ x
+
+
+
+= P
+
+
+
+Si+1 = Ti+1 , θ ∈ E γ,i +1 |Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t, ¯X = ¯ x
+
+
+
++
+
+Z
+
+> γ′>γ
+
+P
+
+
+
+Si+1 = Ti+1 , θ ∈ dEγ′,i +1 |Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t, ¯X = ¯ x
+
+
+
+dγ′
+
+≤ P
+
+
+
+Si+1 = Ti+1 |θ ∈ E γ,i +1 , W i = wi, ˜Wi = ˜ wi, ¯T = ¯ t, ¯X = ¯ x
+
+
+
+× P
+
+
+
+θ ∈ E γ,i +1 |Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t, ¯X = ¯ x
+
+
+
++
+
+Z
+
+> γ′>γ
+
+P
+
+
+
+Si+1 = Ti+1 |θ ∈ dEγ′,i +1 , W i = wi, ˜Wi = ˜ wi, ¯T = ¯ t, ¯X = ¯ x
+
+
+
+× P
+
+
+
+θ ∈ dEγ′,i +1 |Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t, ¯X = ¯ x
+
+
+
+dγ′
+
+≤ eγ+εi
+
+1 + eγ+εi
+
+× P
+
+
+
+θ ∈ E γ,i +1 |Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t, ¯X = ¯ x
+
+
+
++
+
+Z
+
+> γ′>γ
+
+eγ′+εi
+
+1 + eγ′+εi
+
+× P
+
+
+
+θ ∈ dEγ′,i +1 |Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t, ¯X = ¯ x
+
+
+
+dγ′
+
+= E
+
+h
+
+ξ′
+
+> i+1
+
+|Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t, ¯X = ¯ x
+
+i
+
+,
+
+using the above computations with the adequate event E. Thus, 
+
+E
+
+h
+
+max(0 , T i+1 , S i+1 )|Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t, ¯X = ¯ x
+
+i
+
+≤ E
+
+h
+
+|Ti+1 |ξ′
+
+> i+1
+
+|Wi = wi, ˜Wi = ˜ wi, ¯T = ¯ t, ¯X = ¯ x
+
+i
+
+,
+
+29 leading to max(0 , T i+1 Si+1 ) stochastically dominated by |Ti+1 |ξ′ 
+
+> i+1
+
+since stochastic domination for Bernoulli random variables is equivalent to domination of means, conditionally on Wi, ˜Wi,
+
+X and T≤i+1 . Using Steinke et al. [37 , Lemma 4.9 ] : Wi+1 is stochastically dominated by ˜Wi+1 ,conditionally on Wi, ˜Wi and T≤i+1 . Thus, Wn is stochastichally dominated by: 
+
+W ′ 
+
+> n
+
+=
+
+> m
+
+X
+
+> i=1
+
+|Ti|ξ′ 
+
+> i
+
+.
+
+Recall that: 
+
+ξ′ 
+
+> j
+
+= 1{A (D)∈E γ,i }ξj (γ) + 
+
+Z
+
+> γ′>γ
+
+1{A(D)∈dEγ′,i }ξj (γ′) ,
+
+so that: 
+
+W ′ 
+
+> n
+
+= Am + Bm ,
+
+where 
+
+Am =
+
+> m
+
+X
+
+> i=1
+
+|Ti|ξi(γ) ,
+
+and 
+
+Bm
+
+> def
+
+=
+
+> m
+
+X
+
+> j=1
+
+|Tj |
+
+Z 
+
+> γ′>γ
+
+1{A(D)∈dEγ′,i }ξj (γ′) − 1{A (D) /∈E γ,i }ξj (γ)
+
+
+
+=
+
+> m
+
+X
+
+> j=1
+
+|Tj |
+
+Z 
+
+> γ′>γ
+
+1{A(D)∈dEγ′,i }
+
+ ξj (γ′) − ξj (γ)
+
+and we are left with upper bounding this second sum. Note that under our coupling of ξj (γ), ξ j (γ′),each element of the sum in Bm is non-negative, enabling us to use Markov inequality later in the proof. For j ∈ [m],
+
+E
+
+Z 
+
+> γ′>γ
+
+1{A(D)∈dEγ′,i }ξj (γ′)
+
+
+
+=
+
+Z
+
+> γ′>γ
+
+P (A(D) ∈ dEγ′,i ) E [ξj (γ′)] d γ′
+
+=
+
+Z
+
+> γ′>γ
+
+P (A(D) ∈ dEγ′,i ) eγ′+εj
+
+1 + eγ′+εj dγ′
+
+=
+
+Z
+
+> γ′>γ
+
+P
+
+
+
+|PLRV ADj ,D′ 
+
+> j
+
+(A(D)) | = γ′ eγ′+εj
+
+1 + eγ′+εj dγ′
+
+= E
+
+ e|PLRV ADj ,D′
+
+> j
+> (A(D)) |+εj
+
+1 + e|PLRV ADj ,D′
+
+> j
+> (A(D)) |+εj
+
+|PLRV ADj ,D′ 
+
+> j
+
+(A(D)) | > γ 
+
+ P (A(D) /∈ E γ,j ) .
+
+30 Thus, 
+
+E
+
+Z 
+
+γ′>γ 
+
+1{A(D)∈dEγ′,j }ξj (γ′) − 1{A (D) /∈E γ,j }ξj (γ)
+
+
+
+= E
+
+ e|PLRV ADj ,D′
+
+> j
+
+(A(D)) |+εj
+
+1 + e|PLRV ADj ,D′
+
+> j
+
+(A(D)) |+εj
+
+− eγ+εj
+
+1 + eγ+εj
+
+ |PLRV ADj ,D′ 
+
+> j
+
+(A(D)) | > γ 
+
+ P (A(D) /∈ E γ,j )= E
+
+ e|PLRV ADj ,D′
+
+> j
+
+(A(D)) |+εj
+
+1 + e|PLRV ADj ,D′
+
+> j
+
+(A(D)) |+εj
+
+− eγ+εj
+
+1 + eγ+εj
+
+
+
++
+
+ (where ∀z ∈ R , z+ = max(0 , z )) 
+
+≤ E
+
+ e|PLRV ADj ,D′
+
+> j
+
+(A(D)) |+εj
+
+1 + eγ+εj − eγ+εj
+
+1 + eγ+εj
+
+
+
++
+
+
+
+≤ E
+
+ e|PLRV ADj ,D′
+
+> j
+
+(A(D)) |+εj
+
+− eγ+εj
+
+1 + eγ+εj
+
+
+
++
+
+
+
+≤ E
+
+ e|PLRV ADj ,D′
+
+> j
+
+(A(D)) |+εj
+
+− eγ+εj
+
+eγ+εj
+
+
+
++
+
+
+
+≤ E
+
+ e|PLRV ADj ,D′
+
+> j
+
+(A(D)) |
+
+− eγ
+
+eγ
+
+
+
++
+
+
+
+≤ E
+
+"
+
+1 − eγ−| PLRV ADj ,D′
+
+> j
+
+(A(D)) |
+
++
+
+#
+
+.
+
+Now, under Sj = 1 we have D = Dj , while under Sj = −1 we have D = D′
+
+j . Either way, we have: 
+
+E
+
+Z 
+
+γ′>γ 
+
+1{A(D)∈dEγ′,j }ξj (γ′) − 1{A (D) /∈E γ,j }ξj (γ)
+
+
+
+≤ max E
+
+"
+
+1 − eγ−| PLRV ADj ,D′
+
+> j
+
+(A(Dj )) |
+
++
+
+#
+
+, E
+
+"
+
+1 − eγ−| PLRV ADj ,D′
+
+> j
+
+(A(D′ 
+
+> j
+
+)) |
+
++
+
+#! 
+
+≤ δ′ .
+
+Each element in the sum defining Bm is of bounded first moment of order δ′, but the two difficulties are that: these events are not independent, and these events are not independent of random variables 
+
+Ti, enabling us to only be able to use a basic Markov inequality. We thus have, on the one hand: 
+
+E Bm| ¯X ≤ mδ ′ .
+
+Using Markov inequality, 
+
+P  Bm > v | ¯X ≤ mδ ′
+
+v ,
+
+and thus, for any u, v > 0:
+
+P
+
+mX
+
+i=1 
+
+max(0 , S iTi) > u | ¯X, ¯T
+
+!
+
+≤ P  Am > u − Bm| ¯X, ¯T 
+
+≤ P
+
+mX
+
+i=1 
+
+|Ti|ξi > u − v, B m ≤ v| ¯X, ¯T
+
+!
+
++ P
+
+mX
+
+i=1 
+
+|Ti|ξi > u − Bm, B m ≥ v| ¯X, ¯T
+
+!
+
+≤ P
+
+mX
+
+i=1 
+
+|Ti|ξi > u − v| ¯X, ¯T
+
+!
+
++ P  Bm ≥ v| ¯X, ¯T  .
+
+31 Then, since using Markov inequality: 
+
+E P  Bm ≥ v| ¯X, ¯T  | ¯X
+
+= P  Bm ≥ v| ¯X
+
+≤ mδ ′
+
+v ,
+
+using yet again Markov inequality, for any v, w > 0:
+
+P  P  Bm ≥ v| ¯X, ¯T  > w  ≤ 2mδ ′
+
+vw ,
+
+and we conclude by taking w =
+
+ mδ ′
+
+> v
+
+1/2
+
+.
+
+D.4 Proof of Theorem D.2 
+
+Proof of Theorem D.2. The proof follows by combining Proposition 7 with Theorem D.3. 
+
+## E Proof of Theorem 5.1.2 (Conditional f −DP Auditing) 
+
+Let β(Xi) = max 
+
+n π(Xi)1−π(Xi) , 1−π(Xi)
+
+> π(Xi)
+
+o
+
+so that εi = log( β(Xi)) , and let (Bi)i∈[m] be independent Bernoulli random variables of parameters bi ≤ e−εi , independent of all the rest. Then, let T ′ 
+
+> i
+
+= BiTi,where T ∈ {− 1, 0, 1}m are the MIA guesses. T ′ ∈ {− 1, 0, 1}m can be thought of as tampered 
+
+guesses, in order to to debias for the over confidence induced by distribution shift between members and non-members. We first start by proving the following lemma, inspired by Mahloujifar et al. [25 , Lemma 11 ] .Intuitively, this lemma upper and lower bounds the influence of making a correct guess on the data distribution of the algorithm. It will serve as a back-bone to the proof of Theorem 5.1.2. 
+
+Lemma 1. For any measurable E ∈ Θ,
+
+P (A(D) ∈ E , T ′ 
+
+> 1
+
+= S1|X1, . . . , X m) ≤ f ′(P (A(D) ∈ E| X1, . . . , X m)) ,
+
+where: 
+
+f ′(t) = sup {α : α + f (t − α) ≤ 1} .
+
+Proof of Lemma 1. Let p′ = P (A(D) ∈ E , T ′ 
+
+> 1
+
+= S1|X1, . . . , X m), p =
+
+P (A(D) ∈ E , T 1 = S1|X1, . . . , X m) and q = P (A(D) ∈ E| X1, . . . , X m). First, notice that: 
+
+p′ = P (A(D) ∈ E , T ′ 
+
+> 1
+
+= S1|X1, . . . , X m)= P (A(D) ∈ E , T 1 = S1, B 1 = 1 |X1, . . . , X m)= P (A(D) ∈ E , T 1 = S1|X1, . . . , X m) × P (B1 = 1) = b1P (A(D) ∈ E , T 1 = S1|X1, . . . , X m)
+
+≤ e−ε1 P (A(D) ∈ E , T 1 = S1|X1, . . . , X m)= e−ε1 p . 
+
+We then have: 
+
+p = P (A(D) ∈ E , T 1 = S1|X1, . . . , X m, S 1 = 0) P (S1 = 0 |X1, . . . , X m)+ P (A(D) ∈ E , T 1 = S1|X1, . . . , X m, S 1 = 1) P (S1 = 1 |X1, . . . , X m)= P (A(D) ∈ E , T 1 = 0 |X1, . . . , X m, S 1 = 0) (1 − π(X1)) + P (A(D) ∈ E , T 1 = 1 |X1, . . . , X m, S 1 = 1) π(X1)
+
+≤ ¯f (P (A(D) ∈ E , T 1 = 0 |X1, . . . , X m, S 1 = 1)) (1 − π(X1)) + ¯f (P (A(D) ∈ E , T 1 = 1 |X1, . . . , X m, S 1 = 0)) π(X1)
+
+≤ 1 − f (P (A(D) ∈ E , T 1 = 0 |X1, . . . , X m, S 1 = 1)) (1 − π(X1)) 
+
+− f (P (A(D) ∈ E , T 1 = 1 |X1, . . . , X m, S 1 = 0)) π(X1) ,
+
+32 by using the f -DP assumption on the two adjacent datasets (removing or adding X1), since T1 is also a function of A(D). Now, by convexity and decreasing property of f :
+
+p ≤ 1 − f
+
+
+
+(1 − π(X1)) P (A(D) ∈ E , T 1 = 0 |X1, . . . , X m, S 1 = 1) + π(X1)P (A(D) ∈ E , T 1 = 1 |X1, . . . , X m, S 1 = 0) 
+
+
+
+≤ 1 − f
+
+ 1 − π(X1)
+
+π(X1) P (A(D) ∈ E , T 1 = 0 , S 1 = 1 |X1, . . . , X m)+ π(X1)1 − π(X1) P (A(D) ∈ E , T 1 = 1 , S 1 = 0 |X1, . . . , X m)
+
+
+
+≤ 1 − f
+
+
+
+β(X1) × P (A(D) ∈ E , T 1̸ = S1|X1, . . . , X m)
+
+
+
+= ¯f
+
+
+
+eε1 × P (A(D) ∈ E , T 1̸ = S1|X1, . . . , X m)
+
+
+
+,
+
+where β(X1) = max 
+
+ π(X1)1−π(X1) , 1−π(X1)
+
+> π(X1)
+
+
+
+= eε1 . Then, notice that, since we have the event inclusion {T ′ 
+
+> 1
+
+= S1} ⊂ { T1 = S1}:
+
+P (A(D) ∈ E , T 1̸ = S1|X1, . . . , X m)
+
+≤ P (A(D) ∈ E , T ′
+
+> 1
+
+̸ = S1|X1, . . . , X m)= P (A(D) ∈ E| X1, . . . , X m) − P (A(D) ∈ E , T ′ 
+
+> 1
+
+= S1|X1, . . . , X m)= q − p′ .
+
+Thus, since ¯f is concave, non-decreasing, and ¯f (0) ≥ 0:
+
+p′ ≤ e−ε1 p
+
+≤ e−ε1 ¯f (eε1 (q − p′)) 
+
+≤ e−ε1 ¯f (eε1 (q − p′)) + (1 − e−ε1 ) ¯f (0) 
+
+≤ ¯f (e−ε1 eε1 (q − p′) + (1 − e−ε1 ) × 0) = ¯f (q − p′) ,
+
+which leads to: 
+
+p′ + f (q − p′) ≤ 1 ,
+
+giving us p ≤ f ′(q), concluding the proof of Lemma 1. We now prove Theorem 5.1.2. Although the remaining arguments are exactly the same as in Mahloujifar et al. [25], we include them for completeness. 
+
+Proof of Theorem 5.1.2. We first state the following lemma [25, Proposition 12]. 
+
+Lemma 2. f ′ is increasing and concave. Proof of Lemma 2. For t < t ′, we have that for all α ∈ R such that t − α and t′ − α are in [0 , 1] :
+
+α + f (t − α) ≥ α + f (t − α) ,
+
+since f is decreasing. Thus, f (t) ≤ f (t′) and f is increasing. For concavity, let t, t ′ ∈ R. By convexity of f , for any α, α ′ ∈ R such that t − α and t′ − α′ are in 
+
+[0 , 1] :
+
+f ( t + t′
+
+2 − α + α′
+
+2 ) ≤ f (t − α) + f (t′ − α′)2 ,
+
+by convexity of f . Thus, if α, α ′ satisfy f (t − α) + α ≤ 1 and f (t′ − α′) + α′ ≤ 1, we have 
+
+α + α′
+
+2 + α + f (t − α) + α′ + f (t′ − α)2 ≤ 1 ,
+
+and thus α+α′ 
+
+> 2
+
++ f ( t+t′ 
+
+> 2
+
+− α+α′ 
+
+> 2
+
+) ≤ 1. We can thus conclude that f ( t+t′ 
+
+> 2
+
+) ≥ α+α′ 
+
+> 2
+
+and taking the sup over α, α ′ satisfying f (t − α) + α ≤ 1 and f (t′ − α′) + α′ ≤ 1, we have concavity. 33 As in Mahloujifar et al. [25 , Theorem 9 ], we assume that the adversary makes guesses on all m inputs with a vector q ∈ { 0, 1}m with exactly r 1’s and m − r 0’s. Only correct guesses that are in locations where qi = 1 are counted. If ti = 1{Si=T ′ 
+
+> i
+
+}, we thus have 
+
+pk = P
+
+> m
+
+X
+
+> i=1
+
+tiqi = k (Xi)i∈[m]
+
+!
+
+= P
+
+> m
+
+X
+
+> i=2
+
+tiqi = k − 1 and t1 = 1 and q1 = 1 (Xi)i∈[m]
+
+!
+
++ P
+
+> m
+
+X
+
+> i=2
+
+tiqi = k and t1q1 = 0 (Xi)i∈[m]
+
+!
+
+.
+
+Here, we could use Lemma 1, which would yield: 
+
+P
+
+> m
+
+X
+
+> i=2
+
+tiqi = k − 1 and t1 = 1 and q1 = 1 (Xi)i∈[m]
+
+!
+
+≤ f ′ P
+
+> m
+
+X
+
+> i=2
+
+tiqi = k − 1 and q1 = 1 (Xi)i∈[m]
+
+!! 
+
+.
+
+To obtain sharper bounds, we instead sum over all k ∈ T and use the same reasoning: 
+
+X
+
+> k∈T
+
+pk = X
+
+> k∈T
+
+P
+
+> m
+
+X
+
+> i=1
+
+tiqi = k (Xi)i∈[m]
+
+!
+
+= X
+
+> k∈T
+
+P
+
+> m
+
+X
+
+> i=2
+
+tiqi = k − 1 and t1 = 1 and q1 = 1 (Xi)i∈[m]
+
+!
+
++ P
+
+> m
+
+X
+
+> i=2
+
+tiqi = k and t1q1 = 0 (Xi)i∈[m]
+
+!
+
+= P 1 + 
+
+> m
+
+X
+
+> i=2
+
+tiqi ∈ T and t1 = 1 and q1 = 1 (Xi)i∈[m]
+
+!
+
++ P
+
+> m
+
+X
+
+> i=2
+
+tiqi ∈ T and t1q1 = 0 (Xi)i∈[m]
+
+!
+
+.
+
+We now use Lemma 1 on the first term: 
+
+X
+
+> k∈T
+
+pk ≤ f ′ P 1 + 
+
+> m
+
+X
+
+> i=2
+
+tiqi ∈ T and q1 = 1 (Xi)i∈[m]
+
+!! 
+
++ P
+
+> m
+
+X
+
+> i=2
+
+tiqi ∈ T and t1q1 = 0 (Xi)i∈[m]
+
+!
+
+.
+
+The RHS of the bound is now invariant under a permutation of the order of indices, so that for a random permutation π sampled uniformly at random in all permutations on [n], we have: 
+
+X
+
+> k∈T
+
+pk ≤ Eπ f ′ P 1 + 
+
+> m
+
+X
+
+> i=2
+
+tπ(i)qπ(i) ∈ T and qπ(1) = 1 (Xi)i∈[m]
+
+!! 
+
++ Eπ P
+
+> m
+
+X
+
+> i=2
+
+tπ(i)qπ(i) ∈ T and tπ(1) qπ(1) = 0 (Xi)i∈[m]
+
+!
+
+≤ f ′ Eπ P 1 + 
+
+> m
+
+X
+
+> i=2
+
+tπ(i)qπ(i) ∈ T and qπ(1) = 1 (Xi)i∈[m]
+
+!! 
+
++ Eπ P
+
+> m
+
+X
+
+> i=2
+
+tπ(i)qπ(i) ∈ T and tπ(1) qπ(1) = 0 (Xi)i∈[m]
+
+!
+
+,
+
+34 using concavity of f ′. The reasoning is then the same as Mahloujifar et al. [25] : when permuting the order, Pmi=2 tπ(i)qπ(i) = k and tπ(1) qπ(1) = 0 count each instances tq with exactly k non-zero locations, for (m − k) × (m − 1)! times, leading to: 
+
+Eπ P
+
+> m
+
+X
+
+> i=2
+
+tπ(i)qπ(i) ∈ T and tπ(1) qπ(1) = 0 (Xi)i∈[m]
+
+!
+
+= X
+
+> k∈T
+
+m − km pk .
+
+Similarly for the other term, Pmi=2 tπ(i)qπ(i) = k − 1 and qπ(1) = 1 count each instances t, q that satisfy tiqi = 1 for k − 1 indices exactly ( (r − k + 1)( m − 1)! times each) and each instances t, q 
+
+that satisfy tiqi = 1 for k indices exactly ( k(m − 1)! times each), leading to: 
+
+Eπ P 1 + 
+
+> m
+
+X
+
+> i=2
+
+tπ(i)qπ(i) ∈ T and qπ(1) = 1 (Xi)i∈[m]
+
+!
+
+= X
+
+> k∈T
+
+km pk + r − k + 1 
+
+m pk−1 .
+
+Thus, 
+
+X
+
+> k∈T
+
+pk ≤ f ′ X
+
+> k∈T
+
+km pk + r − k + 1 
+
+m pk−1
+
+!
+
++ X
+
+> k∈T
+
+m − km pk ,
+
+leading to: 
+
+X
+
+> k∈T
+
+km pk ≤ f ′ X
+
+> k∈T
+
+km pk + r − k + 1 
+
+m pk−1
+
+!
+
+.
+
+Thus, by definition of f ′,
+
+X
+
+> k∈T
+
+km pk ≤ 1 − f X
+
+> k∈T
+
+r − k + 1 
+
+m pk−1 − f X
+
+> k∈T
+
+r − k + 1 
+
+m pk−1
+
+!! 
+
+≤ 1 − f X
+
+> k∈T
+
+r − k + 1 
+
+m pk−1
+
+!
+
+= ¯f X
+
+> k∈T
+
+r − k + 1 
+
+m pk−1
+
+!
+
+,
+
+since ¯f = 1 − f and f is decreasing. This concludes the proof. 
+
+Proof of Corollary 2 (conditional f -DP part). The proof of is a direct adaptation of the proof Mahloujifar et al. [25, Theorem 10] (which is quite technically involved). 
+
+## F Experimental Synthetic Distribution Shift 
+
+To rigorously evaluate the deconvolution of privacy leakage from dataset shift, we construct a high-dimensional synthetic Membership Inference Attack (MIA) environment. The procedure isolates empirical privacy leakage by controlling both the algorithmic signal-to-noise ratio and the underlying structural dataset shift. Let N be the total dataset size, partitioned equally into a member set Dmem and a non-member set 
+
+Dnon , and let d be the feature dimensionality. We first sample a fixed global direction vector μ ∈ Rd:
+
+v ∼ N (0, Id), μ = v
+
+∥v∥2
+
+(8) To strictly enforce a bounded L2 sensitivity for the downstream differential privacy mechanism, we define a generative function g(γ) that draws a feature vector shifted along μ with bias strength γ, and subsequently projects it onto the unit hypersphere: 
+
+˜x ∼ N (γμ, Id), x = ˜x
+
+∥˜x∥2
+
+(9) 35 This projection step ensures that every single data record inherently satisfies ∥x∥2 = 1 . We construct the target model’s training set by generating members with a strong baseline bias γbase :
+
+∀x ∈ D mem , x ∼ g(γbase ) (10) For the non-members, we modulate the bias strength to simulate evaluation environments with and without structural shift, parameterized by an alignment decay ratio ρ ∈ (0 , 1] :• IID Setting (No Shift): The non-members are identically distributed to the members using 
+
+γnon = γbase .• OOD Setting (Dataset Shift): The non-members are drawn using an attenuated bias strength γnon = ρ · γbase . Because the shift attenuates the signal purely along the axis of the base vector μ, it creates a structural dataset gap strictly aligned with the adversary’s target objective. We abstract the training of the machine learning model by computing a differentially private sum of the members’ feature vectors. Under the standard add/remove adjacency definition, the global L2
+
+sensitivity of the sum query is strictly bounded by the maximum norm of a single vector: 
+
+∆2 = max  
+
+> x
+
+∥x∥2 = 1 (11) We apply the Gaussian mechanism by adding isotropic Gaussian noise calibrated to a scale σ > 0:
+
+θpriv = X
+
+> x∈D mem
+
+x + η, where η ∼ N (0, σ 2Id) (12) Releasing θpriv rigorously guarantees μ-Gaussian Differential Privacy ( μ-GDP) with a true algorithmic privacy limit bounded at μtrue = ∆ 2/σ = 1 /σ .The adversary attempts to distinguish members from non-members via white-box access to the target model. The attacker computes a linear test statistic against the public DP-released vector for all queried samples x ∈ D mem ∪ D non :
+
+sMIA (x) = ⟨x, θpriv ⟩ (13) Because the structural dataset shift between members and non-members occurs along the same vector 
+
+μ as the principal component of θpriv , the shift systematically inflates the attacker’s observed signal (μtot ) independently of any true algorithmic memorization. To explicitly isolate the true empirical leakage from the confounding dataset shift, the auditor computes propensity scores ˆπi ≈ P (yi = 1 | xi) using an L2-regularized Logistic Regression across the standardized feature space. These propensity scores quantify the structural ceiling of the dataset shift ( μds ), allowing the auditor to cleanly deconvolve the overall observed attack strength ( μtot ) back into the true, Zero-Run algorithmic leakage: 
+
+μleak =
+
+q
+
+max (0 , μ 2 
+
+> tot
+
+− μ2
+
+> ds
+
+) (14) 36

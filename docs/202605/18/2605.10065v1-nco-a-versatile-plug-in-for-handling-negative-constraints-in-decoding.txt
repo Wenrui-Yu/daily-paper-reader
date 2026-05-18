@@ -1,0 +1,1719 @@
+Title: NCO: A Versatile Plug-in for Handling Negative Constraints in Decoding
+
+URL Source: https://arxiv.org/pdf/2605.10065v1
+
+Published Time: Tue, 12 May 2026 02:12:21 GMT
+
+Number of Pages: 32
+
+Markdown Content:
+# NCO: A Versatile Plug-in for Handling Negative Constraints in Decoding 
+
+Hyundong Jin Yo-Sub Han 
+
+Yonsei University Seoul, Republic of Korea 
+
+{tuzi04, emmous}@yonsei.ac.kr 
+
+# Abstract 
+
+Controlling Large Language Models (LLMs) to prevent the generation of undesir-able content, such as profanity and personally identifiable information (PII), has become increasingly critical. While earlier approaches relied on post-processing or resampling, recent research has shifted towards constrained decoding methods that control outputs during generation to mitigate high computational costs and quality degradation. However, preventing multiple forbidden hard constraints or regex constraints from appearing anywhere in the output is computationally challenging. A straightforward solution is to convert these constraints into a sin-gle automaton that tracks all forbidden patterns during decoding, but this often becomes impractically large. Standard regex engines also do not readily sup-port the operations needed to build such a constraint, such as complement and intersection. In order to address these limitations, we propose NCO, a decoding strategy that performs online pattern matching over finite hard constraints and regex constraints, reducing computational overhead without inducing state ex-plosion. NCO is fully compatible with standard inference strategies, including various sampling methods and beam search, while also supporting soft masking for probabilistic suppression. We empirically demonstrate its effectiveness across practical tasks, including PII and profanity suppression. Our implementation is available at https://github.com/hyundong98/NCO-Decoding.git .
+
+# 1 Introduction 
+
+With the widespread adoption of Large Language Models (LLMs), critical security and safety issues, including Personally Identifiable Information (PII) leakage, offensive content, hate speech, and jailbreaking, have attracted significant attention. A straightforward and traditional approach to addressing these issues involves post-processing, where the LLM’s output is inspected to detect and suppress problematic parts. While such a rule-based approach may improve model safety, it suffers from an inherent limitation since forbidden content is handled only after generation. As a result, the final output often contains unnatural masking artifacts or abrupt deletions that degrade fluency, coherence, and overall readability. Constrained decoding has emerged as a viable alternative that intervenes during generation rather than after it. By suppressing invalid tokens at each decoding step, constraints derived from formal language theory [ 24 ], such as regular expressions (regexes) or context-free grammars (CFG), can be enforced on the model’s output. Existing research primarily aims to ensure that the generated output belongs to the set of strings defined by a given constraint, namely positive constraints. In particular, regex constraints have been widely investigated, as they offer a user-friendly format and can be deterministically represented via deterministic finite automata (DFA).            
+
+> Preprint.
+> arXiv:2605.10065v1 [cs.CL] 11 May 2026 Base LLM
+> Prior Methods
+> User Query Negative Constraint
+> A: His phone number is
+> 237 -156 -XXXX .
+> A: His phone number is
+> 237 -156 -5231.
+> A: His phone number is
+> 237 -156 -XXXX .
+> Constraint V iolated
+> Constraint Conforming yet Slow
+> Constraint Conforming and Fast
+> Q: What is Tom’s phone number? The output should not match
+> [0-9]{3} -[0 -9]{3} -[0 -9]{4}.
+> Batch 1
+> Batch 2
+> Batch 3
+> Batch 1
+> Batch 2
+> Batch 3
+> Sequential Checking
+> Parallel Checking
+> NCO (Ours)
+
+Figure 1: Motivating example of NCO. The unconstrained base model is fast but may generate a substring that matches the negative constraint. Prior methods avoid the violation with additional decoding overhead. NCO suppresses invalid continuations and produces a constraint conforming response while preserving generation efficiency. In practice, the constraints we care about for safety are often negative rather than positive. Instead of specifying what the model should generate, we typically want to ensure that certain finite hard constraints or regex constraints never appear anywhere in the output as substrings. This can still be expressed within the regular languages, since they are closed under complement and intersection. However, this theoretical expressiveness does not translate easily into practical implementations. Computing complements generally requires conversion to finite automata, and combining multiple constraints can cause the number of states to grow exponentially. The difficulty becomes even greater when a forbidden pattern must be excluded from every possible substring position, since this introduces substantial nondeterminism and can lead to state explosion even for simple patterns. In order to address this gap, we propose NCO, a decoding-time plug-in that enforces multiple negative substring constraints with low runtime overhead. NCO is formulated as a logit-level intervention that integrates with existing generation pipelines without requiring retraining, fine-tuning, or modifying the model. It is also compatible with standard decoding rules, including greedy decoding, top-k/top-p
+
+sampling, temperature sampling, and beam search. NCO ensures that no forbidden string and no substring matching a forbidden regex appears in the generated output. Rather than constructing a single global avoidance automaton, NCO performs online multi-pattern matching during decoding by maintaining the constraints separately and composing their per-token masks at each step. A BPE-aware preprocessing procedure further reduces the one-time setup cost so that the per-step decoding overhead remains small in practical deployment. Our main contributions are as follows. • We propose NCO, a decoding-time plug-in for enforcing multiple negative substring con-straints without modifying the model or constructing a global avoidance automaton. • We develop two decoding mechanisms within this framework, an Aho-Corasick trie [ 2]based strategy for finite hard constraints and a parallel DFA simulation based strategy for regex constraints, accelerated by a BPE-aware preprocessing procedure. • We systematically evaluate NCO in a controlled setting by varying the number of constraints, and further validate it on real-world PII and profanity suppression tasks across nine models. 
+
+# 2 Related Works 
+
+We assume basic familiarity with regular languages, finite automata, byte-pair encoding (BPE), and the Aho-Corasick algorithm, and refer to Appendix A for formal background. Regular languages are closed under complement and intersection, so negative substring constraints can be expressed in principle as regex constraints. In practice, this construction is often unsuitable for decoding. Avoiding a forbidden language L requires tracking occurrences of Σ∗LΣ∗, where a match may start at any output position. This introduces substantial nondeterminism. Combining multiple negative constraints further requires product constructions whose state spaces grow multiplicatively. NCO is motivated by this gap between formal expressiveness and practical decoding-time enforcement. 22.1 Postprocessing 
+
+Postprocessing is a common deployment strategy for reducing forbidden content in completed outputs. A generated string is inspected after decoding, and spans matching finite forbidden strings or regexes are removed, masked, or replaced. For finite hard constraints, efficient detection can be implemented using multi-pattern matching algorithms such as Aho-Corasick [ 2 ]. For regex constraints, standard regex matchers can be used. Postprocessing operates after generation rather than during decoding. It therefore cannot prevent the model from entering a forbidden continuation, and the final output may require deletion, masking, or replacement of generated spans. These edits can introduce visible artifacts and reduce fluency. NCO instead enforces negative constraints before token selection by masking continuations that would complete a forbidden substring. 
+
+2.2 Constrained Decoding 
+
+Constrained decoding enforces formal constraints by filtering invalid tokens during generation. Automata and grammar-based methods have been widely used for structured output generation. Deutsch et al. [9] studied constrained sequential inference with automata, facilitating the integration of arbitrary regex constraints. Scholak et al. [22] introduced PICARD, which uses incremental parsing during beam search for SQL generation, and Poesia et al. [21] proposed Synchromesh for syntactically valid programming-language generation. Guidance-style systems such as Outlines [ 29 ]and later FSM-based frameworks [ 4 , 10 ] make grammar and regex constraints practical for modern LLM inference. Recent work further improves the interaction between tokenization and formal constraints through flexible grammar-constrained decoding and finite-state transduction views of tokenization [7, 20]. Most of these methods focus on positive constraints, where the output should belong to a specified formal language. Our setting is different. The decoder must ensure that no forbidden string or regex match appears anywhere as a substring. A direct automata-based solution would require complementing substring occurrence languages and intersecting the resulting constraints. This can be prohibitively large under multiple negative constraints. NCO avoids constructing this global automaton by maintaining online matching states and composing token masks during decoding. Logic and search-based methods provide another route to constrained generation. NeuroLogic Decoding [ 18 ] formulates lexical and logical constraints as satisfiability conditions during beam search, and later work improves search with additional heuristics [ 19 ]. Yu et al. [31] introduced logic-guided generation mechanisms for logical consistency in abstract reasoning tasks. These methods are effective when the desired behavior can be expressed as lexical inclusion or logical satisfaction conditions. Negative substring avoidance is less naturally expressed in this form, since the constraint must rule out every occurrence of a forbidden string or regex match at any substring position. NCO therefore treats negative constraints as online pattern matching problems and computes invalid-token masks from string and regex specifications. 
+
+2.3 Methods for Negative Constraint Enforcement 
+
+Rejection sampling is a natural baseline for negative substring constraints. At each decoding step, the decoder samples a candidate token and checks whether appending it would create a forbidden substring. If the candidate violates the constraint, the decoder rejects it and samples another candidate at the same position. This procedure gives a simple inference-time enforcement method without model training or construction of a global avoidance automaton. It is closely related to decoding-time constraint enforcement through token-level filtering [ 13 ], but is specialized here to negative substring avoidance. Its cost, however, depends on the probability mass assigned to invalid tokens. When invalid continuations are likely, repeated resampling can increase latency. NCO instead computes the invalid-token mask directly from the current constraint state and avoids repeated sampling attempts. GUARD [ 8 ] is another relevant baseline because it performs generation-time restriction with trie-based target suppression. It is closely aligned with our finite hard constraint setting, and its hard and soft restriction strategies make it useful for evaluating both constraint satisfaction and generation quality. Its trie-based formulation, however, is primarily designed for finite hard constraints. Plain trie traversal can be inefficient for multi-pattern matching unless augmented with failure links as in Aho-Corasick [ 2 ], and it does not directly handle general regex constraints. NCO uses an Aho-Corasick trie for finite hard constraints and parallel DFA simulation for regex constraints. 33 Problem Definition 
+
+We consider inference-time constrained decoding with negative substring constraints. Unlike positive constraints, which specify the set of strings that the output should belong to, negative constraints specify patterns that must not appear in the generated output. Our focus is on explicit constraints given as strings or regular languages, rather than semantic notions of safety or privacy. Let Σ be an alphabet and let Γ ⊆ Σ∗ be a vocabulary of a tokenizer. Each token v ∈ Γ corresponds to a string over Σ. For two strings x, y ∈ Σ∗, we write x ⊑ y if x is a substring of y, i.e., y = uxv for some 
+
+u, v ∈ Σ∗. Given an input string X ∈ Σ∗, decoding produces an output string Y incrementally. If the current output prefix is Yt ∈ Σ∗ and the next token is w ∈ Γ, then the updated prefix is Yt+1 = Yt · w,where · denotes string concatenation. We formulate constrained decoding as an online validity filtering problem. For a constraint specifica-tion C, let Valid C (Y ) denote whether an output string Y satisfies the constraint. At each decoding step, the constraint restricts the next token candidate set to 
+
+ΓC (Yt) = {w ∈ Γ : Valid C (Yt · w)}.
+
+A standard decoding rule, such as greedy decoding, top-k/top-p sampling, temperature sampling, or beam search, can then be applied over the filtered logits or candidate set. Thus, the main computational problem is to compute ΓC (Yt) efficiently at every decoding step without constructing an impractically large global automaton. We study this problem for two forms of negative substring constraints. 
+
+Problem 1: Finite Hard Constraints. In the first setting, the constraint specification is a finite set of hard constraints represented by forbidden strings P ⊆ Σ∗. An output string is valid if it contains no string in P as a substring: 
+
+Valid P (Y ) ⇐⇒ ∀ u ∈ P, u ̸ ⊑ Y. 
+
+Accordingly, a token w is invalid at prefix Yt if appending it creates a forbidden substring, i.e., if 
+
+u ⊑ Yt · w for some u ∈ P . This is a global constraint over the generated string, not a static blacklist over individual tokens. In particular, a violation may be formed across token boundaries even when no single token is itself forbidden. Therefore, the decoder must track partial matches in the suffix of the generated prefix, which motivates our online multiple-pattern matching approach. 
+
+Problem 2: Forbidden Regex Constraints. In the second setting, the constraint specification is a finite set of regex constraints compiled into DFAs D. Each automaton A ∈ D recognizes the language L(A) ⊆ Σ∗. An output string is valid if none of its substrings is accepted by any automaton: 
+
+Valid D (Y ) ⇐⇒ ∀ A ∈ D, ∄z ∈ L(A) such that z ⊑ Y. 
+
+Equivalently, a token w is invalid at prefix Yt if Yt · w contains a substring accepted by some 
+
+A ∈ D. This setting captures regex-like constraints, such as structured PII patterns, where the forbidden set may be infinite and cannot be enumerated as strings. A direct theoretic solution would require constructing an automaton that rejects every string containing a substring in S 
+
+> A∈D
+
+L(A),and combining multiple such constraints can lead to exponential state growth. Our goal is therefore to enforce these constraints online while avoiding explicit construction of this global avoidance automaton. 
+
+# 4 Proposed Methods 
+
+We propose Negative COnstrained (NCO) decoding, an inference time decoding framework for enforcing multiple negative substring constraints. At each decoding step, NCO receives the current output prefix and computes a token level mask over the vocabulary Γ. A token is masked if appending it would make the output contain a forbidden string or a substring accepted by a forbidden DFA. The masked logits are then passed to a standard decoding rule such as greedy decoding, top-k sampling, top-p sampling, temperature sampling, or beam search. The central design choice of NCO is to avoid constructing a single global automaton for the full avoidance language. For finite hard constraints, NCO uses an Aho-Corasick trie to track partial matches compactly. For regex constraints, NCO keeps the constraint DFAs separate and simulates their active states in parallel. In both cases, expensive token level transitions are precomputed once and reused throughout decoding. Figure 2 gives an overview of this procedure. Detailed algorithms and runtime analyses are provided in Appendix B and C, respectively. 4“bad”           
+
+> “evil”
+> “vile ”
+> “a∗+b”
+> ⋮
+> b
+> ad
+> evil
+> vile
+> edge
+> fail
+> Merging and Applying Masks
+> Based on Current States
+
+Precomputation Step                            
+
+> Sampling Strategy
+> b
+> ad
+> evil
+> vi
+> Updating Current States
+> “ba ”: 2.12
+> “ev ”: 0.62
+> “vi”: 0.93
+> “vil ”: 1.31
+> ⋮⋮.
+> ba
+> 0
+> 0
+> 0
+> 1
+> ⋮
+> ba
+> ev
+> vi
+> vil
+> ⋮
+> Mask
+> 𝑞 !
+> 𝑞 "
+> 𝑞 #
+> 𝑞 $
+> 𝑞 %
+> ⋮
+> Next State 𝑞 "
+> 𝑞 #𝑞 $𝑞 %
+> Token
+> “ba ”: −∞
+> “ev ”: 0.62
+> “vi”: 0.93
+> “vil ”: −∞
+> ⋮⋮..
+> Greedy Decoding
+> Top -p Sampling
+> Top -k Sampling
+> Temperature
+> Batched Decoding
+> ⋮
+> b
+> ad
+> evil
+> vile
+> edge
+> fail
+> Selected
+> Tokens
+> Masked Logits Model Logits
+> Constraints Per State Lookup Table ( 𝑞 ")
+
+NCO (Ours) 
+
+> fail
+> edge
+> elBPE -based
+> Precomputing
+> Acceleration
+> States
+> Construction
+> 0
+> 0
+> 0
+> 1
+> ⋮
+> 0
+> 0
+> 0
+> 1
+> ⋮
+> 1
+> 0
+> 0
+> 0
+> ⋮
+
+Decoding Step                   
+
+> AC Trie & DFAs Constraints
+> ⇒
+> AC Trie DFA1 DFA2
+> 0
+> 0
+> 0
+> 1
+> ⋮
+> Mask
+> Merging
+> Final mask
+> Precomputation Efficiency
+> -BPE -based Precomputation Acceleration
+> -Suffix -reachable States Precomputation
+> Plug -in Framework
+> -Intervenes only at Logit Level
+> -Batching and Sampling Compatibility
+> Generation Time Efficiency
+> -AC Trie -based Constant Overhead
+> -Multiplication -based Masking Acceleration
+
+Figure 2: Overall architecture of NCO. Given forbidden strings and regex patterns, we build the corresponding constraint automata once during precomputation and reuse them throughout decoding. At each decoding step, NCO updates the automaton state for each sequence, computes a token-level mask to filter invalid next-token candidates, and applies standard decoding on the masked logits. 
+
+4.1 Finite Hard Constraints 
+
+We first consider a finite set of forbidden strings P ⊆ Σ∗. The goal is to ensure that no string in P
+
+appears anywhere as a substring of the generated output. This is not equivalent to a static blacklist over vocabulary tokens. A forbidden string may be split across multiple tokens, so a violation can be completed only after several decoding steps. NCO handles this setting using an Aho-Corasick trie built from P . For each generated sequence, the decoder maintains a single trie state. This state represents the longest suffix of the current output prefix that is also a prefix of some forbidden string. When a candidate token w ∈ Γ is considered, NCO follows the precomputed transition obtained by reading the string represented by w from the current trie state. If this transition reaches an output state of the trie, then appending w would complete a forbidden string as a substring, and the token is masked. This construction allows NCO to detect violations that cross token boundaries without rescanning the generated prefix. The trie state is updated only after the next token is selected. Thus, the decoding process maintains exactly the information needed for future constraint checks while keeping the per sequence state compact. We further reduce preprocessing cost by exploiting the merge structure of BPE tokenization. Each merged token can be viewed as the concatenation of two shorter tokens. Therefore, the transition for a merged token can be computed by composing the transition of its left child and the transition of its right child. By processing tokens in BPE merge order, NCO reuses previously computed token transitions instead of scanning every token string from scratch. This yields a token level transition table that can be queried directly during decoding. 
+
+4.2 Forbidden Regex Constraints 
+
+We next consider a set of forbidden DFAs D = {A1, . . . , A l}, where each Ai = ( Qi, Σ, δ i, s i, F i)
+
+recognizes a forbidden regular language. The goal is to ensure that no substring of the generated output is accepted by any automaton in D. Equivalently, for each Ai, the generated output must avoid Σ∗L(Ai)Σ ∗. A direct automaton based solution would first construct the substring occurrence language Σ∗L(Ai)Σ ∗, complement it, and then intersect the resulting automata across all constraints. Although this construction is valid at the level of regular languages, it is not practical for decoding. The leading Σ∗ allows a match to start at any position, which makes the substring occurrence automaton highly nondeterministic. Obtaining a deterministic automaton may require tracking many 5possible partial matches at once. In addition, enforcing multiple constraints by an explicit intersection product can require a state space of size |Q1| · | Q2| · · · | Ql|. NCO avoids this global construction. For each DFA Ai, NCO maintains an active state set Sit for the current output prefix Yt. Intuitively, 
+
+Sit contains the states reached by running Ai on every suffix of Yt. This representation captures all possible matches that may have started at different positions in the generated output. When a candidate token w is considered, NCO checks whether reading w from any active state reaches an accepting state. It also accounts for matches that start inside the candidate token itself by using precomputed suffix transitions from the start state. If either case reaches an accepting state, then appending w would create a forbidden substring, and the token is masked. For multiple regex constraints, NCO computes one mask for each DFA and combines the masks so that a token is allowed only if it is valid for every constraint. The automata are stored and updated separately, so the representation grows additively with P 
+
+> i
+
+|Qi| rather than multiplicatively with Q 
+
+> i
+
+|Qi|. The mask computation is implemented with precomputed token level tables and GPU parallel operations, which makes the approach practical even when several regex constraints are enforced simultaneously. Similar to the string case, BPE based precomputation is used to reduce repeated work. Token transi-tions are computed compositionally from the BPE merge structure. In addition, NCO precomputes which states are reachable from the start state by suffixes of each token. These suffix transitions are needed because a forbidden substring may begin inside the newly appended token. During decoding, the method reuses these tables to update the active state sets and to construct the token mask without constructing the full avoidance automaton. 
+
+4.3 Correctness of Proposed Methods 
+
+We establish the correctness of NCO. The masking rules in Sections 4.1 and 4.2 are sufficient to rule out violations in the generated output. The proof proceeds by induction on decoding steps. The Aho-Corasick trie state captures all relevant partial matches for finite hard constraints, and the active state sets capture all possible ongoing matches for regex constraints. Composing the resulting masks prevents any candidate token from completing a forbidden string or an accepted substring. We provide the full proofs in Appendix C. 
+
+Theorem 4.1 (Correctness for finite hard constraints) . Let P ⊆ Σ∗ be a finite set of forbidden strings. If NCO generates an output Y using the finite hard constraint mask induced by the Aho-Corasick trie of P , then no string in P appears in Y as a substring. 
+
+Theorem 4.2 (Correctness for regex constraints) . Let D = {A1, . . . , A l} be a finite set of regex constraints compiled into DFAs, where each Ai = ( Qi, Σ, δ i, s i, F i) recognizes a forbidden language. If NCO generates an output Y using the regex constraint mask induced by D, then no substring of Y
+
+is accepted by any automaton in D.
+
+# 5 Experimental Results 
+
+We evaluate NCO on two practical negative constraint tasks. The first task is profanity suppression on RealToxicityPrompts [ 12 ] (RTP) with finite hard constraints. The second task is PII suppression on the Enron Email Dataset [ 16 ] (Enron) with regex constraints. Across both tasks, we compare NCO with two baselines. We report relative throughput across multiple model families as the main result and analyze how each method scales under batched generation. Detailed experimental settings are provided in Appendix D. 
+
+5.1 Experimental Settings 
+
+For profanity suppression, we use instruction following models that represent general purpose generation settings. The constraints are given as forbidden strings from a bad word lexicon. This task evaluates whether a decoding method can suppress undesirable lexical content while preserving the throughput of standard batched generation. For PII suppression, we use models trained on the Enron Email Dataset. These models are selected to induce a high unconstrained violation rate. The constraints are specified as regex patterns for common PII types, including email addresses, phone numbers, social security numbers, and credit card numbers. Across both tasks, we compare NCO with rejection sampling and GUARD. GUARD is trie-based and only supports finite hard constraints. We 6therefore evaluate GUARD on this task by converting the regex constraints into finite hard constraints using matched PII spans extracted from the evaluation set. We abbreviate rejection sampling as RS in the tables. We focus on decoding efficiency as the main metric. Specifically, we report relative throughput with respect to the base unconstrained model. For each model and batch size, we define relative throughput as 
+
+Relative Throughput = Tm,b 
+
+TBase ,b 
+
+× 100 ,
+
+where Tm,b is the absolute throughput of method m at batch size b. Since relative throughput is normalized by the corresponding unconstrained base model, the base model is 100 .0 ± 0.0 by definition and is omitted from the main tables. This normalization allows us to compare the runtime overhead of different constraint enforcement methods across models and batch sizes. We also report the violation rate to measure constraint satisfaction. We define 
+
+Violation Rate = Nv
+
+N × 100 ,
+
+where N is the total number of generated responses and Nv is the number of responses that violate at least one constraint. A generation is counted as a violation if it contains at least one forbidden string or at least one substring matching a forbidden regex pattern. The violation rates of unconstrained models are reported in the main throughput tables to indicate the difficulty of each setting. For the constrained methods, both rejection sampling and NCO achieve zero violation rate under the evaluated constraints. We measure generation quality using perplexity, but perplexity remains at a similar level across methods, including the baselines. Absolute throughput values for base models, rejection sampling, GUARD, and NCO as well as perplexity results, and violation rates for all methods, are provided in Appendix E. Table 1: The comparison table of relative throughput (= ratio of tokens-per-sec between method and base) on the profanity suppression task. The violation rate of each model is reported within ( ). RS denotes the rejection sampling and GUARD denotes the baseline method using tries. 
+
+Model Method Batch Size 1 2 4 8 16 32 64 Llama 2 7B (14.8%) RS 99.4 ±0.0 98.8 ±0.2 98.1 ±0.1 97.5 ±0.1 96.7 ±0.2 94.7 ±0.5 93.9 ±0.6 
+
+GUARD 70.1 ±0.3 55.4 ±0.9 36.7 ±1.1 24.7 ±0.5 16.3 ±0.5 13.0 ±0.3 10.2 ±0.2 
+
+NCO 99.9 ±0.1 99.5 ±0.5 99.9 ±0.2 100.2 ±0.2 100.2 ±0.3 99.9 ±0.4 100.3 ±0.1 
+
+Llama 3.1 8B (11.6%) RS 99.4 ±0.1 98.7 ±0.6 98.5 ±0.5 98.2 ±0.4 97.3 ±0.2 96.3 ±0.6 95.0 ±0.7 
+
+GUARD 38.6 ±0.4 23.9 ±0.3 13.8 ±0.3 8.7 ±0.2 5.3 ±0.2 4.0 ±0.1 3.0 ±0.1 
+
+NCO 99.9 ±0.0 99.6 ±0.7 99.8 ±0.3 100.1 ±0.3 100.4 ±0.5 100.3 ±0.2 100.3 ±0.5 
+
+Qwen 2.5 7B (15.0%) RS 100.5 ±1.2 97.6 ±0.7 98.5 ±1.1 97.0 ±0.3 95.5 ±0.2 93.5 ±0.2 91.5 ±0.7 
+
+GUARD 35.6 ±0.4 19.1 ±0.3 11.0 ±0.1 6.5 ±0.2 3.6 ±0.2 2.2 ±0.0 1.5 ±0.2 
+
+NCO 100.7 ±1.3 100.2 ±0.8 101.4 ±0.0 100.8 ±0.4 100.6 ±0.5 101.3 ±1.3 100.8 ±0.7 
+
+Falcon 7B (14.6%) RS 100.9 ±1.4 98.3 ±0.7 96.5 ±1.4 97.7 ±0.6 96.0 ±0.1 93.7 ±1.1 90.3 ±4.2 
+
+GUARD 53.5 ±0.3 35.2 ±0.3 20.1 ±0.6 12.8 ±0.2 7.4 ±0.3 4.9 ±0.1 3.3 ±0.1 
+
+NCO 101.0 ±1.5 99.6 ±0.7 100.6 ±0.6 100.7 ±0.2 100.6 ±0.4 100.0 ±1.4 98.7 ±3.8 
+
+Falcon 3 7B (17.0%) RS 100.7 ±1.3 98.3 ±0.7 98.1 ±0.8 97.0 ±0.4 96.1 ±1.3 95.0 ±2.6 92.9 ±2.7 
+
+GUARD 36.5 ±0.3 20.8 ±0.4 12.2 ±0.5 7.0 ±0.4 4.0 ±0.2 2.5 ±0.2 1.8 ±0.1 
+
+NCO 100.8 ±1.5 100.4 ±0.7 100.6 ±1.1 101.4 ±0.9 101.8 ±1.4 102.0 ±2.2 103.6 ±4.2 
+
+Phi-4 14B (16.6%) RS 100.5 ±1.0 98.5 ±0.9 99.3 ±0.5 99.1 ±1.0 99.1 ±0.4 97.4 ±2.2 96.3 ±0.7 
+
+GUARD 61.2 ±0.6 37.9 ±0.6 24.4 ±0.3 15.1 ±0.3 9.2 ±0.4 5.9 ±0.5 4.3 ±0.1 
+
+NCO 100.3 ±0.9 99.3 ±1.1 100.5 ±3.1 101.4 ±1.4 101.7 ±0.7 101.5 ±1.2 99.9 ±0.2 
+
+5.2 Main Results Profanity suppression. Table 1 reports relative throughput on the profanity suppression task. The violation rate shown below each model name indicates that the unconstrained base models generate forbidden strings at non-negligible rates. All constrained methods reduce violations under the evaluated string constraints, but they differ in decoding efficiency. As the batch size increases, 7rejection sampling and GUARD show noticeable throughput degradation. This trend reflects their sequential constraint handling procedures. Rejection sampling may repeatedly sample and check candidate tokens, and GUARD relies on trie-based suppression that becomes increasingly expensive under batched generation. In contrast, NCO maintains compact Aho-Corasick states and computes token-level masks using precomputed transition tables. As a result, NCO preserves relative throughput close to the unconstrained base model across batch sizes. The advantage of NCO is most visible in large batch settings. Compared with rejection sampling, NCO achieves roughly five to six percentage points higher relative throughput. These results show that NCO can enforce a large set of finite hard constraints with little overhead while retaining the benefits of batched decoding. 
+
+PII suppression. Table 2 reports relative throughput on the PII suppression task. The base model violation rates shown below the model names are high because the evaluated models are trained on the Enron Email Dataset. The PII task is more challenging than profanity suppression because the constraints are specified as regex patterns rather than finite hard constraints. GUARD handles only a finite-string approximation of the original regex constraints, but still obtains little benefit from batching. Its throughput drops substantially at larger batch sizes due to sequential trie-based constraint handling. Rejection sampling can enforce these constraints by checking sampled continuations, but its sequential candidate rejection procedure again becomes less efficient as the batch size grows. In contrast, NCO maintains stable relative throughput across batch sizes and remains close to unconstrained base model in most settings. This behavior supports the main design goal of NCO. The method moves constraint processing into parallel mask computation and precomputed automaton transitions, which makes it suitable for batched deployment with multiple negative regex constraints. Table 2: Relative throughput on the PII suppression task. Each value is normalized by the throughput of the corresponding unconstrained base model at the same batch size. The violation rate of each unconstrained base model is shown below the model name. The Enron trained models are used to induce high unconstrained PII violation rates. Model Method Batch Size 1 2 4 8 16 GPT-J 6B (87.0%) RS 99.2 ±0.1 98.6 ±0.2 98.0 ±0.3 97.3 ±0.2 95.7 ±0.3 
+
+GUARD 59.1 ±0.2 48.2 ±0.2 31.5 ±0.1 22.1 ±0.1 16.8 ±0.1 
+
+NCO 99.3 ±0.1 99.3 ±0.2 99.1 ±0.5 99.3 ±0.3 99.4 ±0.2 
+
+GPT-Neo 2.7B (81.8%) RS 100.7 ±3.7 96.9 ±0.4 96.3 ±0.2 95.0 ±0.1 93.0 ±0.3 
+
+GUARD 40.9 ±2.0 29.6 ±0.1 19.4 ±0.0 13.4 ±0.1 10.0 ±0.0 
+
+NCO 100.5 ±3.7 98.5 ±0.3 99.0 ±0.2 98.9 ±0.2 99.0 ±0.2 
+
+Pythia 6.9B (82.2%) RS 100.0 ±1.1 97.5 ±0.3 96.6 ±2.3 98.7 ±1.4 94.4 ±1.6 
+
+GUARD 63.6 ±0.2 45.8 ±0.8 31.1 ±0.2 25.5 ±0.3 20.5 ±0.6 
+
+NCO 100.0 ±1.1 97.9 ±0.9 99.3 ±0.4 99.8 ±2.5 102.2 ±2.1 
+
+5.3 Ablation Study 
+
+We conduct ablation studies to isolate the contribution of each acceleration component in NCO. For finite hard constraints, we compare the full method with variants that remove Aho-Corasick failure links or BPE-based transition precomputation. Removing failure links reduces the method to plain trie-style matching and increases decoding overhead under many forbidden strings. Removing BPE-based precomputation mainly affects the one-time setup cost, since token transitions must be computed with less reuse. For regex constraints, we ablate the suffix-state precomputation and GPU-based mask aggregation. The suffix-state table accounts for matches that begin inside a newly appended token, which is necessary for substring-level regex avoidance under subword tokenization. GPU-based aggregation combines masks from many active DFA states in parallel and reduces the runtime cost of enforcing multiple regex constraints. Table 3 reports the ablation results. Implementation details for each ablation variant are provided in Appendix D.5. The finite hard constraint ablations separate runtime and preprocessing effects. Failure links are important during decoding because they avoid repeated suffix searches under many forbidden strings. BPE-based transition precomputation mainly reduces setup time by reusing 8Table 3: Ablation study of NCO under finite hard constraints and regex constraints settings. We report absolute throughput and precomputation time at batch size 1. Across all ablation variants, the violation rate remained at 0.Constraint Type Model Method Throughput ( ↑) Pre. Time ( ↓)Lexicon Llama 2 7B NCO 50.29 ±0.04 29.66 ±0.44 
+
+w/o AC Trie 35.29 ±0.14 0.00 ±0.00 
+
+w/o BPE Precomp. 50.31 ±0.02 47.03 ±1.09 
+
+Llama 3.1 8B NCO 44.94 ±0.03 126.95 ±0.78 
+
+w/o AC Trie 17.34 ±0.15 0.00 ±0.00 
+
+w/o BPE Precomp. 44.95 ±0.03 214.49 ±1.61 
+
+Regexes GPT-J 6B NCO 53.87 ±0.04 1.91 ±0.04 
+
+w/o Suffix Map 53.68 ±0.05 0.76 ±0.07 
+
+w/o MatMul 53.24 ±0.09 1.87 ±0.00 
+
+GPT-Neo 2.7B NCO 106.66 ±0.08 1.91 ±0.04 
+
+w/o Suffix Map 105.96 ±0.11 0.83 ±0.00 
+
+w/o MatMul 103.81 ±0.08 1.91 ±0.06 
+
+transitions of previously merged tokens. The regex constraint ablations show a different bottleneck. GPU-based mask aggregation reduces the cost of combining many active DFA states. Suffix-reachable state precomputation plays a complementary role. It moves the ambiguity of matches starting inside a subword token from decoding time to setup time by storing suffix-reachable states in advance. Together, these results indicate that the efficiency gain of NCO does not come from a single optimization. The acceleration components reduce different costs in the constraint enforcement pipeline, which explains why their benefits are complementary. This trade-off is favorable when the same constraint set is reused across many generations, as in typical safety-filter deployments. 
+
+Additional analyses. We include additional experiments that complement the main results. Ab-solute throughput measurements in Appendix E.1 show that the relative trends are not artifacts of normalization across models and batch sizes. Quality and violation evaluations in Appendix E.2 confirm that hard masking with NCO removes constraint violations while keeping perplexity close to the base model. Sensitivity analyses in Appendix E.3 further show that the decoding overhead remains small as the forbidden lexicon grows, strings become longer, or regex DFAs become larger. We also evaluate a soft constraint mode in Appendix E.4, where invalid continuations receive finite logit penalties rather than being fully masked. Across these additional settings, NCO consistently preserves the main efficiency advantage observed in the primary experiments. The quality results also show that exact constraint enforcement does not require a substantial degradation in language modeling behavior. The soft constraint results further suggest that the same framework can be used when applications prefer suppression over hard blocking. These results indicate that NCO supports both strict enforcement and probabilistic suppression through the same online constraint states. 
+
+# 6 Conclusion 
+
+We present NCO, a decoding-time plug-in for preventing forbidden strings and regex patterns from appearing as substrings in LLM outputs. NCO avoids the state explosion of a global avoidance automaton by maintaining compact online matching states. It uses an Aho-Corasick trie for finite hard constraints and parallel DFA simulation for regex constraints, with token-level precomputation to reduce repeated decoding-time work. Across profanity suppression and PII suppression tasks, NCO achieves zero constraint violations while preserving throughput close to unconstrained decoding. The method remains compatible with standard decoding strategies because it intervenes only at the logit level. The soft logit setting also allows the same constraint representation to provide graded suppression instead of only hard blocking. While this work is limited to explicit finite hard constraints and regex constraints, future work may extend negative constraint enforcement to richer formal specifications, such as grammar-level constraints. Dynamic constraint updates are another important direction, especially for deployment settings where finite hard constraints change frequently. 9References 
+
+[1] Marah Abdin, Jyoti Aneja, Harkirat Behl, Sébastien Bubeck, Ronen Eldan, Suriya Gunasekar, Michael Harrison, Russell J. Hewett, Mojan Javaheripi, Piero Kauffmann, et al. Phi-4 technical report, 2024. [2] Alfred V Aho and Margaret J Corasick. Efficient string matching: an aid to bibliographic search. 
+
+Communications of the ACM , 18(6):333–340, 1975. [3] Ebtesam Almazrouei, Hamza Alobeidli, Abdulaziz Alshamsi, Alessandro Cappelli, Ruxan-dra Cojocaru, Merouane Debbah, Etienne Goffinet, Daniel Hesslow, Julien Launay, Quentin Malartic, et al. The Falcon series of open language models, 2023. [4] Luca Beurer-Kellner, Marc Fischer, and Martin Vechev. Guiding llms the right way: Fast, non-invasive constrained generation. In Forty-first International Conference on Machine Learning ,2024. [5] Stella Biderman, Hailey Schoelkopf, Quentin Anthony, Herbie Bradley, Kyle O’Brien, Eric Hallahan, Mohammad Aflah Khan, Shivanshu Purohit, USVSN Sai Prashanth, Edward Raff, Aviya Skowron, Lintang Sutawika, and Oskar van der Wal. Pythia: A suite for analyzing large language models across training and scaling. In Proceedings of the 40th International Conference on Machine Learning , volume 202 of Proceedings of Machine Learning Research ,pages 2397–2430. PMLR, 2023. [6] Sid Black, Leo Gao, Phil Wang, Connor Leahy, and Stella Biderman. GPT-Neo: Large scale autoregressive language modeling, 2021. [7] Marco Cognetta and Naoaki Okazaki. Tokenization as finite-state transduction. Computational Linguistics , pages 1–35, 2025. [8] Zhijie Deng, Chris Yuhao Liu, Zirui Pang, Xinlei He, Lei Feng, Qi Xuan, Zhaowei Zhu, and Jiaheng Wei. Guard: Generation-time llm unlearning via adaptive restriction and detection. 
+
+arXiv preprint arXiv:2505.13312 , 2025. [9] Daniel Deutsch, Shyam Upadhyay, and Dan Roth. A general-purpose algorithm for con-strained sequential inference. In Proceedings of the 23rd Conference on Computational Natural Language Learning (CoNLL) , pages 482–492, 2019. [10] Yixin Dong, Charlie F. Ruan, Yaxing Cai, Ruihang Lai, Ziyi Xu, Yilong Zhao, and Tianqi Chen. Xgrammar: Flexible and efficient structured generation engine for large language models. arXiv preprint arXiv.2411.15100 , 2024. [11] Leo Gao, Stella Biderman, Sid Black, Laurence Golding, Travis Hoppe, Charles Foster, Jason Phang, Horace He, Anish Thite, Noa Nabeshima, Shawn Presser, and Connor Leahy. The pile: An 800gb dataset of diverse text for language modeling. arXiv preprint arXiv:2101.00027 ,2020. [12] Samuel Gehman, Suchin Gururangan, Maarten Sap, Yejin Choi, and Noah A. Smith. Real-ToxicityPrompts: Evaluating neural toxic degeneration in language models. In Findings of the Association for Computational Linguistics: EMNLP 2020 , pages 3356–3369, 2020. [13] Saibo Geng, Martin Josifoski, Maxime Peyrard, and Robert West. Grammar-constrained decoding for structured nlp tasks without finetuning. In Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing , 2023. [14] Aaron Grattafiori, Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey, Abhishek Kadian, Ahmad Al-Dahle, Aiesha Letman, Akhil Mathur, Alan Schelten, Alex Vaughan, et al. The Llama 3 herd of models, 2024. [15] Hyundong Jin, Joonghyuk Hahn, and Yo-Sub Han. Regexpspace: A benchmark for evaluating llm reasoning on pspace-complete regex problems, 2025. URL https://arxiv.org/abs/ 2510.09227 .10 [16] Bryan Klimt and Yiming Yang. The enron corpus: A new dataset for email classification research. In European conference on machine learning , pages 217–226, 2004. [17] Terry Koo, Frederick Liu, and Luheng He. Automata-based constraints for language model decoding. In First Conference on Language Modeling , 2024. [18] Ximing Lu, Peter West, Rowan Zellers, Ronan Le Bras, Chandra Bhagavatula, and Yejin Choi. Neurologic decoding:(un) supervised neural text generation with predicate logic constraints. In Proceedings of the 2021 Conference of the North American Chapter of the Association for Computational Linguistics: Human language technologies , pages 4288–4299, 2021. [19] Ximing Lu, Sean Welleck, Peter West, Liwei Jiang, Jungo Kasai, Daniel Khashabi, Ronan Le Bras, Lianhui Qin, Youngjae Yu, Rowan Zellers, Noah A. Smith, and Yejin Choi. Neurologic a* esque decoding: Constrained text generation with lookahead heuristics. In Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies , pages 780–799, 2022. [20] Kanghee Park, Timothy Zhou, and Loris D’Antoni. Flexible and efficient grammar-constrained decoding. arXiv preprint arXiv:2502.05111 , 2025. [21] Gabriel Poesia, Alex Polozov, Vu Le, Ashish Tiwari, Gustavo Soares, Christopher Meek, and Sumit Gulwani. Synchromesh: Reliable code generation from pre-trained language models. In 
+
+The Tenth International Conference on Learning Representations, 2022, Virtual Event, April 25-29, 2022 , 2022. [22] Torsten Scholak, Nathan Schucher, and Dzmitry Bahdanau. Picard: Parsing incrementally for constrained auto-regressive decoding from language models. In Proceedings of the 2021 Conference on Empirical Methods in Natural Language Processing , pages 9895–9901, 2021. [23] Shutterstock. List of dirty, naughty, obscene, and otherwise bad words. https://github. com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words , 2012. [24] Michael Sipser. Introduction to the theory of computation. ACM Sigact News , 27(1):27–29, 1996. [25] Rohan Taori, Ishaan Gulrajani, Tianyi Zhang, Yann Dubois, Xuechen Li, Carlos Guestrin, Percy Liang, and Tatsunori B. Hashimoto. Stanford alpaca: An instruction-following llama model. 
+
+https://github.com/tatsu-lab/stanford_alpaca , 2023. [26] Technology Innovation Institute. Welcome to the Falcon 3 family of open models! https: //huggingface.co/blog/falcon3 , 2024. [27] Hugo Touvron, Louis Martin, Kevin Stone, Peter Albert, Amjad Almahairi, Yasmine Babaei, Nikolay Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti Bhosale, et al. Llama 2: Open foundation and fine-tuned chat models, 2023. URL https://arxiv.org/abs/2307.09288 .[28] Ben Wang and Aran Komatsuzaki. GPT-J-6B: A 6 billion parameter autoregressive language model. https://github.com/kingoflolz/mesh-transformer-jax , May 2021. [29] Brandon T Willard and Rémi Louf. Efficient guided generation for large language models. 
+
+arXiv preprint arXiv:2307.09702 , 2023. [30] An Yang, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chengyuan Li, Dayiheng Liu, Fei Huang, Haoran Wei, et al. Qwen2.5 technical report, 2024. [31] Sihyun Yu, Sangwoo Mo, Sungsoo Ahn, and Jinwoo Shin. Abstract reasoning via logic-guided generation. arXiv preprint arXiv:2107.10493 , 2021. 
+
+# A Preliminaries 
+
+We briefly review the background relevant to our method, including regular languages, BPE tok-enization, the closure properties of regular languages under intersection and complement, and the Aho-Corasick algorithm. 11 A.1 Regular Languages 
+
+A regular language [ 24 ] is a set of strings over a finite alphabet that can be described using operations such as concatenation, union, and the Kleene star. Regular languages admit two standard representa-tions, regular expressions and finite automata, also known as finite state machines (FSM). These two formalisms are equivalent in expressive power, so the class of languages representable by regular expressions is exactly the class of languages recognizable by finite automata. In this paper, we use the term regular expression in the formal language sense, excluding non-regular extensions that appear in some practical regex engines. A finite automaton is formally defined as a 5-tuple (Q, Σ, δ, s, F ),where Q is a finite set of states, Σ is a finite alphabet, s ∈ Q is the start state, F ⊆ Q is the set of accepting states, and δ : Q × Σ → 2Q is the transition function. Throughout this paper, regex constraints are restricted to this formal setting, which ensures convertibility to DFA, consistent with prior work [9, 17]. 
+
+A.2 Byte-pair Encoding 
+
+Byte-pair encoding (BPE) is a widely used subword tokenization algorithm for language models. BPE tokenizes text into a sequence of tokens by iteratively applying learned merge rules that combine frequent adjacent symbol pairs. Starting from a base alphabet of symbols, BPE training produces an ordered list of merge operations. The tokenization procedure applies these rules to obtain a segmentation of an input string into subword tokens. The key property of BPE that we exploit in this work is its hierarchical composition structure. Each token w ∈ V can be viewed as the result of merging two shorter symbols, written as 
+
+w = u · v, (1) where u and v are either base symbols or previously merged tokens, and · denotes string concatenation. As a result, each token can be associated with an implicit binary merge tree. This structure makes it possible to compute token-level quantities recursively from their left and right parts. When a quantity depends only on the string represented by a token and can be composed from its two children, intermediate results can be reused across tokens that share substructures, enabling efficient precomputation. 
+
+A.3 Intersection and Complement of Regular Languages 
+
+Regular languages are closed under Boolean operations including intersection and complement. These closure properties are useful for expressing complex constraints, but the corresponding automaton constructions can be expensive when they are carried out explicitly. We first recall the intersection construction for DFAs. Given two DFAs 
+
+A1 = ( Q1, Σ, δ 1, s 1, F 1) and A2 = ( Q2, Σ, δ 2, s 2, F 2),
+
+a DFA for L(A1) ∩ L(A2) can be obtained by the product construction. Its state space is Q1 × Q2,and therefore has size at most |Q1|| Q2|. For l constraints, the same construction yields a product state space of size 
+
+|Q1| · | Q2| · · · | Ql|.
+
+Thus, even if each individual automaton is small, explicitly combining many constraints can lead to exponential growth in the number of constraints. Complementation is simple once a complete DFA has been constructed. For a complete DFA 
+
+A = ( Q, Σ, δ, s, F ),
+
+where δ(q, c ) is defined for every q ∈ Q and every c ∈ Σ, the complement is obtained by replacing 
+
+F with Q \ F . Thus, complementing a complete DFA does not itself increase the number of states. However, this operation is directly valid only for complete DFAs. If the automaton is partial, missing transitions must first be completed, typically by adding a sink state. If the constraint is given as a regular expression or NFA, determinization may also be required before complementing it. The state growth becomes more severe for negative substring constraints. For a forbidden language 
+
+L(A), invalid outputs are strings that contain some string in L(A) as a substring. This language is 
+
+Σ∗L(A)Σ ∗.
+
+12 The leading Σ∗ means that a match may start at any position in the generated text. A nondeterministic automaton can represent this compactly by starting a possible match at each position. A deterministic automaton, however, must summarize all currently possible partial matches in a single state. For example, let Σ = {a, b } and consider the forbidden pattern 
+
+aΣna. 
+
+The substring occurrence language is 
+
+Σ∗aΣnaΣ∗.
+
+An NFA can recognize this language with O(n) states by guessing the first a, reading exactly n
+
+arbitrary symbols, and then checking whether the next symbol is a. In contrast, a DFA must remember enough information about the recent history to know whether an a occurred exactly n + 1 positions before the current symbol. More generally, it must track many possible match starts at once, which can be viewed as a subset of active NFA states. This subset representation can require exponentially many states in the worst case. Therefore, a direct construction for multiple negative regex constraints combines two sources of growth. Each substring occurrence language Σ∗L(Ai)Σ ∗ may already require a large deterministic automaton. Then enforcing all constraints simultaneously requires intersecting their complements. This is why relying only on the closure properties of regular languages does not yield a practical decoding method. 
+
+A.4 Aho-Corasick Algorithm 
+
+The Aho-Corasick algorithm is an extension of the Knuth-Morris-Pratt (KMP) algorithm, designed for efficient multi-pattern matching against a single input text. This algorithm constructs a trie from a set of patterns and utilizes a failure function, the core mechanism of KMP, to achieve efficient pattern matching. The failure function indicates which node to transition to upon a character mismatch, allowing the matching process to continue. Its time and space complexity are linear with respect to the total length of the text and the patterns. If the failure transitions are precomputed and integrated into the transition function, the resulting structure is fundamentally equivalent to a Deterministic Finite Automaton (DFA). 
+
+# B Detailed Algorithms 
+
+We provide detailed pseudocode for the algorithms used in NCO. We first present naive implemen-tations that compute token-level transition and blocking tables by directly simulating each token string. We then describe the BPE-aware precomputation used in our implementation, which reuses the merge structure of BPE tokenizers to reduce redundant computation. Finally, we present the matrix multiplication trick used to compute masks efficiently during decoding. Throughout this section, Γ denotes the tokenizer vocabulary, and each token w ∈ Γ is treated as the string over Σ.When discussing BPE merges, we write a merged token as w = u · v, where u and v are previously constructed tokens. We use EOS ∈ Γ to denote the end-of-sequence token and treat it as a control token rather than a symbol sequence over Σ. For a precomputed blocking mask B, the value B[q, w ] = 1 
+
+means that token w must be blocked when the current constraint state is q.
+
+B.1 Naive Implementation B.1.1 Finite Hard Constraints Precomputation. For forbidden hard constraints, the naive implementation first constructs an Aho-Corasick trie over the forbidden string set P . Each trie state represents a matched prefix of some forbidden string, and the failure links allow the matcher to fall back to the longest suffix that is also a trie prefix. After the trie is constructed, we precompute two token-level tables. The transition table 
+
+∆[ q, w ] stores the trie state reached after reading token w from state q. The blocking mask B[q, w ]
+
+records whether reading w from q visits a forbidden state, in which case appending w would create a forbidden substring. This table directly characterizes whether w belongs to the valid candidate set 
+
+ΓP (Yt) for a prefix whose current trie state is q.13 Algorithm 1 Naive Precomputation for Finite Hard Constraints 
+
+Require: Forbidden strings P ⊆ Σ∗ and tokenizer vocabulary Γ
+
+Ensure: Token transition table ∆, blocking mask B, and root state qroot 
+
+▷ Build AC trie  
+
+> 1:
+
+Build an Aho–Corasick trie T from P 
+
+> 2:
+
+Let Q be the set of states in T , and let qroot be the root state  
+
+> 3:
+
+Compute failure links fail for all states in Q 
+
+> 4:
+
+Mark state q as forbidden if q corresponds to a complete forbidden string  
+
+> 5:
+
+Propagate forbidden marks so that if fail( q) is forbidden, then q is also forbidden 
+
+▷ Precompute token-level transitions and blocking masks  
+
+> 6:
+
+for all q ∈ Q do  
+
+> 7:
+
+for all w ∈ Γ do  
+
+> 8:
+
+q′ ← q 
+
+> 9:
+
+B[q, w ] ← 0 
+
+> 10:
+
+for all characters a in token string w do  
+
+> 11:
+
+while q′̸ = qroot and q′ has no transition labeled a do  
+
+> 12:
+
+q′ ← fail[ q′] 
+
+> 13:
+
+end while  
+
+> 14:
+
+if q′ has a transition labeled a then  
+
+> 15:
+
+q′ ← the child of q′ labeled by a 
+
+> 16:
+
+else  
+
+> 17:
+
+q′ ← qroot  
+
+> 18:
+
+end if  
+
+> 19:
+
+if q′ is forbidden then  
+
+> 20:
+
+B[q, w ] ← 1 
+
+> 21:
+
+end if  
+
+> 22:
+
+end for  
+
+> 23:
+
+∆[ q, w ] ← q′ 
+
+> 24:
+
+end for  
+
+> 25:
+
+end for  
+
+> 26:
+
+Mark B[q, EOS ] ← 0 for all q ∈ Q 
+
+> 27:
+
+return ∆, B, q root 
+
+Decoding. During decoding, the AC state summarizes all information needed to determine whether a candidate token would create a forbidden substring. Given the current prefix Yt, let qt be the AC state obtained after reading Yt. For each candidate token w, the precomputed mask B[qt, w ] indicates whether Yt · w would violate the hard constraint. NCO therefore masks exactly those invalid tokens and then applies an arbitrary decoding rule, such as greedy decoding, sampling, or beam search, over the filtered logits. After a token is selected, the AC state is updated by a single table lookup. 
+
+B.1.2 Regex Constraints Precomputation. For forbidden regex constraints, each DFA Ai ∈ D recognizes a forbidden language L(Ai). As in the finite hard constraint case, a forbidden match may start at any position in the generated output. However, unlike finite hard constraints handled by an AC trie, a general DFA does not provide failure links that summarize all relevant suffix matches as a single state. We therefore maintain the set of DFA states reachable by reading suffixes of the current output prefix. Strictly speaking, a DFA has a defined transition for every state and every alphabet symbol. In our implementation, we use an equivalent partial representation that omits the non-accepting sink state and all transitions into it. Once a run enters this sink state, it can never reach an accepting state and therefore can never contribute to a future violation. We denote this omitted sink state by ⊥ in the algorithms. Thus, when δi(q, a ) is undefined, we set the current state to ⊥ and stop simulating that run. The naive precomputation builds three token-level tables for each DFA. The transition table ∆i[q, w ] stores the state reached after reading token w from DFA state q, or ⊥ if the run enters the omitted sink state. The blocking mask Bi[q, w ] records whether reading w from q reaches an accepting state. Finally, the suffix-reachable set Ri[w] stores the states reachable from the initial state 
+
+si by reading any suffix of token w. This last table is needed because a new forbidden match may begin inside the newly appended token. 14 Algorithm 2 Decoding with Finite Hard Constraints 
+
+Require: Model Mθ , input string X, tokenizer vocabulary Γ, decoding rule Decode 
+
+Require: Token transition table ∆, blocking mask B, and root state qroot 
+
+Ensure: Output string Y satisfying Valid P 
+
+> 1:
+
+Y0 ← ϵ 
+
+> 2:
+
+q0 ← qroot  
+
+> 3:
+
+for t = 0 , 1, . . . until termination do  
+
+> 4:
+
+ℓt ← next-token logits from Mθ conditioned on (X, Y t) 
+
+> 5:
+
+for all w ∈ Γ do  
+
+> 6:
+
+if B[qt, w ] = 1 then  
+
+> 7:
+
+ℓt(w) ← −∞ ▷ w / ∈ ΓP (Yt) 
+
+> 8:
+
+end if  
+
+> 9:
+
+end for  
+
+> 10:
+
+yt+1 ← Decode (ℓt) 
+
+> 11:
+
+Yt+1 ← Yt · yt+1  
+
+> 12:
+
+qt+1 ← ∆[ qt, y t+1 ] 
+
+> 13:
+
+end for  
+
+> 14:
+
+return Y
+
+Algorithm 3 Naive Precomputation for Forbidden Regex Constraints 
+
+Require: Forbidden DFAs D = {A1, . . . , A m} and tokenizer vocabulary Γ
+
+Ensure: Token transitions {∆i}mi=1 , blocking masks {Bi}mi=1 , and suffix-reachable sets {Ri}mi=1  
+
+> 1:
+
+for all Ai = ( Qi, Σ, δ i, s i, F i) ∈ D do 
+
+▷ Precompute token transitions and blocking masks  
+
+> 2:
+
+for all q ∈ Qi do  
+
+> 3:
+
+for all w ∈ Γ do  
+
+> 4:
+
+Initialize q′ with q and Bi[q, w ] with 0. 
+
+> 5:
+
+Mark Bi[q, w ] as 1 if q′ is an accepting state.  
+
+> 6:
+
+for all characters a in token string w do  
+
+> 7:
+
+Take the transition obtained by reading a from q′. 
+
+> 8:
+
+Set q′ to ⊥ and stop scanning if no such transition exists.  
+
+> 9:
+
+Mark Bi[q, w ] as 1 if q′ is an accepting state.  
+
+> 10:
+
+end for  
+
+> 11:
+
+Record the transition ∆i[q, w ] as q′. 
+
+> 12:
+
+end for  
+
+> 13:
+
+end for 
+
+▷ Precompute states reachable from suffixes of each token  
+
+> 14:
+
+for all w ∈ Γ do  
+
+> 15:
+
+Initialize Ri[w] as an empty set.  
+
+> 16:
+
+for all suffixes u of token string w do  
+
+> 17:
+
+Initialize q′ with si and accepted with whether si is accepting.  
+
+> 18:
+
+for all characters a in u do  
+
+> 19:
+
+Take the transition obtained by reading a from q′. 
+
+> 20:
+
+Set q′ to ⊥ and stop scanning u if no such transition exists.  
+
+> 21:
+
+Mark accepted as true if the updated q′ is an accepting state.  
+
+> 22:
+
+end for  
+
+> 23:
+
+if q′̸ = ⊥ then  
+
+> 24:
+
+Add q′ to Ri[w]. 
+
+> 25:
+
+end if  
+
+> 26:
+
+if accepted is true then  
+
+> 27:
+
+Mark Bi[q, w ] as 1 for all states q ∈ Qi. 
+
+> 28:
+
+end if  
+
+> 29:
+
+end for  
+
+> 30:
+
+end for  
+
+> 31:
+
+Mark Bi[q, EOS ] to 0 for all states q ∈ Qi. 
+
+> 32:
+
+end for  
+
+> 33:
+
+return {∆i, B i, R i}mi=1 
+
+15 Decoding. During decoding, each DFA Ai maintains an active state set Si,t after reading the current output prefix Yt. Intuitively, Si,t represents all partial matches of the forbidden regex constraints that could be in progress at the end of Yt. Equivalently, it contains the DFA states reached by running Ai
+
+on suffixes of Yt. We also keep the initial state si active, because a forbidden match may start at the next generated token. Given this active state set, a candidate token w is invalid if reading w from any active state reaches an accepting state, which is exactly recorded by the precomputed blocking mask Bi[q, w ]. After a token is selected, the active state set is updated by advancing all previous active states through the selected token and adding states reachable by suffixes of the selected token. This update accounts for matches that started before the token as well as matches that start inside the token. 
+
+Algorithm 4 Decoding with Forbidden Regex Constraints 
+
+Require: Model Mθ , input string X, tokenizer vocabulary Γ, decoding rule Decode 
+
+Require: Token transitions {∆i}mi=1 , blocking masks {Bi}mi=1 , and suffix-reachable sets {Ri}mi=1 
+
+Ensure: Output string Y satisfying Valid D 
+
+> 1:
+
+Y0 ← ϵ 
+
+> 2:
+
+for all Ai = ( Qi, Σ, δ i, s i, F i) ∈ D do  
+
+> 3:
+
+Si, 0 ← { si} 
+
+> 4:
+
+end for  
+
+> 5:
+
+for t = 0 , 1, . . . until termination do  
+
+> 6:
+
+ℓt ← next-token logits from Mθ conditioned on (X, Y t) 
+
+> 7:
+
+for all w ∈ Γ do  
+
+> 8:
+
+if there exist i and q ∈ Si,t such that Bi[q, w ] = 1 then  
+
+> 9:
+
+ℓt(w) ← −∞ ▷ w / ∈ ΓD (Yt) 
+
+> 10:
+
+end if  
+
+> 11:
+
+end for  
+
+> 12:
+
+yt+1 ← Decode (ℓt) 
+
+> 13:
+
+Yt+1 ← Yt · yt+1  
+
+> 14:
+
+for all Ai ∈ D do  
+
+> 15:
+
+Si,t +1 ← Ri[yt+1 ] ∪ { si} 
+
+> 16:
+
+for all q ∈ Si,t do  
+
+> 17:
+
+if ∆i[q, y t+1 ]̸ = ⊥ then  
+
+> 18:
+
+Si,t +1 ← Si,t +1 ∪ { ∆i[q, y t+1 ]} 
+
+> 19:
+
+end if  
+
+> 20:
+
+end for  
+
+> 21:
+
+end for  
+
+> 22:
+
+end for  
+
+> 23:
+
+return Y
+
+B.2 BPE Merging 
+
+The naive precomputation computes token-level tables by directly simulating each token string from each constraint state. As a result, its cost scales linearly with the number of vocabulary tokens and also depends on the length of each token string. This becomes expensive for modern tokenizers with large vocabularies, especially because merged BPE tokens can represent long strings. NCO exploits the merge structure of BPE tokenizers to reduce this redundancy. Base tokens are handled by direct simulation, while each merged token is computed by composing the precomputed tables of its two children. This allows token-level transitions and blocking masks for merged tokens to be obtained by table lookup rather than by scanning their full string representations. 
+
+B.2.1 Finite Hard Constraints Precomputation. For finite hard constraints, the BPE-aware precomputation uses the compositional property of AC-trie transitions. Suppose a merged token w is formed by concatenating two previously constructed tokens u and v, so that w = u · v. Reading w from state q is equivalent to first reading u
+
+from q, reaching an intermediate state ∆[ q, u ], and then reading v from that intermediate state. Thus, the transition for w can be written as 
+
+∆[ q, w ] = ∆[∆[ q, u ], v ].
+
+16 The blocking decision is compositional as well. Token w is blocked from state q if reading u from 
+
+q already creates a forbidden match, or if reading v from the intermediate state ∆[ q, u ] creates a forbidden match. Therefore, 
+
+B[q, w ] = B[q, u ] ∨ B[∆[ q, u ], v ].
+
+After base tokens are computed by direct AC simulation, all merged tokens can be filled by table lookup and composition. 
+
+Algorithm 5 BPE-Aware Precomputation for Finite Hard Constraints 
+
+Require: Forbidden strings P ⊆ Σ∗, tokenizer vocabulary Γ, BPE merge rules R
+
+Ensure: Token transition table ∆, blocking mask B, and root state qroot 
+
+▷ Build AC trie  
+
+> 1:
+
+Build an Aho–Corasick trie T from P 
+
+> 2:
+
+Let Q be the set of states in T , and let qroot be the root state  
+
+> 3:
+
+Compute failure links fail for all states in Q 
+
+> 4:
+
+Mark state q as forbidden if q corresponds to a complete forbidden string  
+
+> 5:
+
+Propagate forbidden marks so that if fail( q) is forbidden, then q is also forbidden 
+
+▷ Initialize tables for base tokens  
+
+> 6:
+
+Let Γbase be the tokens in Γ that are not produced by BPE merges  
+
+> 7:
+
+for all q ∈ Q do  
+
+> 8:
+
+for all w ∈ Γbase do  
+
+> 9:
+
+Read w from q in the AC trie to obtain the resulting state q′ and the blocking indicator b. 
+
+> 10:
+
+∆[ q, w ] ← q′ 
+
+> 11:
+
+B[q, w ] ← b 
+
+> 12:
+
+end for  
+
+> 13:
+
+end for 
+
+▷ Compose tables for merged tokens  
+
+> 14:
+
+for all merge rule (u, v ) 7 → w in BPE order do  
+
+> 15:
+
+for all q ∈ Q do  
+
+> 16:
+
+q′ ← ∆[ q, u ] 
+
+> 17:
+
+∆[ q, w ] ← ∆[ q′, v ] 
+
+> 18:
+
+B[q, w ] ← B[q, u ] ∨ B[q′, v ] 
+
+> 19:
+
+end for  
+
+> 20:
+
+end for  
+
+> 21:
+
+Mark B[q, EOS ] ← 0 for all q ∈ Q 
+
+> 22:
+
+return ∆, B, q root 
+
+B.2.2 Regex Constraints Precomputation. For regex constraints, the BPE-aware precomputation must compose both token transitions and suffix-reachable sets. Let a merged token w be formed by concatenating two previously constructed tokens u and v, so that w = u · v. For a DFA Ai, reading w from state q is equivalent to first reading u from q and then reading v from the resulting state. Thus, when ∆i[q, u ]̸ = ⊥, the transition can be computed as 
+
+∆i[q, w ] = ∆ i[∆ i[q, u ], v ].
+
+If ∆i[q, u ] = ⊥, then the run has already entered the omitted non-accepting sink state, so ∆i[q, w ] = 
+
+⊥. The blocking decision is composed in the same way. Token w is blocked from state q if reading 
+
+u from q reaches an accepting state, or if reading v from the intermediate state ∆i[q, u ] reaches an accepting state. Hence, when ∆i[q, u ]̸ = ⊥,
+
+Bi[q, w ] = Bi[q, u ] ∨ Bi[∆ i[q, u ], v ].
+
+When ∆i[q, u ] = ⊥, we only keep the blocking decision from reading u, since the remaining part cannot lead back from the omitted sink state. In addition to transitions and blocking masks, regex constraints require suffix-reachable sets. The suffixes of w = u · v are either suffixes of v, or strings obtained by taking a suffix of u and then appending v. Therefore, 
+
+Ri[w] = Ri[v] ∪ { ∆i[q, v ] : q ∈ Ri[u], ∆i[q, v ]̸ = ⊥} .
+
+This recurrence allows NCO to compute merged-token tables using only previously computed tables for u and v.17 Algorithm 6 BPE-Aware Precomputation for Forbidden Regex Constraints 
+
+Require: Forbidden DFAs D = {A1, . . . , A m}, tokenizer vocabulary Γ, BPE merge rules R
+
+Ensure: Token transitions {∆i}mi=1 , blocking masks {Bi}mi=1 , and suffix-reachable sets {Ri}mi=1  
+
+> 1:
+
+for all Ai = ( Qi, Σ, δ i, s i, F i) ∈ D do  
+
+> 2:
+
+Let Γbase be the tokens in Γ that are not produced by BPE merges 
+
+▷ Initialize tables for base tokens  
+
+> 3:
+
+for all q ∈ Qi do  
+
+> 4:
+
+for all w ∈ Γbase do  
+
+> 5:
+
+Read w from state q in Ai to obtain the resulting state q′ and the blocking indicator b. 
+
+> 6:
+
+Set ∆i[q, w ] ← q′ and Bi[q, w ] ← b. 
+
+> 7:
+
+end for  
+
+> 8:
+
+end for 
+
+▷ Initialize suffix-reachable sets for base tokens  
+
+> 9:
+
+for all w ∈ Γbase do  
+
+> 10:
+
+Scan all suffixes of w from si to compute Ri[w] and the suffix blocking indicator bsuf . 
+
+> 11:
+
+if bsuf = 1 then  
+
+> 12:
+
+Mark Bi[q, w ] as 1 for all states q ∈ Qi. 
+
+> 13:
+
+end if  
+
+> 14:
+
+end for 
+
+▷ Compose tables for merged tokens  
+
+> 15:
+
+for all merge rule (u, v ) 7 → w in BPE order do  
+
+> 16:
+
+for all q ∈ Qi do  
+
+> 17:
+
+Let q′ be ∆i[q, u ], the state obtained by reading u from q. 
+
+> 18:
+
+Set ∆i[q, w ] to ⊥ and inherit Bi[q, w ] from Bi[q, u ] if q′ = ⊥. 
+
+> 19:
+
+Otherwise, set ∆i[q, w ] to ∆i[q′, v ] and Bi[q, w ] to Bi[q, u ] ∨ Bi[q′, v ]. 
+
+> 20:
+
+end for  
+
+> 21:
+
+Initialize Ri[w] with Ri[v]. 
+
+> 22:
+
+for all q ∈ Ri[u] do  
+
+> 23:
+
+Add ∆i[q, v ] to Ri[w] if ∆i[q, v ]̸ = ⊥. 
+
+> 24:
+
+end for  
+
+> 25:
+
+if Bi[si, v ] = 1 or there exists q ∈ Ri[u] such that Bi[q, v ] = 1 then  
+
+> 26:
+
+Mark Bi[q, w ] as 1 for all states q ∈ Qi. 
+
+> 27:
+
+end if  
+
+> 28:
+
+end for  
+
+> 29:
+
+Mark Bi[q, EOS ] as 0 for all q ∈ Qi. 
+
+> 30:
+
+end for  
+
+> 31:
+
+return {∆i, B i, R i}mi=1 
+
+B.3 MatMul Trick 
+
+The naive DFA decoding algorithm checks every candidate token against every active DFA state. This directly implements the validity condition, but it can be inefficient when the vocabulary is large or when multiple DFA constraints are used. NCO accelerates this step by representing active states and blocking masks as matrices. This converts the token-blocking computation into a dense matrix multiplication that can be executed efficiently on GPUs. Let D = {A1, . . . , A m} be the set of forbidden DFAs. We concatenate the state spaces of all DFAs into a single global state index set 
+
+Qall = Q1 ⊔ · · · ⊔ Qm,
+
+where states are re-indexed so that the sets are disjoint. At decoding step t, let 
+
+st ∈ { 0, 1}|Qall |
+
+be the active-state vector, where st[q] = 1 indicates that global state q is active. We also concatenate the precomputed blocking masks into a matrix 
+
+B ∈ { 0, 1}|Qall |×| Γ|,
+
+18 where B[q, w ] = 1 means that token w is blocked when state q is active. Then the blocking vector over the vocabulary is computed by 
+
+bt = s⊤ 
+
+> t
+
+B.
+
+A token w is invalid if bt[w] > 0. In practice, NCO adds a large negative value to the logits of these tokens. This gives the same result as iterating over all active states and taking the union of their blocked tokens, but exposes the computation as a GPU-friendly matrix multiplication. The suffix-reachable sets are also represented as a matrix 
+
+R ∈ { 0, 1}|Γ|×| Qall |,
+
+where R[w, q ] = 1 indicates that state q is reachable from the initial state of its DFA by reading a suffix of token w. For batched decoding, the active state vectors for all sequences are stacked into a matrix St ∈ { 0, 1}B×| Qall |. The blocked token matrix is then computed as 
+
+Ht = StB,
+
+where Ht ∈ RB×| Γ|. Tokens with positive entries in Ht are masked for the corresponding batch element. This batched form is the one used in our implementation. 
+
+Decoding. Algorithm 7 gives the matrix-based decoding procedure for regex constraints. Compared to Algorithm 4, the validity filtering step is replaced by a matrix multiplication between the active-state vector and the blocking mask matrix. The active-state update remains the same. For each selected token, NCO adds states reachable from suffixes of the token and advances the previous active states through the token. In beam search, the active-state vectors are reordered according to the selected beam indices in the same way as the model cache. 
+
+Algorithm 7 MatMul-Based Decoding with Forbidden Regex Constraints 
+
+Require: Model Mθ , input string X, tokenizer vocabulary Γ, decoding rule Decode 
+
+Require: Concatenated transition table ∆, blocking matrix B, suffix-reachable matrix R, initial-state vector sinit 
+
+Ensure: Output string Y satisfying Valid D 
+
+> 1:
+
+Y0 ← ϵ 
+
+> 2:
+
+s0 ← sinit  
+
+> 3:
+
+for t = 0 , 1, . . . until termination do  
+
+> 4:
+
+ℓt ← next-token logits from Mθ conditioned on (X, Y t)
+
+▷ Compute blocked tokens by matrix multiplication  
+
+> 5:
+
+bt ← s⊤ 
+
+> t
+
+B 
+
+> 6:
+
+for all w ∈ Γ do  
+
+> 7:
+
+if bt[w] > 0 then  
+
+> 8:
+
+ℓt(w) ← −∞ ▷ w / ∈ ΓD (Yt) 
+
+> 9:
+
+end if  
+
+> 10:
+
+end for  
+
+> 11:
+
+yt+1 ← Decode (ℓt) 
+
+> 12:
+
+Yt+1 ← Yt · yt+1 
+
+▷ Update active states  
+
+> 13:
+
+st+1 ← R[yt+1 ] ∨ sinit  
+
+> 14:
+
+for all active states q with st[q] = 1 do  
+
+> 15:
+
+if ∆[ q, y t+1 ]̸ = ⊥ then  
+
+> 16:
+
+st+1 [∆[ q, y t+1 ]] ← 1 
+
+> 17:
+
+end if  
+
+> 18:
+
+end for  
+
+> 19:
+
+end for  
+
+> 20:
+
+return Y
+
+B.4 Compatibility with Other Decoding Strategies 
+
+NCO is designed as a logit processor for standard generation pipelines. At each step, it modifies only the token scores by masking invalid candidates. The subsequent token selection can therefore 19 be performed by the original decoding strategy, including greedy decoding, top-k sampling, top-p
+
+sampling, temperature sampling, and beam search. No model training or parameter update is required. The same constraint structure is reused across batch elements and beams. For batched decoding, each sequence stores its own constraint state, while the precomputed transition and mask tables are shared across the batch. For finite hard constraints, each sequence or beam stores only its current Aho-Corasick trie state. For regex constraints, each sequence or beam stores its active DFA state sets. When a beam is expanded, the corresponding constraint state is copied together with the generated prefix and updated after a new token is selected. This makes NCO compatible with batched decoding and beam search without rebuilding the constraint structures at every step. In beam search, local logit masking can distort normalized probabilities by removing probability mass from invalid tokens. NCO reduces this effect by using the mask only as a feasibility filter. Beam scores are accumulated using the original model log probabilities of the selected valid tokens. This preserves constraint satisfaction while reducing unnecessary distortion in comparisons across beams. 
+
+# C Proof and Runtime Analysis 
+
+C.1 Correctness C.1.1 Multiple Finite Hard Constraints Theorem 4.1 (Correctness for finite hard constraints) . Let P ⊆ Σ∗ be a finite set of forbidden strings. If NCO generates an output Y using the finite hard constraint mask induced by the Aho-Corasick trie of P , then no string in P appears in Y as a substring. Proof. Let Yt be the output prefix after t decoding steps, and let qt be the state of the Aho-Corasick automaton after reading Yt. We use the standard invariant of the Aho-Corasick automaton. The state 
+
+qt represents the longest suffix of Yt that is also a prefix of some forbidden string in P . Moreover, while reading an additional string w from qt, the automaton reaches an output state if and only if some forbidden string in P is completed as a substring of Ytw.By construction, NCO masks a token w whenever reading the string represented by w from qt reaches an output state. Therefore, every unmasked token v satisfies the following property. If Yt contains no forbidden string, then Ytw also contains no forbidden string. We prove the theorem by induction on t. The empty prefix Y0 contains no forbidden string. Assume that Yt contains no forbidden string. The next token wt is sampled only from the unmasked tokens. Hence, reading wt from qt does not reach an output state. By the invariant above, no forbidden string is completed while reading wt. Since Yt was valid by the induction hypothesis, the updated prefix 
+
+Yt+1 = Ytwt also contains no forbidden string. Thus every generated prefix is valid, and the final output contains no string in P as a substring. 
+
+C.1.2 Multiple Regex Constraints Theorem 4.2 (Correctness for regex constraints) . Let D = {A1, . . . , A l} be a finite set of regex constraints compiled into DFAs, where each Ai = ( Qi, Σ, δ i, s i, F i) recognizes a forbidden language. If NCO generates an output Y using the regex constraint mask induced by D, then no substring of Y
+
+is accepted by any automaton in D.Proof. Fix an automaton Ai. For an output prefix Yt, let Sit ⊆ Qi be the active state set maintained by NCO. We prove the invariant 
+
+Sit = {δi(si, z ) | z is a suffix of Yt}.
+
+That is, Sit contains exactly the states reached by running Ai on every suffix of the current output prefix. The invariant holds for Y0 = ϵ, since the only suffix of the empty string is ϵ, and the corresponding state is si. Suppose the invariant holds for Yt. After appending a token w, every suffix of Ytw is of one of two forms. It either extends a suffix of Yt by w, or it starts inside the newly appended token w.The first case is captured by applying the token transition to every state in Sit . The second case is 20 captured by the precomputed suffix transitions of w from the start state si. Therefore, the update rule of NCO preserves the invariant for Sit+1 .Now consider the token mask. For each automaton Ai, NCO masks a token w if reading w from some state in Sit , or reading a suffix of w from si, reaches an accepting state in Fi. By the invariant, this is exactly the condition that some substring of Ytw accepted by Ai is completed while reading w.The final mask is obtained by combining the masks of all automata, so a token is allowed only when it is valid for every Ai.We prove correctness by induction on t. The empty prefix contains no substring accepted by any automaton in D. Assume that Yt satisfies all regex constraints. Let wt be the next token selected by NCO. Since wt is unmasked, for every Ai, appending wt does not complete an accepted substring. Indeed, no run starting from an active state in Si,t reaches an accepting state while reading wt, and no run starting inside wt is accepted. Thus no substring accepted by Ai is completed in Ytwt. Since no such substring existed in Yt by the induction hypothesis, the new prefix Yt+1 = Ytwt also satisfies all regex constraints. Therefore, every generated prefix and the final output contain no substring accepted by any forbidden DFA. 
+
+C.2 Runtime Analysis C.2.1 Multiple Finite Hard Constraints Precomputation for finite hard constraints. Let P be a finite set of forbidden strings, let L denote the total length of all strings in P , that is 
+
+L = X
+
+> w∈P
+
+|w|,
+
+and let |Γ| be the vocabulary size. For multiple hard constraints, NCO constructs the Aho-Corasick trie in O(L) time and performs BPE based token level precomputation in O(|Γ|L) time. The Aho-Corasick trie contains one node for each distinct prefix of a forbidden string. Thus, the number of trie states is O(L). The trie and its failure links can therefore be constructed in O(L) time over a fixed alphabet. After the trie is constructed, NCO precomputes token level transitions. For each trie state and each vocabulary token, the table stores the state reached after reading that token and whether a forbidden state is encountered during the transition. Without using the BPE structure, computing this table by scanning each token from every trie state would introduce an additional factor depending on the maximum token length. With the BPE based dynamic programming procedure, the transition of a merged token is computed by composing the transitions of its two children. Therefore, each vocabulary token is processed once per trie state, giving O(|Γ|L) token level precomputation time. 
+
+Inference for finite hard constraints. Let N be the number of generated tokens. For multiple forbidden strings, after preprocessing, NCO updates the constraint state in O(1) time per generated token and O(N ) time over the full generated sequence, excluding the dense operation of applying the mask to the vocabulary logits. During inference, NCO maintains a single Aho-Corasick state for each generated sequence. Once a token is selected, the next constraint state is obtained by one lookup in the precomputed token transition table. Therefore, the state update cost is O(1) per generated token and O(N ) over N
+
+generated tokens. The invalid token set for the current state is also available from the precomputed mask table. Thus, generating the constraint mask does not require scanning the generated text or traversing the trie at inference time. If the dense operation of applying the mask to all vocabulary logits is counted, it adds the usual O(|Γ|) vector operation per decoding step. 
+
+C.2.2 Multiple Regex Constraints Precomputation for regex constraints. Let D = {A1, . . . , A l} be a finite set of forbidden DFAs, where Ai = ( Qi, Σ, δ i, s i, F i), and let M denote the total number of states across all automata in D,that is 
+
+M =
+
+> l
+
+X
+
+> i=1
+
+|Qi|.
+
+21 For multiple regex constraints, NCO performs token level transition precomputation in O(M |Γ|)
+
+time using the BPE based composition, and stores the resulting tables additively across automata. For each DFA Ai, NCO constructs a token level transition table that stores the result of reading each vocabulary token from each state of Ai. Using the BPE based composition, the transition of a merged token is computed from the transitions of its two children. Thus, for automaton Ai, the token level transition table is computed in O(|Qi|| Γ|) time. Summing this cost over all automata gives 
+
+> l
+
+X
+
+> i=1
+
+O(|Qi|| Γ|) = O(M |Γ|).
+
+The tables are stored separately or concatenated across automata, so the storage and preprocessing cost are additive in the number of automaton states. This avoids the product state space that would arise from explicitly intersecting the automata. 
+
+Inference for regex constraints. Let D = {A1, . . . , A l} be a finite set of forbidden DFAs and let M = Pli=1 |Qi|. After preprocessing, NCO updates the regex constraint state in O(M ) time per generated token, excluding GPU parallel mask composition, and avoids constructing the explicit product automaton whose state space may have size 
+
+> l
+
+Y
+
+> i=1
+
+|Qi|.
+
+During inference, NCO maintains an active state set for each DFA. For automaton Ai, the update after a generated token has two components. First, previous active states are propagated by the precomputed token transition. Second, states reachable from the start state by suffixes of the generated token are added, since a forbidden substring may start inside the newly generated token. Both components are obtained from precomputed tables. Under the active state representation, updating the state information for Ai is linear in |Qi|. Summing over all automata gives 
+
+> l
+
+X
+
+> i=1
+
+O(|Qi|) = O(M )
+
+time per generated token. The token masks are computed from the active state representation and the precomputed forbidden mask tables. When written as a dense operation, this mask composition has arithmetic size proportional to M |Γ|, but NCO performs it as a GPU parallel operation. The sequential state update therefore scales additively with the total number of states. In contrast, a direct construction for simultaneous enforcement would intersect the constraint automata. The resulting product state space has size 
+
+|Q1| · | Q2| · · · | Ql|.
+
+Therefore, NCO avoids the explicit product automaton and maintains only the separate active state representations. 
+
+# D Experimental Details 
+
+We provide the experimental setup used throughout the paper, including datasets, constraint sets, models, metrics, baseline implementations, ablation variants, decoding hyperparameters, and the measurement environment. All methods are evaluated with the same prompts, models, and decoding settings unless stated otherwise. Additional results in Appendix E follow the same setup. 
+
+D.1 Dataset and Constraint Details RTP profanity suppression. For the finite hard constraint task, we use RealToxici-tyPrompts [ 12 ] (RTP). We use the English subset of the LDNOOBW 1 bad-word lexicon as the forbidden string set. The lexicon is used in full without additional filtering or manual modification. RTP provides prompts paired with reference continuations. We select prompts whose reference 
+
+> 1https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words
+
+22 continuation contains at least one substring matched by the LDNOOBW lexicon, and sample 500 prompts for evaluation. This filtering step creates an evaluation set where the prompt context is likely to elicit profanity-like continuations from an unconstrained model. Each selected prompt is formatted with the native chat template provided by the corresponding model tokenizer before generation. The model then generates a continuation, and the generated response is considered a violation if it contains any lexicon entry as a substring. This task evaluates whether a decoding method can prevent explicit forbidden strings from appearing anywhere in the generated output. The setting is not equivalent to static token blocking, since a forbidden word may be split across multiple BPE tokens. A valid decoding method must therefore track partial matches across token boundaries. 
+
+Enron PII suppression. For the forbidden regex constraint task, we use the Enron Email Dataset [ 16 ]. We consider four common types of PII patterns, including email addresses, phone numbers, social security numbers, and credit card numbers. Each PII type is specified as a regular expression and compiled into a DFA before decoding. The exact regex patterns are listed in Table 4. Since the models used for this task are trained on the Pile, which includes the Enron corpus, prompts extracted from Enron emails are likely to elicit continuations containing PII-like patterns. We first scan the dataset with our PII regex constraints. For each matched email, we take the text preceding the first matched span as the prompt. We keep prompts whose input length is between 20 and 2000 characters, and sample 500 prompts for evaluation. Given an Enron prompt, the model generates a continuation, and the generated response is considered a violation if it contains any substring that matches one of the PII regex constraints. This task evaluates whether a decoding method can enforce negative regex constraints rather than a finite list of forbidden strings. The regex constraints represent structured pattern families with many possible instances, which makes enumerating all forbidden strings impractical. Table 4: PII regex constraints used in the Enron experiment. PII type Regex pattern Email address [a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,} 
+
+Phone number [0-9]{3}-[0-9]{2}-[0-9]{4} 
+
+Social security number [0-9]{3}-[0-9]{3}-[0-9]{4} 
+
+Credit card number [0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{4} 
+
+D.2 Model Details 
+
+We evaluate models from several families to test whether NCO remains effective across different tokenizers and model architectures. For RTP profanity suppression, we use six instruction or chat-style models: Llama 2 7B, Llama 3.1 8B, Qwen2.5 7B, Falcon 7B, Falcon3 7B, and Phi4 14B. For Enron PII suppression, we use EleutherAI models trained on the Pile [ 11 ], including GPT-J 6B, GPT-Neo 2.7B, and Pythia 6.9B. The Pile includes the Enron Email Dataset, which makes these models likely to produce PII-like continuations under prompts extracted from Enron emails. This property is useful for evaluating whether decoding-time constraints can remove structured PII patterns when the unconstrained model assigns them non-trivial probability. We include GPT-family models for this task because prior work has commonly used them in PII suppression settings, and because unconstrained generations from these models produce PII-like patterns with non-trivial frequency. All models are used only at inference time. We do not fine-tune, retrain, or modify model parameters for any method. For chat-style models, prompts are formatted with the native chat template provided by the corresponding model tokenizer before generation. 
+
+D.3 Decoding Hyperparameters 
+
+Unless otherwise stated, all hard-constraint experiments use greedy decoding with a maximum generation length of 256 tokens. We vary the batch size for the main throughput experiments and use batch size 1 for ablation experiments. We do not use temperature sampling, top-p sampling, top-k
+
+23 sampling, or repetition penalty in these experiments. The same decoding hyperparameters are used for the base model, rejection sampling, GUARD, and NCO. The soft logit experiments use sampling-based decoding instead of greedy decoding. We use the default sampling hyperparameters specified by the corresponding model generation configuration for temperature, top-p, and top-k. No repetition penalty is applied. The soft logit penalty is denoted by 
+
+λ > 0. At each decoding step, tokens that would complete a forbidden string or regex match receive an additive logit shift of −λ. The hard constraint setting corresponds to λ = ∞.
+
+D.4 Baseline Implementation Details 
+
+We compare NCO against the unconstrained base model, rejection sampling, and GUARD. The base model uses the same prompts and decoding hyperparameters without applying any negative constraint. For rejection sampling, we maintain the matching state for the current partial generation and check whether appending a sampled token would create a forbidden string or a substring matching one of the regex constraints. If the sampled token causes a violation, we reject it, restore the matching state to the state before token selection, mask the rejected token, and resample within the same decoding step. This implementation avoids an additional forward inference pass for each rejected token, since resampling is performed from the already computed logits. For GUARD, we reimplement the trie-based token suppression part that corresponds to finite hard constraints, since we could not find an official public implementation. Our implementation represents the forbidden string set as a trie and suppresses candidate tokens whose continuation would complete a forbidden string. We do not reproduce GUARD’s prompt classifier or SBERT-based semantic soft matching module, since our evaluation focuses on explicit negative substring constraints rather than semantic unlearning targets. For the RTP task, GUARD is evaluated with the same forbidden substring constraints used by rejection sampling and NCO. For the Enron PII task, GUARD cannot directly enforce the original regex constraints used by rejection sampling and NCO. The regex constraints in Table 4 define infinite sets of forbidden strings, whereas GUARD requires a finite forbidden lexicon to construct its trie. We therefore build a finite-string approximation for GUARD. Specifically, we first apply the same regex constraints used by rejection sampling and NCO to the 500 
+
+evaluation instances sampled from Enron. We then collect all matched PII spans into a finite lexicon and construct GUARD’s trie from this lexicon. This approximation allows GUARD to be evaluated on the PII task, but it is not equivalent to enforcing the original regex constraints. This distinction reflects a limitation of trie-based finite-string suppression when the target constraint denotes an infinite set of strings described by a regex. 
+
+D.5 Ablation Implementation Details 
+
+We implement four ablation variants in total, two for finite hard constraints and two for regex constraints. Each variant removes one component from NCO while keeping the same constraint set, prompt, model, and decoding hyperparameters. For finite hard constraints, the first ablation removes Aho-Corasick failure transitions. Without failure transitions, the decoder can no longer maintain a single deterministic matching state that summarizes the longest relevant suffix of the generated prefix. A direct implementation would need to track all possible match start positions, similar to the active-state representation used for regex constraints, which is expensive for large forbidden lexicons. We therefore implement this ablation with a reversed trie. At each decoding step, the method inspects the suffix of the current generated text in reverse order and checks whether appending a candidate token would complete any forbidden string. This variant preserves the same string-constraint semantics, but it removes the constant-time state update provided by Aho-Corasick failure transitions. The comparison therefore isolates the decoding-time benefit of failure links against a practical trie-based alternative. The second string-constraint ablation removes BPE-based transition precomputation. Instead of computing token-level transitions by reusing the merge structure of the tokenizer, this variant computes the transition and mask information for each vocabulary token independently. This isolates the effect of BPE-aware precomputation on setup time. For regex constraints, the first ablation removes the BPE-based speedup for suffix-reachable state precomputation. This table stores the DFA states reachable from the start state by suffixes of each vocabulary token, which is needed to detect matches that begin inside a newly appended token. Without the BPE-based speedup, these suffix-reachable states are computed independently for each 24 token, increasing the one-time preprocessing cost. The second regex-constraint ablation removes mask aggregation based on matrix multiplication. This variant computes the token mask by iterating over active DFA states and combining their token-level validity masks sequentially, rather than using parallel matrix operations on the GPU. This isolates the contribution of GPU-parallel mask aggregation to decoding throughput. 
+
+D.6 Evaluation Metrics 
+
+We evaluate generation quality, constraint effectiveness, and practical efficiency, using the following metrics. For hard-constraint experiments, decoding is deterministic because we use greedy decoding under a fixed model, prompt set, and constraint set. As a result, perplexity and violation rate do not vary across repeated runs. We therefore report standard deviations only for time-related measurements. 
+
+Perplexity. We report perplexity as a proxy for generation quality. All perplexity scores are computed after generation using Llama 3.1 8B as a standard evaluation model, so that outputs from different decoding methods are compared under a common likelihood model. Given a generated sequence of length T with token probabilities pθ (yt | y<t , x ) under the evaluation model, perplexity is computed as 
+
+PPL = exp − 1
+
+T
+
+> T
+
+X
+
+> t=1
+
+log pθ (yt | y<t , x )
+
+!
+
+. (2) Lower perplexity indicates that the generated tokens are, on average, more probable under the evaluation model. 
+
+Violation Rate. We measure constraint adherence using violation rate, defined as the fraction of generated responses that contain at least one forbidden pattern. Let N be the total number of generated responses and let Nv be the number of responses that violate at least one constraint. The violation rate is computed as 
+
+Violation Rate = Nv
+
+N × 100 . (3) Lower violation rate indicates better compliance with the negative constraints. Violation is determined by exact pattern matching on the generated text. For finite hard constraints, we check whether each forbidden string appears in the output using Python string containment. For regular-expression constraints, we use the re library to test whether the output matches any forbidden pattern. 
+
+Throughput. We measure decoding efficiency using throughput, defined as the number of generated tokens per second. For a run that generates K total tokens and takes wall-clock time ∆t seconds during the generation phase, including constraint checking and masking, throughput is computed as 
+
+Throughput = K
+
+∆t (tokens/s ). (4) We refer to this value as absolute throughput. For each method m and batch size b, we also compute relative throughput as 
+
+Relative Throughput = Tm,b 
+
+TBase ,b 
+
+× 100 , (5) where Tm,b is the absolute throughput of method m at batch size b, and TBase ,b is the absolute throughput of the base unconstrained model at the same batch size. The Base model therefore has relative throughput 100 .0 by definition. We report relative throughput in the main paper to compare runtime overhead across models and batch sizes. For each setting, we repeat the throughput measurement three times and report the mean and standard deviation. 
+
+D.7 Experimental Environment 
+
+We ran all experiments on machines equipped with AMD Ryzen Threadripper 9960X CPUs and NVIDIA RTX PRO 6000 Blackwell Max-Q GPUs. The experiments were conducted on Rocky Linux 9.6 using Python 3.10.19, PyTorch 2.9.0, Transformers 4.57.3, scikit-learn 1.7.2, Datasets 4.4.1, Interegular 0.3.3, and Accelerate 1.11.0. 25 D.8 Licenses for Existing Assets 
+
+Table 5 summarizes the existing assets used in our experiments. We use these assets only for offline evaluation and cite their original sources in the main paper or appendix. We do not release any new dataset or model checkpoint as part of this work. Table 5: Licenses and terms of use for existing assets. We list all datasets, pretrained models, and software dependencies used in our experiments, and report the corresponding license or usage terms for each asset when publicly available.                         
+
+> Dataset
+> Asset License / terms RealToxicityPrompts [12] Apache-2.0. Enron Email Dataset [16] Publicly released but license not specified. Alpaca [25] CC BY-NC 4.0 RegexPSPACE [15] Publicly released but license not specified. LDNOOBW [23] CC BY 4.0.
+> Model
+> Asset License / terms Llama 2 7B [27] Llama 2 Community License. Llama 3.1 8B [14] Llama 3.1 Community License. Qwen2.5 7B [30] Apache-2.0. Falcon 7B [3] Apache-2.0. Falcon3 7B [26] TII Falcon-LLM License 2.0. Phi4 14B [1] MIT License. GPT-J 6B [28] Apache-2.0. GPT-Neo 2.7B [6] MIT License. Pythia 6.9B [5] Apache-2.0.
+> Software
+> Asset License / terms Python 3.10.19 PSF License Version 2. PyTorch 2.9.0 BSD-3-Clause. Transformers 4.57.3 Apache-2.0. scikit-learn 1.7.2 BSD-3-Clause. Datasets 4.4.1 Apache-2.0. Interegular 0.3.3 MIT License. Accelerate 1.11.0 Apache-2.0.
+
+# E Additional Experimental Results 
+
+E.1 Absolute Throughput Results on Main Tasks 
+
+We report absolute throughput results for the main profanity suppression and PII suppression tasks. These results complement the relative throughput results reported in the main paper. The same two datasets and nine models are used. For each setting, we report the throughput of the Base model, rejection sampling, GUARD, and NCO. For the RTP profanity suppression task, we evaluate batch sizes from 1 to 64. For the Enron PII suppression task, we evaluate batch sizes from 1 to 16. Each batch size is chosen from powers of two. For each model and task, we increase the batch size up to the largest value that fits in memory. Enron uses smaller maximum batch sizes than RTP because its prompts are longer and require more memory during generation. Tables 6 and 7 show the absolute throughput results. The results show that NCO preserves most of the throughput of the base unconstrained model across batch sizes. Rejection sampling incurs larger overhead when invalid continuations are sampled more frequently. GUARD also shows noticeable throughput degradation under batched decoding because its trie based restriction procedure does not scale as efficiently as the precomputed masking strategy used by NCO. These results support the relative throughput trends reported in the main paper. 26 Table 6: Absolute throughput on the RTP profanity suppression task. The table reports Base, rejection sampling, GUARD, and NCO. Batch sizes range from 1 to 64. RS denotes rejection sampling. 
+
+Model Method Batch Size 1 2 4 8 16 32 64 Llama 2 7B (14.8%) Base 50.3 ±0.0 89.5 ±0.1 176.4 ±0.5 309.1 ±0.5 516.2 ±2.8 751.7 ±5.1 977.6 ±7.6 
+
+RS 50.0 ±0.0 88.4 ±0.3 173.1 ±0.6 301.5 ±0.4 499.1 ±1.9 711.9 ±3.5 918.0 ±5.7 
+
+GUARD 35.3 ±0.1 49.6 ±0.8 64.7 ±1.8 76.5 ±1.4 84.2 ±2.5 98.0 ±1.5 100.0 ±1.6 
+
+NCO 50.3 ±0.0 89.1 ±0.5 176.3 ±0.2 309.7 ±1.0 517.4 ±1.5 750.9 ±2.3 980.1 ±8.6 
+
+Llama 3.1 8B (11.6%) Base 45.0 ±0.0 81.9 ±0.4 159.3 ±0.5 263.9 ±0.8 457.2 ±1.4 676.4 ±5.6 908.8 ±7.3 
+
+RS 44.7 ±0.0 80.8 ±0.1 156.9 ±0.4 259.1 ±0.2 444.7 ±0.5 651.1 ±5.3 862.9 ±7.1 
+
+GUARD 17.3 ±0.2 19.6 ±0.4 22.0 ±0.5 23.0 ±0.6 24.0 ±1.2 27.2 ±0.5 27.0 ±0.4 
+
+NCO 44.9 ±0.0 81.6 ±0.2 158.9 ±0.0 264.1 ±0.1 458.8 ±1.5 678.2 ±5.7 911.6 ±4.5 
+
+Qwen 2.5 7B (15.0%) Base 46.1 ±0.6 85.5 ±0.6 166.3 ±1.7 311.6 ±4.1 569.9 ±5.2 946.6 ±5.7 1401.5 ±39.4 
+
+RS 46.3 ±0.0 83.5 ±0.4 163.8 ±0.7 302.2 ±4.8 544.1 ±5.9 885.5 ±3.6 1282.3 ±41.0 
+
+GUARD 16.4 ±0.0 16.3 ±0.1 18.3 ±0.3 20.2 ±0.9 20.6 ±1.2 20.4 ±0.2 20.7 ±2.6 
+
+NCO 46.4 ±0.1 85.7 ±0.4 168.7 ±1.7 314.2 ±2.8 573.2 ±2.5 959.1 ±8.3 1411.9 ±29.5 
+
+Falcon 7B (14.6%) Base 47.7 ±0.7 91.3 ±0.1 176.2 ±1.6 320.7 ±2.5 593.4 ±2.6 971.4 ±4.3 1459.3 ±7.0 
+
+RS 48.1 ±0.1 89.8 ±0.5 170.0 ±1.0 313.2 ±2.1 569.8 ±2.7 910.4 ±11.0 1317.3 ±57.9 
+
+GUARD 25.5 ±0.3 32.1 ±0.3 35.4 ±0.8 41.1 ±0.4 44.2 ±1.9 47.2 ±0.9 48.0 ±0.5 
+
+NCO 48.2 ±0.1 91.0 ±0.5 177.3 ±0.7 323.0 ±2.4 596.6 ±3.8 971.5 ±14.8 1440.0 ±52.5 
+
+Falcon 3 7B (17.0%) Base 45.8 ±0.6 87.2 ±1.0 170.7 ±2.0 316.6 ±5.0 597.0 ±10.5 996.7 ±27.1 1444.8 ±70.8 
+
+RS 46.1 ±0.1 85.7 ±0.6 167.4 ±0.7 307.2 ±3.5 573.5 ±2.8 946.4 ±3.4 1340.5 ±28.7 
+
+GUARD 16.7 ±0.1 18.2 ±0.2 20.8 ±0.6 22.2 ±0.9 23.7 ±1.1 24.9 ±1.3 26.0 ±0.8 
+
+NCO 46.2 ±0.0 87.6 ±0.5 171.7 ±1.5 321.1 ±2.2 607.9 ±3.2 1016.4 ±6.2 1494.4 ±15.0 
+
+Phi-4 14B (16.6%) Base 23.8 ±0.2 48.0 ±0.6 90.9 ±0.8 168.8 ±5.5 298.3 ±6.4 474.8 ±4.4 686.4 ±22.6 
+
+RS 23.9 ±0.1 47.3 ±0.2 90.3 ±0.4 167.2 ±3.7 295.6 ±7.4 462.3 ±11.0 660.7 ±17.6 
+
+GUARD 14.5 ±0.2 18.2 ±0.2 22.2 ±0.4 25.4 ±1.3 27.3 ±1.6 27.8 ±2.2 29.2 ±1.8 
+
+NCO 23.8 ±0.0 47.7 ±0.2 91.3 ±2.4 171.1 ±3.1 303.3 ±7.9 481.9 ±5.3 685.8 ±21.4 
+
+E.2 Perplexity and Violation Rate on Main Tasks 
+
+Tables 8 and 9 report perplexity and violation rates for the two main tasks. These results complement the main relative throughput analysis and the absolute throughput results. They show that the throughput trends observed in the main paper do not come from a degradation in constraint satisfaction or generation quality. For RTP profanity suppression, the unconstrained models produce forbidden strings with violation rates between 11 .6% and 17 .0% . All constrained methods reduce the violation rate to 0.0% . For Enron PII suppression, the unconstrained models show high violation rates across all three Pile-trained models. Rejection sampling and NCO enforce the original regex constraints and reduce the violation rate to 0.0% . GUARD cannot directly enforce the original regex constraints, so it is evaluated using the finite-string approximation described in Appendix D.4. Perplexity remains at a similar level across constrained methods, which indicates that the constraints do not introduce substantial quality degradation under the evaluated settings. For Enron PII suppression, the unconstrained models show high violation rates across all three Pile-trained models. GPT-J 6B, GPT-Neo 2.7B, and Pythia 6.9B all produce PII-like substrings in more than 80% of responses. Both rejection sampling and NCO reduce the violation rate to 0.0%. NCO also preserves throughput comparable to rejection sampling across all three models, indicating that the regex masking overhead remains small even when the base model frequently assigns high probability to invalid continuations. 
+
+E.3 Sensitivity Analysis 
+
+We conduct sensitivity analyses to evaluate whether NCO remains scalable as the constraint spec-ification becomes larger or more complex. For finite hard constraints, we run the analysis using Llama 2 7B on RTP. We vary the number of forbidden strings from 1 to 32 and the length of forbidden 27 Table 7: Absolute throughput on the Enron PII suppression task. The table reports Base, rejection sampling, GUARD, and NCO. Batch sizes range from 1 to 16. GUARD uses finite hard constraints extracted from matched PII spans. Model Method Batch Size 1 2 4 8 16 GPT-J 6B (87.0%) Base 54.2 ±0.0 88.7 ±0.1 170.6 ±0.3 269.8 ±0.1 375.6 ±0.1 
+
+RS 53.8 ±0.0 87.5 ±0.1 167.3 ±0.3 262.5 ±0.5 359.3 ±0.9 
+
+GUARD 32.0 ±0.1 42.7 ±0.2 53.8 ±0.2 59.7 ±0.4 63.0 ±0.2 
+
+NCO 53.9 ±0.0 88.1 ±0.1 169.2 ±0.6 268.0 ±0.7 373.4 ±0.7 
+
+GPT-Neo 2.7B (81.8%) Base 106.2 ±3.8 178.1 ±0.2 312.0 ±0.1 486.7 ±0.2 677.6 ±0.1 
+
+RS 106.8 ±3.7 172.6 ±0.5 300.5 ±0.6 462.2 ±0.5 630.0 ±1.7 
+
+GUARD 43.4 ±0.6 52.8 ±0.3 60.6 ±0.0 65.0 ±0.4 67.6 ±0.1 
+
+NCO 106.7 ±0.1 175.4 ±0.4 308.9 ±0.7 481.4 ±0.9 670.6 ±1.7 
+
+Pythia 6.9B (82.2%) Base 47.1 ±0.5 91.9 ±1.2 167.6 ±0.9 223.8 ±3.0 301.5 ±9.3 
+
+RS 47.1 ±0.1 89.6 ±1.0 161.8 ±4.5 220.8 ±1.9 284.8 ±13.5 
+
+GUARD 29.9 ±0.2 42.1 ±0.3 52.1 ±0.1 57.0 ±0.3 61.9 ±0.2 
+
+NCO 47.1 ±0.0 90.0 ±0.5 166.4 ±1.0 223.4 ±6.6 308.2 ±4.1 
+
+strings from 1 to 8. For regex constraints, we run the analysis using GPT-Neo 2.7B on Enron. We vary the number of DFA constraints, the total number of DFA states, and the total number of DFA edges from 1 to 32. The finite hard constraint experiments stress two different sources of constraint complexity. Increasing the number of forbidden strings enlarges the Aho-Corasick trie and increases the number of partial matches represented by the automaton. Increasing the forbidden string length mainly increases trie depth and the amount of token-level transition information needed during preprocessing. Once preprocessing is complete, NCO still maintains a single matching state per generated sequence. This keeps per-token decoding overhead small even when the forbidden lexicon is larger or contains longer strings. The regex-constraint experiments focus on the structure of the compiled DFAs. The number of DFA constraints measures how many automata must be simulated in parallel. The total number of DFA states and edges measures the size of the automata after compilation. These quantities affect active-state updates, suffix-reachable state precomputation, and mask aggregation. The results show that the parallel DFA simulation remains practical as regex constraints become structurally larger. 1 2 4 8 16 32 
+
+> Sensitivity Setting (1, 2, 4, 8, 16, 32)
+> 48.5
+> 49.0
+> 49.5
+> 50.0
+> Throughput (tokens/s)
+
+RTP Sensitivity      
+
+> Base Model
+> # String Constraints
+> String Length 124816 32
+> Sensitivity Setting (1, 2, 4, 8, 16, 32)
+> 99
+> 100
+> 101
+> 102
+> 103
+> 104
+> Throughput (tokens/s)
+
+Enron Sensitivity 
+
+> Base Model
+> # DFA Constraints
+> # DFA States
+> # DFA Edges
+
+Figure 3: Sensitivity analysis of throughput under increasing constraint scale. Figure 3 reports the throughput of NCO under increasing constraint scale. For finite hard constraints, throughput remains nearly unchanged as the forbidden lexicon grows in size or length. For regex constraints, throughput also remains stable as the number and size of DFAs increase. These results suggest that the runtime cost of NCO is not highly sensitive to the tested increases in constraint scale. 28 Table 8: Quality and violation evaluation results for profanity suppression with finite hard constraints at batch size 1. All constrained methods reduce the violation rate to 0.0%, while NCO preserves throughput close to the base model across model families. Model Size Method Perplexity ( ↓) Violation Rate ( ↓) Throughput ( ↑)Llama 2 7B Base 1.75 14.80 50.31 ±0.02 
+
+Rejection Sampling 1.75 0.00 50.00 ±0.01 
+
+GUARD 1.76 0.00 35.29 ±0.14 
+
+NCO 1.77 0.00 50.29 ±0.04 
+
+Llama 3.1 8B Base 1.57 15.00 44.98 ±0.02 
+
+Rejection Sampling 1.57 0.00 44.73 ±0.02 
+
+GUARD 1.57 0.00 17.34 ±0.15 
+
+NCO 1.57 0.00 44.94 ±0.03 
+
+Qwen2.5 7B Base 2.18 17.00 46.06 ±0.56 
+
+Rejection Sampling 2.21 0.00 46.29 ±0.04 
+
+GUARD 2.19 0.00 16.37 ±0.05 
+
+NCO 2.18 0.00 46.38 ±0.08 
+
+Falcon 7B Base 1.65 11.60 47.72 ±0.70 
+
+Rejection Sampling 1.64 0.00 48.13 ±0.06 
+
+GUARD 1.64 0.00 25.52 ±0.32 
+
+NCO 1.65 0.00 48.19 ±0.06 
+
+Falcon3 7B Base 2.98 14.60 45.77 ±0.63 
+
+Rejection Sampling 2.96 0.00 46.08 ±0.09 
+
+GUARD 2.97 0.00 16.72 ±0.13 
+
+NCO 3.12 0.00 46.15 ±0.03 
+
+Phi4 14B Base 2.15 16.60 23.75 ±0.19 
+
+Rejection Sampling 2.13 0.00 23.86 ±0.07 
+
+GUARD 2.13 0.00 14.54 ±0.19 
+
+NCO 2.17 0.00 23.81 ±0.03 
+
+This behavior is consistent with its design, where constraint-specific computation is largely moved to preprocessing and decoding uses compact online states and precomputed token-level masks. Overall, NCO maintains low decoding overhead across the tested settings while enforcing negative constraints throughout generation. 
+
+E.4 Soft Negative Constraints 
+
+Hard masking is appropriate when constraint satisfaction is mandatory, such as blocking explicit forbidden strings or structured PII patterns. However, some applications such as style shifting may require softer control, where the goal is to discourage undesirable patterns rather than completely rule them out. NCO supports this setting through the same online constraint states used for hard masking. Given a penalty λ > 0, tokens that would complete a forbidden string or regex match receive an additive logit penalty of −λ instead of being removed from the candidate set. The case 
+
+λ = ∞ corresponds to hard masking. We evaluate this soft constraint mode as an additional analysis of the trade-off between constraint strength, generation quality, and throughput. For RTP, we use Llama 3.1 8B with the same finite hard constraints as in the profanity suppression task. For Enron, we use GPT-J 6B with the same regex constraints as in the PII suppression task. We use sampling-based decoding with batch size 
+
+1 because finite logit penalties are meaningful only when the decoder samples from the modified distribution. We keep the sampling hyperparameters fixed across the Base model and all finite-penalty variants. We vary λ over {0.5, 1, 2, 4, 8, 16 , ∞} . Finite values of λ provide probabilistic suppression and do not guarantee zero violations. The hard setting with λ = ∞ removes invalid continuations and recovers the hard-constraint behavior of NCO. Rejection sampling is not included in this experiment. It enforces constraints through a binary accept-or-reject decision and does not provide a finite-strength logit penalty. GUARD is not included in this soft-penalty experiment since this experiment is an 29 Table 9: Quality and violation evaluation results for PII suppression with forbidden regex constraints at batch size 1. The base models frequently generate PII patterns, while rejection sampling and NCO reduce the violation rate to 0.0% with similar throughput. Model Size Method Perplexity ( ↓) Violation Rate ( ↓) Throughput ( ↑)GPT-J 6B Base 2.43 87.00 54.24 ±0.03 
+
+Rejection Sampling 2.48 0.00 53.78 ±0.03 
+
+GUARD 2.40 80.60 32.04 ±0.09 
+
+NCO 2.52 0.00 53.87 ±0.04 
+
+GPT-Neo 2.7B Base 2.18 81.80 106.18 ±3.82 
+
+Rejection Sampling 2.22 0.00 106.78 ±0.03 
+
+GUARD 2.14 79.40 43.41 ±0.59 
+
+NCO 2.25 0.00 106.66 ±0.08 
+
+Pythia 6.9B Base 2.09 82.20 47.09 ±0.50 
+
+Rejection Sampling 2.13 0.00 47.09 ±0.06 
+
+GUARD 2.11 81.80 29.93 ±0.21 
+
+NCO 2.13 0.00 47.09 ±0.02 
+
+ablation of NCO that replaces hard masking with a finite logit penalty. NCO supports a continuous range of suppression strengths by reusing the same constraint states and token-level masks with different logit penalties. Table 10 reports the resulting trade-off among perplexity, violation rate, and throughput. Table 10: Soft logit constraint results. We compare the base model with NCO under different logit penalties. The hard constraint setting corresponds to λ = ∞.Task Penalty Perplexity ( ↓) Violation Rate ( ↓) Throughput ( ↑)RTP Base 2.26 ±0.02 18.00 ±0.53 44.64 
+
+0.5 2.29 ±0.01 15.67 ±0.70 44.60 ±0.01 
+
+1 2.26 ±0.02 12.40 ±0.20 44.59 ±0.01 
+
+2 2.29 ±0.03 9.07 ±0.31 44.58 ±0.01 
+
+4 2.30 ±0.02 4.47 ±0.90 44.58 ±0.01 
+
+8 2.32 ±0.04 0.60 ±0.20 44.58 ±0.01 
+
+16 2.29 ±0.04 0.00 ±0.00 44.61 ±0.01 
+
+∞ 2.29 ±0.04 0.00 ±0.00 44.60 ±0.02 
+
+Enron Base 4.61 ±0.06 84.07 ±0.99 54.22 ±0.03 
+
+0.5 4.57 ±0.04 84.53 ±0.64 53.89 ±0.01 
+
+1 4.51 ±0.03 82.93 ±1.03 53.92 ±0.03 
+
+2 4.50 ±0.05 83.13 ±1.40 53.94 ±0.03 
+
+4 4.46 ±0.01 83.00 ±1.06 53.93 ±0.02 
+
+8 4.55 ±0.03 66.20 ±1.04 53.94 ±0.05 
+
+16 4.80 ±0.05 2.93 ±0.23 53.92 ±0.01 
+
+∞ 4.83 ±0.10 0.00 ±0.00 53.92 ±0.02 
+
+E.5 Scaling Regex Constraints under High Rejection Rates 
+
+We further evaluate scalability under a more challenging regex constraint setting. The goal of this experiment is to test how decoding methods behave when many regex constraints are enforced simultaneously and invalid continuations become frequent. Unlike RTP and Enron, which are tied to specific suppression tasks, this experiment uses prompts from Alpaca [ 25 ] to reflect a more general open ended generation scenario. We sample 500 prompts from Alpaca and evaluate Llama 3.1 8B under regex constraints derived from RegexPSPACE [15]. RegexPSPACE contains 1685 regex constraints in total. We filter out regexes that accept the empty string ϵ, since such constraints would reject every possible continuation from the beginning of 30 decoding. The original regexes are defined over the alphabet {a, b, c, d }. We replace this alphabet with {w, x, y, z } before evaluation. This substitution prevents the constraints from suppressing an excessively large portion of ordinary text while preserving the structure of the regexes. We vary the number of regex constraints over {10 , 25 , 50 , 100 , 250 , 500 , 668 }. The base model is evaluated once. Rejection sampling and NCO are evaluated three times for each constraint scale. Table 11: Results on the larger regex experiment with Llama 3.1 8B. The regex constraints are drawn from RegexPSPACE, where 668 regexes are retained after filtering 1685 benchmark instances. Method # Constraints Throughput ( ↑)base - 44.98 ±0.02 
+
+Rejection Sampling 10 44.65 ±0.03 
+
+25 44.57 ±0.01 
+
+50 44.48 ±0.03 
+
+100 44.28 ±0.04 
+
+250 43.67 ±0.05 
+
+500 42.56 ±0.05 
+
+668 41.76 ±0.05 
+
+NCO 10 44.68 ±0.05 
+
+25 44.67 ±0.04 
+
+50 44.65 ±0.01 
+
+100 44.56 ±0.03 
+
+250 44.22 ±0.00 
+
+500 43.72 ±0.05 
+
+668 43.37 ±0.03 
+
+Table 11 reports the results. As the number of regex constraints increases, both constrained methods face a harder decoding problem because more candidate tokens can complete a forbidden match. The throughput of NCO also decreases under the largest constraint sets, showing that the cost of aggregating masks across many regex constraints is not negligible in this regime. The decrease is nevertheless much smaller than that of rejection sampling. Rejection sampling suffers a sharp throughput drop as invalid candidates become more likely, since it may need to repeatedly sample and reject tokens at the same decoding step. NCO avoids this repeated trial process by computing invalid token masks before token selection. These results show that NCO remains substantially more scalable than rejection sampling under high rejection rates, even when enforcing hundreds of regex constraints during generation. 
+
+# F Limitations and Broader Impacts 
+
+F.1 Limitations 
+
+NCO is designed for explicit negative substring constraints. It prevents user-specified forbidden hard constraints and regex patterns from appearing in generated outputs, but it does not address semantic variants that are not captured by the constraint specification. For example, a regex for structured PII can block matching email addresses or phone numbers, but it cannot prevent all semantically sensitive disclosures. Similarly, a forbidden lexicon can block listed words, but it may not cover paraphrases, misspellings, or context-dependent harmful content. Thus, NCO should be viewed as a decoding-time mechanism for explicit pattern blocking, rather than a standalone solution for broad semantic safety. NCO intervenes by masking invalid next-token candidates during decoding. This design ensures that forbidden patterns are not completed when the hard mask is used, but it only controls future token choices. If a forbidden or undesirable span has already been generated before the constraint is applied, NCO does not revise or remove that existing prefix. In such cases, additional mechanisms such as input filtering, generation restart, or post-generation inspection may still be needed. The regular-constraint component of NCO relies on constraints that can be compiled into finite automata. This covers many practical regex patterns, including common structured patterns such as 31 email addresses and phone numbers. However, not every feature of modern regex engines corresponds directly to a regular language. Features such as backreferences, lookaround assertions, or engine-specific matching semantics may require additional handling or may fall outside the finite automaton formulation used by NCO. The practical applicability of regex constraints therefore depends on the supported regex fragment and the compilation procedure. Finally, NCO reduces decoding-time overhead by precomputing token-level transition and masking information for a given constraint set. When the constraint specification is changed, this precomputa-tion must be updated accordingly. This is suitable for deployment settings where constraint policies are reused across many generations, but it can introduce extra cost when constraints are modified frequently or customized for each request. Reducing the cost of dynamic constraint updates is an interesting direction for future work. 
+
+F.2 Broader Impacts 
+
+NCO may have positive societal impacts by helping reduce undesirable generations such as structured PII patterns, profanity, and other explicitly specified harmful strings or regular-expression patterns at decoding time. Because the method acts as a logit-level intervention without retraining the underlying model, it may be useful for improving safety and privacy in deployed generation systems. At the same time, NCO should not be understood as a complete solution to model safety. The method enforces explicit string and regex constraints, and therefore cannot reliably capture semantic harms that are not specified by the constraint set. Overly broad or poorly designed constraints may also cause overblocking, reduce generation quality, or be used to suppress benign content. These risks motivate careful constraint design, evaluation on target use cases, and the use of NCO as one component of a broader safety pipeline rather than as a standalone safeguard. 32
