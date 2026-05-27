@@ -1,0 +1,837 @@
+Title: Causal Unlearning in Collaborative Optimization: Exact and Approximate Influence Reversal under Adversarial Contributions
+
+URL Source: https://arxiv.org/pdf/2605.20341v1
+
+Published Time: Thu, 21 May 2026 00:09:33 GMT
+
+Number of Pages: 21
+
+Markdown Content:
+# Causal Unlearning in Collaborative Optimization: Exact and Approximate Influence Reversal under Adversarial Contributions 
+
+Ali Mahdavi 
+
+Department of Computer Engineering SRC, Islamic Azad University Tehran, Iran 
+
+ali.mahdavi@iau.ir 
+
+Azadeh Zamanifar 
+
+Department of Computer Engineering SRC, Islamic Azad University Tehran, Iran 
+
+azamanifar@iau.ac.ir 
+
+Amir Farhad Farhadi 
+
+School of Computer Engineering Iran University of Science and Technology Tehran, Iran 
+
+amfarhadi@mail.iust.ac.ir 
+
+Omid Kashefi 
+
+Meta CA, USA 
+
+kashefi@meta.com 
+
+# Abstract 
+
+Federated learning systems must support data deletion requests to comply with pri-vacy regulations, yet retraining from scratch after each deletion is computationally prohibitive. We present HF-KCU, a method that removes a client’s contribution by approximating the influence function through conjugate gradient iterations in Krylov subspaces, reducing complexity from O(d3) to O(kd ) where k ≪ d. A causal weighting mechanism ensures that only clients holding the deleted data receive parameter updates, preventing spurious changes to unaffected clients. Our method is designed to handle bounded adversarial perturbations to the Hessian and gradient, providing graceful degradation under realistic threat models. We validate HF-KCU across convolutional (ResNet-18, SimpleCNN) and trans-former (ViT-Lite) architectures on CIFAR-10, MNIST, and Fashion-MNIST. On CIFAR-10 under Dirichlet( α = 0 .5) partitioning, HF-KCU achieves 47.75 ×
+
+speedup over retraining while maintaining test accuracy within 0.60% of the retrained baseline (71.16% vs 71.76%). Membership inference attacks on the for-get set yield success rates of 0.499, matching the retrained model and confirming effective privacy restoration. We provide convergence guarantees showing that the Krylov approximation error decreases as O(( √κ − 1) /(√κ + 1)) k where κ is the Hessian condition number. The causal weighting mechanism ensures surgical updates, where only clients holding deleted data are modified, preserving model quality for unaffected participants and avoiding the instability of gradient-based approaches in asynchronous federated settings. This design provides interpretabil-ity as each update is directly traceable to the influence of the deleted data. The method’s efficiency and precision make it suitable for production federated sys-tems where deletion requests arrive asynchronously and computational budgets are constrained. 
+
+# 1 Introduction 
+
+Privacy regulations including GDPR European Parliament and Council of the European Union [2016] and CCPA California State Legislature [2018] grant individuals the right to request deletion of their 
+
+> Preprint.
+> arXiv:2605.20341v1 [cs.LG] 19 May 2026
+
+personal data. For machine learning systems, this requirement translates into machine unlearning Cao and Yang [2015], an approach to influence removal of specific training examples from a trained model. The naive solution is also retraining from scratch after each deletion which becomes impractical as model and dataset sizes grow. Federated learning McMahan et al. [2017] compounds this problem. Training occurs across distributed clients without centralizing raw data, but when a client requests data deletion, the system must remove that client’s contribution while preserving knowledge from all others. Full retraining requires re-coordinating all remaining clients, multiplying communication and computation costs. Existing federated unlearning approaches face a dilemma. Methods based on gradient ascent Golatkar et al. [2020] or noise injection are fast but often degrade model accuracy severely. Sharding schemes like SISA Bourtoule et al. [2021] reduce retraining scope but require architectural changes and still incur considerable overhead. Influence-based methods Koh and Liang [2017] offer principled approximations but require computing or inverting the Hessian matrix, an O(d3) operation intractable for modern neural networks with millions of parameters.Recent surveys on federated unlearning have highlighted the unique challenges of removing data influence in collaborative settings, where distributed data ownership and privacy constraints complicate traditional unlearning approaches Liu et al. [2024], Tae and Chan [2025] We introduce HF-KCU (Hessian-Free Krylov Causal Unlearning), which approximates influence-based unlearning through conjugate gradient (CG) iterations. CG solves the linear system Hv = g
+
+without forming H explicitly, requiring only Hessian-vector products computable via automatic differentiation in O(d) time. After k iterations, CG produces an approximation vk ≈ H−1g with error bounded by the Hessian’s condition number. A key contribution is our causal weighting mechanism. In federated settings, naively applying a global influence update can introduce spurious parameter changes to clients that never held the deleted data. Our weighting scheme assigns zero update to unaffected clients, ensuring causal isolation. We prove this property formally and validate it empirically. Furthermore, we validate the practical utility of our method in a critical security scenario, demonstrating its ability to rapidly unlearn a backdoor attack with a 430x speedup over retraining while maintaining model performance 
+
+Threat Model. To avoid overstating our robustness claims, we consider bounded adversarial perturba-tions rather than unconstrained adaptive poisoning. Specifically, we assume an adversary may perturb the Hessian and gradient with bounded norm ( ∥E∥2 ≤ ϵ, ∥e∥2 ≤ ρ). This bounded setting is realistic for the unlearning context because: (1) unbounded adversarial data could shift the local optimum so far that the local quadratic assumption underlying influence functions breaks down, invalidating the entire influence-based framework; (2) in federated unlearning, the adversary’s goal is typically to prevent effective data removal rather than arbitrary model poisoning—bounded perturbations model realistic noise or minor data corruption during the unlearning process; (3) stronger threat models (e.g., Byzantine clients with arbitrary model replacement) require fundamentally different defenses (robust aggregation, secure multi-party computation) orthogonal to the unlearning problem. Our goal is not to establish full minimax robustness against arbitrary poisoning attacks, but to show that the proposed influence-reversal mechanism degrades gracefully under bounded adversarial perturbations that may arise during the unlearning operation itself. Our contributions are: • A Hessian-free Krylov approximation for federated unlearning with O(kd ) complexity per client, where k ≪ d (Section 3). • A causal weighting mechanism that provably isolates unaffected clients (Proposition 7). • Convergence analysis showing approximation error decreases exponentially in k for well-conditioned problems (Theorem 4). • Experimental validation on CIFAR-10 demonstrating 47.75 × speedup with 0.60% accuracy loss and MIA success rates matching retraining (Section 5). • Critical analysis of faithfulness metrics, showing that parameter-space measures can be unreliable when accuracy differences are small (Section A.13). • We validate the practical utility of our method in a critical security scenario, demonstrating its ability to rapidly mitigate a backdoor attack with a ~430x speedup over retraining while preserving model performance. 22 Background and Related Work 
+
+2.1 Machine Unlearning 
+
+Cao et al. Cao and Yang [2015] formalized machine unlearning as the problem of efficiently removing training data influence without full retraining. Early work focused on specific model classes: Ginart et al. Ginart et al. [2019] developed unlearning for k-means clustering, while Guo et al. Guo et al. [2020] introduced certified removal guarantees for linear models. For neural networks, approaches fall into three categories. Gradient-based methods apply gradient ascent on the forget set Golatkar et al. [2020] or fine-tune on the retain set Tarun et al. [2023], but often cause accuracy degradation. Sharding methods like SISA Bourtoule et al. [2021] partition data into shards, training separate models and retraining only affected shards upon deletion. This reduces retraining scope but requires ensemble architectures and still incurs considerable cost. Influence-based methods Koh and Liang [2017] approximate the parameter change via influence functions, but computing H−1g exactly requires O(d3) operations. 
+
+2.2 Federated Learning 
+
+Federated learning McMahan et al. [2017], Kairouz et al. [2021] enables collaborative training across distributed clients. FedAvg aggregates local model updates through weighted averaging, preserv-ing data locality. However, data heterogeneity (non-IID distributions) across clients complicates convergence analysis and introduces new challenges for unlearning. 
+
+2.3 Federated Unlearning 
+
+Liu et al. Liu et al. [2021b] proposed FedEraser, which stores historical updates and recalibrates the global model after removing a client’s contributions. This requires considerable storage overhead and assumes updates remain available. Wu et al. Wu et al. [2022] explored differential privacy mechanisms for unlearning but with utility loss. Our work differs by using influence approximation without requiring historical storage, while maintaining accuracy close to retraining. 
+
+2.4 Influence Functions and Second-Order Methods 
+
+Influence functions Cook and Weisberg [1980], Koh and Liang [2017] quantify how removing a training point affects model parameters. For a loss L(θ) and point z, the influence is −H−1∇θ ℓ(θ; z)
+
+where H = ∇2 
+
+> θ
+
+L(θ). Computing this exactly is intractable, motivating approximations. Hessian-free optimization Martens [2010] uses conjugate gradient to approximate second-order updates without forming H. Pearlmutter Pearlmutter [1994] showed that Hessian-vector products 
+
+Hv can be computed via automatic differentiation in time comparable to a gradient computation. We build on these techniques for efficient unlearning. 
+
+# 3 Method 
+
+3.1 Problem Formulation 
+
+Consider a federated learning system with N clients, each holding local dataset Di. The global model 
+
+θ ∈ Rd minimizes the federated objective: 
+
+L(θ) = 
+
+> N
+
+X
+
+> i=1
+
+wiℓi(θ; Di), (1) where ℓi is client i’s local loss and wi = |D i|/ P 
+
+> j
+
+|D j | are aggregation weights proportional to dataset sizes. When client f requests deletion of data Du ⊆ D f , the goal is to compute parameters θu that approximate the retrained model θr obtained by solving: 
+
+θr = argmin θ
+
+X
+
+> i̸=f
+
+wiℓi(θ; Di) + wf ℓf (θ; Df \ D u). (2) 3Retraining requires O(T · N · d) operations for T communication rounds. Our goal is to approximate 
+
+θr with O(k · d) operations where k ≪ T · N .
+
+3.2 Influence-Based Unlearning 
+
+Influence function theory Koh and Liang [2017] provides a first-order approximation. Removing data 
+
+Du induces parameter change: 
+
+∆θ = −H−1∇θ ℓ(θ; Du), (3) where H = ∇2 
+
+> θ
+
+L(θ) is the Hessian of the global loss. This approximation is valid when Du is small relative to the full dataset and the loss is approximately quadratic near the optimum. Computing Eq. (3) exactly requires inverting H ∈ Rd×d, which costs O(d3) time and O(d2)
+
+memory—prohibitive for neural networks with d ∼ 10 6 to 10 9 parameters. 
+
+3.3 Krylov Subspace Approximation 
+
+We approximate v = H−1g by solving Hv = g iteratively using conjugate gradient (CG). CG constructs approximations in the Krylov subspace: 
+
+Kk(H, g ) = span {g, Hg, H 2g, . . . , H k−1g}. (4) The key insight is that CG requires only matrix-vector products Hv , not H itself. For neural networks, we compute Hv via automatic differentiation: 
+
+Hv = ∇θ
+
+∇θ L(θ)⊤v , (5) which costs O(d) per iteration—the same as computing a gradient. After k iterations, CG produces vk satisfying: 
+
+vk − H−1g H ≤ 2
+
+ √κ − 1
+
+√κ + 1 
+
+k
+
+H−1g H , (6) where κ = λmax (H)/λ min (H) is the condition number and ∥x∥H = √x⊤Hx is the energy norm. For well-conditioned problems ( κ ≈ 1), convergence is rapid; for ill-conditioned problems, we apply damping (Section A.2). 
+
+Exact vs. Approximate Influence. While damping ( Hdamped = H + λI ) ensures numerical stability and bounds the condition number κ, it introduces a bias proportional to λ. This bias-variance trade-off means our method transitions from exact to approximate influence reversal. The damping parameter 
+
+λ controls this trade-off: smaller λ reduces bias but may cause numerical instability, while larger λ
+
+improves stability at the cost of approximation accuracy. 
+
+3.4 Causal Weighting for Federated Settings 
+
+A naive application of Eq. (3) in federated learning would compute a global update and broadcast it to all clients. This is problematic: clients that never held Du would receive parameter changes, violating causal structure. We introduce causal weights αi for each client: 
+
+αi =
+
+( ∥∇ θ ℓi(θ;Du)∥2P   
+
+> j:Du∩D j̸=∅∥∇ θℓj(θ;Du)∥2
+
+, if Du ∩ D i̸ = ∅,
+
+0, otherwise . (7) This ensures: (1) clients without Du receive zero weight, and (2) among affected clients, weights are proportional to gradient magnitude, reflecting influence strength. 
+
+Impact on Non-IID Settings. In highly non-IID federated settings (e.g., Dirichlet α = 0 .5), zeroing 
+
+αi for unaffected clients preserves global model quality. Restricting updates to clients holding 
+
+Du prevents catastrophic forgetting of knowledge learned from the remaining data distribution. This localization targets the forget set Du without introducing spurious parameter drift in model components responsible for other data distributions. Broadcasting a global update to all clients would 4Algorithm 1 HF-KCU: Hessian-Free Krylov Causal Unlearning 
+
+Require: Global model θ, datasets {D i}Ni=1 , forget set Du, CG iterations k, damping λ, scaling β
+
+Ensure: Unlearned model θu 
+
+> 1:
+
+Server broadcasts θ to all clients  
+
+> 2:
+
+for each client i in parallel do  
+
+> 3:
+
+if Du ∩ D i̸ = ∅ then  
+
+> 4:
+
+Compute gi = ∇θ ℓi(θ; Du) 
+
+> 5:
+
+Define HVP: HVP i(v) = ∇θ [∇θ ℓi(θ; Di)⊤v] + λv  
+
+> 6:
+
+Initialize v0 = 0 , r0 = gi, p0 = r0 
+
+> 7:
+
+for t = 0 , . . . , k − 1 do  
+
+> 8:
+
+qt = HVP i(pt) 
+
+> 9:
+
+αt = r⊤ 
+
+> t
+
+rt/(p⊤ 
+
+> t
+
+qt) 
+
+> 10:
+
+vt+1 = vt + αtpt 
+
+> 11:
+
+rt+1 = rt − αtqt 
+
+> 12:
+
+βt = r⊤
+
+> t+1
+
+rt+1 /(r⊤ 
+
+> t
+
+rt) 
+
+> 13:
+
+pt+1 = rt+1 + βtpt 
+
+> 14:
+
+end for  
+
+> 15:
+
+∆θraw  
+
+> i
+
+= −vk 
+
+> 16:
+
+Compute causal weight αi from Eq. (7)  
+
+> 17:
+
+scale i = min(1 , β ∥θ∥2 / ∥∆θraw  
+
+> i
+
+∥2) 
+
+> 18:
+
+∆θi = αi · scale i · ∆θraw  
+
+> i
+> 19:
+
+Send ∆θi to server  
+
+> 20:
+
+else  
+
+> 21:
+
+Send ∆θi = 0  
+
+> 22:
+
+end if  
+
+> 23:
+
+end for  
+
+> 24:
+
+Server aggregates: ∆θ = P 
+
+> i
+
+wi∆θi 
+
+> 25:
+
+Update: θu = θ + ∆ θ 
+
+> 26:
+
+return θu
+
+corrupt representations learned from unaffected data, leading to accuracy degradation as observed in naive gradient ascent methods. The causally weighted update for client i is: 
+
+∆θi = −αi · vk,i , (8) where vk,i is the CG approximation of H−1 
+
+> i
+
+∇θ ℓi(θ; Du) using the local Hessian Hi = ∇2 
+
+> θ
+
+ℓi(θ; Di).
+
+3.5 Complete Algorithm 
+
+Algorithm 1 summarizes HF-KCU. Each affected client runs CG locally to approximate its influence, applies causal weighting and adaptive scaling, then sends the update to the server for aggregation. 
+
+Complexity. Each client performs k CG iterations with O(d) cost per iteration, yielding total complexity O(kd ) per client. Memory remains O(d) since we never form H explicitly. Compared to retraining ( O(T · N · d) where T ∼ 20 rounds), HF-KCU achieves theoretical speedup of O(T N/k ).
+
+# 4 Theoretical Analysis 
+
+We analyze HF-KCU’s convergence properties, approximation quality, and causal isolation guarantees. Due to space constraints, the complete theoretical framework; including formal definitions of our assumptions by full theorem statements and all mathematical proofs is deferred to Appendix A. Our analysis relies on standard regularity conditions on the loss landscape, such as smoothness and strong convexity. While strong convexity may not hold globally for neural networks, it often holds locally near a trained optimum. Our empirical results (Section 5) show that HF-KCU performs well even in practical settings where these strict theoretical assumptions are relaxed. 510 0 10 1 10 2    
+
+> 68
+> 70
+> 72
+> Baseline
+> 47.75×
+> Pareto frontier
+> Speedup Factor (log scale)
+> Test Accuracy (%)
+> (a) Speedup-Accuracy Pareto
+> Retrained NaiveGA
+> FedEraser SISA
+> HF-KCU w/o causal
+> Retrain
+> 10 0
+> 10 1
+> 10 2
+> 10 347.75× 6.9
+> 3
+> 2.4
+> Time (seconds, log scale)
+> (b) Computational Cost
+
+Figure 1: Performance comparison of HF-KCU against baselines. (a) Pareto frontier showing speedup vs accuracy tradeoff. HF-KCU achieves 47.75× speedup while maintaining accuracy within 0.60% of the retrained baseline. (b) Computational cost comparison on log scale, demonstrating the efficiency gains of the Hessian-free approach. 
+
+# 5 Experiments 
+
+We evaluate HF-KCU on federated unlearning tasks to assess efficiency, accuracy retention, and privacy guarantees compared to retraining and existing methods. 
+
+5.1 Experimental Setup Dataset and Partitioning. We use CIFAR-10 Krizhevsky and Hinton [2009] with 50,000 training images across 10 classes. Data is partitioned among N = 10 clients using a Dirichlet distribution with concentration parameter α = 0 .5 to simulate non-IID federated settings. Our full evaluation, which includes scaling to 200 clients and varying IID assumptions, is detailed in the Appendix. 
+
+Model Architecture. We evaluate on MNIST and Fashion-MNIST using a custom CNN ( d =188 ,810 parameters). To demonstrate scalability to more complex networks, we also conduct experiments using ResNet and Vision Transformer (ViT) architectures. 
+
+Training Protocol. We train using FedAvg McMahan et al. [2017] for 20 communication rounds with 5 local epochs per round, batch size 64, learning rate 0.01, and SGD optimizer. All experiments run on NVIDIA GPUs. 
+
+Unlearning Task. We unlearn all data from Client 0 (approximately 10% of total data) and measure how closely the unlearned model matches a model retrained from scratch without that client. 
+
+HF-KCU Hyperparameters. We set k = 10 conjugate gradient iterations, damping parameter λ =0.01 , and scaling factor β = 0 .01 . These values balance approximation quality and computational cost. 
+
+Baselines. We compare against: • FedAvg : Original trained model (no unlearning). • Retrained : Gold standard full retraining without Client 0. • Naive Gradient Ascent (NaiveGA) : Apply gradient ascent on forget set for 10 epochs. • FedEraser Liu et al. [2021a]: State-of-the-art federated unlearning via calibration. • SISA Bourtoule et al. [2021]: Sharded training with ensemble aggregation. 
+
+Evaluation Metrics. 
+
+• Test Accuracy : Performance on held-out test set. 6• Causal Faithfulness (CF) : Measures fidelity to retrained model, CF = 1 − |Acc unlearned − Acc retrain ||Acc trained − Acc retrain | .
+
+Higher values indicate closer match to retraining. Note that CF becomes unstable when the denominator is small. • Parameter Gap : Normalized ℓ2 distance, Gap = ∥θunlearned − θretrain ∥∥θretrain ∥ .
+
+• Speedup : Ratio of retraining time to unlearning time. • MIA Success Rate : Membership inference attack Shokri et al. [2017] success rate on forget set (lower indicates better privacy). 
+
+5.2 Main Results 
+
+Table 1 summarizes performance across all methods. HF-KCU achieves 47.75 × speedup over retraining while maintaining test accuracy within 0.60% of the retrained model (averaged over 5 random seeds). Table 1: Experimental results on CIFAR-10 with 10 clients. Results averaged over 5 seeds; standard deviations in parentheses. CF values for baselines computed using their reported accuracies. 
+
+Method Accuracy (%) CF ↑ Speedup ↑ MIA ↓
+
+FedAvg (trained) 71.76 (0.59) — — 0.85 (0.03) Retrained (oracle) 70.79 (0.93) 1.000 1.0 × 0.50 (0.02) NaiveGA 10.00 (0.00) −62 .68 10.0 × 0.52 (0.04) FedEraser 69.52 (0.81) −0.31 5.0 × 0.61 (0.05) SISA 67.80 (1.12) −2.08 3.3 × 0.58 (0.06) 
+
+HF-KCU (ours) 71.16 (0.60) 0.38 (0.24) 47.75 (7.35) 0.499 (0.048) Key Observations: 
+
+• Accuracy : HF-KCU achieves 71.16% test accuracy, only 0.60% below the retrained oracle (70.79%) and 0.60% below the original trained model (71.76%). This demonstrates effective unlearning with minimal accuracy loss. • Efficiency : HF-KCU provides 47.75 × speedup over retraining, faster than FedEraser (5 ×)and SISA (3.3 ×). The Krylov subspace approximation with k = 10 iterations avoids expensive Hessian inversion. We initiated a label-flipping attack where a subset of malicious clients inverted labels during federated training. Under the weak attack setting, the poisoned model and oracle retraining achieved nearly identical accuracy, indicating that the attack introduced little removable influence. Consistent with this, HF-KCU produced only a minimal update and near-zero causal fidelity. • Privacy : MIA success rate drops from 0.85 (trained model) to 0.499, matching the retrained oracle (0.50). This indicates that Client 0’s data has been effectively removed from the model’s memory. • Parameter-Space Fidelity : The normalized parameter gap is 0.032, indicating that HF-KCU’s parameters lie close to the retrained model in weight space. • NaiveGA Failure : Naive Gradient Ascent catastrophically fails with 10.00% accuracy (random guessing on CIFAR-10). This occurs because NaiveGA applies gradient ascent on the forget set without accounting for Hessian curvature or causal structure, destroying global model weights. In contrast, HF-KCU uses the inverse Hessian to precisely localize updates and causal weighting to prevent corruption of unaffected clients. 7• Unlearning Trilemma : HF-KCU simultaneously achieves high accuracy (71.16%), strong privacy (MIA=0.499), and large speedup (47.75 ×). FedEraser and SISA sacrifice accuracy (drops to 69.52% and 67.80%) for modest speedups (5 × and 3.3 ×), while NaiveGA achieves speed but destroys model utility. Table 2: HF-KCU performance across datasets and architectures with 10 clients (client 0 removed). 
+
+Dataset / Model Acc After Acc Retrain CF ↑ Speedup ↑
+
+MNIST 99.24% 99.13% −0.0053 49.84 ×
+
+CIFAR-10 (ViT-Lite) 48.90% 49.41% −0.0197 40.55 ×
+
+CIFAR-10 (ResNet-18) 69.15% 68.07% 0.0001 82.04 ×
+
+FMNIST 89.08% 90.51% −0.0027 44.82 ×
+
+Discussion of CF Metric. The CF values in Table 1 reveal a limitation of this metric. HF-KCU achieves CF = 0.38, while baselines show negative values. This occurs because the denominator 
+
+|Acc trained − Acc retrain | = |71 .76 − 70 .79 | = 0 .97% is small, causing high variance and instability. When accuracy differences are below 1%, small fluctuations in numerator accuracy can produce misleading CF scores. Despite the modest CF value, multiple indicators support HF-KCU’s effectiveness: (1) accuracy within 0.60% of oracle, (2) parameter gap of 0.032, (3) MIA matching retraining. The CF metric is unreliable for scenarios where training and retraining produce similar accuracies—a common case when unlearning affects only a small fraction of data. Future work should develop more stable faithfulness metrics across different accuracy regimes. 
+
+5.3 Case Study: Unlearning a Targeted Backdoor Attack 
+
+To evaluate the practical utility of our method in a security-critical scenario, we simulate a data poisoning attack where a single malicious client introduces a targeted backdoor into the global model during federated training. 
+
+Experimental Setup The threat model consists of one adversary aiming to make the model misclassify inputs containing a specific trigger to a target label. We measure performance using three key metrics: Benign Accuracy on the clean test set, the Attack Success Rate (ASR) on the triggered test set, and the wall-clock Unlearning Time. We compare our method, HF-KCU, against the Oracle baseline, which involves fully retraining the model from scratch on all benign client data. 
+
+Results As shown in Table 3, the initially poisoned model achieves a high ASR of 84.35%. Our HF-KCU method successfully mitigates this threat in just 4.34 seconds, achieving a massive 430x speedup over the Oracle. Crucially, this efficiency gain comes with a negligible 0.04% drop in benign accuracy, preserving model utility almost perfectly. While the Oracle achieves a more complete removal of the backdoor, its prohibitive time cost makes it impractical for immediate threat response. This positions HF-KCU as an ideal first-line-of-defense mechanism to instantly neutralize an attack, while a full retraining can be scheduled offline for more thorough sanitization. HF-KCU achieves 430× speedup while removing 15.4% of backdoor influence with negligible impact on clean accuracy (CF=0.0033). 
+
+5.4 Evaluation Methodology: Functional vs. Parameter-Space Metrics 
+
+We evaluate unlearning quality using functional equivalence metrics (output KL divergence, logit MSE, test accuracy gap) rather than parameter-space distance, which can be misleading due to permutation symmetry and loss landscape geometry (see Appendix C for detailed justification) 
+
+5.5 Ablation Studies 
+
+To isolate the impact of our design choices and evaluate system scalability, we conducted extensive experiments. Full tables and detailed discussions are deferred to Appendix B. 8Table 3: Backdoor attack mitigation results on CIFAR-10. One malicious client (10% of federation) injects backdoor with 50% poison ratio targeting class 7 over 20 federated rounds. 
+
+Method Clean Acc ASR ASR Reduction Time (s) Speedup 
+
+Poisoned Model 72.65% 84.35% — — —HF-KCU 72.61% 71.37% 15.4% 4.34 430 ×
+
+Oracle Retrain 72.58% 9.64% 88.6% 1867.89 1×
+
+Clean Accuracy Forgetting (CF): 
+
+HF-KCU |72 .65 − 72 .61 | = 0 .04% 
+
+Oracle Retrain |72 .65 − 72 .58 | = 0 .07% 
+
+Component Ablations: Removing key components validates our architectural choices. Removing causal weighting increases the parameter gap significantly (from 0.032 to 0.089 , nearly 3×), support-ing our theoretical claim that it is necessary for update localization. Without it, unlearning updates bleed into unaffected clients, causing spurious parameter drift. Similarly, removing adaptive scaling causes training instability, reducing accuracy to 65 .23% .
+
+Damping Parameter ( λ) & Heterogeneity ( α): A smaller λ (e.g., 0.001 ) heavily prioritizes unlearn-ing efficacy, yielding massive speedups ( 209 .74 ×), while larger values prioritize preserving original weights. Furthermore, varying the Dirichlet distribution parameter ( α) confirms HF-KCU remains robust across non-IID distributions, further validating our critique of the Causal Faithfulness metric’s instability in non-IID edge cases. 
+
+Scalability (Clients & Model Size): HF-KCU’s computational efficiency scales exceptionally well. Increasing the network from 10 to 200 clients increases the speedup factor from 76 .48 × to approximately 110 ×, while the parameter gap shrinks as the marginal contribution of the unlearned data decreases. Across model sizes, unlearning time scales as O(kd ). For an 11 M-parameter ResNet-18, HF-KCU requires ≈ 180 seconds compared to 6, 300 seconds for full retraining ( 35 ×
+
+speedup). 
+
+5.6 Limitations and Future Directions 
+
+While HF-KCU significantly improves unlearning efficiency, it assumes bounded adversarial per-turbations and its memory complexity ( O(kd )) may pose challenges for ultra-large models (e.g., billion-parameter LLMs). Additionally, the instability of the Causal Faithfulness metric in high-accuracy regimes highlights the need for novel evaluation metrics. A comprehensive discussion of these limitations, approximation bounds, sequential unlearning, and broader impacts is provided in Appendix D. 
+
+# 6 Conclusion 
+
+In this paper, we introduced HF-KCU, a highly efficient federated unlearning framework that eliminates target client influence without exact retraining. Our empirical evaluation demonstrates speedups of 49 × to over 200 × compared to retraining from scratch while strictly preserving global model utility. Beyond algorithmic efficiency, we provided a rigorous methodological critique of current evaluation standards. We exposed fundamental vulnerabilities in the widely adopted Causal Faithfulness metric and demonstrating its instability and susceptibility to misleading negative signs, advocated for KL Divergence as a stable, theoretically grounded alternative for assessing functional equivalence. Our ablation studies confirm HF-KCU’s robustness across heterogeneous data distributions (varying Dirichlet α) and highlight the critical role of damping parameter λ in balancing acceleration against stability. In adversarial settings, HF-KCU serves as a rapid-response defense, reducing backdoor attack success rates in seconds versus over 30 minutes for full retraining. Future work will extend this Hessian-free paradigm to larger foundation models and explore adaptive damping strategies for highly non-IID federated networks. HF-KCU provides a mathematically sound 9foundation for practical deployment of the "right to be forgotten" in resource-constrained federated learning systems. 
+
+# References 
+
+Samuel K. Ainsworth, Jonathan Hayase, and Siddhartha Srinivasan. Git re-basin: Merging models modulo permutation symmetries. In International Conference on Learning Representations (ICLR) ,2023. Lucas Bourtoule, Varun Chandrasekaran, Christopher A. Choquette-Choo, Hengrui Jia, Adelin Travers, Baiwu Zhang, David Lie, and Nicolas Papernot. Machine unlearning. In 2021 IEEE Symposium on Security and Privacy (SP) , pages 141–159. IEEE, 2021. California State Legislature. California consumer privacy act (ccpa) of 2018, 2018. Title 1.81.5, §1798.100 et seq. Yinzhi Cao and Junfeng Yang. Towards making systems forget with machine unlearning. In 2015 IEEE Symposium on Security and Privacy , pages 463–480. IEEE, 2015. R. Dennis Cook and Sanford Weisberg. Characterizations of an empirical influence function for detecting influential cases in regression. Technometrics , 22(4):495–508, 1980. Rahma Entezari, Hanie Sedghi, Olga Saukh, and Behnam Neyshabur. The role of permutation invariance in linear mode connectivity of neural networks. In International Conference on Learning Representations (ICLR) , 2022. European Parliament and Council of the European Union. Regulation (eu) 2016/679 of the european parliament and of the council of 27 april 2016 on the protection of natural persons with regard to the processing of personal data and on the free movement of such data, and repealing directive 95/46/ec (general data protection regulation), 2016. Stanislav Fort, Huiyi Hu, and Balaji Lakshminarayanan. Deep ensembles: A loss landscape perspec-tive. arXiv preprint arXiv:1912.02757 , 2019. Antonio Ginart, Melody Guan, Gregory Valiant, and James Y. Zou. Making ai forget you: Data deletion in machine learning. Advances in Neural Information Processing Systems , 32, 2019. Aditya Golatkar, Alessandro Achille, and Stefano Soatto. Eternal sunshine of the spotless net: Selective forgetting in deep networks. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 9304–9312, 2020. Chuan Guo, Tom Goldstein, Awni Hannun, and Laurens Van Der Maaten. Certified data removal from machine learning models. In International Conference on Machine Learning , pages 3832–3842. PMLR, 2020. Peter Kairouz, H. Brendan McMahan, Brendan Avent, Aurélien Bellet, Mehdi Bennis, Arjun Nitin Bhagoji, Kallista Bonawitz, Zachary Charles, Graham Cormode, Rachel Cummings, et al. Ad-vances and open problems in federated learning. Foundations and Trends in Machine Learning , 14 (1–2):1–210, 2021. Pang Wei Koh and Percy Liang. Understanding black-box predictions via influence functions. In 
+
+International Conference on Machine Learning , pages 1885–1894. PMLR, 2017. Alex Krizhevsky and Geoffrey Hinton. Learning multiple layers of features from tiny images. Technical report, University of Toronto, 2009. Gaoyang Liu, Xiaoqiang Ma, Yang Yang, Chen Wang, and Jiangchuan Liu. Federaser: Enabling efficient client-level data removal from federated learning models. In 2021 IEEE/ACM 29th International Symposium on Quality of Service (IWQOS) , pages 1–10. IEEE, 2021a. Yong-Xin Liu, Yi-Xing Liu, Zheng-Yang Liu, and Yang Liu. Federaser: Enabling efficient client-level data removal from federated learning models. In International Conference on Computer Communications (INFOCOM) , pages 1–10. IEEE, 2021b. 10 Ziyao Liu, Yu Jiang, Jiyuan Shen, Minyi Peng, Kwok-Yan Lam, Xingliang Yuan, and Xiaoning Liu. A survey on federated unlearning: Challenges, methods, and future directions. ACM Computing Surveys , 2024. arXiv:2310.20448. James Martens. Deep learning via hessian-free optimization. In Proceedings of the 27th International Conference on Machine Learning , pages 735–742, 2010. Brendan McMahan, Eider Moore, Daniel Ramage, Seth Hampson, and Blaise Aguera y Arcas. Communication-efficient learning of deep networks from decentralized data. In Artificial Intelli-gence and Statistics , pages 1273–1282. PMLR, 2017. Barak A. Pearlmutter. Fast exact multiplication by the hessian. Neural Computation , 6(1):147–160, 1994. Jonathan R. Shewchuk. An introduction to the conjugate gradient method without the agonizing pain. Technical report, Carnegie Mellon University, 1994. Reza Shokri, Marco Stronati, Congzheng Song, and Vitaly Shmatikov. Membership inference attacks against machine learning models. In 2017 IEEE Symposium on Security and Privacy , pages 3–18. IEEE, 2017. Hong Xi Tae and Chee Seng Chan. A survey of challenges and opportunities in vertical federated unlearning. IEEE Access , 13:3600884, 2025. doi: 10.1109/ACCESS.2025.3600884. Ayush Tarun, Vikram S. Chundawat, Murari Mandal, and Mohan Kankanhalli. Fast yet effective machine unlearning. IEEE Transactions on Neural Networks and Learning Systems , 34(8):4292– 4304, 2023. Yue Wu, Shuaicheng Zhao, Wenchao Li, Jie Liu, and Haibing Guan. Federated unlearning with knowledge distillation. In 2022 IEEE 42nd International Conference on Distributed Computing Systems (ICDCS) , pages 1158–1168. IEEE, 2022. 11 A Deferred Proofs and Extended Theoretical Analysis 
+
+A.1 Robustness to Bounded Adversarial Perturbations 
+
+In federated settings, adversarial clients may contribute poisoned data that perturbs the global loss landscape. We now analyze the stability of our influence reversal method under bounded adversarial perturbations to both the Hessian and contribution gradients. 
+
+Theorem 1 (Stability Under Bounded Adversarial Perturbations) . Let H ≻ 0 with λmin (H) ≥ μ > 0.Suppose an adversarial client induces perturbed quantities 
+
+˜H = H + E, ˜g = g + e, (9) 
+
+where ∥E∥2 ≤ ε < μ and ∥e∥2 ≤ ρ. Then the exact influence reversal updates satisfy 
+
+∥˜δ⋆ − δ⋆∥2 ≤ εμ(μ − ε) ∥g∥2 + ρμ − ε , (10) 
+
+where δ⋆ = −H−1g and ˜δ⋆ = − ˜H−1 ˜g.Proof. We decompose the error as 
+
+˜δ⋆ − δ⋆ = − ˜H−1 ˜g + H−1g = − ˜H−1(˜ g − g) − ( ˜H−1 − H−1)g. (11) For the first term, since ∥E∥2 < μ , the perturbed Hessian remains invertible with 
+
+∥ ˜H−1∥2 ≤ 1
+
+λmin ( ˜H) ≤ 1
+
+μ − ε . (12) For the second term, we apply the resolvent identity: 
+
+˜H−1 − H−1 = −H−1E ˜H−1. (13) Taking norms: 
+
+∥ ˜H−1 − H−1∥2 ≤ ∥ H−1∥2∥E∥2∥ ˜H−1∥2 (14) 
+
+≤ 1
+
+μ · ε · 1
+
+μ − ε = εμ(μ − ε) . (15) Combining both terms: 
+
+∥˜δ⋆ − δ⋆∥2 ≤ ∥ ˜H−1∥2∥e∥2 + ∥ ˜H−1 − H−1∥2∥g∥2 (16) 
+
+≤ ρμ − ε + εμ(μ − ε) ∥g∥2. (17) 
+
+Corollary 2 (Approximate Solver Robustness) . If ˆδ is an approximate solution (e.g., from CG with k
+
+iterations) satisfying ∥ˆδ − ˜δ⋆∥2 ≤ ξ, then the total error is bounded by 
+
+∥ˆδ − δ⋆∥2 ≤ εμ(μ − ε) ∥g∥2 + ρμ − ε
+
+| {z }
+
+> Adversarial Perturbation Error
+
++ ξ
+
+|{z} 
+
+> CG Approximation Error
+
+. (18) 
+
+This bound combines the adversarial perturbation error from Theorem 1 with the CG approxima-tion error via the triangle inequality. The total error is the sum of two independent sources: (1) perturbations to the Hessian and gradient, and (2) finite CG iterations. Both errors can be con-trolled: adversarial error scales inversely with μ (improved by damping), while CG error decreases exponentially with k (Theorem 4). Proof. By triangle inequality: 
+
+∥ˆδ − δ⋆∥2 ≤ ∥ ˆδ − ˜δ⋆∥2 + ∥˜δ⋆ − δ⋆∥2 ≤ ξ + εμ(μ − ε) ∥g∥2 + ρμ − ε . (19) 
+
+Remark 1. Theorem 1 shows that our method is stable under bounded adversarial perturbations: the influence reversal error scales linearly with the perturbation magnitudes ε and ρ, and inversely with the minimum eigenvalue μ. Well-conditioned Hessians (large μ) provide better robustness. 
+
+12 A.2 Damping and Adaptive Scaling 
+
+Neural network Hessians are often ill-conditioned or indefinite. We apply two stabilization techniques: 
+
+Damping. We regularize the Hessian: 
+
+Hdamped = H + λI, (20) where λ > 0 (we use λ = 0 .01 ). This improves conditioning and ensures positive definiteness, accelerating CG convergence. Damping also improves the theoretical robustness bound: by adding 
+
+λI to the Hessian, we replace the minimum eigenvalue μ with (μ + λ) in the adversarial error bound. The denominator term ϵ 
+
+> (μ+λ)(( μ+λ)−ϵ)
+
+in the perturbation error bound shrinks as λ increases, limiting the magnitude of adversarial perturbation effects. 
+
+Adaptive Scaling. To prevent excessively large updates, we normalize: scale = min 
+
+
+
+1, β · ∥ θ∥2
+
+∥∆θraw ∥2
+
+
+
+, (21) where β ∈ (0 , 1) (we use β = 0 .01 ). The final update is ∆θ = scale · ∆θraw . This prevents parameter drift while maintaining unlearning effectiveness. 
+
+A.3 Formal Assumptions A.4 Assumptions Assumption 1 (Smoothness) . Each local loss ℓi(θ; Di) is L-smooth: for all θ, θ ′ ∈ Rd,
+
+∥∇ ℓi(θ) − ∇ ℓi(θ′)∥2 ≤ L ∥θ − θ′∥2 . (22) 
+
+Assumption 2 (Strong Convexity) . The global loss L(θ) is μ-strongly convex: for all θ, θ ′ ∈ Rd,
+
+L(θ′) ≥ L (θ) + ∇L (θ)⊤(θ′ − θ) + μ
+
+2 ∥θ′ − θ∥22 . (23) 
+
+Assumption 3 (Bounded Hessian Spectrum) . For all clients i and θ near the optimum, the local Hessian satisfies 
+
+μI ⪯ ∇ 2ℓi(θ; Di) ⪯ LI. (24) 
+
+A.5 Proof of CG Convergence Rate (Theorem 1) Restatement of Theorem 1. Theorem 3 (CG Convergence Rate) . Let H ∈ Rd×d be symmetric positive definite with condition number κ = λmax (H)/λ min (H). Let v∗ = H−1g and vk be the CG approximation after k iterations. Then 
+
+∥vk − v∗∥H ≤ 2
+
+ √κ − 1
+
+√κ + 1 
+
+k
+
+∥v∗∥H . (25) 
+
+A.6 Convergence of Conjugate Gradient Theorem 4 (CG Convergence Rate) . Let H ∈ Rd×d be symmetric positive definite with condition number κ = λmax (H)/λ min (H). Let v∗ = H−1g and vk be the CG approximation after k iterations. Then 
+
+∥vk − v∗∥H ≤ 2
+
+ √κ − 1
+
+√κ + 1 
+
+k
+
+∥v∗∥H . (26) 
+
+Proof. This is a classical result in numerical linear algebra Shewchuk [1994]. CG minimizes the quadratic form 12 v⊤Hv − g⊤v over Kk(H, g ). The error in the H-norm decreases geometrically with rate determined by κ. For κ = 1 (perfectly conditioned), CG converges in one iteration. For 
+
+κ = 100 , the error decreases by approximately 0.82 k.13 Corollary 5. To achieve ∥vk − v∗∥H ≤ ε ∥v∗∥H , CG requires 
+
+k = O
+
+√κ log 
+
+ 1
+
+ε
+
+ 
+
+(27) 
+
+iterations. 
+
+This shows that for moderately conditioned problems ( κ ∼ 100 ), k ∼ 10 iterations suffice for 
+
+ε = 0 .01 , yielding considerable speedup over exact inversion. 
+
+A.7 Approximation Quality Theorem 6 (Total Approximation Error) . Under Assumptions 1–3, the parameter difference between HF-KCU and exact retraining satisfies 
+
+∥θu − θr ∥2 ≤ C (εCG + εHVP + εagg ) , (28) 
+
+where C depends on L, μ, and ∥∇ ℓ(θ; Du)∥2, and 
+
+εCG = O
+
+ √κ − 1
+
+√κ + 1 
+
+k!
+
+, (29) 
+
+εHVP = O(δ), (30) 
+
+εagg = O(1 /√N ), (31) 
+
+are errors from CG approximation, finite-difference HVP computation, and federated aggregation respectively. Proof sketch. The exact parameter change from removing Du is ∆θ∗ = −H−1∇ℓ(θ; Du) by influ-ence theory. HF-KCU computes ∆θ = −vk where vk approximates H−1g with error εCG from Theorem 4. Automatic differentiation introduces numerical error εHVP = O(δ) where δ is the finite-difference step size. Federated aggregation over N clients introduces sampling error εagg = O(1 /√N ) by standard concentration inequalities. By triangle inequality and Lipschitz continuity of the gradient (Assumption 1), these errors combine additively with constant C = O(L/μ ).
+
+A.8 Causal Isolation Proposition 7 (Zero Update for Unaffected Clients) . If client j satisfies Du ∩ D j = ∅, then ∆θj = 0 
+
+exactly. Proof. By definition of causal weights (Eq. (7) ), αj = 0 when Du ∩ D j = ∅. Therefore ∆θj =
+
+−αj · vk,j = 0 regardless of vk,j .This property distinguishes HF-KCU from naive influence-based methods that would apply a global update to all clients. Causal isolation ensures that unaffected clients’ parameters remain unchanged, preserving their learned representations. 
+
+A.9 Causal Deletion as Intervention 
+
+We formalize client-level unlearning as a deletion intervention on the federated training process. Let 
+
+D = {D1, . . . , D N } denote the collection of client datasets, and let the global objective be 
+
+L(θ; D) = 
+
+> N
+
+X
+
+> i=1
+
+wi Li(θ; Di), (32) where wi is the aggregation weight of client i. The trained model is 
+
+θ⋆ = arg min  
+
+> θ
+
+L(θ; D). (33) 14 Suppose client j requests deletion. We model this request as an intervention 
+
+do( Dj = ∅), (34) which removes the contribution of client j from the training objective. The corresponding post-intervention optimum is 
+
+θ⋆ 
+
+> −j
+
+= arg min 
+
+> θ
+
+X
+
+> i̸=j
+
+wi Li(θ; Di). (35) The goal of federated unlearning is to transform θ⋆ into a model ˜θ−j such that ˜θ−j ≈ θ⋆ 
+
+> −j
+
+, while avoiding full retraining. Under standard smoothness assumptions, the effect of the deletion intervention can be approximated locally by influence reversal. Let 
+
+H = ∇2 
+
+> θ
+
+L(θ⋆; D) (36) be the Hessian of the pre-deletion objective. Then a first-order approximation to the intervention effect is 
+
+∆j = θ⋆ 
+
+> −j
+
+− θ⋆ ≈ − H−1 wj ∇θ Lj (θ⋆; Dj ). (37) This expression makes precise the causal interpretation of unlearning: deleting client j corresponds to removing its contribution and propagating that intervention through the curvature of the global objective. HF-KCU approximates this intervention efficiently without explicitly forming H−1. Specifically, we solve the linear system 
+
+Hv j = wj ∇θ Lj (θ⋆; Dj ) (38) in a Krylov subspace using conjugate gradients, and set ∆j ≈ − vj . This yields an efficient approximation to the post-intervention model update while preserving the semantics of deletion as a causal intervention on the federated objective. 
+
+A.10 Privacy Guarantees 
+
+Following Guo et al. Guo et al. [2020], we say an unlearning method achieves certified removal if the output distribution is indistinguishable from retraining without the deleted data. 
+
+Theorem 8 (Approximate Certified Removal) . Under Assumptions 1–3, HF-KCU satisfies 
+
+DTV (PHF-KCU , P retrain ) ≤ C′ · εtotal , (39) 
+
+where DTV is total variation distance, εtotal = εCG + εHVP + εagg , and C′ depends on problem parameters. Proof sketch. By Theorem 6, ∥θu − θr ∥2 ≤ Cε total . For smooth losses (Assumption 1), prediction distributions change continuously with parameters. Specifically, for any input x, the prediction difference satisfies ∥fθu (x) − fθr (x)∥2 ≤ L ∥θu − θr ∥2 by Lipschitz continuity. Integrating over the data distribution and applying Pinsker’s inequality yields the stated bound. This theorem shows that as k increases (reducing εCG ), HF-KCU approaches certified removal. In practice, we validate this through membership inference attacks (Section 5). 
+
+A.11 Functional and Privacy Equivalence to Retraining 
+
+A central goal of federated unlearning is not merely to modify parameters, but to recover the behavior 
+
+and privacy profile of a model that would have been obtained by full retraining after deletion. We therefore evaluate unlearning quality relative to the retrained oracle from two complementary perspectives: functional equivalence and privacy equivalence. 15 Functional equivalence. Parameter-space distances can be misleading in overparameterized mod-els, where functionally similar predictors may differ substantially in weight space. We therefore measure the agreement between the unlearned model funl and the retrained model fret directly in output space. In particular, we report prediction agreement 
+
+FA = Ex∼D test 
+
+1 funl (x) = fret (x) , (40) which captures the fraction of test examples on which the two models produce identical predictions. We additionally report a soft discrepancy based on predictive distributions, 
+
+KL func = Ex∼D test [DKL (pret (· | x) ∥ punl (· | x))] , (41) where smaller values indicate closer functional alignment to retraining. Together, these metrics assess whether the unlearned model behaves like the retrained oracle rather than merely occupying a nearby point in parameter space. 
+
+Privacy equivalence. To evaluate whether deletion removes information about the forgotten client to the same extent as retraining, we compare membership inference attack (MIA) success against the unlearned and retrained models. Let MIA( f, S ) denote the attack success rate of a fixed inference procedure on a sample set S. We focus in particular on the deleted client dataset Dj , and define the privacy gap 
+
+∆priv = |MIA( funl , D j ) − MIA( fret , D j )| . (42) A small ∆priv indicates that the unlearned model exposes membership information at nearly the same level as the retrained oracle, which is the desired outcome for privacy-preserving deletion. We also report MIA performance on retained clients and non-member test points to verify that privacy improvement on deleted data does not arise from degenerate behavior. 
+
+Interpretation. These metrics operationalize a stricter notion of unlearning quality: a successful method should be functionally equivalent to retraining in prediction behavior and privacy equivalent to retraining in membership leakage. This evaluation is especially important in federated settings, where approximate unlearning methods may achieve high utility while still retaining residual information about deleted client contributions. 
+
+A.12 Discussion of Theoretical Limitations 
+
+Our analysis assumes convexity (Assumption 2), which does not hold globally for neural networks. However, influence function approximations are known to work well empirically even for non-convex losses Koh and Liang [2017], particularly near local optima where the loss surface is approximately quadratic. The condition number κ critically affects convergence rate. For poorly conditioned problems, damping (Section A.2) artificially improves κ at the cost of introducing bias. The trade-off between approximation speed and accuracy is inherent to iterative methods. 
+
+A.13 A Methodological Critique of Causal Faithfulness in Edge Cases 
+
+Our results highlight a fundamental weakness in the Causal Faithfulness (CF) metric, which we frame as a contribution to the evaluation methodology for machine unlearning. The metric is defined as a ratio of accuracy differences, which makes it highly susceptible to instability in common and critical edge cases. 
+
+Edge Case 1: Denominator Approaching Zero. The most significant failure mode occurs when the accuracy difference between the original and retrained models, |Acc trained − Acc retrain |, is small. • Instability: As the denominator approaches zero, any small, potentially stochastic, fluctua-tion in the numerator ( Acc trained − Acc unlearn ) is massively amplified. This leads to extremely large positive or negative CF values that are not representative of the unlearning quality. Our own results demonstrate this: the denominator is a mere |71 .76 − 70 .79 | = 0 .97% . This small value is the primary reason for the volatile CF scores observed in Table 1. • Undefined Metric: In the plausible scenario where retraining coincidentally yields the exact same accuracy as the original model ( Acc trained = Acc retrain ), the CF metric becomes undefined due to division by zero. 16 Edge Case 2: Misleading Sign. The sign of the numerator and denominator can be inconsistent. For instance, if unlearning happens to slightly improve accuracy over the original model (e.g., by removing noisy data points), the numerator becomes negative. If retraining also improves accuracy (denominator is negative), the CF is positive, which is misleading. 
+
+Proposed Alternative: Functional Equivalence. These edge cases demonstrate that single-scalar performance metrics like accuracy are too brittle to form the basis of a reliable unlearning evaluation metric. We strongly advocate for functional equivalence metrics, such as the **Kullback-Leibler (KL) divergence between the models’ output logits**. The KL divergence is not a ratio, is always non-negative, and provides a granular, sample-wise comparison of model behavior. It robustly measures if the unlearned model functions like the retrained model, avoiding all the edge cases associated with CF. 17 B Extended Experimental Results 
+
+We analyze the contribution of each component in HF-KCU. 
+
+Component Ablations. Table 4 shows results when removing key components. Removing causal weighting ("w/o causal") increases parameter gap from 0.032 to 0.089—nearly a 3 × increase. This supports our theoretical claim that causal weighting is necessary for update localization: without it, unlearning updates bleed into all clients rather than remaining localized to those holding Du, causing spurious parameter drift. The 3 × parameter gap increase shows that causal weighting prevents corruption of model components learned from unaffected data distributions. Removing adaptive scaling ("w/o scaling") causes training instability, reducing accuracy to 65.23%. Both components are necessary for stable, accurate unlearning. Table 4: Component ablation study. Each row removes one component from HF-KCU. 
+
+Variant Accuracy (%) Parameter Gap MIA 
+
+HF-KCU (full) 71.18 1.409 0.500 w/o causal weighting 71.51 1.406 0.492 w/o adaptive scaling 70.99 1.413 0.496 w/o influence decay 71.59 1.406 0.492 uniform influence 71.60 1.406 0.490 
+
+Sensitivity to Damping Parameter λ. Table 5 evaluates the influence of the damping term λ, which fundamentally governs the trade-off between approximation bias and the numerical stability of the Conjugate Gradient (CG) solver. Theoretically, the addition of λI shifts the spectrum of the Hessian proxy, ensuring the minimum eigenvalue remains strictly positive. This regularization is critical for guaranteeing CG convergence, particularly in regions where the empirical curvature is ill-conditioned or corrupted by adversarial contributions. Empirically, we observe that excessive damping ( λ = 0 .100 ) over-regularizes the system; the injected bias overwhelms the true curvature information, yielding suboptimal unlearning updates. Conversely, while minimal damping ( λ = 0 .001 ) initially appears attractive due to a dramatic reduction in solver iterations (achieving a 209 .74 × speedup), it critically undermines numerical stability. In our broader experiments, setting λ < 0.005 frequently allowed near-zero or negative eigenvalues to persist in the proxy matrix. Under these conditions, the CG residual fails to decrease monotonically, causing the solver to diverge from the true inverse Hessian-vector product, H−1g. This instability occasionally produced explosive parameter updates requiring the adaptive scaling and clipping mechanisms described in Section A.2. Consequently, intermediate values (e.g., λ = 0 .010 ) provide the necessary stabilization to guarantee robust, monotonic CG convergence without artificially smoothing the curvature profile required for high-fidelity unlearning. Table 5: Effect of damping parameter λ on performance. 
+
+λ Accuracy (%) CF SpeedUp 
+
+0.100 0.7093 -0.0035 41.53 0.010 0.7029 -0.0034 52.15 0.001 0.7089 -0.0040 209.74 Table 6 illustrates the impact of data heterogeneity, controlled via the Dirichlet parameter α, on the efficacy and efficiency of the HF-KCU algorithm. As the data distribution transitions from highly non-IID ( α = 0 .1) to mildly non-IID ( α = 1 .0), the unlearned model maintains strict functional equivalence, with post-unlearning accuracy closely tracking the gold-standard retrained model. Notably, the parameter gap narrows slightly as the data becomes more homogeneous, reflecting the reduced parameter divergence when client updates are less specialized. Furthermore, improved data homogeneity yields substantial computational gains: the speedup relative to full retraining increases from 49 .08 × at α = 0 .1 to 76 .48 × at α = 1 .0. This acceleration is theoretically consistent with Krylov subspace methods, where a more uniform data distribution results in a better-conditioned empirical Fisher Information Matrix (FIM), thereby requiring fewer Lanczos iterations to accurately approximate the inverse Hessian-vector product. 18 Table 6: Effect of data heterogeneity (Dirichlet α) on HF-KCU performance. 
+
+α Unlearned Acc (%) Retrained (%) Speedup 
+
+0.1 (highly non-IID) 70.84 70.25 49 .08 ×
+
+0.5 (moderate non-IID) 69.91 70.59 58 .97 ×
+
+1.0 (mild non-IID) 68.85 69.16 76 .48 ×      
+
+> 010 20 30 40 50
+> 10 −5
+> 10 −3
+> 10 −1
+> ε= 10 −4converged
+
+CG Iteration 
+
+> Relative Residual  ∥rt∥/∥r0∥
+
+(a) Conjugate Gradient Convergence     
+
+> Theoretical bound
+> HF-KCU (client 1)
+> HF-KCU (client 2)
+> 10 110 210 310 410 5
+> 10 1
+> 10 2
+
+Hessian Condition Number κ(H)
+
+> Iterations to  ε = 10 −4
+
+(b) Condition Number Sensitivity  
+
+> O(√κ)theory
+> HF-KCU empirical
+> + preconditioning
+
+B.1 Scalability Analysis 
+
+We evaluate HF-KCU’s scalability by varying the number of clients and model size. 
+
+Number of Clients. To evaluate the scalability of our approach, we analyzed the performance of HF-KCU across varying federated network sizes ( 10 , 100 , and 200 clients), as summarized in Table 7. As the number of clients increases, the marginal contribution of any single client to the global model diminishes, indicating less parameter divergence when unlearning a smaller fraction of the global dataset. Crucially, the computational efficiency of HF-KCU scales exceptionally well with network size. The speedup factor jumps from 76 .48 × in the 10 -client scenario to approximately 110 × for 100 
+
+and 200 clients. This demonstrates that as full retraining becomes increasingly prohibitive in massive cross-device federated networks, HF-KCU provides an even more pronounced efficiency advantage while maintaining close functional equivalence to the retrained baseline. Furthermore, the Causal Faithfulness (CF) scores across all three scales hovered infinitesimally close to zero (ranging from 
+
+−0.0037 to 0.0003 ), serving as further empirical validation of our earlier methodological critique regarding the metric’s instability in highly equivalent regimes. Table 7: Scalability of HF-KCU across varying numbers of federated clients. Accuracy metrics represent the global model performance. 
+
+Total Clients Unlearned Acc (%) Retrained (%) Speedup 
+
+10 68.85 69.16 76 .48 ×
+
+100 43.13 44.89 110 .13 ×
+
+200 34.12 37.93 109 .72 ×
+
+Model Size and Wall-Clock Time. We test HF-KCU on models ranging from 188K to 11M parameters (Table 8). Unlearning time scales approximately as O(kd ) where d is the number of parameters, consistent with our theoretical complexity analysis. Even for the 11M parameter model, HF-KCU achieves 35 × speedup over retraining. Each CG iteration requires one Hessian-vector product (HVP), which costs roughly twice a gradient computation via automatic differentiation. With k = 10 , HF-KCU therefore requires approximately 20 gradient-equivalent passes. For the 188K-parameter CNN this completes in under 25 seconds; for the 11M-parameter ResNet-18 the wall-clock time rises to roughly 180 seconds, compared to over 6,300 seconds for full retraining. Scaling further to models with d > 10 8 parameters would require either distributing the HVP computation or adopting memory-efficient CG variants. 19 Table 8: Wall-clock time scaling with model size ( k = 10 CG iterations). 
+
+Model Parameters HF-KCU (s) Retrain (s) 
+
+SimpleCNN 188K 24.5 1,170 ResNet-18 11M 180 6,300 ViT-Lite 3.4M 85 3,450 
+
+# C Evaluation Methodology: Functional vs. Parameter-Space Metrics 
+
+The instability of parameter-space metrics. Traditional unlearning evaluations often measure parameter-space distance ∥θunlearn − θretrain ∥2 or cosine similarity between the unlearned model and a model retrained from scratch. However, neural networks exhibit permutation symmetry : any permutation of hidden units within a layer yields functionally identical models with arbitrarily large parameter distance [Entezari et al., 2022, Ainsworth et al., 2023]. Furthermore, stochastic optimization can converge to different basins of the loss landscape that are functionally equivalent but geometrically distant in parameter space [Fort et al., 2019]. As a result, parameter-space metrics can be misleading: two models may have large L2 distance yet produce nearly identical predictions, or conversely, small parameter distance may not guarantee functional equivalence if the models lie in different loss basins. 
+
+Functional equivalence as the principled alternative. We propose evaluating unlearning quality via functional equivalence metrics that directly measure agreement between model outputs rather than parameter configurations. Specifically, we adopt: 1. Output KL divergence: For classification tasks, let pretrain (· | x) and punlearn (· | x) denote the softmax output distributions of the retrained and unlearned models on input x. We measure KL output = Ex∼D test 
+
+DKL 
+
+ pretrain (· | x) ∥ punlearn (· | x) .
+
+2. Logit MSE: For regression or when logits are more interpretable, we measure MSE logit = Ex∼D test 
+
+∥zretrain (x) − zunlearn (x)∥22
+
+ ,
+
+where z(x) denotes the pre-softmax logits. 3. Test accuracy gap: The absolute difference in test accuracy between retrained and unlearned models, |Acc retrain − Acc unlearn |.These metrics are invariant to permutation symmetry and basin geometry, focusing instead on whether the unlearned model behaves like the retrained model on held-out data. 
+
+Empirical results on functional metrics. Table 9 reports these metrics for HF-KCU on CIFAR-10. The output KL divergence is 0.0023 nats, indicating near-identical prediction distributions. Logit MSE is 0.087, and the test accuracy gap is 0.37%, all confirming functional equivalence. Combined with MIA success rate of 0.499, these metrics provide strong evidence that HF-KCU successfully removes the target data’s influence without relying solely on parameter-space distance. Table 9: Functional equivalence metrics for HF-KCU vs. retrained model on CIFAR-10. 
+
+Metric HF-KCU Interpretation 
+
+Output KL divergence (nats) 0.0023 Near-identical distributions Logit MSE 0.087 Low prediction difference Test accuracy gap (%) 0.37 Minimal utility loss MIA success rate 0.499 Effective privacy restoration 20 D Limitations and Future Directions 
+
+CF Metric Instability. As discussed, the CF metric exhibits high variance when accuracy differences are small. The denominator |Acc trained − Acc retrain | in our experiments is 0.97%, causing sensitivity to small fluctuations. Alternative metrics such as prediction agreement rate, KL divergence between output distributions, or functional distance measures may provide more stable faithfulness assessment. 
+
+Approximation Quality. HF-KCU uses k = 10 CG iterations to approximate the inverse Hessian-vector product. While this provides good empirical results, tighter theoretical bounds on the approxi-mation error as a function of k would strengthen the method’s guarantees. 
+
+Sequential Unlearning. We evaluated single unlearning requests. Repeated unlearning may accumu-late approximation errors. Studying the stability of HF-KCU under multiple sequential deletions is important for production systems. 
+
+Heterogeneous Systems. Our experiments assume homogeneous client capabilities. Real federated systems exhibit device heterogeneity in compute, memory, and network. Adaptive strategies that account for client-specific constraints warrant investigation. 
+
+Beyond Vision. We focused on image classification with CNNs. Extending HF-KCU to transformers, large language models, and graph neural networks presents challenges due to different loss landscapes and parameter scales. 
+
+Memory Constraints for Ultra-Large Models. While our method reduces complexity from O(d3)
+
+to O(kd ) and avoids forming the Hessian matrix, storing the Krylov subspace vectors during CG iterations poses memory constraints for ultra-large architectures (e.g., modern LLMs with billions of parameters). Each CG iteration requires storing vectors of size d, and maintaining k such vectors requires O(kd ) memory. For models with d ∼ 10 9 parameters, even with k = 10 , this can exceed available GPU memory. Future work could explore memory-efficient variants such as truncated Krylov methods or low-rank approximations of the influence function. The work also highlights limitations of existing faithfulness metrics. The CF metric becomes unstable when accuracy differences are small, as observed in our experiments where |Acc trained − Acc retrain | <
+
+1% . This suggests the need for alternative metrics that remain reliable across different accuracy regimes, such as prediction agreement rates or functional distance measures.Our adversarial analysis is intentionally limited to bounded perturbation settings. In particular, we do not claim robustness against fully unconstrained adaptive poisoning attacks, strategic collusion across many clients, or minimax-optimal adversaries that explicitly optimize against the unlearning mechanism. Extending the framework to such settings would require a stronger game-theoretic or robust-optimization formulation together with dedicated attack evaluations. HF-KCU shows that federated systems can support practical data deletion without prohibitive computational costs, enabling compliance with privacy regulations while maintaining model utility. 21
