@@ -1,0 +1,924 @@
+Title: Preserving Data Privacy in Learning Causal Structure with Fully Homomorphic Encryption
+
+URL Source: https://arxiv.org/pdf/2606.05129v1
+
+Published Time: Thu, 04 Jun 2026 01:25:59 GMT
+
+Number of Pages: 13
+
+Markdown Content:
+# Preserving Data Privacy in Learning Causal Structure with Fully Homomorphic Encryption 
+
+Jian Yang 1,2, Tong Yuan 1, Qinbin Li 3, Zeyi Wen 1,2, Xiaofang Zhou 21Hong Kong University of Science and Technology (Guangzhou), 
+
+2Hong Kong University of Science and Technology, 3University of California, Berkeley 
+
+{jyang827,tyuan053 }@connect.hkust-gz.edu.cn, qinbin@berkeley.edu, {wenzeyi, zxf }@ust.hk 
+
+Abstract —Preserving data privacy is an important topic in structural data management and data mining. However, the issue of privacy leakage in distributed causal structure learning is a persistent challenge, especially in cases where data transmission and computation are required. In this paper, we propose amethod based on fully homomorphic encryption (FHE) that performs calculations on ciphertexts, keeping data encrypted in transition and computation. Nevertheless, adopting FHE to causal structure learning is challenging due to the high computation cost and limited support on division as well as logarithm operations in FHE. To tackle this challenge, we propose a series of novel techniques including (i) circuit simplification for better efficiency, (ii) approximation of division and logarithm through Newton-Raphson Reciprocal and Taylor expansion, and (iii) a batching technique with SIMD-acceleration to enhance the whole learning process. Additionally, our method can be easily extended beyond FHE by demonstration of its portability to support differential privacy. Empirical results show that our method achieves high consistency and comparable causal structure with the plaintext version in the datasets tested. Last, our method is efficient and practical to complete learning causal structures in tens of minutes even under the privacy protection of FHE. 
+
+Index Terms —Privacy-Preserving Data Processing, Homomor-phic Encryption, Causal Structure Learning 
+
+I. I NTRODUCTION 
+
+Causal learning [1] aims to learn probabilistic graphical models that employ directed acyclic graphs (DAGs) to com-pactly represent a set of random variables and their conditional dependencies. The learned structures are widely applied in data management of the smart city, such as traffic prediction [2] and automatic drive [3], thanks to its innate interpretability [4], [5]. Table I illustrates a dataset about traffic prediction and Figure 1 shows a causal structure for this traffic prediction example. Each column in the table represents a variable and opposites a node in the causal structure, while each row is a sample that records the values of these variables. In most samples, when Heavy Rain is true, Bad Vision and Slippery Road are true too, indicating Heavy Rain may lead to Bad Vision and Slippery Road . Hence, two edges “Heavy Rain”-“Bad Vision” and “Heavy Rain”-“Slipped Road” exist among these three variables. The relation between other variables can be inferred from the data, such as Bad Vision and Slipped Road are reasons for Accident . In addition, Accident may lead to Congestion and Injury .The data-driven approach has been used for learning causal structure quantitatively and automatically, to encap-TABLE I: Dataset of the causal structure example. 
+
+Heavy Rain Bad Vision Slippery Accident Congestion Injury 
+
+True False True True True True True True True False True False False False True True True True True True True False True False 
+
+... Heavy Rain 
+
+> Bad Vision
+> Congestion
+> Accident
+> Injury
+> Slippery
+
+Fig. 1: An example of causal structure. sulate causal relationships among the variables. A corner-stone of structure learning algorithms is the PC-stable [6], which commences with a complete undirected graph and eliminates edges at sequential depths based on CI tests. Notably, the PC-stable algorithm has found widespread use in diverse applications [7], [8] and has been implemented in mainstream causal learning packages such as bnlearn [9] and tetrad [10]. On the other hand, privacy-preserving causal structure learning represents a significant area of exploration. At present, fully homomorphic encryption (FHE) [11], capable of directly executing addition and multiplication operations on ciphertexts, addresses issues related to data transmission and computation. This makes it particularly fitting for privacy-focused causal structure learning. However, the following three major challenges are associated with the learning: (i) the computation circuit of FHE for causal structure learning is complex and large, requiring careful design to guarantee correctness and efficiency; (ii) division and log operations in causal structure learning are hard problems in FHE [12]; (iii) the complex circuit for structure learning further aggravates the time-consuming issue of FHE. To overcome these challenges in the FHE-based method, we propose a privacy-preserving causal structure learning system to handle this secure computation problem. Firstly, we reduce the complexity of computation circuits and the number of 1
+
+> arXiv:2606.05129v1 [cs.CR] 3 Jun 2026
+
+computation operations by substituting fractions and terms within the equations. Secondly, we carefully design arithmetic circuits to approximate division and logarithm by addition and multiplication, while ensuring the retainment of efficiency and precision. Thirdly, we develop several techniques for en-hancing efficiency and precision, which include (i) the SIMD techniques to compress numerous conditionally independent (CI) tests into one batch and expedite execution, thereby significantly enhancing the speed of the proposed method; (ii) deliberated initial guesses and expansion to reduce the number of iterations and boost the performance; (iii) optimizing the communication cost by transferring only crucial data. Lastly, we demonstrate the portability of our method by adapting it to differential privacy. To sum up, we make the following major contributions in this paper.  
+
+> •
+
+We propose a privacy-preserving causal structure learning method in distributed systems by fully homomorphic encryption, which isolates the plaintext of computation and the executor of computation and guarantees plaintext security. The proposed method is versatile and can be effortlessly extended to accommodate differential privacy.  
+
+> •
+
+To support division and logarithm, we design two ap-proximate circuits to compute the division by Newton-Raphson reciprocal and logarithm by Taylor expansion, ensuring precision and efficiency.  
+
+> •
+
+Our proposed method is equipped with a series of tech-niques for good efficiency, including batching techniques to enhance efficiency by grouping many CI tests into a single batch for concurrent execution, better initial guesses for reciprocal and expansion points for logarithm to converge faster, and transferring only crucial data to save communication overhead.  
+
+> •
+
+We conduct extensive experiments to validate the cor-rectness, efficiency, and scalability of our method. The results prove that our method can complete the task efficiently and correctly, and can be extended across multiple machines. II. P RELIMINARIES 
+
+In this section, we initially provide the terminologies and definitions related to causal structure learning and review the learning algorithms. Then, we present two methodolo-gies for safeguarding privacy: differential privacy (DP) and fully homomorphic encryption (FHE). DP preserves personal information by infusing noise into individual data that does not change the statistics of interest, while FHE enables the execution of addition and multiplication operations directly on ciphertext without decryption. 
+
+A. Causal Structures 
+
+Causal structures are a class of probabilistic graphical models that represent a joint distribution P over a set of random variables V = {V 1, V2, ..., Vn} via a DAG. Typically, one variable corresponds to one feature in machine learning problems. We use G = ( V, E) to denote the DAG. In a DAG 
+
+G, each node in V is associated with one variable, and each edge in E represents conditional dependencies among the two variables. Vj is called a parent of Vi if there exists a directed edge from Vj to Vi in G, and we use P a (Vi) to denote the set of parent variables of Vi.In a causal structure, each variable has its local probability distribution that describes the probabilities of possible values of this variable given its possible parent configurations. The joint probability of variables V in a causal structure can be decomposed into the product of local probability distributions of each variable, and each local probability distribution only depends on its correlated variable Vi and its parents: 
+
+P (V1, V2, . . . , Vn) = Qni=1 P (Vi|P a (Vi)) , where n is the number of variables in V, P (V1, V2, ..., Vn) represents the joint probability of the variables and P (Vi|P a (Vi)) represents the conditional probability of variable Vi.
+
+B. Conditional Independence Tests 
+
+Consider some random variables Vi, Vj and Vk in a causal structure, a CI test assertion of the form I(Vi, Vj |{V k}) means 
+
+Vi and Vj are independent given Vk. Given dataset D, a CI test I(Vi, Vj |{V k}) determines whether the corresponding hypothesis I(Vi, Vj |{V k}) holds or not. In the domain of discrete variables, two commonly employed primary statistical tests are the χ2 and G2 tests [13] defined as: 
+
+χ2 = X
+
+> x,y,z
+
+(Nxyz − Exyz )2
+
+Exyz 
+
+(1) 
+
+G2 = 2 X
+
+> x,y,z
+
+Nxyz log Nxyz 
+
+Exyz 
+
+, (2) where Nxyz is the number of samples in D that satisfy Vi = x,
+
+Vj = y and Vk = z. The value of Nxyz can be obtained from the contingency table that shows the frequencies for all configurations of values. G2 could be considered as a simple version of χ2 and follows an asymptotic χ2 distribution with 
+
+(|V i| − 1)( |V j | − 1) , where | · | denotes the number of possible values of the variable. The p-value of χ2 distribution can be calculated according to the G2 statistic and the final decision is made by comparing the p-value with the significance level 
+
+α. If p-value is greater than α, the independent hypothesis 
+
+I(Vi, Vj |{V k}) is accepted; otherwise, the hypothesis is re-jected. Exyz is the expected frequency which is defined as 
+
+Exyz = Nx+z N+yz 
+
+N++ z
+
+, (3) where Nx+z = P 
+
+> y
+
+Nxyz , N+yz = P 
+
+> x
+
+Nxyz , and N++ z =P 
+
+> xy
+
+Nxyz , which represent the marginal frequencies. 
+
+C. The Causal Structure Learning Algorithm 
+
+The PC-stable algorithm [14] is one of the most popular methods for causal structure learning from data. PC-stable consists of three steps. The first step is to determine the skeleton of the graph. The term skeleton means the underlying undirected graph of the learned structure. This step is done by performing a large number of CI tests. The second step is to identify the v-structures in the skeleton. A v-structure is a 2Algorithm 1: Causal Structure Learning Algorithm.  
+
+> 1
+
+Input: Node set V, Dataset D 
+
+> 2
+
+Output: Graph G, SepSet  
+
+> 3
+
+Graph G ← − FormCompletedGraph( V) = V × V  
+
+> 4
+
+Depth d ←− 0 
+
+> 5
+
+Let a(Vi) represent adjacency nodes of Vi 
+
+> 6
+
+repeat  
+
+> 7
+
+for any edge (Vi, Vj ) in G do  
+
+> 8
+
+repeat  
+
+> 9
+
+Choose a new S ⊆ a(Vi)\{V j } with |S| = d 
+
+> 10
+
+Perform CI test I(Vi, Vj |S ) 
+
+> 11
+
+if hypothesis I(Vi, Vj |S ) holds then  
+
+> 12
+
+Remove (Vi, Vj ) from G 
+
+> 13
+
+Store S in SepSet (Vi, Vj ) 
+
+> 14
+
+end if  
+
+> 15
+
+until (Vi, Vj ) is removed or all S are considered  
+
+> 16
+
+d ←− d + 1  
+
+> 17
+
+until all pairs of (Vi, Vj ) in G satisfy |a(Vi)\{V j }| < d 
+
+triple (Vi, Vj , Vk) that can be denoted by Vi → V k ← V j .In other words, nodes Vi and Vj have an outgoing edge to node Vk and are not connected by any edge in the graph. The v-structure is a key component to distinguish different causal structures. By identifying the v-structures in this step, some edges in the skeleton become directed edges. The third step is to set directions for as many of the remaining undirected edges as possible by applying a set of rules called Meek rules [15]. For example, we set the direction of the undirected edge Vj − V k into Vj → V k whenever there is a directed edge 
+
+Vi → V j such that Vi and Vk are not adjacent; otherwise a new v-structure is created. In the three steps of the PC-stable algorithm, only the first step involves data exchange [16], and hence we focus on privacy protection for the first step, which is further elaborated to protect the privacy of the learning process in Section III. The pseudo-code of the key part of the causal structure learning with PC-stable is given in Algorithm 1. The general idea is to initialize G to a complete undirected graph over the node set V (Line 3), and remove some of the edges determined as independent by performing a number of CI tests in consecutive depths (Lines 6 to 16). Specifically, at each depth d, the algorithm iteratively records the current adjacency sets of all the nodes, where a(G, Vi) denotes the adjacent nodes of Vi in G (Line 5). This operation is used for choosing the separating set S later. Next, for every edge (Vi, Vj ) in the graph G, a number of CI tests I(Vi, Vj |S ) are performed for different separating sets. The elements in the separating sets are chosen from a(Vi)\{V j }, and the size of each separating set |S| is equal to the current depth d (Lines 7 to 10). If there exists a separating set S where Vi is independent of 
+
+Vj given S, the edge (Vi, Vj ) is removed from G, and S is stored in SepSet (Vi, Vj ) (Lines 11 to 13). SepSet (Vi, Vj )
+
+denotes the separating set of Vi and Vj , which is used in the second step of the PC-stable algorithm to identify the v-structures. Since the second step is fast and is not the focus of our work, we omit the details of separating set. Once all edges are considered, d is incremented (Line 15) and the above procedure is repeated for the next depth. Depth d is used to control the size of the separating sets from small to large. This process continues until all pairs of adjacent nodes (Vi, Vj ) in 
+
+G satisfy |a(Vi)\{V j }| < d as shown in Line 16. 
+
+D. Differential Privacy 
+
+Differential privacy (DP) provides a quantifiable privacy assurance that prevents the exposure of individual’s sensitive information in a dataset, while allowing useful computations on the aggregate data [17]. The objective of DP ensures that the inclusion or exclusion of a single individual’s data does not significantly affect the total results. Formally, a randomized algorithm M satisfies ϵ-DP if for any two adjacent datasets 
+
+D and D′ that differ in at most one record, and any subset S
+
+of the range of M, the probability of M(D) outputting S is bounded by: 
+
+P r [M(D) ∈ S] ≤ eϵ · P r [M(D′) ∈ S]
+
+where ϵ > 0 is a parameter that controls the strength of privacy guarantee and δ is a small constant that represents the probability of the algorithm deviating. The goal of DP in distributed machine learning is to ensure that the learning process does not leak the privacy of personal data [18]. This is usually achieved by adding carefully calibrated random noises to the computation process which prevents reconstruction of individual records from the shared outputs. To ensure consistency with the origin algorithm, the added noise should balance the privacy and utility [19]. This balance is crucial because if too much noise is added, the utility of the data can be compromised while adding too little noise can risk privacy. There are various techniques to add noise like the Laplace Mechanism and Exponential Mechanism [17], [20]. Each of these approaches varies in their theoretical privacy guarantees, computational requirements, and impact on the final model’s accuracy. DP provides robust privacy guarantees in the face of side-channel attacks and post-processing. Hence, it has gained considerable interest in the research community for its potential to protect privacy in distributed machine learning systems. 
+
+E. Fully Homomorphic Encryption 
+
+Fully homomorphic encryption (FHE) [11] has become a cornerstone in the field of privacy-preserving machine learn-ing. It allows computations to be performed on encrypted data without requiring access to the decryption key, thereby ensuring data privacy FHE operations mainly consist of two types: addition and multiplication. Let c1 and c2 be two ciphertexts encrypting plaintexts m1 and m2, respectively. The homomorphic properties of FHE can be defined as follows:  
+
+> •
+
+Addition: Dec sk (c1 + c2) = m1 + m2 
+
+> •
+
+Multiplication: Dec sk (c1 · c2) = m1 · m2
+
+3where Dec sk denotes the decryption function using se-cret key sk . The Brakerski-Fan-Vercauteren (BFV) [21] and Boneh-Goh-Nissim (BGV) [22] schemes support computa-tions on integers and binary data. The Cheon-Kim-Kim-Song (CKKS) scheme is a variant of FHE that supports approxi-mate arithmetic on complex numbers, making it suitable for handling floating-point data [23]. The scale ∆ in CKKS is a parameter that controls the precision of the computations. The encryption of a message m in CKKS can be represented as 
+
+c = Enc pk (m; ∆) , where pk is the public key. The decryption of a ciphertext c is Dec sk (c) ≈ m, where the approximation is due to the inherent noise in the CKKS scheme. In the CKKS scheme, batching is a technique in FHE that allows a single ciphertext to encrypt a vector of plain-texts, thereby enabling single instruction multiple data (SIMD) operations. This is particularly useful in machine learning applications where computations are often performed on large datasets. In the context of FHE, SIMD operations can be per-formed in parallel on the encrypted data, leading to significant speedup. III. M ETHOD 
+
+This section introduces our proposed privacy-preserving causal structure learning method in the distributed setting. The overview of our proposed method is shown in Figure 2. According to the figure, the coordinator starts the process by raising a CI test and notifying all the machines. Then, each machine computes local results, encrypts the local results, and sends ciphertexts to the coordinator. Later, the coordinator computes global results according to ciphertexts of local results, obtains encrypted global results, and sends global results back to machines. Finally, each machine decrypts global results, and updates the local network referring to global results. The coordinator aggregates local results and produces global results. Our proposed method is applicable to typical distributing settings. In a typical distributed learning scenario, the training dataset is stored in multiple machines. Each worker machine stores a distinct partition of the training dataset. A typical training dataset comprises several samples, each containing multiple dimensions. In the context of causal structure learn-ing, these dimensions are referred to as nodes. Each sample consists of the values of these nodes, while each node can have varied values across different samples. Unlike the single machine scenario where each process can access the entire dataset and distribute tasks among nodes, here, processes are restricted to access only a subset of the training data. These processes execute tasks in parallel on their specific samples, following the instructions set forth by the coordinator. In the following of this section, the technical details of our proposed method are introduced in four parts.  
+
+> •
+
+First, we describe distributed causal structure learning where each machine holds a subset of the training data. Each machine computes the local results based on the subset it holds, and sends local results to the coordina-tor. This method enables the distributed causal structure ... Coordinator Machine 0 Global data Machine 1 Machine n Machine Coordinator Local data Counter CI Test Gen En/Decoder Local Network Raise CI test  
+
+> Compute local result Encrypt local result
+> Compute global result
+> Decrypt global result Update local network Arithmetic C ircuit Local Data 0 Local Data 1 Local Data n
+
+# ... 
+
+Fig. 2: The pipeline of our proposed privacy-preserving dis-tributed causal structure learning method. learning method on horizontally partitioned data to output identical learning results as the causal structure method on the entire data.  
+
+> •
+
+Second, we present the threat model of our privacy-preserving distributed causal structure learning. There are two threats from the computation process due to coor-dinators’ curiosity and data leakage in communication channels. The coordinator may infer some sensitive in-formation from machines’ data collected in computation. Communication channels transfer correct information but leak information to attackers. We show that these two threats can be solved by privacy-preserving techniques, such as homomorphic encryption.  
+
+> •
+
+Third, we elaborate on the details of our proposed full privacy protection solution with fully homomorphic encryption (FHE). FHE supports applying addition and multiplication directly on ciphertexts without decryption. With this property, we design a conditional independent (CI) test system where machines encrypt their individual local results and transmit encrypted local results to the co-ordinator. The coordinator performs arithmetic operations on encrypted local results and obtains encrypted global results by FHE in complete unawareness of the plaintext. For log( x) and 1/x functions in CI tests, we design arithmetic circuits to calculate them by FHE addition and multiplication. In addition, we accelerate the execution of CI tests by the SIMD-style batching technique.  
+
+> •
+
+Finally, to prove the portability to other privacy-preserving algorithms, we illustrate the differential pri-vacy version of our proposed privacy-preserving causal structure learning. The mechanism builds a noise distri-bution whose mean is zero and draws a noise from it for each data sum operation. The noise avoids reverse reasoning that discriminates individual data, while zero-mean offsets the errors caused by noise. 
+
+A. Causal Structure Learning in Plaintext 
+
+To decide the existence of an edge in the causal structure, we conduct CI tests based on separating sets from neighbor nodes of its two endpoints. The depth is equal to the size of the 4separating set, increasing one by one at each level. The size of the separating set affects the computation efficiency: smaller separating sets have lower computation costs when testing the existence of edges, while the cost grows exponentially with the increase of the size [24]. When performing the CI test, the coordinator machine raises a CI test request containing an edge and a separating set. It notifies worker machines to calculate partial results based on the subset they hold. After that, worker machines send their partial results to the coordinator to obtain the final results, and then the worker machines decide whether to delete the edge according to the final results. Considering the CI tests in Equations (1) and (2), calculating the value of G2 and χ2 need to compute Exyz and Nxyz 
+
+first. In a single machine setting, it is easy to count Exyz 
+
+and Nxyz in one pass. However, in multiple machine settings, each machine needs to count local results and the coordinator merges local results into one global result. The term Nxyz 
+
+can be computed by aggregating the partial/local results N ixyz 
+
+from each worker machine, i.e., Nxyz = Pi N ixyz . Similarly, other terms can be computed using the following formulas: 
+
+Nx+z = Pi N ix+z , N+yz = Pi N i 
+
+> +yz
+
+, N++ z = Pi N i 
+
+> ++ z
+
+,where N ixyz , N ix+z , N i 
+
+> +yz
+
+, and N i 
+
+> ++ z
+
+represent the local 
+
+Nxyz , Nx+z , N+yz , and N++ z of the i-th worker machine, respectively. For each CI test, we need to aggregate these values to obtain global results that consider all the disjoint subsets of the entire training dataset. The pseudo-code of the causal structure learning algorithm in a distributed environment is provided in Algorithm 2. We add a machine set M and training dataset D as the input (Line 1) for this setting. The initial part keeps the same as the Algorithm 1 (Lines 3-5). For the computation part (Lines 6-19), we first raise a new CI test request and inform the request to the worker machines (Line 8). Then each machine 
+
+Mi ∈ M computes local results referring to their local dataset (Line 10) and sends local results to the coordinator M0 (Line 11). Following that, the coordinator M0 collects local data and calculates global results (Line 12). M0 compares global results with the p-value (Line 13) and determines the existence of the edge (Lines 14-16). After finishing the CI test in this level d, the program turns to the next level to conduct CI tests (Line 18). 
+
+B. Threat Model 
+
+In the context of our threat model, we make certain as-sumptions to delineate potential risks and vulnerabilities in our system. Specifically, we assume that all the machines involved in the learning process, as well as the coordinator, are honest actors who strictly adhere to the established protocol for conducting computation and communication. However, we acknowledge that the coordinator may harbor a certain level of curiosity, seeking to infer sensitive information from the data provided by the machines. Our primary objective is to ensure the confidentiality and privacy of the data while allowing the computation to proceed. To this end, we outline the key threats and countermeasures within our threat model. 
+
+Algorithm 2: Causal Structure Learning in Plaintext.  
+
+> 1
+
+Input: Node set V, Machine set M, Dataset Di ∈ D ,
+
+Mi holds Di, M0 is Coordinator  
+
+> 2
+
+Output: Graph G, SepSet  
+
+> 3
+
+Graph G ← − FormCompletedGraph( V) = V × V  
+
+> 4
+
+Depth d ←− 0 
+
+> 5
+
+Let a(Vi) represent adjacency nodes of Vi 
+
+> 6
+
+repeat  
+
+> 7
+
+repeat  
+
+> 8
+
+C raise a CI test I(Vi, Vj |S ) 
+
+> 9
+
+parallel for each machine Mi do  
+
+> 10
+
+Count N ixyz , N ix+z , N i 
+
+> +yz
+
+, and N i 
+
+> ++ z
+
+in Di 
+
+> 11
+
+Send these four values to M0 
+
+> 12
+
+end parallel for  
+
+> 13
+
+M0 calculate Nxyz , Nx+z , N+yz , and N++ z by local values  
+
+> 14
+
+M0 obtain p-value and compare p-value with threshold  
+
+> 15
+
+if hypothesis I(Vi, Vj |S ) holds then  
+
+> 16
+
+Remove (Vi, Vj ) from G 
+
+> 17
+
+Store S in SepSet (Vi, Vj ) 
+
+> 18
+
+end if  
+
+> 19
+
+until (Vi, Vj ) is removed or all S are considered  
+
+> 20
+
+d ←− d + 1  
+
+> 21
+
+until all pairs of (Vi, Vj ) in G satisfy |a(Vi)\{V j }| < d 
+
+Threat 1: Coordinator’s Curiosity: The coordinator may attempt to infer sensitive information from the data pro-vided by the machines during computation, compromising the privacy of the individuals or entities whose data is being processed. 
+
+Countermeasure: To mitigate this threat, we must ensure that the data remains secret throughout the computation con-ducted on the coordinator. This can be achieved through the use of advanced cryptographic techniques, including homo-morphic encryption. Homomorphic encryption allows compu-tations to be performed on encrypted data, preserving privacy while still obtaining the desired results. 
+
+Threat 2: Data Leakage through Communication Chan-nels: During the communication phase, communication chan-nels may transfer correct data but inadvertently leak data to unauthorized parties, compromising the integrity of the data. 
+
+Countermeasure: To protect against this threat, we must implement mechanisms that enable secure and private com-munication. This involves employing cryptographic techniques such as asymmetric cryptography to verify the correctness of data transmission without exposing sensitive information. 
+
+C. Learning with Fully Homomorphic Encryption 
+
+Here, we illustrate the fully homomorphic encryption ver-sion of the causal structure learning method. The fully homomorphic encryption supports multiplication and addi-tion, which can be extended to various complex operations. Our proposed method is based on Cheon-Kim-Kim-Song 5(CKKS) [23] scheme, supporting float-point addition and operations that are required by the CI tests. A nice property of CKKS is that it allows computing a batch of inputs in one pass, which can significantly enhance learning efficiency when used properly. During the structure learning process, CI tests, either based on G2 or χ2, are essential. To ascertain the value of χ2 and G2,it is necessary to perform division and log operations, referring to Equations (1) and (2). For these operations, we employ Newton-Raphson reciprocal and Taylor expansion techniques to approximate the real values. Additionally, in the context of fully homomorphic encryption, a single CI test requires a fixed amount of time and memory resources, determined by the complexity of the arithmetic circuit. Given the modest and constant resource consumption for a single CI test, a machine can concurrently support multiple CI tests. Drawing inspiration from SIMD parallel techniques, we concurrently execute a batch of CI tests to minimize the total time required. 
+
+1) Arithmetic Circuit for 1/x : In fully homomorphic en-cryption, each computation task has an arithmetic circuit, which is recognized as a task execution flow graph. Let us take the G2 case as an example, we compute Nxyz and Exyz first. Then we calculate 1/E xyz by Newton-Raphson reciprocal formula. After that, we multiply 1/E xyz with Nxyz and obtain 
+
+Nxyz /E xyz . In the Newton-Raphson reciprocal calculation, the formula is derived from Newton’s method by considering the reciprocal function f (x) = 1 /x and solving for the root of 
+
+f (x)−r = 0 , where r is the reciprocal estimate. The resulting iteration formula is: 
+
+rt+1 = rt(2 − xr t) (4) which converges quadratically to the true reciprocal value. The reciprocal computation executes iteratively for several times to obtain the precision results. Figure 3 illustrates the procedure of the arithmetic circuit for 1/x . We input x and an initial guess, then iterate computing Equation (4) t times, and obtain approximate 1/x .2Initial Guess if ( n times) 01
+
+Fig. 3: Newton-Raphson reciprocal circuit for 1/x .
+
+2) Arithmetic Circuit for log( x): The calculation of G2
+
+involves computing log Nxyz  
+
+> Exyz
+
+which can be approximated by Taylor expansion of log in x0 = 1 , because Nxyz /E xyz is around 1. Once we finish these steps, we directly compute the product of log NXyz  
+
+> Exyz
+
+with Nxyz and sum the product over every 
+
+xyz tuple. More specifically, the three-term Taylor expansion for f (x) on x0 = a is as follows: 
+
+f (x) ≈ f (a) + f ′(a)( x − a) + f ′′ (a)2! (x − a)2.
+
+Considering Nxyz /E xyz is near 1 because Nxyz is close to 
+
+Exyz in most cases, we expand log on x0 = 1 :
+
+log( x) ≈ (x − 1) − (x − 1) 2
+
+2 + (x − 1) 3
+
+3 .
+
+Here we implement the arithmetic circuit of the above equation using only multiplication and addition to approximate the log 
+
+function. The three-term expansion has enough precision for the CI test, while more terms lead to higher computation costs but slight performance improvement, due to the exponential growth of the number of multiplication operations. Figure 4 shows the three-term Taylor expansion circuit for approximate 
+
+log( x). We compute x1, x2 and x3, then multiply them with coefficients 1, 12 and 13 . Finally, we assemble by addition and subtraction together to obtain log( x).1
+
+Fig. 4: Taylor expansion circuit for log( x).
+
+3) Calculation for χ2 Test: After building 1/x and log( x)
+
+circuits, we can implement χ2 and G2 CI test circuits. To calculate the value of χ2, we substitute Equation (3) into Equation (1). If we calculate the value χ2 first, we need to conduct reciprocal twice. First, we compute 1/N ++ z , and then we require to calculate 1/E xyz . The complexity of arithmetic grows up exponentially when the depth of the arithmetic circuit increases. So we reduce the fraction by multiplying N 2++ z to both the denominator and numerator and obtain a new fraction that only needs one reciprocal. The derivation is shown as follows: 
+
+χ2 = X
+
+> x,y,z
+
+(Nxyz − Exyz )2
+
+Exyz 
+
+= X
+
+> x,y,z
+
+(Nxyz − Nx+z N+yz  
+
+> N++ z
+
+)2 
+
+> Nx+zN+yz
+> N++ z
+
+= (Nxyz N++ z − Nx+z N+yz )2
+
+N+yz Nx+z N++ z
+
+Figure 5 illustrates the arithmetic circuit of our proposed 
+
+χ2 calculation method. We obtain N+yz , Nx+z , and N++ z by marginalizing Nxyz over x, y and z, respectively. Then, we feed these values into the circuit. (Nxyz N++ z − Nx+z N+yz )2
+
+and 1   
+
+> N+yz Nx+zN++ z
+
+can be computed in parallel and incorpo-rate them by a multiplication operation. After the execution of the circuit, we obtain the χ2 value. 
+
+4) Calculations for G2 Test: Here, we discuss the compu-tation process of G2, which also faces the same problem that has two reciprocal operations. We adopt a similar solution to simplify the equation by multiplying N++ z to the denominator and numerator of Nxyz  
+
+> Exyz
+
+together. In the end, we obtain a simpler equation that only requires one reciprocal operation. The derivation is shown as follows: 62Fig. 5: The χ2 Calculation Circuit. 
+
+G2 = 2 X
+
+> x,y,z
+
+Nxyz log Nxyz 
+
+Exyz 
+
+= 2 X
+
+> x,y,z
+
+Nxyz log Nxyz Nx+z N+yz 
+
+> N++ z
+
+= 2 X
+
+> x,y,z
+
+Nxyz log Nxyz N++ z
+
+Nx+z N+yz 
+
+Figure 6 describes details of the arithmetic circuit. N+yz ,
+
+Nx+z and N++ z can be obtained from Nxyz . Then, they are fed into the circuit shown in the figure. After that, we calculate 
+
+Nxyz N++ z and 1  
+
+> Nx+zN+yz
+
+simultaneously and multiply them to get Nxyz N++ z  
+
+> Nx+zN+yz
+
+. Nxyz N++ z  
+
+> Nx+zN+yz
+
+is input to the log module and multiply with Nxyz to obtain G2 finally. 2
+
+Fig. 6: The G2 Calculation Circuit. 
+
+5) Enhancing Efficiency with Batching: It is known that fully homomorphic encryption is computationally expensive, and parallelism is a technique to accelerate computation. However, the crucial path in the circuit cannot be executed concurrently due to data dependency, while the crucial path dominates the total execution time. Therefore, it is infeasible to decompose a circuit and runs its subparts in parallel. In this paper, we utilize multiple circuit parallelism to improve efficiency. Following the CKKS scheme, a batch of input values can be encoded in one vector and be performed as one input to participate in operations. After finishing these computations, the outputs are also formed as a vector that contains the resulting values. The batching scheme is defined as follows: 
+
+I = {I1 ⊕ I2 ⊕ ... ⊕ In},
+
+O = {O1 ⊕ O2 ⊕ ... ⊕ On},f (I) = O, f (Ii) = Oi,
+
+where f : I → O is the arithmetic circuit; Ii and Oi is the i-th input and output value, respectively; I and O is the input and output vectors that concat all the input and output values, respectively. cAs can be seen from the above scheme, executing the arithmetic circuit for every input value one by one can obtain the same result as running the circuit in one batch. The batching technique can significantly enhance efficiency, thanks to its single instruction multiple data (SIMD) nature. In our causal structure setting, one CI test may take a large amount of running time, which is much larger than the overhead of batching. 
+
+6) Other Optimization Details: Here, we provide the details of other optimization techniques, including initial guesses selection for the reciprocal circuit, point of Taylor expansion, and packing ciphertext for efficient communication.  
+
+> •
+
+Initial Guess : The initial guess of the reciprocal should be selected carefully for fast convergence. For the input 
+
+x, the initial guess should be smaller than its reciprocal value [25]. Otherwise, it may not converge to the correct result. However, overly small initial guesses lead to excessive iterations and slow convergence. In this paper, we propose to choose the initial guess as the reciprocal of the maximum input, which guarantees correctness while achieving good efficiency.  
+
+> •
+
+Expansion Point : The point of Taylor expansion x0 is crucial, because the approximate value is more precise when input value x is near x0. It means that x0 should ideally be in the center of the domain of x. For log Nxyz  
+
+> Exyz
+
+,it is common to compute it by ( log Nxyz − log Exyz ). However, it is difficult to find where to expand log Nxyz 
+
+and log Exyz , because values of Nxyz and Exyz vary. In comparison, Nxyz  
+
+> Exyz
+
+is around 1, since Nxyz and Exyz 
+
+have similar values in most cases. Therefore, expanding the function in x0 = 1 leads to a more accurate solution for calculation.  
+
+> •
+
+Ciphertext Condensation : For computation efficiency, ciphertext occupies a fixed space in memory at the beginning. The subsequent growth of ciphertext due to the progress of computation does not need to allocate new space, thanks to the memory pre-allocation. How-ever, to perform efficient communication, we condense the unused part of the ciphertext and only transfer the used part to the receiver. Then, the receiver rebuilds the ciphertext by compositing the used part. 
+
+D. Learning with Differential Privacy 
+
+We describe the differential privacy module in this sub-section. Considering the G2 computation in the distributed setting, it is easy to steal information in the data transfer process. Attackers analyze local results from each machine and infer individual information. To avoid the inference that obtains local information, we adopt differential to enhance the security of data transfer and aggregation. We can recap Lines 10-12 of Algorithm 2, which sends and receives the plaintext of local results, leaking local information about the individual privacy of machines. To protect the privacy of transfer and processing, a simple approach is to add noise that the total sum is zero to these local results. One approach to achieve ϵ-DP is to draw noise from a Laplace distribution Lap (0 , ∆fϵ ) that the expected mean is zero and scale is ∆fϵ [17]. Equation (5) shows the Laplace Mechanism 7TABLE II: Dataset information.                             
+
+> Dataset #Nodes #Edges #States #Samples
+> child 20 25 65000
+> insurance 27 52 55000
+> water 32 66 45000
+> alarm 37 46 45000
+> hepar2 70 123 45000
+> win95pts 76 112 25000
+
+function F (D), which can add noise to the original function 
+
+f (D). ∆f = max D′ ||D−D ′|| , where D′ only has one-sample difference with D.
+
+F (D) = f (D) + Lap (0 , ∆fϵ ). (5) In the context of causal structure learning, we modify the four local results N ixyz , N ix+z , N i 
+
+> +yz
+
+, and N i 
+
+> ++ z
+
+to 
+
+F (N ixyz ), F (N ix+z ), F (N i 
+
+> +yz
+
+), and F (N i 
+
+> ++ z
+
+). The modified local results can obtain an approximate result of the original result. In the training process, the local results require noise to protect the information. Large noise is beneficial to protect privacy but is harmful to the original information. How to control the size of the noise is also a crucial problem, and one needs to balance privacy and accuracy problems. IV. E XPERIMENT 
+
+In this section, we undertake experiments to investigate the efficacy and performance of our implementation that incorporates differential privacy (DP) and fully homomorphic encryption (FHE), and we compare the findings with baseline methods. Furthermore, we analyze the elapsed time, memory usage, and communication overhead associated with our pro-posed method. Finally, we investigate the trade-off between execution duration, memory utilization, and precision. 
+
+A. Experiment Setting 
+
+The experiments were conducted in 10 machines that are equipped with AMD EPYZ 7502 32 cores-64 threads CPU and 320GB memory. The proposed causal structure learning algorithm is implemented in C++ under the C++20 standard, with OpenMPI to support distributed and parallel computing. To implement fully homomorphic encryption computation, we adopt the Microsoft SEAL [26] as FHE library and EVA [27] as FHE compiler. We used χ2 and G2 test statistics to perform the CI tests while setting the significance level α to 0.05 in all the experiments. 
+
+Datasets : The datasets used in the experiments are summa-rized in Table II. These datasets used are generated from eight benchmark causal structures of different sizes and max status. These datasets illustrate problems from different fields and are widely used in other causal structure learning studies [28]. We obtained 5,000 samples of data with no missing values from each benchmark causal structure. Each dataset has nodes, edges, and states, which composite a causal structure. Every node represents one variable in a dataset, which is connected with other variables by edges. One edge between two nodes indicates one conditional dependency relation between two variables with an arrow for direction. States represent values of variables and are categorical types. Two-state variables have two types of value: T rue and F alse . Three-state may have High , M iddle , and Low . Edges from one node may arrive at different nodes in different states. For example, there are three nodes V1, V2, and V3 under a two-state setting. Edge V1
+
+> T rue
+
+−−−→ V 2 means that when value of V1 is T rue ,next node of V1 is V2. In addition, there may also have one edge V1
+
+> F alse
+
+−−−−→ V 3 or V1
+
+> F alse
+
+−−−−→ V 2. If V1
+
+> T rue
+
+−−−→ V 2 and 
+
+V1
+
+> F alse
+
+−−−−→ V 2, then it represents that both cases of V1 taking 
+
+T rue or F alse transit to V2.
+
+Distributed Learning Setting : For the k machines setting, we horizontally partition dataset D into k parts; Di represents the i-th dataset and is the dataset of i-th machine Mi. We set 
+
+k = 2 for most cases except the scalability part of experiments. For each level of causal structure learning, we encode all CI tests in one batch and input the batch to the arithmetic circuit in one pass to obtain encrypted p-values. Then the encrypted p-values are sent to machines and machines decrypted p-values to decide the existence of edges. Finally, each machine obtains consistent causal structures. For each level in causal structure learning, we packed all the CI tests in one batch on the client node and passed the encrypted batch to the arithmetic circuit in the coordinator in one pass to obtain encrypted χ2 or G2
+
+values. Once the values are sent back to the client machines, they are decrypted and the p-value is obtained from the lookup table. Finally, the dependence of each edge can be determined, by which consistent causal structures on the client machine are obtained. 
+
+B. Consistency Verification 
+
+The most important object for privacy-preserving causal structure learning is correctness, which means that we should ensure the proposed method produces similar results as the one without encryption. The baseline of this experiment is the causal structure learning in plaintext method discussed in Section III-A. We used the consistency of CI tests, and com-pared two causal structures with structural hamming distance (SHD). The SHD measurements are commonly used in causal structure learning [29]. The experiments were conducted under 
+
+G2 and χ2 tests for the learned causal structure to verify the correctness. For the CI tests, we compared the results output by our method and the plaintext method, and then counted the con-sistent numbers. Figure 7a and Table III illustrate the CI test consistency ratios: the overlapping ratio of CI test outcomes from our method and the plaintext method. From Table III, the average results across 6 datasets demonstrate that the consistency of our method is around 85%. An observation is that in G2 of alarm and χ2 of child , the consistency is over 90%. In win95pts , alarm , hepar2 , insurance , and child , the G2
+
+obtains better results than χ2, while results of χ2 are better in 
+
+water .From the level perspective, the CI tests at level 0 are more consistent than those at level 1, because level 0 does not have 8TABLE III: Consistency of CI test at each level between our approach and the plain version.                                                        
+
+> Dataset win95pts alarm hepar2 water insurance child
+> Level χ2G2χ2G2χ2G2χ2G2χ2G2χ2G2
+> 00.931 0.989 0.881 0.991 0.864 0.993 0.925 0.988 0.937 0.972 0.911 1.000 10.731 0.846 0.833 0.896 0.611 0.833 0.849 0.792 0.865 0.814 0.928 0.963 Average 0.746 0.833 0.833 0.900 0.641 0.863 0.854 0.833 0.862 0.826 0.922 0.960 child
+> win95pts
+> alarm
+> hepar2
+> water
+> insurance
+> 0.6
+> 0.7
+> 0.8
+> 0.9
+> 1.0
+> Consistency  2
+> G2
+> (a) CI test insurance
+> win95pts
+> hepar2
+> water
+> child
+> 0.0
+> 0.5
+> 1.0
+> 1.5
+> SHD(test/ref)  2
+> G2(b) SHD
+
+Fig. 7: SHD and CI tests consistency. a separating set, which leads to shorter computation process, which has less precision loss than a longer process. From different tests perspective, the CI tests based on χ2 is more consistent than those based on G2 in level 0, but worsen at level 1. This is because square operations have better precision and more computation requirement. At level 0, it has high precision due to sufficient resources, while it is not affordable for the square explosion and leads to precision loss at level 1. In contrast, G2 adopts log to reduce the amount of test value. Although G2 is not accurate enough at level 0 (about 10% less than χ2), it slightly loses precision at level 1. This is because the number of CI tests at level 1 is much larger than that at level 0, according to the combination number, leading to better overall performance in G2.We also verify the structure information through the ratio of SHD for the reference structures (produced by plaintext version) and our method’s. Figure 7b shows that our method can obtain a similar structure to the reference one. In win95pts ,
+
+water , hepar2 , and child , the ratio is mildly small than 1, indicating highly similar results. In insurance , our results are better than references, because the batching technique checks all the CI tests simultaneously while the plaintext version conducts CI tests one by one. Considering all the CI tests in one level together benefits the performance of final results due to its comprehensive decision-making for each CI test and edge. Our method looks through these CI tests and finds the highest p-value CI test for each edge, which produces the best separating set for the edge orientation step. 
+
+C. Execution Time Analysis 
+
+The execution time of our method is also a crucial concern in the experiments. We measured total elapsed times over 6 datasets and recorded them in Figure 8a. It is easy to find that the χ2 test executes faster than the G2 test since the arithmetic circuit of χ2 is simpler than the arithmetic circuit of G2. More complex circuits require longer execution times for computation. Observing elapsed times for different datasets, win95pts is the fastest, and child is the slowest. At first glance, this result seems counter-intuitive, as win95pts has the most nodes and the second most edges, while child has the fewest nodes and edges. The key reason is that elapsed time is only affected by the number of states and increases exponentially with the increment of the number of states. Figure 9a studies elapsed time of one batch of 215 CI tests in different numbers of states. The workload of this batch is sufficient to evaluate the effects of the number of states. As we can see from the figure, elapsed time grows up with the incremental of states in both G2 and 
+
+χ2. G2 costs more time than χ2 at each number of states. When the number of states is 6, the elapsed time of G2 and 
+
+χ2 is 4 times larger than their elapsed time when the number of states is 2. child  
+
+> insurance
+> water
+> hepar2
+> alarm
+> win95pts
+> 0
+> 2000
+> 4000
+> 6000
+> Elapsed time (s)
+> 2
+> G2
+> (a) Total elapsed time (b) Elapsed time for each part
+
+Fig. 8: Time comparison. (a) is the total time for χ2 and 
+
+G2. (b) indicates each part contributing to elapsed time, where “comm”, “enc”, and “comp” represent communication, encryption, and computation respectively. We also study the time consumption in different parts in Figrue 8b. In each dataset, our method spends above 84% time on computations, around 10%-15% time on encryption, and less than 1% time on communication. Most of the elapsed time is on computations, which feed encrypted inputs into arithmetic circuits and obtain encrypted outputs. A small part of the time is used for encryption, which encrypts inputs and decrypts encrypted outputs. The time for communication is omittable, because of its faint effect on the total time. Here 
+
+G2 still puts more time into computation than χ2 as the total elapsed time shown in Figure 8a. In Table IV, we compare the elapsed time of our method with the plaintext version. Although the plaintext version finishes the execution in 5 seconds, our method is practical to 92 3 4 5 6     
+
+> Input states
+> 0
+> 200
+> 400
+> 600
+> 800
+> 1000
+> 1200
+> Elapsed time(s)  G2
+> 2(a) Elapsed time 23456
+> Input states
+> 20
+> 40
+> 60
+> 80
+> 100
+> 120
+> Memory (GB)  G2
+> 2(b) Memory usage
+
+Fig. 9: Time and memory for a large batch with G2 and χ2.complete running in 6 to 30 minutes under privacy protection. Note that causal structure learning is an offline process, and hence 30 minutes of learning time is often acceptable. TABLE IV: Elapsed time (sec) comparison in χ2 between our method and the plaintext version.               
+
+> Dataset Plaintext Ours
+> child 0.18 1545
+> insurance 0.24 1845
+> water 0.07 698
+> alarm 0.12 933
+> hepar2 1.57 1433
+> win95pts 0.51 366
+
+D. Memory and Communication Analysis 
+
+In this subsection, we study memory usage and communi-cation overhead in our method. We test the maximum memory usage for executions on different datasets in G2 and χ2,and then record results on Figure 10a. It is to conclude that G2 consumes more memory than χ2, due to its more complex arithmetic circuit. To build a more complex circuit, the program needs to allocate more memory to buffer it. In addition, the number of nodes or edges does not affect the memory consumption of the proposed method, since win95pts 
+
+has the most edges and nodes but costs the least memory. In fact, the only factor for memory usage is the number of states, similar to the phenomenon in elapsed time studied in Section IV-C. We find win95pts has 2 states and uses the least memory; alarm , hepar2 , and water have 4 states that get the same memory usage. The child dataset owns 6 states, and consumes the most memory. To further verify our conclusion, we test the memory usage for a batch of 215 CI tests with 
+
+G2 and χ2 in Figure 9b. Following the increase of states, memory usage shows similar results as the elapsed time shown in Figure 9a on the different datasets. We measure the communication time for different datasets in G2 and χ2 and record results in Figure 10b. The commu-nication time is still related to the number of states. win95pts 
+
+use the least time on communication while child uses the most time on communication. For datasets that have the same number of states, such as water , alarm and hepar2 , more edges and nodes lead to longer communication time, due to more CI child  
+
+> insurance
+> water
+> hepar2
+> alarm
+> win95pts
+> 0
+> 25
+> 50
+> 75
+> 100
+> 125
+> Memory (GB)  2
+> G2
+> (a) Maximum memory usage child
+> insurance
+> water
+> hepar2
+> alarm
+> win95pts
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> Communication(s)
+> 2
+> G2(b) Communication cost
+
+Fig. 10: Max memory usage and communication time for different datasets in χ2 and G2.tests for more edges and larger separating sets for more nodes. 
+
+G2 also spend more time on communication than χ2 because the size of ciphertext of G2 is much bigger than that of χ2.We also estimate the memory usage at different time slots in 
+
+insurance with χ2 as an example, detailed in Figure 11, reveal-ing three stages. The first part conducting data-loading sees an initial memory spike to 20GB. The second, data encryption and communication, entails a sharp memory increase to 45GB due to encrypted data’s high memory demands. The final computation stage displays steady memory usage at 45GB because of the computation graph’s occupation. 0 100 200 300 400 500 1800 1900 2000  
+
+> Time (s)
+> 0
+> 20
+> 40
+> 60
+> Memory (GB)
+> Loading
+> Encryption & Communication
+> Computation
+
+# ... 
+
+Fig. 11: Memory consumption during learning. 
+
+E. Hyperparameter Study 
+
+Hyperparameters are crucial configurations in our method. We study three important hyperparameters in this subsection. First, we discuss the effect of batching size on elapsed time and memory usage. Then, we analyze the times of iterations for the Newton-Raphson reciprocal circuit and the series for Taylor expansion. We test the memory usage and elapsed time in elements in one batch from 21 to 216 and show the result in Figure 12. When the number of elements in one batch is not larger than 
+
+215 , the memory usage and elapsed time are kept the same as those of 21, indicating that computing 21 elements has the same overhead as computing 215 . Therefore, this parallel technique has 214 times speedup. For the Taylor expansion circuit, the relationship between elapsed time and memory usage in different numbers of series is shown in Figure 13a. We observe that the 3-series expansion has a better balance between precision and speed. For the 10 (a) Elapsed time  (b) Memory usage 
+
+Fig. 12: Time and memory for 21 to 216 elements in batch. Newton-Raphson reciprocal circuit, we varied the number of iterations and recorded the results shown in Figure 13b. As we can see from the result, having 10 iterations is a good tradeoff between precision and efficiency. 1 2 3 4 5            
+
+> # of Series
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> Time (s)
+> Our choice
+> Time(s)
+> MSRE
+> 0.02
+> 0.04
+> 0.06
+> 0.08
+> 0.10
+> MSRE
+> (a) log( x)Taylor expansion 678910 11 12 13
+> # of Iterations
+> 10
+> 20
+> 30
+> 40
+> Time (s)
+> Our choice
+> Time(s)
+> MSRE
+> 0.000
+> 0.002
+> 0.004
+> 0.006
+> 0.008
+> MSRE (b) 1/x Newton-Raphson reciprocal
+
+Fig. 13: Arithmetic circuit hyperparameter testing. Comparing times of iterations for log( x) and series of Taylor expansion for 1/x .
+
+F. Scalability 
+
+We evaluate the scalability of our method by enumerating the number of machines from 2 to 10. Figure 14a illustrates the total elapsed time and computation time for different numbers of machines, showing a small rise in total time and stability in computation time. The increasing total time is due to more communication time for more ciphertexts needing to be transmitted, which is confirmed by the growing communication size in Figure 14b. The coordinator undertakes all computation workload that is not changed in different numbers of machines, so the computation time keeps stable. Figure 14b also demonstrates that memory consumption rises linearly to the number of machines. 
+
+G. Differential Privacy Experiments 
+
+Here, we analyze our proposed method with differential privacy. The DP method only requires O(1) time for privacy protection and has the same time complexity as the plaintext version, so we omit experiments of the elapsed time. Figure 15 shows the SHD results in three datasets: alarm , herpar2 , and 
+
+insurance in different noise parameter ϵ. The dash represents the SHD of the reference network produced by the plaintext method. Smaller ϵ leads to larger noise following the distribu-tion lap (0 , ∆fϵ ). Therefore, the SHD of our method converges to the SHD of the plaintext method with the growth of 1/ϵ .2 4 6 8 10      
+
+> # of machines
+> 800
+> 850
+> 900
+> 950
+> 1000
+> 1050
+> Time (s)  Total
+> Comp
+> (a) Elapsed time 246810
+> # of machines
+> 2.5
+> 5.0
+> 7.5
+> 10.0
+> 12.5
+> 15.0
+> Message size(GB)
+> 80
+> 100
+> 120
+> 140
+> 160
+> Memory(GB) Message
+> Memory (b) Communication and memory
+
+Fig. 14: Elapsed time, communication, and memory analysis for 2 to 10 machines. 
+
+Fig. 15: The SHD in three datasets in different ϵ.
+
+H. Experimental Summary 
+
+Here, we summarize the key findings of our experiment. First of all, Our method achieves high CI test consistency and comparable structure with the plaintext version. Our method can be extended to differential privacy settings, which also achieves good quality precision compared with the plaintext version. Second, 84% of the total time of our method is spent on computation, 10%-15% on encryption, and less than 1% time on communication. Although the plaintext version finishes running in just 5 seconds, our method is still practical to complete learning causal structures in 6 to 30 minutes under privacy protection. Third, for different time slots in insurance , computation costs 45GB of memory, while encryption and communication consume 20GB to 45GB of memory. Communication overhead is relatively light in our proposed method, which is less than 50 seconds among datasets. Fourth, 215 is the best number for batching, 3-term Taylor expansion, and 10-iteration reciprocal balance precision and efficiency. Finally, the total elapsed time, communication size, and memory usage increase linearly with the growth of the number of machines. The computation time remains constant when increasing the number of machines. V. R ELATED WORK 
+
+Here, we present the methodologies for causal structure learning, focusing on the enhancements achievable through distributed and parallel computing. Then, we explore the domain of privacy-preserving distributed learning algorithms in the context of causal structure learning. 11 A. Causal Structure Learning 
+
+Causal structures have emerged as potent models for rep-resentation learning and uncertainty management in the field of artificial intelligence, garnering significant interest within both research and industrial spheres. A key aspect of deploying causal structures involves determining the dependency graph from the data, a process referred to as structure learning . This paper classifies the existing literature on causal structure learn-ing into two primary categories: score-based and constraint-based methodologies. 
+
+Constraint-based approaches [6], [13], [14], [30] under-take structure learning via a succession of statistical tests, such as the χ2 test, G2 test, and mutual information test, to discern conditional independence relationships among vari-ables. These relationships serve as constraints in building the DAG. The majority of constraint-based algorithms operate similarly to the PC-stable algorithm [6], [13]. Unlike score-based approaches, enhancing constraint-based approaches us-ing general-purpose optimization theory is inherently non-trivial. This paper primarily addresses the privacy-awareness of constraint-based approaches in distributed settings. 
+
+Score-based approaches [31]–[33] pursue the optimal DAG in accordance with scoring functions that assess the fitness of causal structures to the observed data. Commonly employed scores include BDeu, BIC, and MDL. Zhu et al [34] have suggested a continuous optimization solution for recommendation systems. However, the number of possible DAGs is super-exponential to the number of variables [35]. Hence, many score-based approaches employ heuristics, like greedy search or simulated annealing, in an attempt to reduce the search space. Such ap-proaches can easily get trapped in local optima [36]. The opti-mization techniques in this paper focus on the constraint-based approaches which tend to scale better to high-dimensional data. 
+
+B. Privacy-Aware Distributed Learning 
+
+Preserving sensitive information in distributed learning tasks presents a significant challenge due to the necessity of frequent inter-machine communication. The inevitable data transfer and sharing process risk exposing sensitive information, which could potentially be intercepted by malicious parties seeking to infer local or global information. Several studies propose mitigating this risk by enhancing privacy protection in com-munication via the addition of noise to raw data [17], sharing agreed functions for mutli-party [37], employing anonymiza-tion techniques [38], or conducting computations on cipher-texts without decryption [39]. Differential privacy (DP) and fully homomorphic encryption (FHE) are the primary privacy-aware techniques used in data management and distributed machine learning. DP has been used to compose local results globally [40], thereby preventing the reverse-engineering of personal data from global data movements. Despite its efficiency, DP exposes plaintext to the main server, rendering the original text vulnerable to recovery [41]. Some works use DP to protect privacy in queries of database systems [42], [43]. Conversely, FHE [39] allows certain operations to be performed on ciphertexts without decryption, thereby preserving the confidentiality of the data. HEDA [44] develops an FHE-based database analytical system combining to support SQL aggregation queries in encrypted databases. Radix-based parallel caching optimization can ac-celerate operations of FHE-based outsourced databases [45]. BatchCrypt [46] offers a system solution for distributed ma-chine learning based on FHE, accelerating communication and encryption through data batching. Efforts have been made to address the privacy issue in distributed causal structure learning. The study by Ng et al. [47] employed continuous optimization to tackle distributed structure learning problems among agents holding horizontally partitioned data, though without considering privacy protec-tion. A recent privacy-aware method [48] utilized a voting mechanism for causal structure learning, but it presents limita-tions in statistical test accuracy and exposes private voting data to potential threats. This paper strives to ensure comprehensive privacy protection while maintaining statistical accuracy. VI. C ONCLUSION 
+
+In this paper, we have proposed a privacy-preserving causal structure learning algorithm with fully homomorphic encryp-tion (FHE). The key challenges of this problem include com-plex arithmetic circuits, the requirement for division and log-arithmic operations, and inefficiencies in execution. We have proposed a series of techniques to address these challenges including equation simplification, high-quality approximation for division and logarithm, and batching mechanisms to im-prove efficiency. A thorough examination of the experimental results reveals the efficacy of the proposed method. It is capable of generating causal structures of similar quality to those obtained from plaintext methods, demonstrating its effectiveness. Additionally, the method is not only efficient to deploy, but also exhibits commendable scalability and be seamlessly extended to support other privacy-preservation techniques (e.g., DP). REFERENCES [1] J. Pearl, “Probabilistic reasoning in intelligent systems: networks of plausible inference,” 1988. [2] X. Zhan, Y. Zheng, X. Yi, and S. V. Ukkusuri, “Citywide traffic volume estimation using trajectory data,” IEEE Transactions on Knowledge and Data Engineering , vol. 29, no. 2, pp. 272–285, 2016. [3] C. Chen, X. Liu, H.-H. Chen, M. Li, and L. Zhao, “A rear-end collision risk evaluation and control scheme using a bayesian network model,”          
+
+> IEEE Transactions on Intelligent Transportation Systems , vol. 20, no. 1, pp. 264–284, 2018. [4] D. Gunning and D. Aha, “Darpa’s explainable artificial intelligence (XAI) program,” AI Magazine , vol. 40, no. 2, pp. 44–58, 2019. [5] C. Rudin, “Stop explaining black box machine learning models for high stakes decisions and use interpretable models instead,” Nature Machine Intelligence , vol. 1, no. 5, pp. 206–215, 2019. [6] D. Colombo, M. H. Maathuis et al. , “Order-independent constraint-based causal structure learning.” Journal of Machine Learning Research ,vol. 15, no. 1, pp. 3741–3782, 2014. [7] X. Zhang, X.-M. Zhao, K. He, L. Lu, Y. Cao, J. Liu, J.-K. Hao, Z.-P. Liu, and L. Chen, “Inferring gene regulatory networks from gene expression data by path consistency algorithm based on conditional mutual information,” Bioinformatics , vol. 28, no. 1, pp. 98–104, 2012.
+
+12 [8] M. H. Maathuis, D. Colombo, M. Kalisch, and P. B¨ uhlmann, “Predicting causal effects in large-scale systems from observational data,” Nature methods , vol. 7, no. 4, pp. 247–248, 2010. [9] M. Scutari, “Learning Bayesian networks with the bnlearn R package,” 
+
+arXiv preprint arXiv:0908.3817 , 2009. [10] J. D. Ramsey, K. Zhang, M. Glymour, R. S. Romero, B. Huang, I. Ebert-Uphoff, S. Samarasinghe, E. A. Barnes, and C. Glymour, “Tetrad—a toolbox for causal discovery,” in International Workshop on Climate Informatics , 2018. [11] C. Gentry, “Fully homomorphic encryption using ideal lattices,” in 
+
+Proceedings of the forty-first annual ACM symposium on Theory of computing , 2009, pp. 169–178. [12] L. J. Aslett, P. M. Esperanc ¸a, and C. C. Holmes, “A review of homomorphic encryption and software tools for encrypted statistical machine learning,” arXiv preprint arXiv:1508.06574 , 2015. [13] P. Spirtes, C. N. Glymour, R. Scheines, and D. Heckerman, Causation, prediction, and search . MIT press, 2000. [14] D. Colombo, M. H. Maathuis, M. Kalisch, and T. S. Richardson, “Learning high-dimensional directed acyclic graphs with latent and selection variables,” The Annals of Statistics , pp. 294–321, 2012. [15] C. Meek, “Causal inference and causal explanation with background knowledge,” arXiv preprint arXiv:1302.4972 , 2013. [16] B. Zarebavani, F. Jafarinejad, M. Hashemi, and S. Salehkaleybar, “cupc: Cuda-based parallel PC algorithm for causal structure learning on gpu,” 
+
+IEEE Transactions on Parallel and Distributed Systems , vol. 31, no. 3, pp. 530–542, 2019. [17] C. Dwork, “Differential privacy,” in Automata, Languages and Program-ming: 33rd International Colloquium, ICALP 2006, Venice, Italy, July 10-14, 2006, Proceedings, Part II 33 . Springer, 2006, pp. 1–12. [18] R. Shokri and V. Shmatikov, “Privacy-preserving deep learning,” in 
+
+Proceedings of the 22nd ACM SIGSAC conference on computer and communications security , 2015, pp. 1310–1321. [19] M. Abadi, A. Chu, I. Goodfellow, H. B. McMahan, I. Mironov, K. Talwar, and L. Zhang, “Deep learning with differential privacy,” in 
+
+Proceedings of the 2016 ACM SIGSAC conference on computer and communications security , 2016, pp. 308–318. [20] Z. Huang and S. Kannan, “The exponential mechanism for social welfare: Private, truthful, and nearly optimal,” in 2012 IEEE 53rd Annual Symposium on Foundations of Computer Science . IEEE, 2012, pp. 140– 149. [21] J. Fan and F. Vercauteren, “Somewhat practical fully homomorphic encryption,” Cryptology ePrint Archive , 2012. [22] Z. Brakerski, C. Gentry, and V. Vaikuntanathan, “(leveled) fully ho-momorphic encryption without bootstrapping,” ACM Transactions on Computation Theory (TOCT) , vol. 6, no. 3, pp. 1–36, 2014. [23] J. H. Cheon, A. Kim, M. Kim, and Y. Song, “Homomorphic encryption for arithmetic of approximate numbers,” in Advances in Cryptology– ASIACRYPT 2017: 23rd International Conference on the Theory and Applications of Cryptology and Information Security, Hong Kong, China, December 3-7, 2017, Proceedings, Part I 23 . Springer, 2017, pp. 409– 437. [24] M. Van Dijk, C. Gentry, S. Halevi, and V. Vaikuntanathan, “Fully homomorphic encryption over the integers,” in Advances in Cryptology– EUROCRYPT 2010: 29th Annual International Conference on the The-ory and Applications of Cryptographic Techniques, French Riviera, May 30–June 3, 2010. Proceedings 29 . Springer, 2010, pp. 24–43. [25] P. Kornerup and J.-M. Muller, “Choosing starting values for newton-raphson computation of reciprocals, square-roots and square-root recip-rocals,” Ph.D. dissertation, INRIA, LIP, 2003. [26] “Microsoft SEAL (release 4.1),” https://github.com/Microsoft/SEAL, Jan. 2023, microsoft Research, Redmond, WA. [27] R. Dathathri, B. Kostova, O. Saarikivi, W. Dai, K. Laine, and M. Musuvathi, “Eva: An encrypted vector arithmetic language and compiler for efficient homomorphic computation,” in Proceedings of the 41st ACM SIGPLAN Conference on Programming Language Design and Implementation , ser. PLDI 2020. New York, NY, USA: Association for Computing Machinery, 2020, p. 546–561. [Online]. Available: https://doi.org/10.1145/3385412.3386023 [28] M. Scutari, “Bayesian network constraint-based structure learning al-gorithms: Parallel and optimised implementations in the bnlearn R package,” arXiv preprint arXiv:1406.7648 , 2014. [29] A. Bookstein, V. A. Kulyukin, and T. Raita, “Generalized hamming distance,” Information Retrieval , vol. 5, pp. 353–375, 2002. [30] J. Jiang, Z. Wen, and A. Mian, “Fast parallel bayesian network structure learning,” in 2022 IEEE International Parallel and Distributed Process-ing Symposium (IPDPS) , 2022, pp. 617–627. [31] S. Acid and L. M. de Campos, “Searching for Bayesian network structures in the space of restricted acyclic partially directed graphs,” 
+
+Journal of Artificial Intelligence Research , vol. 18, pp. 445–490, 2003. [32] J. Tian, “A branch-and-bound algorithm for mdl learning Bayesian networks,” arXiv preprint arXiv:1301.3897 , 2013. [33] J. W. Myers, K. B. Laskey, and T. S. Levitt, “Learning Bayesian networks from incomplete data with stochastic search algorithms,” arXiv preprint arXiv:1301.6726 , 2013. [34] R. Zhu, A. Pfadler, Z. Wu, Y. Han, X. Yang, F. Ye, Z. Qian, J. Zhou, and B. Cui, “Efficient and scalable structure learning for bayesian net-works: Algorithms and applications,” in 2021 IEEE 37th International Conference on Data Engineering (ICDE) . IEEE, 2021, pp. 2613–2624. [35] R. W. Robinson, “Counting unlabeled acyclic digraphs,” in Combinato-rial Mathematics V . Springer, 1977, pp. 28–43. [36] M. Scutari, C. E. Graafland, and J. M. Guti´ errez, “Who learns better Bayesian network structures: Accuracy and speed of structure learning algorithms,” International Journal of Approximate Reasoning , vol. 115, pp. 235–253, 2019. [37] O. Goldreich, “Secure multi-party computation,” Manuscript. Prelimi-nary version , vol. 78, no. 110, 1998. [38] K. Bonawitz, V. Ivanov, B. Kreuter, A. Marcedone, H. B. McMahan, S. Patel, D. Ramage, A. Segal, and K. Seth, “Practical secure aggregation for privacy-preserving machine learning,” in proceedings of the 2017 ACM SIGSAC Conference on Computer and Communications Security ,2017, pp. 1175–1191. [39] C. Fontaine and F. Galand, “A survey of homomorphic encryption for nonspecialists,” EURASIP Journal on Information Security , vol. 2007, pp. 1–10, 2007. [40] M. Pathak, S. Rane, and B. Raj, “Multiparty differential privacy via ag-gregation of locally trained classifiers,” Advances in neural information processing systems , vol. 23, 2010. [41] Y. Aono, T. Hayashi, L. Wang, S. Moriai et al. , “Privacy-preserving deep learning via additively homomorphic encryption,” IEEE Transactions on Information Forensics and Security , vol. 13, no. 5, pp. 1333–1345, 2017. [42] K. Cai, X. Xiao, and G. Cormode, “Privlava: synthesizing relational data with foreign keys under differential privacy,” Proceedings of the ACM on Management of Data , vol. 1, no. 2, pp. 1–25, 2023. [43] W. Dong, D. Sun, and K. Yi, “Better than composition: How to answer multiple relational queries under differential privacy,” Proceedings of the ACM on Management of Data , vol. 1, no. 2, pp. 1–26, 2023. [44] X. Ren, L. Su, Z. Gu, S. Wang, F. Li, Y. Xie, S. Bian, C. Li, and F. Zhang, “Heda: Multi-attribute unbounded aggregation over homo-morphically encrypted database,” Proceedings of the VLDB Endowment ,vol. 16, no. 4, pp. 601–614, 2022. [45] O. T. Tawose, J. Dai, L. Yang, and D. Zhao, “Toward efficient homo-morphic encryption for outsourced databases through parallel caching,” 
+
+Proceedings of the ACM on Management of Data , vol. 1, no. 1, pp. 1–23, 2023. [46] C. Zhang, S. Li, J. Xia, W. Wang, F. Yan, and Y. Liu, “Batchcrypt: Efficient homomorphic encryption for cross-silo federated learning,” in Proceedings of the 2020 USENIX Annual Technical Conference (USENIX ATC 2020) , 2020. [47] I. Ng and K. Zhang, “Towards federated bayesian network structure learning with continuous optimization,” in International Conference on Artificial Intelligence and Statistics . PMLR, 2022, pp. 8095–8111. [48] J. Huang, K. Yu, X. Guo, F. Cao, and J. Liang, “Towards privacy-aware causal structure learning in federated setting,” arXiv preprint arXiv:2211.06919 , 2022. 
+
+13
