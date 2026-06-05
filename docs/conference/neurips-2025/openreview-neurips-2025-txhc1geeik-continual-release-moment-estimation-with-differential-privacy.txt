@@ -1,0 +1,5883 @@
+Title: 11815_Continual_Release_Moment.pdf
+
+URL Source: https://openreview.net/pdf?id=TXHc1gEEIk
+
+Number of Pages: 46
+
+Markdown Content:
+# Continual Release Moment Estimation with Differential Privacy 
+
+Nikita P. Kalinin 
+
+Institute of Science and Technology Austria (ISTA) Klosterneuburg, Austria 
+
+nikita.kalinin@ist.ac.at 
+
+Jalaj Upadhyay 
+
+Department of Computer Science Rutgers University Piscataway, NJ 08854, USA 
+
+jalaj.upadhyay@rutgers.edu 
+
+Christoph H. Lampert 
+
+Institute of Science and Technology Austria (ISTA) Klosterneuburg, Austria 
+
+chl@ist.ac.at 
+
+## Abstract 
+
+We propose Joint Moment Estimation (JME), a method for continually and privately estimating both the first and second moments of a data stream with reduced noise compared to naive approaches. JME supports the matrix mechanism and exploits a joint sensitivity analysis to identify a privacy regime in which the second-moment estimation incurs no additional privacy cost, thereby improving accuracy while maintaining privacy. We demonstrate JME’s effectiveness in two applications: estimating the running mean and covariance matrix for Gaussian density estimation and model training with DP-Adam. 
+
+## 1 Introduction 
+
+Estimating the first and second moments of data is a fundamental step in many machine learning algo-rithms, ranging from foundational methods, such as linear regression, principal component analysis, or Gaussian model fitting, to state-of-the-art neural network components, such as BatchNorm [ 23 ], and optimizers, such as Adam [ 32 ]. Often, these estimates must be computed and updated continu-ously, called the continual release setting [ 13 ]. For example, this is the case when the data arrives sequentially and intermediate results are needed without delay, such as for sequential optimization algorithms like Adam, or for real-time systems in healthcare, finance, or recommendation systems. In such scenarios, ensuring the privacy of sensitive data, such as user information or medical records, is essential. 
+
+Differential Privacy (DP) is a widely established formal notion of privacy that ensures that the inclusion or exclusion of any single individual’s data has a limited impact on the output of an algorithm. Technically, DP masks sensitive information by adding suitably scaled noise, thereby creating a trade-off between privacy (formalized as a privacy budget ) and utility (measured by the expected accuracy of the estimates). This trade-off becomes particularly challenging when more than one quantity is meant to be estimated from the same private data, as is the case when estimating multiple data moments. Done naively, the privacy budget has to be split between the estimates, resulting in more noise and lower accuracy for both of them. In this work, we introduce a new method, Joint Moment Estimation (JME) , that is able to privately estimate the first and second moments of vector-valued data without suffering from this shortcoming. Algorithmically, JME relies on the recent matrix factorization (MF) mechanism [ 35 ] for continual 
+
+> 39th Conference on Neural Information Processing Systems (NeurIPS 2025).
+
+Table 1: Common workload matrices for moment estimation in (1). 
+
+method symbol coefficients 
+
+prefix sum E1 1{i ≤ t}
+
+exponential (weight β) Eβ βt−i1{i ≤ t}
+
+standard average V 1 
+
+> t
+
+1{i ≤ t}
+
+sliding window (size k) Wk 1 
+
+> k
+
+1{t − k < i ≤ t}
+
+release DP to individually compute the first and the second moments of the data, thereby making it flexible to accommodate a variety of settings. For example, besides the standard uniform sum or weighted average across data items, exponentially weighted averages or sliding-window estimates are readily possible. The key innovation of JME lies in our theoretical analysis of its properties. By jointly analyzing the sensitivity of the otherwise independent estimation processes, in combination with considering a carefully calibrated trade-off between them, we show that one can estimate privately the second-moment matrix without having to increase the amount of noise required to keep the first moment private. In this sense, we obtain privacy of the second moment for free .JME is practical and easily implemented using standard programming languages and toolboxes. We demonstrate this by showcasing two applications, one classical and one modern. First, we use JME for continual density estimation using a multivariate Gaussian model, e.g. we estimate the running mean and covariance matrix of a sequence of vector-valued observations. Our experiments confirm that JME achieves a lower Frobenius norm error for the covariance matrix in high-privacy regimes as well as a better fit to the true distribution as measured by the Kullback-Leibler divergence. Second, we integrate JME into the Adam optimizer, which is widely used in deep learning. Here, as well, we observe that JME achieves better optimization accuracy than baseline methods in high-privacy and small-batch-size regimes. 
+
+## 2 Background 
+
+We study the problem of differentially private continually estimation of the pair of weighted sums of the first and second moments, see Section 6 for a discussion of related works. Specifically, consider a sequence of d-dimensional vectors x1, . . . , x n ∈ X , where X = {(x1, . . . , x n) : xi ∈
+
+Rd ∧ max i ∥xi∥2 ≤ ζ} for some fixed constant ζ > 0. At each step t, we aim to privately estimate the following pair of sums: 
+
+Yt =
+
+> t
+
+X
+
+> i=1
+
+atixi ∈ Rd and St =
+
+> t
+
+X
+
+> i=1
+
+btixix⊤ 
+
+> i
+
+∈ Rd×d, (1) for arbitrary coefficients ati ∈ R and bti ∈ R. This formulation includes many practical schemes; see Table 1. To express this problem compactly, we rewrite it in matrix form. We collect the coefficients into lower triangular workload matrices, A1 = ( ati)1≤i,t ≤n ∈ Rn×n and A2 = ( bti)1≤i,t ≤n ∈ Rn×n.We stack the data as rows into a matrix X ∈ Rn×d. Then, all terms of the sums in (1) can then be expressed compactly 1 as Y = A1X and S = A2(X • X), where the second matrix consists of the data vectors stacked as rows, and • denotes the Face-Splitting Product or transposed Khatri-Rao product [16 ], (X • X)ij := ( xi ⊗ xi)j = vec (xix⊤ 
+
+> i
+
+)j , where ⊗ is the Kronecker product of two vectors. To protect the privacy of individual data elements, we rely on the notion of differential privacy ,considering neighboring datasets as those differing by a single data point; see e.g., [ 14 ] for an introduction. Recently, a series of works have developed effective methods for privately estimating individual matrices in the aforementioned product form by means of the matrix mechanism [ 35 , 7 , 10 ,9, 12 , 27 , 22 , 20 , 17 , 21 , 8, 25 , 39 ]. Its core insight is that, in the continual release setting, outputs at later steps should require less noise to be made private than earlier ones because more data points contributed to their computation. One can exploit this fact by adding noise that is correlated between the steps instead of being independent. This way, at each step, some of the noise added at an earlier stage can be removed again, thereby resulting in a less noisy result without lowering the privacy guarantees.            
+
+> 1We slightly abuse the notation and make Sa matrix of shape n×d2instead of a tensor of size n×d×d.
+
+2Algorithm 1 Joint Moment Estimation (JME) 
+
+Require: stream of vectors x1, . . . , x n ∈ Rd with ∥xt∥2 ≤ ζ,
+
+Require: workload matrices A1, A 2 ∈ Rn×n
+
+Require: privacy parameters (ϵ, δ )
+
+Require: noise shaping matrices C1, C 2 ∈ Rn×n (invertible, decreasing column norm), defaults: Id 
+
+σϵ,δ ← noise strength for (ϵ, δ )-DP Gaussian mechanism 
+
+λ ← ∥ C1∥21→2/(cdζ2∥C2∥21→2) with c1 = 811+5 √5 , and cd = 2 for d ≥ 2 // scaling parameter 
+
+s ← 2ζ∥C1∥1→2 // joint sensitivity 
+
+Z1 ∼ N (0 , σ 2 
+
+> ϵ,δ
+
+s2)n×d, Z2 ∼ N (0 , σ 2 
+
+> ϵ,δ
+
+s2)n×d2
+
+// 1st and 2nd moment noise 
+
+for t = 1 , 2, . . . , n do 
+
+bxt ← xt + [ C−11 Z1][t, ·] and \xt ⊗ xt ← xt ⊗ xt + λ−1/2[C−12 Z2][t, ·,·]
+
+yield bYt = tP
+
+> i=1
+
+[A1]t,i bxi, bSt = tP
+
+> i=1
+
+[A2]t,i \xi ⊗ xi
+
+end for 
+
+Technically, the matrix mechanism relies on an invertible noise shaping matrix C. For our theoretical results, we often also assume that C has decreasing column norms, As the private estimate of a product AX , one computes dAX = A(X + C−1Z), where Z is a matrix of i.i.d. Gaussian noise. This estimate is (ϵ, δ )-differentially private if the noise magnitude is at least sens (CX ) · σϵ,δ , where 
+
+σϵ,δ denotes the variance required in the Gaussian distribution to ensure (ϵ, δ )-DP for sensitivity 1
+
+queries 2. sens (·) denotes the sensitivity , which, for any function F , is defined as sens (F ) = max  
+
+> X∼X′
+
+∥F (X)−F (X′)∥F (2) where X ∼ X′ denote two neighboring data matrices, i.e. identical except for one of the data vectors. 
+
+## 3 Joint Moment Estimation (JME) 
+
+We now introduce our main algorithmic contribution: the Joint Moment Estimation (JME) algorithm for solving the problem of differentially private (weighted) moment estimation in a continual release setting. Algorithm 1 shows its pseudo-code. JME takes as input a stream of input data vectors, the weights for the desired estimate in the form of two lower triangular workload matrices, and privacy parameters ϵ, δ > 0. Optionally, it takes two noise-shaping matrices as input. If these are not provided, C1 = C2 = In×n, can serve as defaults. The algorithm uses the matrix mechanism to privately estimate the weighted sums of vectors for both the first and second moments. At each step, the algorithm receives a new data point, xt, it creates private version of both xt and xt ⊗ xt by adding suitably scaled Gaussian noise. The noise shaping matrices, if provided, determine the covariance structure of the noise. To balance between the estimates of the first moment and of the second moment, a scaling parameter, 
+
+λ, is used. In Algorithm 1, this parameter is fixed such that the total sensitivity of estimating both moments is equal to the sensitivity of just estimating the first moment alone. This implies that the overall noise variance to make both moment estimates private is equal to that needed to achieve the same level of privacy for the first moment. Consequently, the fact that we also privately estimate the second moment does not increase the necessary noise level for the first moment, a property we call 
+
+(second moment) privacy for free .Note that privacy for free is a quite remarkable property of JME. Generally, when using the same data more than once for private computations, more noise for each of them is required to ensure the overall privacy, following, e.g., the composition theorems of DP [26 ]. In some situations, however, one might also prefer a more flexible way to trade-off between the two moment estimates. For this, we present 
+
+λ-JME in the appendix (Algorithm 3), a variant of JME that has λ as a free hyper-parameter.                
+
+> 2Here and in the following we do not provide a formula for σϵ,δ , because closed-form expressions have been shown to be suboptimal in some regimes. Instead, we recommend determining its value numerically, such as in [ 5]. For reference, typical values of σϵ,δ lie between approximately 0.5(low privacy, e.g. ϵ= 8 , δ = 10 −3)
+> and 50 (high privacy, e.g. ϵ= 0 .1, δ = 10 −9).
+
+3Properties of JME For some inputs X = ( x1, . . . , x n) ∈ Rn×d, let Y = ( Y1, . . . , Y n) ∈ Rn×d and 
+
+S = ( S1, . . . , S n) ∈ Rn×d2
+
+be the matrices of their first and second moments after each step, and let 
+
+bY = ( Y1, . . . , Y n) ∈ Rn×d and bS = ( S1, . . . , S n) ∈ Rn×d2
+
+be the private estimates computed by Algorithm 1 with workload matrix A and noise shaping matrix C. Then, we have the following. 
+
+Theorem 3.1 (Noise properties of JME) . bY and bS are unbiased estimates of Y and S. Their estimation noise, bY − Y and bS − S, has a symmetric distribution. 
+
+Theorem 3.2 (Privacy of JME) . Algorithm 1 is (ϵ, δ )-differentially private. 
+
+Theorem 3.3 (Utility of JME) . For any input X, let cd be as defined in Algorithm 1. Then the expected approximation error of Algorithm 1 for the first and second moments are 
+
+q
+
+E∥Y − bY ∥2 
+
+> F
+
+= 2 ζ√dσ ϵ,δ ∥C1∥1→2∥A1C−11 ∥F, (3) 
+
+q
+
+E∥S − bS∥2 
+
+> F
+
+= 2 ζ2√cddσ ϵ,δ ∥C2∥1→2∥A2C−12 ∥F, (4) 
+
+where ∥ · ∥ 1→2 denotes the maximum ℓ2 column norm of the given matrix. Proof of Theorem 3.1. The statement follows from the fact that for any t = 1 , . . . , n , JME’s estimates 
+
+bxt of xt and \xt ⊗ xt of xt ⊗ xt are unbiased with symmetric noise distribution because they are constructed by adding zero-mean Gaussian noise. 
+
+Proof sketch of Theorem 3.2. The result follows using Gaussian mechanism once we show that the overall sensitivity of jointly estimating both moments has at most s = 2 ζ∥C1∥1→2, as stated in Algorithm 1. 
+
+Definition 3.4. For any noise-shaping matrices C1 and C2 and any λ > 0, we define the joint sensitivity of estimating the first and λ-weighted second moment by sens 2
+
+> λ
+
+(C1, C 2) = sup 
+
+> X∼X′
+
+C1 00 √λC 2
+
+  X −X′
+
+X • X −X′ • X′
+
+ 2
+
+> F
+
+(5) 
+
+= sup 
+
+> X∼X′
+
+h
+
+∥C1(X −X′)∥2 
+
+> F
+
++ λ∥C2(X • X −X′ • X′)∥2
+
+> F
+
+i
+
+.
+
+The following lemma (shown in the appendix) characterizes the values of the joint sensitivity as a function of λ.
+
+Lemma 3.5 (Joint Sensitivity) . Assume that the matrices C1 and C2 have norm-decreasing columns 3.Then, for any λ > 0 holds: sens 2
+
+> λ
+
+(C1, C 2) = ζ2∥C1∥21→2rd
+
+ λζ 2∥C2∥21→2
+
+∥C1∥21→2
+
+
+
+, (6) 
+
+where ∥ · ∥ 1→2 denotes the maximum column norm, corresponding to the norm of the first column of 
+
+C1 and C2, respectively. The function rd(ν) is given by 
+
+rd(ν) = 
+
+ 
+
+> 18
+
+(3 − τ )2(ντ + 1 + ν), with τ =
+
+q
+
+1 − 2 
+
+> ν
+
+, if ν > 11+5 √58 , d = 1 ,
+
+2 + 2 ν + 12ν , if ν > 12 , d > 1,
+
+4, otherwise. 
+
+(7) Algorithm 1 uses the scaling parameter λ = ∥C1∥21→2/(cdζ2∥C2∥21→2), so, by Lemma 3.5, the sensitivity of estimating both moment has the value pζ2∥C1∥21→2rd(cd). The choice of cd implies that rd(cd) = 4 , which yields sens λ(C1, C 2) = s. This concludes the proof of Theorem 3.2. 
+
+> 3
+
+The decreasing column norm structure ensures that the optimum is simultaneously achieved for the first columns of the matrices C1 and C2. This can be relaxed by solving a maximization problem over the column indices, which could be done numerically. Moreover, the matrices that we have in mind for practical tasks are Toeplitz, for which the norm-decreasing property is fulfilled naturally. 
+
+4400 500 600 700 800 900 1000 1100 1200 
+
+> First Moment Error
+> 1000
+> 1500
+> 2000
+> 2500
+> 3000
+> 3500
+> 4000
+> Second Moment Error
+> IME
+> -JME
+> CS
+
+Figure 1: Approximation errors for the 1st and 2nd moments across three methods (see text for details): λ-JME with λ, IME with varying α parameters, and CS with varying τ parameter. λ-JME Pareto-dominates the other two methods. 
+
+Proof sketch of Theorem 3.3. The identities follow from the general properties of the matrix mecha-nism. For any input X, the output of Algorithm 1 for the first moment is bY = Y + A1C−11 Z1, where 
+
+Z1 ∼ [N (0 , σ 2 
+
+> ϵ,δ
+
+s2)] n×d. Consequently, bY − Y = A1C−11 Z1, and hence 
+
+EZ1 ∥ bY − Y ∥2 
+
+> F
+
+= ∥A1C−11 ∥2 
+
+> F
+
+· σ2 
+
+> ϵ,δ
+
+s2d (8) Equation (3) follows by inserting s = 2ζ∥C1∥1→2. For the second moment, Equation (4) follows analogously using that the output of Algorithm 1 is bS = S + λ− 12 A2C−12 Z2 with 
+
+Z2 ∼ [N (0 , σ 2 
+
+> ϵ,δ
+
+s2)] n×d2
+
+.
+
+3.1 Comparison with alternative techniques 
+
+Besides JME, alternatives methods are possible that could be used to privately estimate the first and second moments. In this section, we introduce some of them and discuss their relation to JME. 
+
+Independent Moment Estimation (IME). A straight-forward way to privately estimate first and second moments is to estimate and privatize both of them separately, where the necessary amount of noise is determined by the composition theorem of the Gaussian mechanism [ 1 ] (see Algorithm 4 in the appendix). IME resembles JME in the sense that (i) separate estimates of the moments are created, and (ii) the privatized results are unbiased estimators. However, it does not have JME’s privacy for free property. This is because IME relies on the composition theorem, so the privacy budget is split into two parts, one per estimate, where the exact split is a hyperparameter of the method. As a consequence, IME’s estimate of the first moment is always more noisy, and thereby of lower expected accuracy, than JME’s. For the second moment, IME could in principle achieve a lower noise than plain JME by adjusting the budget split parameter in an uneven way. This, however, would come at the expense of further increase in the error for estimating the first moment. The following theorem establishes that λ-JME, the variant of JME with adjustable λ parameter offers a strictly better trade-off than IME. Theorem 3.6 (JME vs IME) . For any ϵ, δ > 0, λ-JME Pareto-dominates IME with respect to the approximation error for the first vs second moment estimates. 
+
+The proof can be found in the appendix. Figure 1 visualizes this property graphically. 
+
+Concatenate-and-split (CS). In the special case where the two noise shaping matrices are meant to be the same (e.g. the trivial case where both are the identity matrix), it is possible to use a single privatization step for both moments. For this, one forms a new observation vector, ˜xi by concatenating 
+
+xi with a vectorized (and potentially rescaled version of) xi ⊗ xi. Then, one privatizes the resulting vector, taking into account that ˜xi ∈ Rd(d+1) has higher dimension and a larger norm than the original 
+
+xi ∈ Rd. The result is split again into first and second order components, and the latter is unscaled. The result are private estimate of xt and xt ⊗ xt, from which the two weighted moment estimates 510 2 10 1 10 0 10 1 10 2
+
+> sigmas
+> 10 1
+> 10 3
+> 10 5
+> 10 7
+> 10 9
+> Approximation Error  PP (Debiased)
+> PP
+> JME
+
+(a) d = 1 , trivial 10 2 10 1 10 0 10 1 10 2 
+
+> sigmas
+> 10 1
+> 10 3
+> 10 5
+> 10 7
+> 10 9
+> Approximation Error  PP (Debiased) lb
+> PP (Debiased) ub
+> PP ub
+> PP lb
+> JME
+
+(b) d = 1 , square root 10 2 10 1 10 0 10 1 10 2 
+
+> sigmas
+> 10 3
+> 10 5
+> 10 7
+> 10 9
+> 10 11
+> Approximation Error  PP (Debiased)
+> PP
+> JME
+
+(c) d = 10 3, trivial 10 2 10 1 10 0 10 1 10 2 
+
+> sigmas
+> 10 3
+> 10 5
+> 10 7
+> 10 9
+> 10 11
+> Approximation Error  PP (Debiased) lb
+> PP (Debiased) ub
+> PP ub
+> PP lb
+> JME
+
+(d) d = 10 3, square root 
+
+Figure 2: Expected error of second moment estimation with JME versus PP with and without debiasing ( A = E1 (prefix sum), n = 1000 ) In line with our analysis, for d = 1 JME consistently achieves a higher quality than PP. For d = 1000 , JME is preferable to PP in the high privacy regime. Furthermore, the square root matrix factorization substantially improves the quality of both methods. can be constructed. Algorithm 5 in the appendix provides pseudocode for this concatenate-and-split (CS) method. When applicable, CS is easy to implement and produces unbiased moment estimates. However, like IME, it has an unfavorable privacy-accuracy trade-off curve compared to JME, as formalized in the following theorem and shown in the appendix. 
+
+Theorem 3.7 (JME vs CS) . For any ϵ, δ > 0, λ-JME Pareto-dominates CS with respect to the approximation error for the first vs second moment estimates. 
+
+Figure 1 visualizes these cases (Theorems 3.6 and 3.7) graphically in an exemplary setting (d =10 , n = 100 , C 1 = C2 = I, A = E1, ζ = 1 , σ ϵ,δ = 1 /2) .
+
+Post-processing (PP). Post-processing (PP) is another easy-to-use method for joint moment estima-tion. It has appeared in the literature [ 40 ], at least in its naive form without the matrix factorization mechanism. For any xi, it first computes a private estimate bxt by adding sufficient noise to it. It then sets \xt ⊗ xt := bxt ⊗ bxt, which is automatically private by the postprocessing property of DP, and uses it to estimate the second moment matrix without additional privacy protection. Algorithm 6 in the appendix provides pseudocode. Like JME, PP has the privacy-for-free property, i.e., the private estimate of the second moment does not reduce the quality of the first moment. In contrast to JME, however, PP’s estimate of the second moments is not unbiased because the noise that was added to the first moment is squared during the process. It is possible to compensate for this by explicitly subtracting the bias, which can be computed analytically. The bias depends only on hyperparameters such as n, d, and σ, and not on the private data X or the sampled noise used to protect it. Its exact expression can be found in equation (60). For given privacy parameters, PP and JME use the same noise strength toprivatize the first moment and therefore their estimates are of equal quality. For the second moment, their characteristics differ between the low privacy (small noise variance) and the high privacy (large noise variance) regime. To allow for a quantitative comparison, we derive characterizations of the approximation quality of PP. 
+
+Lemma 3.8 (Expected Second Moment Error for PP) . Assume the same setting as for Theorem 3.3, except that we compute the estimates bY and bSPP with the PP method. Let Q = C−11 C−⊤  
+
+> 1
+
+and 
+
+EQ = diag( Q) diag( Q)⊤. Then, the expected approximation error of the second moment satisfies: 
+
+sup 
+
+> X∈X
+
+E∥S − bSPP ∥2 
+
+> F
+
+= 16 d(d + 1) σ4 
+
+> ϵ,δ
+
+ζ4∥C1∥41→2 tr( A⊤ 
+
+> 2
+
+A2(Q ◦ Q)) (9) 
+
++ 8( d + 1) σ2 
+
+> ϵ,δ
+
+ζ2∥C1∥21→2 sup 
+
+> X∈X
+
+tr(( A⊤ 
+
+> 2
+
+A2 ◦ Q)XX T )
+
+> bias
+
+z }| {
+
++16 dσ 4 
+
+> ϵ,δ
+
+ζ4∥C1∥41→2 tr( A⊤ 
+
+> 2
+
+A2EQ) .
+
+For debiased PP, the term marked "bias" does not occur. 
+
+In order to get a better impression of the relation between PP and JME, we first study the special case of a trivial factorization. 
+
+Corollary 3.9. Assume that JME and PP use trivial factorizations, i.e., C1 = C2 = I. Then, JME’s expected approximation error for the second moment is 
+
+E∥S − bS∥2 
+
+> F
+
+= 4 cdd2σ2 
+
+> ϵ,δ
+
+ζ4∥A2∥2 
+
+> F
+
+(10) 6and the corresponding value for PP is 
+
+sup 
+
+> X∈X
+
+E∥S − bSPP ∥2 
+
+> F
+
+=  16 d(d + 1) ζ4σ4 
+
+> ϵ,δ
+
++ 8( d + 1) σ2 
+
+> ϵ,δ
+
+ζ2∥A2∥2
+
+> Fbias
+
+z }| {
+
++16 dσ 4 
+
+> ϵ,δ
+
+ζ4∥ X
+
+> i
+
+(A2)[i, ·]∥22,
+
+where P
+
+> i
+
+(A2)[i, ·] is the row-wise summation of A2. For debiased PP, the term marked "bias" does not occur. Proof. The proofs follow directly from Theorem 3.3 and Lemma 3.8 by observing that ∥C1∥1→2 =
+
+∥C2∥1→2 = 1 . In dimension d = 1 , ζ = 1 , JME has an error of 4c1σ2 
+
+> ϵ,δ
+
+∥A2∥2 
+
+> F
+
+versus (32 σ4 
+
+> ϵ,δ
+
++16 σ2 
+
+> ϵ,δ
+
+)∥A2∥2 
+
+> F
+
+for (debiased) PP. Since c1 < 1, for one-dimensional data, JME’s error is always lower than PP’s (see Figure 2 for visual confirmation). In high dimensions ( d ≫ 1), the terms quadratic in d dominate, so the comparison is between 8σ2 
+
+> ϵ,δ
+
+∥A2∥2 
+
+> F
+
+for JME and 16 d2σ4 
+
+> ϵ,δ
+
+∥A2∥2 
+
+> F
+
+for PP. Consequently, at least for σϵ,δ ≥ 1√2 , JME achieves privacy with less added noise than PP. 
+
+In the regime of low privacy (σϵ,δ → 0) in high dimension (d ≫ 1) , PP can be expected to result in higher accuracy estimates than JME, because the terms involving σ4 
+
+> ϵ,δ
+
+make only minor contributions. For settings with general noise shaping matrix, we cannot provide an exact comparison between PP and JME, because the sup X -term in Equation (9) has no closed-form solution. Instead, we derive upper and lower bounds (Lemma D.2), and provide a numeric comparison in Figure 2. 
+
+## 4 Applications 
+
+To demonstrate potential uses of JME, we highlight two applications: private Gaussian density estimation , a classical probabilistic technique, and private Adam optimization , which is common in deep learning. The proofs for all theoretical results can be found in the appendix. 
+
+Private Gaussian density estimation The maximum likelihood solutions to Gaussian density estimation from i.i.d. data, x1, . . . , x t famously is bp(x) = N (x; μt, Σt), where μt = 1
+
+> t
+
+Pti=1 xi
+
+is the sample mean and Σt = 1
+
+> t
+
+Pti=1 (xi − μt)( xi − μt)⊤ is the sample covariance . Using the alternative identity bΣt = 1
+
+> t
+
+Pti=1 xix⊤ 
+
+> i
+
+− μtμ⊤ 
+
+> t
+
+, one sees that the task can indeed be solved in a continuous release setting and that only estimates of the first and second moments are required. To do so privately, we use the averaging workload matrix V = ( ati) with ati = 1 
+
+> t
+
+for 1 ≤ i ≤ t
+
+and ati = 0 otherwise, and we compute private estimates bμ := dV X (private mean) and bΣ = 
+
+\V (X • X) − \(V X ) • \(V X ) (private covariance) using JME. Note that bμ is simply the first-moment vector as above. It is therefore unbiased and the guarantees of Theorem 3.3 holds for it. However, bΣ is not an unbiased estimate because in its computation the noise within dV X is squared. However, it is possible to characterize the bias analytically and subtract it if required. We provide the exact expression for the bias in equation (75) in the Appendix, where the debiased version is referred to as JME (Debiased) .The expected approximation error of bμ is identical to the one in Theorem 3.3 with A = V and 
+
+C1 = C2 = I. The following Theorem establishes the approximation quality of the covariance estimate. In this and the following sections we denote σ = 2 σϵ,δ , referring to the strength of the noise we add to the first moment for ζ = 1 and trivial factorization. 
+
+Theorem 4.1 (Private covariance matrix estimation with JME) . Assume that all input vectors have norm at most 1. Let bΣ be the results of the above construction, where privacy is obtained by running JME with noise strength σ and debiasing. Then it holds: 
+
+sup 
+
+> X∈X
+
+E∥Σ − bΣ∥2 
+
+> F
+
+= ( cdd2 + 2 d + 2) σ2Hn, 1 + d(d + 1) σ4Hn, 2, (11) 
+
+with cd as in Theorem 3.3, and Hn,m := nP 
+
+> k=1 1
+> km
+
+.
+
+For comparison, we also analyze the case where the PP method is used to privatize the covariance matrix, bΣPP := V ( bX • bX) − (V bX • V bX), where bX are privatized entries of X. Again, the resulting biased estimate can be explicitly debiased, see Appendix (93) for the expression. 7The following theorem states upper and lower bounds on the expected approximation error: 
+
+Theorem 4.2 (Private covariance matrix estimation with PP) . Assume the same setting as for Theorem 4.1. Let bΣPP be the result of the above construction, where privacy is obtained by running PP with noise strength σ and debiasing. Let S(n, d, σ ) := d(d + 1) σ4Hn, 1 − d(d + 1) σ4Hn, 2 +2( d + 1) σ2Hn, 1. Then, for the expected error of the covariance matrix estimate it holds: 
+
+S(n, d, σ ) − 2( d + 1) σ2Hn, 3 ≤ sup 
+
+> X∈X
+
+E∥Σ − bΣPP ∥2 
+
+> F
+
+≤ S(n, d, σ ). (12) 
+
+Comparison. In the high privacy regime ( σ ≫ 1), the leading term for JME is d(d + 1) Hn, 2σ4, and for PP it is d(d + 1) Hn, 1σ4. Given that Hn, 1 = O(log n), while Hn,m < π 2/6 for m ≥ 2, the error introduced by PP is logarithmically worse than JME. Figure 6 shows a numerical plot that confirms this observation. Note that our results match the lower bounds established by G. Kamath 2020 [ 30 ], who proved that private covariance estimation in the Frobenius norm requires Ω( d2) samples. 
+
+Private Adam optimization 
+
+The Adam optimizer [ 32 ], has become a de-facto standard for optimization in deep learning. The defining property of Adam is its update rule, θi ← θi−1 − αm i/(√vi + ϵ), where α is a learning rate, and mi and vi are exponentially running averages of computed model gradients and componentwise squared model gradients, respectively. In the context of our work, these quantities correspond to a weighted first-moment vector and the diagonal of the weighted second-moment matrix. Previous attempts to make Adam differentially private relied on postprocessing [ 4, 36 ], potentially with debiasing [ 42 ], i.e. they privatized the model gradients and derived the squared values from these. We demonstrate that JME’s approach of privatizing both quantities separately can be a competitive alternative. Algorithm 2 in the Appendix shows the pseudocode. It contains some modifications compared to the original JME. In particular, we adjust JME to only estimate and privatize the diagonal of the second moment matrix, which reduces the runtime and memory requirements. Interestingly, as the next theorem shows, having to estimate only the diagonal elements of the covariance matrix does not reduce the problem’s sensitivity, so privatizing the estimates remains equally hard. This implies that our previous analyses, including the relation to the baselines, remain valid. 
+
+Theorem 4.3. The sensitivity of JME, with the whole second-moment matrix (C1X, √λC 2X • X),and with just the diagonal terms (C1X, √λC 2X ◦X), are identical. 
+
+The proof can be found in the Appendix A.3. It does not follow from Lemma 3.5 and is significantly more intricate. As in the previous cases, JME’s for free property ensures that its expected approximation error of the first moment is identical to PP. The following theorem establishes the expected approximation errors of both methods for the computed second moments (i.e. the diagonal of the second moment matrix): 
+
+Lemma 4.4 (Comparison of JME and PP for DP-Adam) . Let D = ( v1, . . . , v n) be the matrix of second moment estimates of the Adam algorithm. Denote by bD = ( bv1, . . . , bvn) the private estimate of D computed by Algorithm 2 with trivial factorization and noise strength σ, and let bDPP be the analog quantity computed by DP-Adam with postprocessing. Then it holds: 
+
+EZ ∥ bD − D∥2 = 2 dσ 2 · ∥ A2∥2
+
+> F
+
+, (13) 
+
+sup 
+
+> X∈X
+
+EZ ∥ bDPP − D∥2 = (2 dσ 4 + 4 σ2) · ∥ A2∥2
+
+> Fbias
+
+z }| {
+
++dσ 4 · X
+
+> i
+
+(A2)i
+
+> 22
+
+, (14) 
+
+where A2 is the workload matrix obtained from the coefficients of Adam’s exponentially weighted averaging operations. The term marked "bias" disappears if PP is debiased. 
+
+The proof of the first part follows directly from Theorem 3.3. The error for PP is computed separately in Lemma D.5 in the appendix. This lemma shows that as long as σ ≥ 1, the error introduced by JME is strictly lower than that of PP (i.e. classic DP-Adam [ 36 ]) and even the debiased version of PP (i.e. DP-AdamBC [ 42 ]). Figure 5 illustrates the relation in a prototypical case. 80 50 100 150 200 
+
+> Steps
+> 0.0
+> 2.5
+> 5.0
+> 7.5
+> 10.0
+> 12.5
+> 15.0
+> Average KL Divergence  PP
+> PP (Debiased)
+> JME
+> JME (Debiased)
+
+(a) d = 5 , n = 200 , σ = 2 0 50 100 150 200 
+
+Steps  
+
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> 35
+> Average KL Divergence  PP
+> PP (Debiased)
+> JME
+> JME (Debiased)
+
+(b) d = 10 , n = 200 , σ = 4 
+
+Figure 3: Approximation quality of JME and PP for private Gaussian density estimation as average and standard deviation over 1000 runs. In the high-privacy regime ( σ = 2 and σ = 4 ), JME achieves lower KL divergence than PP after ≈ 10 samples. 
+
+## 5 Experiments 
+
+Our main contributions in this work are both algorithmic and theoretical. Specifically, JME is the general purpose technique for moment estimation, which is promising for some scenarios and less promising for others. However, it is also a practical algorithm that can be easily implemented and integrated into standard machine learning pipelines. To demonstrate this, we report on the experimental result of using Algorithm 1 and Algorithm 2 in two exemplary settings, reflecting the application scenarios described above. 
+
+Private Gaussian density estimation. From a given data distribution, p(x) = N (μ, Σ) , we sample 
+
+n = 200 data points and use either JME or PP to form a private estimates, bpt(x) = N (bμt, bΣt),at each step t = 1 , . . . , n , of the continuous release process. To ensure positive definiteness, we symmetrize JME’s estimated covariance matrices and project them onto the positive definite cone. As a postprocessing operation, this does not affect their privacy. Figure 3 shows the results, with the approximation quality, measured by the Kullback-Leibler (KL) divergence, KL (bpt∥p), at each step, t, as average and standard deviation over 1000 runs, with 
+
+μ ∼ N (0 , 12 Id) and Σ ∼ Wd
+
+  12 Id, 2d (i.e. a Wishart distribution ) in each case. One can see that in the high-privacy regime (here: σ = 2 ), on average, JME achieves a better estimate of the true density than PP, with and without debiasing. 1 2 3 4 5 6 7 8 9 10 
+
+> Epoch
+> 30
+> 35
+> 40
+> 45
+> 50
+> Accuracy (%)
+> DP-Adam-Clip
+> DP-Adam-JME
+> DP-Adam-PP (Debiased)
+> DP-Adam-PP
+
+(a) batchsize B = 256 , ε ≈ 1.71 2 3 4 5 6 7 8 9 10  
+
+> Epoch
+> 10
+> 15
+> 20
+> 25
+> 30
+> Accuracy (%)
+> DP-Adam-Clip
+> DP-Adam-JME
+> DP-Adam-PP (Debiased)
+> DP-Adam-PP
+
+(b) batchsize B = 1 , ε ≈ 0.16 
+
+Figure 4: Results of private Adam training on CIFAR-10 experiments comparing four methods: DP-Adam based PP (with and without debiasing), JME, and joint clipping, over 10 epochs. Left: for low to medium privacy, JME outperforms vanilla DP-Adam but is slightly worse than the debiased version. Right: for high privacy, JME is slightly better than the debiased version, whereas vanilla DP-Adam cannot handle the necessarily amounts of noise. 9Private model training with Adam. We train a convolutional network on the CIFAR-10 dataset with DP-Adam, which is privatized either with JME or PP. Because gradients could have arbitrarily large norm, we apply gradient clipping to a model-selected threshold in both methods. In addition, we include a heuristic baseline that uses the concatenate-and-split techniques in which not the norm of the gradient vector but the norm of the concatenation vector is clipped. While inferior to JME in the worst case, this might be beneficial for real data, so we include it in the experimental evalution. The results in Figure 4 confirm our expectations: in a setting with small noise variance (large batchsize, low privacy), DP-Adam-JME achieved better results than standard DP-Adam, but worse than the debiased variant of DP-Adam. If the noise variance is large (small batchsize, high privacy), DP-Adam-JME slightly improves over the other methods. For detailed accuracy results, see Table 2 in the appendix with hyperparameters provided in Table 3. 
+
+## 6 Related works 
+
+The problem of differentially private moments (and the related problem of covariance estimation) has a rich history of development, with optimal results known in the central model of privacy [ 41 ]as well as the local model of privacy [11 ], and also in the worst-case setting. Sheffet [ 40 ] proposes three differentially private algorithms for approximating the second-moment matrix, each ensuring positive definiteness. The related setting of covariance estimation has been studied in the worst-case setting when the data comes from a bounded ℓ2 ball by several works for approximate differential privacy [ 2, 6, 15 , 37 , 38 , 43 ] with the works of Amin et al . [ 3 ] and Kapralov & Talwar [ 31 ] presenting a pure differentially private algorithm. Covariance estimation is also used as a subroutine in mean-estimation work under various distributional assumptions [ 29 ]. However, none of these approaches are directly applicable to the continual release model and they offer improvements over the Gaussian mechanism only in a very high privacy regime. Precise sensitivity analysis, as a technique to improve differential privacy guarantees, has also been intensively used in the literature [ 34 , 44 , 24 , 33 ]. The matrix mechanism has also gained a lot of attention recently due to its application of continually releasing prefix sums in private online optimization [8, 25, 39, 20, 17, 21, 28, 18, 19]. 
+
+## 7 Summary and Discussion 
+
+In this work we studied the problem of jointly estimating the first and second moment of a continuous data stream in a differentially private way. We presented the Joint Moment Estimation (JME) method, which solves the problem by exploiting the recently proposed matrix mechanism with carefully tuned noise level. As a result, JME produces unbiased estimates of both moments while requiring less noise to be added than baseline methods, at least in the high privacy regime. We applied JME to private Gaussian density estimation and model training with Adam, demonstrating improved performance in high-privacy regimes both theoretically and practically. Despite the promising results, several open question remain. In particular, we would like to explore if postprocessing is indeed the optimal strategy in a low-privacy regime, or if a better privacy-utility trade-off is still possible. Furthermore, we plan to explore the possibility of problem-specific factorizations, which could be fused with the proposed method. 
+
+## Acknowledgments 
+
+We thank Monika Henzinger for her valuable feedback and insightful discussions on earlier versions of this draft. We are also grateful to Mher Safaryan for his contributions to discussions on DP-Adam. Additionally, we thank Ryan McKenna for suggesting Joint Clipping as a baseline. Jalaj Upadhyay’s research was funded by the Rutgers Decanal Grant no. 302918, NSF CNS 2433628, Google Research Scholar Award, and Google Seed Fund Grant. A part of this work was done while visiting the Institute of Science and Technology Austria (ISTA). Nikita Kalinin’s research was funded in part by the Austrian Science Fund (FWF) [10.55776/COE12]. 10 References 
+
+[1] M. Abadi, A. Chu, I. Goodfellow, H. B. McMahan, I. Mironov, K. Talwar, and L. Zhang. Deep learning with differential privacy. In ACM Conference on Computer and Communications Security (CCS) , 2016. [2] D. Achlioptas and F. McSherry. Fast computation of low-rank matrix approximations. Journal of the ACM (JACM) , 54(2), 2007. [3] K. Amin, T. Dick, A. Kulesza, A. Munoz, and S. Vassilvitskii. Differentially private covariance estimation. In Conference on Neural Information Processing Systems (NeurIPS) , 2019. [4] R. Anil, B. Ghazi, V. Gupta, R. Kumar, and P. Manurangsi. Large-scale differentially private bert. Annual Meeting of the Association for Computational Linguistics (ACL) , 2022. [5] B. Balle and Y.-X. Wang. Improving the Gaussian mechanism for differential privacy: Analytical calibration and optimal denoising. In International Conference on Machine Learning (ICML) ,2018. [6] A. Blum, C. Dwork, F. McSherry, and K. Nissim. Practical privacy: the SuLQ framework. In 
+
+International Conference on Management of Data and Symposium on Principles Database and Systems (PODS) , 2005. [7] C. A. Choquette-Choo, K. Dvijotham, K. Pillutla, A. Ganesh, T. Steinke, and A. Thakurta. Corre-lated noise provably beats independent noise for differentially private learning. In International Conference on Learning Representations (ICLR) , 2024. [8] C. A. Choquette-Choo, A. Ganesh, R. McKenna, H. B. McMahan, J. K. Rush, A. G. Thakurta, and X. Zheng. (Amplified) banded matrix factorization: A unified approach to private training. In Conference on Neural Information Processing Systems (NeurIPS) , 2023. [9] C. A. Choquette-Choo, H. B. McMahan, K. Rush, and A. Thakurta. Multi-epoch matrix factorization mechanisms for private machine learning. In International Conference on Machine Learning (ICML) , 2023. [10] S. Denisov, H. B. McMahan, J. Rush, A. Smith, and G. A. Thakurta. Improved Differential Privacy for SGD via optimal private linear operators on adaptive streams. In Conference on Neural Information Processing Systems (NeurIPS) , 2022. [11] J. C. Duchi, M. I. Jordan, and M. J. Wainwright. Local privacy and statistical minimax rates. In 
+
+Symposium on Foundations of Computer Science (FOCS) , 2013. [12] K. D. Dvijotham, H. B. McMahan, K. Pillutla, T. Steinke, and A. Thakurta. Efficient and near-optimal noise generation for streaming differential privacy. In Symposium on Foundations of Computer Science (FOCS) , 2024. [13] C. Dwork, M. Naor, T. Pitassi, and G. N. Rothblum. Differential privacy under continual observation. In Symposium on Theory of Computing (STOC) , 2010. [14] C. Dwork and A. Roth. The algorithmic foundations of differential privacy. Foundations and Trends in Theoretical Computer Science , 2014. [15] C. Dwork, K. Talwar, A. Thakurta, and L. Zhang. Analyze Gauss: optimal bounds for privacy-preserving principal component analysis. In Symposium on Theory of Computing (STOC) ,2014. [16] A. Esteve, E. Boj, and J. Fortiana. Interaction terms in distance-based regression. Communica-tions in Statistics - Theory and Methods , 2009. [17] H. Fichtenberger, M. Henzinger, and J. Upadhyay. Constant matters: Fine-grained error bound on differentially private continual observation. In International Conference on Machine Learning (ICML) , 2023. [18] M. Henzinger, N. P. Kalinin, and J. Upadhyay. Binned group algebra factorization for differen-tially private continual counting, 2025. arXiv preprint arXiv:2504.04398. 11 [19] M. Henzinger, N. P. Kalinin, and J. Upadhyay. Normalized square root: Sharper matrix factoriza-tion bounds for differentially private continual counting, 2025. arXiv preprint arXiv:2509.14334. [20] M. Henzinger and J. Upadhyay. Improved differentially private continual observation using group algebra. In Symposium on Discrete Algorithms (SODA) , 2025. [21] M. Henzinger, J. Upadhyay, and S. Upadhyay. Almost tight error bounds on differentially private continual counting. In Symposium on Discrete Algorithms (SODA) , 2023. [22] M. Henzinger, J. Upadhyay, and S. Upadhyay. A unifying framework for differentially private sums under continual observation. In Symposium on Discrete Algorithms (SODA) , 2024. [23] S. Ioffe and C. Szegedy. Batch normalization: Accelerating deep network training by reducing internal covariate shift. In International Conference on Machine Learning (ICML) , 2015. [24] M. Joseph, M. Ribero, and A. Yu. Privately counting partially ordered data. In International Conference on Learning Representations (ICLR) , 2025. [25] P. Kairouz, B. McMahan, S. Song, O. Thakkar, A. Thakurta, and Z. Xu. Practical and private (deep) learning without sampling or shuffling. In International Conference on Machine Learning (ICML) , 2021. [26] P. Kairouz, S. Oh, and P. Viswanath. The composition theorem for differential privacy. In 
+
+International Conference on Machine Learning (ICML) , 2015. [27] N. Kalinin and C. H. Lampert. Banded square root matrix factorization for differentially private model training. In Conference on Neural Information Processing Systems (NeurIPS) , 2024. [28] N. P. Kalinin, R. McKenna, J. Upadhyay, and C. H. Lampert. Back to square roots: An optimal bound on the matrix factorization error for multi-epoch differentially private sgd, 2025. arXiv preprint arXiv:2505.12128. [29] G. Kamath. The broader landscape of robustness in algorithmic statistics. arXiv preprint arXiv:2412.02670 , 2024. [30] G. Kamath, A. Mouzakis, and V. Singhal. New lower bounds for private estimation and a generalized fingerprinting lemma. In Conference on Neural Information Processing Systems (NeurIPS) , 2020. [31] M. Kapralov and K. Talwar. On differentially private low rank approximation. In Symposium on Discrete Algorithms (SODA) , 2013. [32] D. P. Kingma and J. Ba. Adam: A method for stochastic optimization. In International Conference on Learning Representations (ICLR) , 2015. [33] C. J. Lebeda. Better Gaussian mechanism using correlated noise. In Symposium on Simplicity in Algorithms (SOSA) , 2025. [34] C. J. Lebeda and L. Retschmeier. The correlated Gaussian sparse histogram mechanism. arXiv preprint arXiv:2412.10357 , 2024. [35] C. Li, G. Miklau, M. Hay, A. McGregor, and V. Rastogi. The matrix mechanism: Optimizing linear counting queries under Differential Privacy. International Conference on Very Large Data Bases (VLDB) , 2015. [36] X. Li, F. Tramer, P. Liang, and T. Hashimoto. Large language models can be strong differentially private learners. In International Conference on Learning Representations (ICLR) , 2022. [37] O. Mangoubi and N. Vishnoi. Re-analyze Gauss: Bounds for private matrix approximation via dyson brownian motion. In Conference on Neural Information Processing Systems (NeurIPS) ,2022. [38] O. Mangoubi and N. K. Vishnoi. Private covariance approximation and eigenvalue-gap bounds for complex Gaussian perturbations. In Workshop on Computational Learning Theory (COLT) ,2023. 12 [39] H. B. McMahan, K. Pillutla, T. Steinke, and A. Thakurta. Efficient and near-optimal noise generation for streaming differential privacy. In Symposium on Foundations of Computer Science (FOCS) , 2024. [40] O. Sheffet. Old techniques in differentially private linear regression. In Algorithmic Learning Theory (ALT) , 2019. [41] A. Smith. Privacy-preserving statistical estimation with optimal convergence rates. In Sympo-sium on Theory of Computing (STOC) , 2011. [42] Q. Tang, F. Shpilevskiy, and M. Lécuyer. DP-AdamBC: Your DP-Adam is actually DP-SGD (unless you apply bias correction). In Conference on Artificial Intelligence (AAAI) , 2024. [43] J. Upadhyay. The price of privacy for low-rank factorization. In Conference on Neural Information Processing Systems (NeurIPS) , 2018. [44] A. Wilkins, D. Kifer, D. Zhang, and B. Karrer. Exact privacy analysis of the Gaussian sparse histogram mechanism. Journal of Privacy and Confidentiality , 2024. 13 A Proofs of the main theorems 
+
+In this section, we provide proofs of Theorem 3.2 and Theorem 3.3 from Section 3 as well as Theorem 4.3 from Section 4. 
+
+A.1 Proof of Theorem 3.2 and Lemma 3.5 
+
+The privacy of Algorithm 1 follows from the properties of matrix mechanism [ 35 ], with a precise estimate of the sensitivity of the joint estimation process that we will introduce and discuss later in this section. By means of the matrix factorization mechanism with A1 = B1C1 and A2 = B2C2, we write the joint moment estimate as, 
+
+Y 00 S
+
+
+
+=
+
+B1 00 λ− 12 B2
+
+  C1X 00 λ 12 C2(X • X)
+
+
+
+(15) where λ > 0 is an arbitrary trade-off parameter that we will adjust optimally later. To make the estimate private, we privatize the rightmost matrix in (15) , which contains the data, by adding suitably scaled Gaussian noise. The subsequent matrix multiplication then acts on private data, so its result is also private. It remains to show that the noise level specified in Algorithm 1 suffices to guarantee (ϵ, δ )-privacy. For this, we denote by X = {(x1, . . . , x n) : max i ∥xi∥2 ≤ ζ ∧ xi ∈ Rd} be the set of input sequences where each d-dimensional vector has bounded ℓ2 norm. The sensitivity of a computation is the maximal amount by which the result differs between two input sequences X, X ′ ∈ X , which are identical except for a single data vector at an arbitrary index (denoted by X ∼ X′). For JME, the relevant sensitivity is the one of the matrix we want to privatize, i.e. (in the squared form) 
+
+sens 2
+
+> λ
+
+(C1, C 2) = sup 
+
+> X∼X′
+
+C1 00 √λC 2
+
+  X − X′
+
+X • X −X′ • X′
+
+ 2
+
+> F
+
+= sup 
+
+> X∼X′
+
+∥C1(X −X′)∥2 
+
+> F
+
++ λ∥C2(X • X −X′ • X′)∥2
+
+> F
+
+ (16) Due to the linearity of the operations and the condition imposed by X ∼ X′, most terms in (16) cancel out and the value of sens 2
+
+> λ
+
+(C1, C 2) simplifies into the solution of the following optimization problem. 
+
+Problem 1 (Sensitivity for Joint Moment Estimation) .
+
+max  
+
+> i=1 ,...,n
+
+max 
+
+> ∥x∥2≤ζ
+> ∥y∥2≤ζ
+
+α2 
+
+> i
+
+∥x − y∥22 + λβ 2 
+
+> i
+
+∥x ⊗ x − y ⊗ y∥22, (17) where α2 
+
+> i
+
+= ∥(C1)i∥22 and β2 
+
+> i
+
+= ∥(C2)i∥22 are the column norms of the matrices C1 and C2,respectively. To study Problem 1, we introduce as an intermediate object the formulation of (17) in the special case of ζ = 1 and αi = βi = 1 for i = 1 , . . . , n , treated as a function of λ:
+
+rd(λ) := max 
+
+> x,y ∈Rd
+> ∥x∥2≤1
+> ∥y∥2≤1
+
+∥x − y∥22 + λ∥x ⊗ x − y ⊗ y∥2
+
+> F
+
+. (18) The following theorems provide specific values for rd in the special case of d = 1 (Theorem A.1) and for general d ≥ 2 (Theorem A.2): 
+
+Theorem A.1 (d = 1 ). For any λ > 0, it holds: 
+
+r1(λ) = 
+
+(
+
+4 if λ ≤ 11+5 √58 , 
+
+> 18
+
+(3 − τ )2(λτ + 1 + λ) otherwise. (19) 
+
+where τ = p1 − 2/λ . Moreover, the function r1(λ) is a continuous function with respect to the parameter λ > 0.
+
+14 Theorem A.2 (Joint Sensitivity for Moments Estimation) . For d > 1 and λ > 0:
+
+rd(λ) = 
+
+4 if λ ≤ 12 ,
+
+2 + 2 λ + 12λ otherwise. (20) The proofs of both theorems can be found further in the appendix. Theorem A.1 requires only straightforward optimization. For theorem A.2, we rewrite the Frobenius norm of the difference of Kronecker products and optimize over all possible values for ⟨x, y ⟩.As a corollary of Theorems A.1 and A.2, we obtain a characterization of the general solutions to Problem 1. 
+
+Corollary A.3 (Solution to Problem 1) . Assume that the matrices C1 and C2 have norm-decreasing columns. Then, for any scaling parameter λ > 0, it holds that sens 2
+
+> λ
+
+(C1, C 2) = ζ2α21rd(λζ 2β21 /α 21) (21) 
+
+where rd is specified in (19) or (20) , and α21 and β21 are the squared norms of the first columns of the matrices C1 and C2, respectively. Proof. A straightforward calculation shows sens 2
+
+> λ
+
+(C1, C 2) = max  
+
+> i=1 ,...,n
+
+sup 
+
+> ∥x∥≤ ζ, ∥y∥≤ ζ
+
+α2 
+
+> i
+
+∥x − y∥22 + λβ 2 
+
+> i
+
+∥x ⊗ x − y ⊗ y∥22
+
+= ζ2α21
+
+"
+
+sup 
+
+> ∥x∥≤ 1,∥y∥≤ 1
+
+∥x − y∥22 + λζ 2β21
+
+α21
+
+∥x ⊗ x − y ⊗ y∥22
+
+#
+
+= ζ2α21rd(λζ 2β21 /α 21)
+
+(22) completing the proof of Corollary A.3. Corollary A.3 implies that the joint estimate (15) will be (ϵ, δ )-private, if we use noise of strength at least, σ = ζ2α1rd(λζ 2β1/α 1)σϵ,δ , where σϵ,δ is the noise strength required for the Gaussian mechanism with sensitivity 1. This finishes the proof of the Lemma 3.5. The claim of Theorem 3.2 follows, because Algorithm 1 corresponds exactly to the above construction, only making use of the identity B(CX + Z) = A(X + C−1Z), and for the special case of λ := λ∗,defined as 
+
+λ∗ := α21
+
+β21 ζ2cd
+
+, (23) with cd = 2 if d > 1 and 811+5 √5 for d = 1 , which is the smallest values for λ, such that 
+
+rd
+
+ λζ 2β21
+
+> α21
+
+
+
+= 4 . The sensitivity is then equal to sens λ∗ (C1, C 2) = 2 ζα 1 = 2 ζ∥C1∥1→2, where the last identity holds because of C1’s decreasing column norm structure. We furthermore note that this value is exactly the sensitivity of estimating the first moment alone, because 
+
+max  
+
+> X∼X′
+
+∥C1X −C1X′∥2 = max  
+
+> i=1 ,...,n
+
+max 
+
+> ∥x∥≤ ζ
+> ∥y∥≤ ζ
+
+αi∥x − y∥2 = 4 α21ζ2 (24) This means that JME estimates the second moment without increasing the noise for the first moment, proving our claim that we obtain the second moment privacy for free .
+
+A.2 Proof of Theorem 3.3 
+
+To prove Theorem 3.3, we have to determine how the left-hand side of (15) changes in expectation due to the added noise on the right-hand side. Due to the additive nature of the moment estimation process, we can do so explicitly. For Z1 ∼ [N (0 , σ 2I)] d it holds that 
+
+EZ ∥Y − ˆY ∥2 
+
+> F
+
+= EZ ∥B1Z1∥2 = dσ 2∥B1∥2
+
+> F
+
+. (25) 15 Inserting B1 = A1C−11 and σ = 2 ζσ ϵ,δ ∥C1∥1→2, Equation (3) follows. Analogously, for Z2 ∼
+
+[N (0 , σ 2I)] d×d,
+
+EZ ∥S − ˆS∥2 
+
+> F
+
+= EZ ∥ 1
+
+√λ∗ B2Z2∥2 = d2σ2
+
+λ∗ ∥B2∥2
+
+> F
+
+. (26) With σ as above, Equation (4) follows from B2 = A2C−12 , and JME’s specific choice of λ∗ = 
+
+> ∥C1∥21→2
+> ∥C2∥21→2ζ2cd
+
+.
+
+A.3 Proof of Theorem 4.3 
+
+The proof of Theorem 4.3 goes similarly to 3.2, but now we estimate only the diagonal of the second moment matrix. We will show that the sensitivity remains unchanged by proving that the corresponding function rd(λ) in (18) also remains unchanged. Specifically: 
+
+rdiag  
+
+> d
+
+(λ) = sup 
+
+> ∥x∥2≤1,∥y∥2≤1
+
+∥x − y∥22 + λ∥ diag( x ⊗ x) − diag( y ⊗ y)∥22
+
+ = rd(λ) (27) For simplicity, we denote x ◦ x = diag( x ⊗ x).In dimension d = 1 , the two functions are identical by construction. In dimension d = 2 , we compute the new function explicitly using the following lemma: 
+
+Lemma A.4. Consider x, y ∈ R2, and let λ > 0 then, 
+
+rdiag  
+
+> 2
+
+(λ) = sup 
+
+> ∥x∥2≤1,∥y∥2≤1
+
+∥x − y∥22 + λ∥x ◦ x − y ◦ y∥22
+
+ =
+
+4, if λ ≤ 12 ,
+
+2 + 2 λ + 12λ , if λ > 12 . (28) Next, we use a dimension reduction argument to prove that rdiag  
+
+> d
+
+(λ) = rdiag  
+
+> 2
+
+(λ) for all d ≥ 2, via the following lemma: 
+
+Lemma A.5 (Dimension Reduction) . For any vectors x, y ∈ Rd, where d ≥ 3, there exist vectors 
+
+x′, y ′ ∈ Rd−1 that for any λ > 0 satisfies the inequality: 
+
+∥x − y∥22 + λ∥x ◦ x − y ◦ y∥22 ≤ ∥ x′ − y′∥22 + λ∥x′ ◦ x′ − y′ ◦ y′∥22. (29) We apply this lemma recursively to prove that rdiag  
+
+> d
+
+(λ) = rdiag  
+
+> 2
+
+(λ) for all d ≥ 2. The proof of the lemma can be found later in the appendix. By combining these lemmas, we conclude the proof of the theorem. 16 B Additional materials 10 2 10 1 10 0 10 1 10 2
+
+sigmas 
+
+10 3
+
+10 5
+
+10 7
+
+10 9
+
+10 11 
+
+> Approximation Error
+
+PP 
+
+PP (Debiased) 
+
+JME 
+
+(a) trivial factorization 10 2 10 1 10 0 10 1 10 2
+
+sigmas 
+
+10 3
+
+10 5
+
+10 7
+
+10 9
+
+10 11 
+
+> Approximation Error
+
+PP lb 
+
+PP (Debiased) lb 
+
+JME (b) square root factorization 
+
+Figure 5: Expected error of the estimated covariance vector for Adam with JME versus PP ( d = 10 6;
+
+n = 1000 ). JME provides a better estimate in the mid to high privacy regime. 10 1 10 0 10 1
+
+sigmas 
+
+10 0
+
+10 1
+
+10 2
+
+10 3
+
+> Variance Error
+
+PP lb 
+
+JME (Debiased) 
+
+PP (Debiased) lb 
+
+(a) d = 1 , n = 1000 10 1 10 0 10 1
+
+sigmas 
+
+10 1
+
+10 2
+
+10 3
+
+10 4
+
+> Variance Error
+
+PP lb 
+
+JME (Debiased) 
+
+PP (Debiased) lb (b) d = 100 , n = 1000 
+
+Figure 6: Expected error of the estimated covariance matrix with JME versus PP (with trivial factorizations). For d = 1 , JME consistently achieves quality better than or on par with PP. For 
+
+d = 100 , JME is preferable to PP only in the high privacy regime. 10 2 10 1 10 0 10 1 10 2
+
+> sigmas
+> 10 1
+> 10 3
+> 10 5
+> 10 7
+> 10 9
+> Approximation Error  PP (Debiased)
+> PP
+> JME
+
+(a) d = 100 , β = 0 .9,
+
+C1 = C2 = I10 2 10 1 10 0 10 1 10 2
+
+> sigmas
+> 10 1
+> 10 3
+> 10 5
+> 10 7
+> 10 9
+> Approximation Error  PP (Debiased) lb
+> PP (Debiased) ub
+> PP ub
+> PP lb
+> JME
+
+(b) d = 100 , β = 0 .9,
+
+C1 = C2 = A1/2
+
+β10 2 10 1 10 0 10 1 10 2
+
+> sigmas
+> 10 1
+> 10 3
+> 10 5
+> 10 7
+> 10 9
+> Approximation Error  PP (Debiased)
+> PP
+> JME
+
+(c) d = 100 , w = 10 ,C1 = C2 = I10 2 10 1 10 0 10 1 10 2
+
+> sigmas
+> 10 1
+> 10 3
+> 10 5
+> 10 7
+> 10 9
+> Approximation Error
+> PP (Debiased) lb
+> PP (Debiased) ub
+> PP ub
+> PP lb
+> JME
+
+(d) d = 100 , w = 10 ,C1 = C2 = A1/2
+
+w
+
+Figure 7: Expected error of second moment estimation with JME versus PP under different workload settings. The scenarios include exponential decay ( β = 0 .9) and sliding window ( w = 10 ) workloads and d = 100 , n = 1000 , both trivial and square root matrix factorization. In line with our analysis, incorporating matrix factorization significantly improves the quality of both methods, particularly in the high privacy regime. 17 Table 2: CIFAR-10 experiments with two different privacy budgets, ε ≈ 1.7 and ε ≈ 0.16 for 
+
+δ = 10 −6, for four methods: DP-Adam with and without debiasing, JME, and Joint Clipping. The average and standard deviation errors are based on 3 runs. 
+
+Method Epoch 1 Epoch 2 Epoch 3 Epoch 4 Epoch 5 Epoch 6 Epoch 7 Epoch 8 Epoch 9 Epoch 10 
+
+ε ≈ 0.16 
+
+DP-Adam-JME 12.43 ± 3.95 19.18 ± 2.27 23.29 ± 1.25 25.83 ± 0.48 27.25 ± 0.20 27.81 ± 0.14 28.50 ± 0.40 28.89 ± 0.54 29.61 ± 0.51 30.38 ± 0.62 DP-Adam-Clip 13.54 ± 3.31 19.68 ± 2.76 24.92 ± 1.48 26.24 ± 1.04 26.60 ± 0.25 27.27 ± 0.55 27.56 ± 0.46 27.98 ± 0.26 27.78 ± 0.17 28.14 ± 0.33 DP-Adam-Debiased 12.41 ± 4.14 16.91 ± 1.36 23.78 ± 0.70 24.92 ± 0.55 26.20 ± 0.65 26.96 ± 1.19 27.46 ± 0.90 28.14 ± 0.72 28.55 ± 0.92 29.14 ± 0.60 DP-Adam 10.29 ± 0.51 10.32 ± 0.56 10.32 ± 0.56 10.34 ± 0.58 10.39 ± 0.67 10.41 ± 0.70 10.42 ± 0.73 10.45 ± 0.79 10.45 ± 0.78 10.48 ± 0.83 
+
+ε ≈ 1.7
+
+DP-Adam-JME 32.64 ± 0.71 39.19 ± 1.52 42.28 ± 0.48 44.44 ± 0.57 45.12 ± 0.81 45.61 ± 0.73 46.91 ± 1.21 47.04 ± 0.98 47.24 ± 0.79 47.94 ± 0.85 DP-Adam-Clip 30.51 ± 0.72 38.03 ± 1.00 40.66 ± 0.75 42.88 ± 0.46 43.30 ± 0.71 43.52 ± 0.50 44.51 ± 0.70 44.45 ± 0.24 44.76 ± 0.22 44.34 ± 0.28 DP-Adam-Debiased 34.21 ± 0.95 41.38 ± 1.54 45.20 ± 0.44 46.91 ± 1.25 48.06 ± 0.36 48.38 ± 0.83 48.26 ± 1.05 48.38 ± 1.21 47.81 ± 0.73 48.53 ± 0.99 DP-Adam 26.58 ± 0.43 31.45 ± 0.43 35.02 ± 1.16 36.39 ± 0.58 38.15 ± 0.95 39.31 ± 0.52 40.33 ± 0.33 41.47 ± 1.05 42.42 ± 0.94 43.07 ± 0.86 Table 3: Hyperparameters for CIFAR-10 Experiments. Medium-privacy experiments use a batch size of 256 , compared to 1 in the high-privacy regime, while using a noise multiplier of σε,δ = 1 for the medium-privacy regime and σε,δ = 2 for the high-privacy regime. JME and joint clipping require an additional hyperparameter—scaling—which is optimized to find the best value for those runs. We also find it helpful to clip the updates; for this, we use the same clipping norm. 
+
+Noise Mult Batch Size Method lr Scaling ( λ, τ ) eps Clip Norm 
+
+ε ≈ 1.7 1 256 DP-Adam-JME 10 −3 1 10 −6 1DP-Adam-Clip 10 −3 0.5 10 −6 1DP-Adam-Debiased 10 −3 - 10 −6 1DP-Adam 10 −3 - 10 −8 1
+
+ε ≈ 0.16 2 1DP-Adam-JME 10 −7 1 10 −7 1DP-Adam-Clip 10 −7 0.5 10 −7 1DP-Adam-Debiased 10 −7 - 10 −7 1DP-Adam 10 −7 - 10 −8 118 C Algorithms 
+
+Algorithm 2 Differentially Private JME Adam 
+
+Input: Initial model θ0 ∈ Rd, dataset D, batchsize b, matrices Cβ1 , C β2 ∈ Rn×n, model loss 
+
+ℓ(θ, d ), clipnorm ζ, noise multiplier σϵ,δ ≥ 0, learning rate α > 0, and parameters β1 = 0 .9,
+
+β2 = 0 .999 , ε = 10 −8.
+
+m0 ← 0 // first moment initialization. 
+
+v0 ← 0 // second moment initialization. 
+
+λ, s λ = ·Joint-sens (Cβ1 , C β2 ) // joint sensitivity 
+
+Z1, Z 2 ∼ N (0 , σ 2 
+
+> ϵ,δ
+
+s2
+
+> λ
+
+Id) // noise generating 
+
+for i = 1 , 2, . . . , n do 
+
+Si ← { d1, . . . , d m} ⊆ D select a data batch 
+
+gj ← ∇ θ ℓ(θi−1, d j )) for j = 1 , . . . , m xi ← Pmj=1 min(1 , ζ/ || gj || )gj
+
+bxi ← xi + ζ[C−1 
+
+> β1
+
+Z1][i, ·]
+
+cx2i ← x2 
+
+> i
+
++ λ−1/2ζ[C−1 
+
+> β2
+
+Z2][i, ·]
+
+mi ← mi−1β1 + (1 − β1)bxi
+
+vi ← vi−1β2 + (1 − β2)cx2i
+
+bmi = mi/(1 − βi
+
+> 1
+
+) // bias-correction 
+
+bvi = vi/(1 − βi
+
+> 2
+
+) // bias-correction 
+
+θi ← θi−1 − α bmi/(√bvi + ϵ)
+
+end for Ensure: Θ = ( θ1, . . . , θ n)
+
+Algorithm 3 λ-JME 
+
+Require: input stream vectors x1, . . . , x n ∈ Rd with ∥xt∥2 ≤ ζ for ζ > 0
+
+Require: workload matrices A1 = ( atk), A 2 = ( btk) ∈ Rn×n
+
+Require: noise shaping matrices C1, C 2 (lower triangular, invertible, decreasing column norms) (default: I n×n)
+
+Require: privacy parameters (ϵ, δ )
+
+σϵ,δ ← noise strength for (ϵ, δ )-dp Gaussian mechanism 
+
+s ← ζ∥C1∥1→2rd
+
+ λζ 2∥C2∥21→2
+
+> ∥C1∥21→2
+
+1/2
+
+// joint sensitivity 
+
+Z1 ∼ N (0 , σ 2 
+
+> ϵ,δ
+
+s2)n×d // 1st moment noise 
+
+Z2 ∼ N (0 , σ 2 
+
+> ϵ,δ
+
+s2)n×d×d // 2nd moment noise 
+
+for t = 1 , 2, . . . , n do 
+
+bxt ← xt + [ C−11 Z1][t, ·]
+
+\xt ⊗ xt ← xt ⊗ xt + λ−1/2[C−12 Z2][t, ·,·]
+
+yield bYt = tP
+
+> k=1
+
+atk cxk, bSt = tP
+
+> k=1
+
+btk \xk ⊗ xk
+
+end for 
+
+19 Algorithm 4 α-IME (IME with budget split parameter α ∈ (0 , 1) )
+
+Require: input stream of vectors x1, . . . , x n ∈ Rd with ∥xt∥2 ≤ ζ for ζ > 0
+
+Require: workload matrices A1 = ( atk), A 2 = ( btk) ∈ Rn×n
+
+Require: noise shaping matrices C1, C 2 (lower triangular, invertible, decreasing column norms) (default: I n×n)
+
+Require: privacy parameters (ϵ, δ )
+
+Require: σ ← noise strength for (ϵ, δ )-dp Gaussian mechanism 
+
+Require: privacy trade-off α ∈ (0 , 1) 
+
+σ1 ← σ√α
+
+s1 ← 2ζ∥C1∥1→2 // sensitivity of 1st moment 
+
+Z1 ∼ N (0 , σ 21 s21)n×d // 1st moment noise 
+
+σ2 ← σ√1−α
+
+s2 ← √2ζ2∥C2∥1→2 // sensitivity of 2nd moment 
+
+Z2 ∼ N (0 , σ 2s22)n×d×d // 2nd moment noise 
+
+for t = 1 , 2, . . . , n do 
+
+bxt ← xt + [ C−11 Z1][t, ·]
+
+\xt ⊗ xt ← xt ⊗ xt + [ C−12 Z2][t, ·,·]
+
+yield bYt = tP
+
+> k=1
+
+atk cxk, bSt = tP
+
+> k=1
+
+btk \xk ⊗ xk
+
+end for Algorithm 5 τ -CS (CS with 2nd moment rescaling parameter τ > 0)
+
+Require: input stream of vectors x1, . . . , x n ∈ Rd with 
+
+Require: workload matrices A = ( atk) ∈ Rn×n
+
+Require: input dimension d, bound on input norm ζ > 0
+
+Require: privacy parameters (ϵ, δ )
+
+Require: (optional) noise shaping matrix C (lower triangular, invertible, decreasing column norms) (default: I n×n)
+
+σϵ,δ ← noise strength for (ϵ, δ )-dp Gaussian mechanism 
+
+s ← 2ζp1 + τ ζ 2 // sensitivity based on norm of concatenated data 
+
+Z ∼ N (0 , σ 2 
+
+> ϵ,δ
+
+s2)n×d(d+1) // noise matrix for concatenated data 
+
+for t = 1 , 2, . . . , n do 
+
+ext =   xt, √τ vec (xt ⊗ xt) bext ← ext + [ C−1Z][t, ·]
+
+yield bYt = tP
+
+> k=1
+
+atk[ b˜xt]1: d bSt = 1√τtP
+
+> k=1
+
+btk[ b˜xt](d+1): d(d+1) 
+
+end for 
+
+20 Algorithm 6 PP 
+
+Require: input stream of vectors x1, . . . , x n ∈ Rd with ∥xt∥2 ≤ ζ for ζ > 0
+
+Require: workload matrices A1 = ( atk), A 2 = ( btk) ∈ Rn×n
+
+Require: noise shaping matrix C1 (lower triangular, invertible, decreasing column norms) (default: In×n)
+
+Require: privacy parameters (ϵ, δ )
+
+σϵ,δ ← noise strength for (ϵ, δ )-dp Gaussian mechanism 
+
+s ← 2ζ∥C1∥1→2 // sensitivity of 1st moment 
+
+Z ∼ N (0 , σ 2 
+
+> ϵ,δ
+
+s2)n×d // 1st moment noise 
+
+for t = 1 , 2, . . . , n do 
+
+bxt ← xt + [ C−11 Z][t, ·]
+
+bt ← Id×d × σ2 
+
+> ϵ,δ
+
+∥C1∥21→2
+
+> n
+
+P
+
+> k=1
+
+(A2)t,k (C1C⊤ 
+
+> 1
+
+)−1 
+
+> k,k
+
+// bias term (optional) 
+
+\xt ⊗ xt ← bxt ⊗ bxt − bt
+
+yield bYt = tP
+
+> k=1
+
+atk cxk, bSt = tP
+
+> k=1
+
+btk \xk ⊗ xk
+
+end for 
+
+21 D Technical Proofs 
+
+Definition D.1 (Face-Splitting Product) . Let A = ( a⊤ 
+
+> i
+
+)ni=1 with ai ∈ Rd1 and B = ( b⊤ 
+
+> i
+
+)ni=1 with 
+
+bi ∈ Rd2 . The Face-Splitting Product of A and B, denoted by A • B, is defined as: 
+
+A • B = ( ai ⊗ bi)ni=1 = (vec( aib⊤ 
+
+> i
+
+)) ni=1 , (30) where ⊗ denotes the Kronecker product, and vec denotes vectorization. The result is a matrix of size n × (d1d2), where each row corresponds to the vectorized Kronecker product of ai and bi. A few properties of the Face-Splitting Product that we will use further: • Bilinearity A •(B + C) = A • B + A • C and (A + B) • C = A • C + B • C).• Associativity (A • B) • C = A •(B • C).• Frobenius norm ∥A • B∥F = ∥B • A∥F, even though A • B̸ = B • A.
+
+D.1 Bounds on the expected approximation error for PP with non-trivial factorization Lemma D.2. 
+
+∥A2C−11 ∥2 
+
+> F
+
+≤ sup 
+
+> X∈X
+
+tr  (A⊤ 
+
+> 2
+
+A2 ◦ C−11 C−⊤  
+
+> 1
+
+)XX ⊤ ≤ X
+
+> ij
+
+[A⊤ 
+
+> 2
+
+A2 ◦ C−11 C−⊤  
+
+> 1
+
+]i,j (31) 
+
+Proof of Lemma D.2. The proof is elementary. For the lower bound. consider the specific choice for 
+
+X = ( x1, . . . , x n) with all rows identical with ∥xi∥ = 1 , such that XX ⊤ is the constant matrix of all 1s. For the upper bound, we observe that [XX ⊤]i,j ∈ [−1, 1] , so 
+
+tr  (A⊤ 
+
+> 2
+
+A2 ◦ C−11 C−⊤  
+
+> 1
+
+)XX ⊤ = X
+
+> i,j
+
+[A⊤ 
+
+> 2
+
+A2 ◦ C−11 C−⊤  
+
+> 1
+
+]i,j [XX ⊤]i,j ≤ X
+
+> i,j
+
+[A⊤ 
+
+> 2
+
+A2 ◦ C−11 C−⊤  
+
+> 1
+
+]i,j .
+
+(32) 
+
+Theorem A.1 (d = 1 ). For any λ > 0, it holds: 
+
+r1(λ) = 
+
+(
+
+4 if λ ≤ 11+5 √58 , 
+
+> 18
+
+(3 − τ )2(λτ + 1 + λ) otherwise. (19) 
+
+where τ = p1 − 2/λ . Moreover, the function r1(λ) is a continuous function with respect to the parameter λ > 0.Proof. We recall that the function r1(λ) is defined as 
+
+r1(λ) = sup 
+
+> |x|,|y|≤ 1
+
+[( x − y)2 + λ(x2 − y2)2]. (33) Given the difference it is an increasing function of x + y therefore without any loss of generality we can assume y = 1 . Then the derivative of this expression would give us 
+
+2( x − 1)(1 + 2 λ(x2 + x)) (34) The optimal value will depend on the roots of the quadratic polynomial. The determinant is 4λ2 − 8λ
+
+therefore for λ < 2 there are no roots, the function is decreasing on the segment [−1, 1] reaching its maximal value at x = −1 with the value 4. Otherwise we have the following roots −1±√1−2/λ  
+
+> 2
+
+. We observe that for large λ ≫ 1 we have the optimal x = 0 which corresponds to the maximal value for the second term. The maximum could be in both x = −1 and x = −1+ √1−2/λ  
+
+> 2
+
+therefore we will need to compare them. By substituting it into the expression we get 18 (τ − 3) 2(λτ + 1 + λ), where 
+
+τ = p1 − 2/λ . We should compare this expression with 4 to find a boundary when x = −1 is an optimal solution. 22 18 (τ − 3) 2(λτ + 1 + λ) ≤ 4 (35) We can express 1/λ = 1−τ 2 
+
+> 2
+
+. Therefore we get the following inequality of variable 0 ≤ τ < 1:
+
+18 (τ − 3) 2(τ + 1 − τ 2
+
+2 + 1) − 4 1 − τ 2
+
+2 = 116 (3 − τ )3(1 + τ ) − 2(1 − τ )(1 + τ )= 116 (1 + τ ) 27 − 27 τ + 9 τ 2 − τ 3 − 32 + 32 τ 
+
+= − 116 (1 + τ )2(τ 2 − 10 τ + 5) ≤ 0
+
+(36) Which is less than 0 for τ ≤ 5 − 2√5 ⇒ λ ≤ 11+5 √58 ≈ 2.77 which concludes the proof. 
+
+Theorem A.2 (Joint Sensitivity for Moments Estimation) . For d > 1 and λ > 0:
+
+rd(λ) = 
+
+4 if λ ≤ 12 ,
+
+2 + 2 λ + 12λ otherwise. (20) 
+
+Proof. First, we decompose the Kronecker product as follows: 
+
+∥x ⊗ x − y ⊗ y∥2 
+
+> F
+
+= ∥xx T − yy T ∥2 
+
+> F
+
+= tr( xx T xx T ) − 2 tr( xx T yy T ) + tr( yy T yy T )= ∥x∥42 + ∥y∥42 − 2⟨x, y ⟩2. (37) Similarly, the squared norm of the difference is 
+
+∥x − y∥22 = ∥x∥22 + ∥y∥22 − 2⟨x, y ⟩. (38) Therefore, the objective function becomes 
+
+∥x − y∥2 + λ∥x ⊗ x − y ⊗ y∥2 
+
+> F
+
+= ∥x∥22 + ∥y∥22 + λ∥x∥42 + λ∥y∥42 − 2⟨x, y ⟩ − 2λ⟨x, y ⟩2. (39) The first four terms are maximized when ∥x∥ = ∥y∥ = 1 , yielding 2 + 2 λ. The last two terms can then be optimized independently over the scalar product ⟨x, y ⟩ in dimension d > 1.Let β = ⟨x, y ⟩, where −1 ≤ β ≤ 1. The expression −2β − 2λβ 2 is maximized at β = − 12λ when 
+
+λ ≥ 12 , or at β = −1 when λ < 12 . If β = −1, then x = −y and the objective function becomes 4. If 
+
+β = − 12λ , the objective function is equal to 2 + 2 λ + 12λ , which concludes the proof. 
+
+Theorem 3.6 (JME vs IME) . For any ϵ, δ > 0, λ-JME Pareto-dominates IME with respect to the approximation error for the first vs second moment estimates. Proof. We begin the proof with the following observation: λ-JME and IME introduce additive noise to the first and second moments. Therefore, for the Frobenius approximation error, it is sufficient to compare just the variances of the noise introduced by those methods. We use an instance of a Gaussian mechanism, and the privacy guarantees are more appropriately characterized by the notion of Gaussian privacy. For the sake of the proof, we assume that (ϵ, δ )-DP is equivalent to μ-GDP for a specific choice of μ. The sensitivity of λ-JME depends on the dimensionality. Here, we assume 
+
+d > 1 to address the hardest case, as d = 1 follows trivially. To estimate x and x ⊗ x simultaneously in a differentially private way via composition theorem, we need to split the privacy budget between the components. Using the Gaussian mechanism, we split the budget as μ1-GDP for the first component and μ2-GDP for the second component such that μ21 + μ22 = μ2. The squared sensitivity of x is 4ζ2, and the squared sensitivity of x ⊗ x is 2ζ4,23 assuming ∥x∥2 ≤ ζ. Therefore, the variance of noise added to the first and second components is given by:  4ζ2
+
+μ21
+
+, 2ζ4
+
+μ2 − μ21
+
+
+
+. (40) Our analysis for JME yields the pair of variances, for λζ 2 ≥ 12 :
+
+ζ2(2 + 2 λζ 2 + 12λζ 2 )
+
+μ2 , ζ2(2 + 2 λζ 2 + 12λζ 2 )
+
+λμ 2
+
+!
+
+. (41) We aim to show that for a given variance in the first component, our variance for the second component is smaller. Specifically, we need to prove: 
+
+ζ2(2 + 2 λζ 2 + 12λζ 2 )
+
+λμ 2 < 2ζ4
+
+μ2 − μ21
+
+, where 4ζ2
+
+μ21
+
+= ζ2(2 + 2 λζ 2 + 12λζ 2 )
+
+μ2 . (42) By substituting μ2
+
+> μ21
+
+= 12 + λζ 2 
+
+> 2
+
++ 18λζ 2 into the inequality, we obtain: 
+
+2λζ 2
+
+2 + 2 λζ 2 + 12λζ 2
+
+> 1 − 1 
+
+> 12
+
++ λζ 2 
+
+> 2
+
++ 18λζ 2
+
+. (43) Multiplying both sides by the denominator yields: 
+
+2λζ 2 > 2 + 2 λζ 2 + 12λζ 2 − 4. (44) Simplifying, we find λζ 2 > 14 , which is satisfied by the initial assumption. 
+
+Theorem 3.7 (JME vs CS) . For any ϵ, δ > 0, λ-JME Pareto-dominates CS with respect to the approximation error for the first vs second moment estimates. Proof. We begin the proof with the following observation: λ-JME and CS introduce additive noise to the first and second moments. Therefore, for the Frobenius approximation error, it is sufficient to compare just the variances of the noise introduced by those methods. We use an instance of a Gaussian mechanism, and the privacy guarantees are more appropriately characterized by the notion of Gaussian privacy. For the sake of the proof, we assume that (ϵ, δ )-DP is equivalent to μ-GDP for a specific choice of μ. The sensitivity of λ-JME depends on the dimensionality. Here, we assume 
+
+d > 1 to address the hardest case, as d = 1 follows trivially. We aim to show that Joint Moment Estimation (JME) introduces less noise to the (x ⊗ x) component than CS under the same privacy budget μ-GDP. Specifically, we compare the variances in the second coordinate under the assumption that the noise variances in the first coordinate are equal. The combined vector of xi and xi ⊗ xi can be represented as: 
+
+(xi, √τ x i ⊗ xi), (45) where τ > 0 is a scaling parameter. If the input vectors xi are bounded by ∥xi∥2 ≤ ζ, the resulting vector will have l2 norm bounded by pζ2 + τ ζ 4. The squared sensitivity of the vector is therefore: 
+
+4ζ2(1 + τ ζ 2). This results in the following variances for the first and second coordinates under noise addition:  4ζ2(1 + τ ζ 2)
+
+μ2 , 4ζ2(1 + τ ζ 2)
+
+τ μ 2
+
+
+
+. (46) For JME, we analyze the variances and obtain the pair of variances as: 
+
+ζ2(2 + 2 ζ2λ + 12ζ2λ )
+
+μ2 , ζ2(2 + 2 ζ2λ + 12ζ2λ )
+
+λμ 2
+
+!
+
+, (47) where we assume ζ2λ ≥ 12 .24 To compare the noise introduced to the second component, we aim to show: 
+
+ζ2(2 + 2 ζ2λ + 12ζ2λ )
+
+λμ 2 < 4ζ2(1 + τ ζ 2)
+
+τ μ 2 , (48) under the condition that the variances in the first component are equal: 
+
+ζ2(2 + 2 ζ2λ + 12ζ2λ )
+
+μ2 = 4ζ2(1 + τ ζ 2)
+
+μ2 . (49) Given the equality, inequality is equivalent to λ > τ . Simplifying the equality in the first component gives: 
+
+2 + 2 ζ2λ + 12ζ2λ = 4 + 4 τ ζ 2. (50) Rearranging terms, we isolate 12ζ2λ :
+
+12ζ2λ = 2 + 2(2 τ − λ)ζ2. (51) From the assumption ζ2λ ≥ 12 , we know that 12ζ2λ < 1. For this inequality to hold, the term 
+
+2 + 2(2 τ − λ)ζ2 must also be less than 1. Therefore, 2τ − λ < 0, therefore λ > τ .Thus, we conclude that for the same variance in the first component, JME introduces less noise variance to the second component compared to CS. 
+
+Lemma 3.8 (Expected Second Moment Error for PP) . Assume the same setting as for Theorem 3.3, except that we compute the estimates bY and bSPP with the PP method. Let Q = C−11 C−⊤  
+
+> 1
+
+and 
+
+EQ = diag( Q) diag( Q)⊤. Then, the expected approximation error of the second moment satisfies: 
+
+sup 
+
+> X∈X
+
+E∥S − bSPP ∥2 
+
+> F
+
+= 16 d(d + 1) σ4 
+
+> ϵ,δ
+
+ζ4∥C1∥41→2 tr( A⊤ 
+
+> 2
+
+A2(Q ◦ Q)) (9) 
+
++ 8( d + 1) σ2 
+
+> ϵ,δ
+
+ζ2∥C1∥21→2 sup 
+
+> X∈X
+
+tr(( A⊤ 
+
+> 2
+
+A2 ◦ Q)XX T )
+
+> bias
+
+z }| {
+
++16 dσ 4 
+
+> ϵ,δ
+
+ζ4∥C1∥41→2 tr( A⊤ 
+
+> 2
+
+A2EQ) .
+
+For debiased PP, the term marked "bias" does not occur. Proof. We aim to evaluate the expected squared Frobenius norm of the error: 
+
+sup 
+
+> X∈X
+
+E∥A2(( X + C−11 Z1) •(X + C−11 Z1)) − A2(X • X)∥2
+
+> F
+
+= 2 sup 
+
+> X∈X
+
+E∥A2(X • C−11 Z1)∥2
+
+> F
+
+| {z }
+
+> S1
+
++2 sup 
+
+> X∈X
+
+E⟨A2(X • C−11 Z1), A 2(C−11 Z1 • X)⟩F
+
+| {z }
+
+> S2
+
++ E∥A2(( C−11 Z1) •(C−11 Z1)) ∥2
+
+> F
+
+| {z }
+
+> S3
+
+.
+
+(52) We compute those terms separately. We add component-wise independent Gaussian noise Z1 ∼N (0 , σ 2) to the first moment, where σ = 2 ζσ ϵ,δ .25 Step 1. Bound S1.
+
+S1 = sup 
+
+X∈X 
+
+E∥A2(X • C−11 Z1)∥2
+
+F
+
+= sup 
+
+X∈X 
+
+E
+
+nX
+
+k=1 
+
+dX
+
+i,j 
+
+nX
+
+t=1 
+
+(A2)k,t Xt,i nX
+
+r=1 
+
+(C−11 )t,r (Z1)r,j 
+
+!2
+
+= sup 
+
+X∈X 
+
+nX
+
+k=1 
+
+dX
+
+i,j nX
+
+t1,t 2
+
+(A2)k,t 1 (A2)k,t 1 Xt1,i Xt2,i nX
+
+r=1 
+
+(C−11 )t1,r (C−11 )t2,r E(Z1)2
+
+r,j 
+
+= σ2∥C1∥21→2 sup 
+
+X∈X 
+
+nX
+
+k=1 
+
+dX
+
+i,j nX
+
+t1,t 2
+
+(A2)k,t 1 (A2)k,t 2 Xt1,i Xt2,i nX
+
+r=1 
+
+(C−11 )t1,r (C−11 )t2,r 
+
+= dσ 2∥C1∥21→2 sup 
+
+X∈X 
+
+nX
+
+t1,t 2
+
+⟨(A⊤
+
+2 )t1 , (A⊤
+
+2 )t2 ⟩⟨ Xt1 , X t2 ⟩⟨ (C−11 )t1 , (C−11 )t2 ⟩
+
+= dσ 2∥C1∥21→2 sup 
+
+X∈X 
+
+tr(( AT
+
+2 A2 ◦ Q)XX T ),
+
+(53) where Q = ( C1CT
+
+1 )−1.
+
+Step 2. Bound S2.
+
+S2 = sup 
+
+X∈X 
+
+E⟨A2(X • C−11 Z1), A 2(C−11 Z1 • X)⟩F
+
+= sup 
+
+X∈X 
+
+E
+
+nX
+
+k=1 
+
+dX
+
+i,j 
+
+nX
+
+t=1 
+
+(A2)k,t Xt,i (C−11 Z1)t,j 
+
+! nX
+
+t=1 
+
+(A2)k,t Xt,j (C−11 Z1)t,i 
+
+!
+
+= sup 
+
+X∈X 
+
+E
+
+nX
+
+k=1 
+
+dX
+
+i,j nX
+
+t1,t 2
+
+(A2)k,t 1 Xt1,i (C−11 Z1)t1,j (A2)k,t 2 Xt2,j (C−11 Z1)t2,i 
+
+= sup 
+
+X∈X 
+
+E
+
+nX
+
+k=1 
+
+dX
+
+j=1 
+
+nX
+
+t1,t 2
+
+(A2)k,t 1 Xt1,j (C−11 Z1)t1,j (A2)k,t 2 Xt2,j (C−11 Z1)t2,j 
+
+= 1
+
+d sup 
+
+X∈X 
+
+E∥A2(X • C−11 Z1)∥2
+
+F = S1
+
+d
+
+(54) 
+
+Step 3. Bounding S3 We expand this term: 
+
+S3 = E∥A2(( C−11 Z1) •(C−11 Z1)) ∥2
+
+F
+
+= E
+
+nX
+
+k=1 
+
+dX
+
+i,j 
+
+nX
+
+t=1 
+
+(A2)k,t (C−11 Z1)t,i (C−11 Z1)t,j 
+
+!2
+
+= E
+
+nX
+
+k=1 
+
+dX
+
+i,j nX
+
+t1,t 2
+
+(A2)k,t 1 (A2)k,t 2 (C−11 Z1)t1,i (C−11 Z1)t1,j (C−11 Z1)t2,i (C−11 Z1)t2,j 
+
+= E
+
+nX
+
+k=1 
+
+nX
+
+t1,t 2
+
+dX
+
+i,j 
+
+(A2)k,t 1 (A2)k,t 2 (C−11 Z1)t1,i (C−11 Z1)t1,j (C−11 Z1)t2,i (C−11 Z1)t2,j 
+
+= E
+
+nX
+
+k=1 
+
+nX
+
+t1,t 2
+
+(A2)k,t 1 (A2)k,t 2
+
+dX
+
+i,j 
+
+(C−11 Z1)t1,i (C−11 Z1)t1,j (C−11 Z1)t2,i (C−11 Z1)t2,j 
+
+=
+
+nX
+
+k=1 
+
+nX
+
+t1,t 2
+
+(A2)k,t 1 (A2)k,t 2
+
+dX
+
+i,j 
+
+E(C−11 Z1)t1,i (C−11 Z1)t1,j (C−11 Z1)t2,i (C−11 Z1)t2,j .
+
+(55) 26 We now deal with two cases. When i = j, we compute: 
+
+E(C−11 Z1)2
+
+t1,j (C−11 Z1)2
+
+t2,j 
+
+= E
+
+nX
+
+r=1 
+
+(C−11 )2
+
+t1,r (C−11 )2
+
+t2,r (Z1)4
+
+r,j + E
+
+nX
+
+r1̸ =r2
+
+(C−11 )2
+
+t1,r 1 (C−11 )2
+
+t2,r 2 (Z1)2
+
+r1,j (Z1)2
+
+r2,j 
+
++ 2 E
+
+nX
+
+r1̸ =r2
+
+(C−11 )t1,r 1 (C−11 )t1,r 2 (C−11 )t2,r 1 (C−11 )t2,r 2 (Z1)2
+
+r1,j (Z1)2
+
+r2,j 
+
+= 3 σ4∥C1∥41→2
+
+nX
+
+r=1 
+
+(C−11 )2
+
+t1,r (C−11 )2
+
+t2,r + σ4∥C1∥41→2
+
+nX
+
+r1̸ =r2
+
+(C−11 )2
+
+t1,r 1 (C−11 )2
+
+t2,r 2
+
++ 2 σ4∥C1∥41→2
+
+nX
+
+r1̸ =r2
+
+(C−11 )t1,r 1 (C−11 )t1,r 2 (C−11 )t2,r 1 (C−11 )t2,r 2
+
+= σ4∥C1∥41→2Qt1,t 1 Qt2,t 2 + 2 σ4∥C1∥41→2Q2
+
+t1,t 2 .
+
+(56) On the other hand, when i̸ = j, then 
+
+E(C−11 Z1)t1,i (C−11 Z1)t1,j (C−11 Z1)t2,i (C−11 Z1)t2,j = σ4∥C1∥41→2
+
+nX
+
+r=1 
+
+(C−11 )t1,r (C−11 )t2,r 
+
+!2
+
+= σ4∥C1∥41→2Q2
+
+t1,t 2 .
+
+(57) Using equation (56) and equation (57) in equation (55), we get 
+
+S3 = E∥A2(( C−11 Z1) •(C−11 Z1)) ∥2
+
+F
+
+= dσ 4∥C1∥41→2
+
+nX
+
+k=1 
+
+nX
+
+t1,t 2
+
+(A2)k,t 1 (A2)k,t 2 (Qt1,t 1 Qt2,t 2 + ( d + 1) Q2
+
+t1,t 2 )= dσ 4∥C1∥41→2
+
+nX
+
+k=1 
+
+nX
+
+t1,t 2
+
+(A2)k,t 1 (A2)k,t 2 (Qt1,t 1 Qt2,t 2 + ( d + 1) Q2
+
+t1,t 2 )= dσ 4∥C1∥41→2 tr( A⊤
+
+2 A2EQ) + d(d + 1) σ4∥C1∥41→2 tr( A⊤
+
+2 A2(Q ◦ Q)) ,
+
+(58) where EQ = diag( Q) diag ⊤(Q).Adding equation (53) to equation (55), we obtain: 
+
+sup 
+
+X∈X 
+
+E∥S − bSPP ∥2
+
+F = d(d + 1) σ4∥C1∥41→2 · tr( A⊤
+
+2 A2(Q ◦ Q)) + 2( d + 1) σ2∥C1∥21→2 · sup 
+
+X∈X 
+
+tr(( AT
+
+2 A2 ◦ Q)XX T )+ dσ 4∥C1∥41→2 · tr( A⊤
+
+2 A2EQ)
+
+(59) 
+
+Bias Correction. 
+
+The expectation of A2(( C−11 Z1) •(C−11 Z1))] k,i,j introduces a bias: 
+
+[EA2(( C−11 Z1) •(C−11 Z1))] k,i,j = E
+
+nX
+
+t=1 
+
+(A2)k,t 
+
+nX
+
+r=1 
+
+(C−11 )t,r (Z1)r,i 
+
+! nX
+
+r=1 
+
+(C−11 )t,r (Z1)r,j 
+
+!
+
+= σ2δi,j ∥C1∥21→2
+
+nX
+
+t=1 
+
+nX
+
+r=1 
+
+(A2)k,t (C−11 )2
+
+t,r 
+
+= σ2δi,j ∥C1∥21→2
+
+nX
+
+t=1 
+
+(A2)k,t Qt,t .
+
+(60) 27 The Frobenius norm of this bias is: 
+
+∥EA2(( C−11 Z1) •(C−11 Z1)) ∥2 
+
+> F
+
+= σ4∥C1∥41→2
+
+> n
+
+X
+
+> k=1
+> d
+
+X
+
+> j=1
+> n
+
+X
+
+> t1,t 2
+
+(A2)k,t 1 (A2)k,t 2 Qt1,t 1 Qt2,t 2
+
+= dσ 4∥C1∥41→2 tr( A⊤ 
+
+> 2
+
+A2EQ)
+
+(61) If we subtract this bias from the estimate, it will increase the error by the aforementioned quantity due to the Frobenius norm of the bias but will decrease the error by two scalar products with the 
+
+A2(( C−11 Z1) •(C−11 Z1)) term: 
+
+E⟨A2(( C−11 Z1) •(C−11 Z1)) , EA2(( C−11 Z1) •(C−11 Z1)) ⟩ = ∥EA2(( C−11 Z1) •(C−11 Z1)) ∥2
+
+> F
+
+. (62) Thus, we can eliminate the last term ( dσ 4∥C1∥41→2 tr( A⊤ 
+
+> 2
+
+A2EQ)) in the error sum via bias correction. Substituting back σ = 2 ζσ ϵ,δ , we obtain the proposed equality. We collect some useful proposition that would be useful for our analysis. 
+
+Proposition D.3. Let V and X be a given fixed matrix and Z be a Gaussian matrix of appropriate dimension. Then 
+
+EZ ∥V Z • V Z ∥2 
+
+> F
+
+= d(d + 2) σ4
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t=1
+
+V 2
+
+> k,t
+
+!2
+
+. (63) 
+
+Proof. Recalling the Face-Splitting product, we have 
+
+EZ ∥V Z • V Z ∥2 
+
+> F
+
+= EZnX
+
+> k=1
+> d
+
+X
+
+> i,j
+
+(V Z )2
+
+> k,i
+
+(V Z )2 
+
+> k,j
+
+= EZnX
+
+> k=1
+> d
+
+X
+
+> i,j
+> n
+
+X
+
+> t=1
+
+Vk,t Zt,i 
+
+!2 nX
+
+> t=1
+
+Vk,t Zt,j 
+
+!2
+
+= 3 σ4
+
+> n
+
+X
+
+> k=1
+> d
+
+X
+
+> i=1
+> n
+
+X
+
+> t=1
+
+V 4 
+
+> k,t
+
++ σ4
+
+> n
+
+X
+
+> k=1
+> d
+
+X 
+
+> i̸=j
+> n
+
+X
+
+> t=1
+
+V 2
+
+> k,t
+
+!2
+
++ 3 σ4
+
+> n
+
+X
+
+> k=1
+> d
+
+X
+
+> i=1
+> n
+
+X 
+
+> j̸=ℓ
+
+V 2 
+
+> k,j
+
+V 2
+
+> k,ℓ
+
+= d(d + 2) σ4
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t=1
+
+V 2
+
+> k,t
+
+!2
+
+,
+
+(64) This completes the proof of the proposition. 
+
+Proposition D.4. Let V and X be a given fixed matrix and Z be a Gaussian matrix of appropriate dimension. Then 
+
+EZ ⟨(V Z ) •(V X ), (V X ) •(V Z )⟩ = 1
+
+d EZ ∥V Z 1 • V X ∥2
+
+> F
+
+. (65) 
+
+Proof. The result follows using the following calculation: 
+
+EZ ⟨(V Z ) •(V X ), (V X ) •(V Z )⟩ = EZnX
+
+> k=1
+> d
+
+X
+
+> i,j
+
+(V Z 1)k,i (V X )k,j (V Z 1)k,j (V X )k,i 
+
+= EZnX
+
+> k=1
+> d
+
+X
+
+> i=1
+
+(V Z 1)k,i (V X )k,i 
+
+!2
+
+= σ2
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t=1
+
+V 2
+
+> k,t d
+
+X
+
+> j=1
+
+(V X )2 
+
+> k,j
+
+= 1
+
+d EZ ∥V Z 1 • V X ∥2
+
+> F
+
+(66) completing the proof. 28 Theorem 4.1 (Private covariance matrix estimation with JME) . Assume that all input vectors have norm at most 1. Let bΣ be the results of the above construction, where privacy is obtained by running JME with noise strength σ and debiasing. Then it holds: 
+
+sup 
+
+> X∈X
+
+E∥Σ − bΣ∥2 
+
+> F
+
+= ( cdd2 + 2 d + 2) σ2Hn, 1 + d(d + 1) σ4Hn, 2, (11) 
+
+with cd as in Theorem 3.3, and Hn,m := nP 
+
+> k=1 1
+> km
+
+.Proof. We first recall that, if Z ∼ N (μ, Σ) , then for any matrix A, we have AZ ∼ N (Aμ, A ΣA⊤).This implies that, when Σ = I and μ = 0 , we have 
+
+EZ ∥AZ ∥2 
+
+> F
+
+= ∥A∥2
+
+> F
+
+. (67) Recall that bμ = V (X +Z1) is a running mean and bΣ = V (X • X +λ−1/2Z2)−(V (X +Z1) • V (X +
+
+Z1)) is a running covariance matrix, with independent noise Z1, Z 2 ∈ N (0 , σ 2)n×d2
+
+, the clipping norm ζ = 1 , and λ = λ∗ = c−1 
+
+> d
+
+as defined in equation (23) . Using the associativity of Face-splitting product and the Pythogorean theorem, we have 
+
+EZ1,Z 2 ∥V (X • X + λ−1/2Z2) − (V (X + Z1) • V (X + Z1)) − V (X • X) + ( V X ) •(V X )∥2
+
+> F
+
+= EZ1,Z 2 ∥λ−1/2V Z 2 − (V Z 1) •(V X ) − (V X ) •(V Z 1) − (V Z 1) •(V Z 1)) ∥2
+
+> F
+
+= EZ2 ∥λ−1/2V Z 2∥2 
+
+> F
+
++ 2 EZ1 ∥(V Z 1) •(V X )∥2 
+
+> F
+
++ EZ1 ∥(V Z 1) •(V Z 1)∥2
+
+> F
+
++ 2 EZ1 ⟨(V Z 1) •(V X ), (V X ) •(V Z 1)⟩
+
+= cdσ2d2∥V ∥2 
+
+> F
+
++ 2 EZ1 ∥(V Z 1) •(V X )∥2 
+
+> F
+
++ EZ1 ∥(V Z 1) •(V Z 1)∥2
+
+> F
+
++ 2 EZ1 ⟨(V Z 1) •(V X ), (V X ) •(V Z 1)⟩
+
+(68) Using Proposition D.3 and Proposition D.4, we therefore have 
+
+EZ1,Z 2 ∥V (X • X + λ−1/2Z2) − (V (X + Z1) • V (X + Z1)) − V (X • X) + ( V X ) •(V X )∥2
+
+> F
+
+= cdσ2d2∥V ∥2 
+
+> F
+
++ 2 
+
+
+
+1 + 1
+
+d
+
+
+
+EZ1 ∥(V Z 1) •(V X )∥2 
+
+> F
+
++ d(d + 2) σ4
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t=1
+
+V 2
+
+> k,t
+
+!2
+
+.
+
+(69) Now using the properties of V , we have 
+
+∥V ∥2 
+
+> F
+
+=
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t=1
+
+V 2 
+
+> k,t
+
+=
+
+> n
+
+X
+
+> k=1
+
+1
+
+k = Hn, 1 and 
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t=1
+
+V 2
+
+> k,t
+
+!2
+
+=
+
+> n
+
+X
+
+> k=1
+
+1
+
+k2 = Hn, 2. (70) Using equation (70) in equation (69), we get 
+
+EZ1,Z 2 ∥V (X • X + λ−1/2Z2) − (V (X + Z1) • V (X + Z1)) − V (X • X) + ( V X ) •(V X )∥2
+
+> F
+
+= 2 
+
+
+
+1 + 1
+
+d
+
+
+
+EZ1 ∥(V Z 1) •(V X )∥2 
+
+> F
+
++ d(d + 2) σ4
+
+> n
+
+X
+
+> k=1
+
+1
+
+k2 + 2 σ2d2
+
+> n
+
+X
+
+> k=1
+
+1
+
+k
+
+= 2 
+
+
+
+1 + 1
+
+d
+
+
+
+EZ1 ∥(V Z 1) •(V X )∥2 
+
+> F
+
++ d(d + 2) σ4Hn, 2 + 2 σ2d2Hn, 1.
+
+(71) Let Hn,c denote the generalized Harmonic sum, i.e., Hn,c = Pni=1 i−c. Therefore, we have 
+
+EZ1,Z 2 ∥V (X • X + λ−1/2Z2) − (V (X + Z1) • V (X + Z1)) − V (X • X) + ( V X ) •(V X )∥2
+
+> F
+
+= 2 
+
+
+
+1 + 1
+
+d
+
+
+
+EZ1 ∥(V Z 1) •(V X )∥2
+
+> F
+
+| {z }
+
+> S(X)
+
++σ4d(d + 2) Hn, 2 + cdσ2d2Hn, 1.
+
+(72) 29 Therefore to estimate sup X∈X E∥Σ − bΣ∥2
+
+> F
+
+, it suffices to estimate sup X∈X S(X). We do it as follows: 
+
+sup 
+
+> X∈X
+
+S(X) = sup 
+
+> X∈X
+
+EZ1 ∥V Z 1 • V X ∥2 
+
+> F
+
+= dσ 2 sup 
+
+> X∈X
+> n
+
+X
+
+> k=1
+
+1
+
+k3
+
+> d
+
+X
+
+> j=1
+> k
+
+X
+
+> t=1
+
+Xt,j 
+
+!2
+
+= dσ 2 sup 
+
+> X∈X
+> n
+
+X
+
+> k=1
+
+1
+
+k3
+
+> k
+
+X
+
+> t1,t 2
+
+⟨Xt1,:, X t2,:⟩ = dσ 2
+
+> n
+
+X
+
+> k=1
+
+1
+
+k = dσ 2Hn, 1,
+
+(73) Plugging equation (73) in equation (72), we get the bound for the biased estimate: 
+
+σ2(cdd2 + 2 d + 2) Hn, 1 + σ4d(d + 2) Hn, 2. (74) Then we need to determine the bias term, all the first-order terms will result in 0 as the expectation is over a zero mean distribution, so the only term that introduces the bias is 
+
+(EZ1 (V Z 1) •(V Z 1)) k,i,j = EZ1 (V Z 1)k,i (V Z 1)k,j = σ2δi=jnX
+
+> t=1
+
+V 2
+
+> k,t
+
+, (75) where δi=j =
+
+1 i = j
+
+0 otherwise is the Dirac-delta function. Then the unbiased approximation error is 
+
+EZ1,Z 2 ∥V (X • X + Z2) − (V (X + Z1) • V (X + Z1)) − V (X • X) + ( V X ) •(V X )+ EZ1 (V Z 1) •(V Z 1)∥2
+
+> F
+
+(76) We have already computed the first three terms inside the expectation. We now compute the bias term error: 
+
+∥EZ1 (V Z 1) •(V Z 1)∥2 
+
+> F
+
+= σ4
+
+> n
+
+X
+
+> k=1
+> d
+
+X
+
+> j=1
+> n
+
+X
+
+> t=1
+
+V 2
+
+> k,t
+
+!2
+
+= dσ 4
+
+> n
+
+X
+
+> k=1
+
+1
+
+k2 = dσ 4Hn, 2. (77) Bias reduction procedure decreases the expected error of (74) by 
+
+−2EZ1 ⟨(V Z 1) •(V Z 1), EZ1 (V Z 1) •(V Z 1)⟩ + ∥EZ1 (V Z 1) •(V Z 1)∥2 
+
+> F
+
+= dσ 4
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t=1
+
+V 2
+
+> k,t
+
+!2
+
+= dσ 4
+
+> n
+
+X
+
+> k=1
+
+1
+
+k2 = dσ 4Hn, 2.
+
+(78) Resulting in the final error of: 
+
+sup 
+
+> X∈X
+
+E∥Σ − bΣ∥2 
+
+> F
+
+= σ2(cdd2 + 2 d + 2) 
+
+> n
+
+X
+
+> k=1
+
+1
+
+k + d(d + 1) σ4
+
+> n
+
+X
+
+> k=1
+
+1
+
+k2
+
+= σ2(cdd2 + 2 d + 2) Hn, 1 + d(d + 1) σ4Hn, 2.
+
+(79) This completes the proof of the theorem. 
+
+Theorem 4.2 (Private covariance matrix estimation with PP) . Assume the same setting as for Theorem 4.1. Let bΣPP be the result of the above construction, where privacy is obtained by running PP with noise strength σ and debiasing. Let S(n, d, σ ) := d(d + 1) σ4Hn, 1 − d(d + 1) σ4Hn, 2 +2( d + 1) σ2Hn, 1. Then, for the expected error of the covariance matrix estimate it holds: 
+
+S(n, d, σ ) − 2( d + 1) σ2Hn, 3 ≤ sup 
+
+> X∈X
+
+E∥Σ − bΣPP ∥2 
+
+> F
+
+≤ S(n, d, σ ). (12) 30 Proof. Let us denote the covariance matrix estimated via Post-Processing (PP) without bias correction as bΣb
+
+> PP
+
+. Then, the approximation error has the following form: 
+
+E∥Σ − bΣb
+
+> PP
+
+∥2 
+
+> F
+
+=EZ1 ∥V (( X + Z1) •(X + Z1)) − (V (X + Z1) • V (X + Z1)) − V (X • X) + ( V X ) •(V X )∥2
+
+> F
+
+= EZ1 ∥V (Z1 • Z1)∥2
+
+> F
+
+| {z }
+
+> A1
+
+−2 EZ1 ⟨V (Z1 • Z1), (V Z 1) •(V Z 1)⟩
+
+| {z }
+
+> A2
+
++2 EZ1 ∥V (Z1 • X)∥2
+
+> F
+
+| {z }
+
+> A3
+
++ 2 EZ1 ⟨V (Z1 • X), V (X • Z1)⟩
+
+| {z }
+
+> A4
+
+−4 EZ1 ⟨V (Z1 • X), (V X ) •(V Z 1)⟩
+
+| {z }
+
+> A5
+
+− 4 EZ1 ⟨V (Z1 • X), (V Z 1) •(V X )⟩
+
+| {z }
+
+> A6
+
++2 EZ1 ∥(V Z 1) •(V X )∥2
+
+> F
+
++ EZ1 ∥(V Z 1) •(V Z 1)∥2
+
+> F
+
++ 2 EZ1 ⟨(V Z 1) •(V X ), (V X ) •(V Z 1)⟩
+
+(80) The last three terms in the above expression evaluates to equation (72). Therefore, in what follows, we bound A1 to A6. Bounding A1:
+
+A1 = EZ1 ∥V (Z1 • Z1)∥2 
+
+> F
+
+= EZ1
+
+> n
+
+X
+
+> k=1
+> d
+
+X
+
+> i,j
+> n
+
+X
+
+> t=1
+
+Vk,t (Z1)t,i (Z1)t,j 
+
+!2
+
+= 3 σ4
+
+> n
+
+X
+
+> k=1
+> d
+
+X
+
+> j=1
+> n
+
+X
+
+> t=1
+
+V 2 
+
+> k,t
+
++ σ4
+
+> n
+
+X
+
+> k=1
+> d
+
+X
+
+> j=1
+> n
+
+X 
+
+> t1̸=t2
+
+Vk,t 1 Vk,t 2 + σ4
+
+> n
+
+X
+
+> k=1
+> d
+
+X 
+
+> i̸=jn
+
+X
+
+> t=1
+
+V 2
+
+> k,t
+
+= d(d + 1) σ4
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t=1
+
+V 2 
+
+> k,t
+
++ dσ 4
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t=1
+
+Vk,t 
+
+!2
+
+(81) 
+
+Bounding A2:
+
+A2 = EZ1 ⟨V (Z1 • Z1), (V Z 1) •(V Z 1)⟩
+
+= EZ1
+
+> n
+
+X
+
+> k=1
+> d
+
+X
+
+> i,j
+> n
+
+X
+
+> t=1
+
+Vk,t (Z1)t,i (Z1)t,j 
+
+! X
+
+> t
+
+Vk,t (Z1)t,i 
+
+! X
+
+> t
+
+Vk,t (Z1)t,j 
+
+!
+
+= 3 σ4
+
+> n
+
+X
+
+> k=1
+> d
+
+X
+
+> j=1
+> n
+
+X
+
+> t=1
+
+V 3 
+
+> k,t
+
++ σ4
+
+> n
+
+X
+
+> k=1
+> d
+
+X 
+
+> i̸=jn
+
+X
+
+> t=1
+
+V 3 
+
+> k,t
+
++ σ4
+
+> n
+
+X
+
+> k=1
+> d
+
+X
+
+> j=1
+> n
+
+X 
+
+> t1̸=t2
+
+Vk,t 1 V 2
+
+> k,t 2
+
+= d(d + 1) σ4
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t=1
+
+V 3 
+
+> k,t
+
++ dσ 4
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t=1
+
+Vk,t 
+
+! nX
+
+> t=1
+
+V 2
+
+> k,t
+
+!
+
+(82) 
+
+Bounding A3:
+
+A3 = EZ1 ∥V (Z1 • X)∥2 
+
+> F
+
+= EZ1
+
+> n
+
+X
+
+> k=1
+> d
+
+X
+
+> i,j
+> n
+
+X
+
+> t=1
+
+Vk,t (Z1)t,i Xt,j 
+
+!2
+
+= dσ 2
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t=1
+
+V 2
+
+> k,t d
+
+X
+
+> j=1
+
+X2
+
+> t,j
+
+(83) 
+
+Bounding A4:
+
+A4 = EZ1 ⟨V (Z1 • X), V (X • Z1)⟩
+
+= EZ1
+
+> n
+
+X
+
+> k=1
+> d
+
+X
+
+> i,j
+> n
+
+X
+
+> t=1
+
+Vk,t (Z1)t,i Xt,j 
+
+! nX
+
+> t=1
+
+Vk,t (Z1)t,j Xt,i 
+
+!
+
+= σ2
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t=1
+
+V 2
+
+> k,t d
+
+X
+
+> j=1
+
+X2
+
+> t,j
+
+(84) 31 Bounding A5:
+
+A5 = EZ1 ⟨V (Z1 • X), (V X ) •(V Z 1)⟩
+
+= EZ1
+
+> n
+
+X
+
+> k=1
+> d
+
+X
+
+> i,j
+> n
+
+X
+
+> t=1
+
+Vk,t (Z1)t,i Xt,j 
+
+! nX
+
+> t=1
+
+Vk,t Xt,i 
+
+! nX
+
+> t=1
+
+Vk,t (Z1)t,j 
+
+!
+
+= σ2
+
+> n
+
+X
+
+> k=1
+> d
+
+X
+
+> j=1
+> n
+
+X
+
+> t=1
+
+V 2
+
+> k,t
+
+Xt,j 
+
+! nX
+
+> t=1
+
+Vk,t Xt,j 
+
+! (85) 
+
+Bounding A6:
+
+A6 = EZ1 ⟨V (Z1 • X), (V Z 1) •(V X )⟩
+
+= EZ1
+
+> n
+
+X
+
+> k=1
+> d
+
+X
+
+> i,j
+> n
+
+X
+
+> t=1
+
+Vk,t (Z1)t,i Xt,j 
+
+! nX
+
+> t=1
+
+Vk,t (Z1)t,i 
+
+! nX
+
+> t=1
+
+Vk,t Xt,j 
+
+!
+
+= dσ 2
+
+> n
+
+X
+
+> k=1
+> d
+
+X
+
+> j=1
+> n
+
+X
+
+> t=1
+
+V 2
+
+> k,t
+
+Xt,j 
+
+! nX
+
+> t=1
+
+Vk,t Xt,j 
+
+! (86) Plugging equation (81) to equation (86) in equation (80), we get 
+
+E∥Σ − bΣb
+
+> PP
+
+∥2 
+
+> F
+
+= d(d + 1) σ4
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t=1
+
+V 2 
+
+> k,t
+
++ dσ 4
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t=1
+
+Vk,t 
+
+!2
+
+− 2d(d + 1) σ4
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t=1
+
+V 3
+
+> k,t
+
+− 2dσ 4
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t=1
+
+Vk,t 
+
+! nX
+
+> t=1
+
+V 2
+
+> k,t
+
+!
+
++ 2( d + 1) σ2
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t=1
+
+V 2
+
+> k,t d
+
+X
+
+> j=1
+
+X2
+
+> t,j
+
+− 4( d + 1) σ2
+
+> n
+
+X
+
+> k=1
+> d
+
+X
+
+> j=1
+> n
+
+X
+
+> t=1
+
+V 2
+
+> k,t
+
+Xt,j 
+
+! nX
+
+> t=1
+
+Vk,t Xt,j 
+
+!
+
++ 2( d + 1) σ2
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t=1
+
+V 2
+
+> k,t d
+
+X
+
+> j=1
+
+(V X )2 
+
+> k,j
+
++ d(d + 2) σ4
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t=1
+
+V 2
+
+> k,t
+
+!2
+
+(87) Recalling that the matrix V is the averaging workload matrix V = ( ati) with ati = 1 
+
+> t
+
+for 1 ≤ i ≤ t
+
+and ati = 0 otherwise, we get 
+
+E∥Σ − bΣb
+
+> PP
+
+∥2 
+
+> F
+
+= d(d + 1) σ4
+
+> n
+
+X
+
+> k=1
+
+1
+
+k + dnσ 4 − 2d(d + 1) σ4
+
+> n
+
+X
+
+> k=1
+
+1
+
+k2 − 2dσ 4
+
+> n
+
+X
+
+> k=1
+
+1
+
+k
+
++ 2( d + 1) σ2
+
+> n
+
+X
+
+> k=1
+> k
+
+X
+
+> t=1
+
+1
+
+k2
+
+> d
+
+X
+
+> j=1
+
+X2 
+
+> t,j
+
+− 4( d + 1) σ2
+
+> n
+
+X
+
+> k=1
+> d
+
+X
+
+> j=1
+> k
+
+X
+
+> t=1
+
+1
+
+k2 Xt,j 
+
+! kX
+
+> t=1
+
+1
+
+k Xt,j 
+
+!
+
++ 2( d + 1) σ2
+
+> n
+
+X
+
+> k=1
+
+1
+
+k
+
+> d
+
+X
+
+> j=1
+> k
+
+X
+
+> t=1
+
+1
+
+k Xt,j 
+
+!2
+
++ d(d + 2) σ4
+
+> n
+
+X
+
+> k=1
+
+1
+
+k2
+
+= d(d − 1) σ4
+
+> n
+
+X
+
+> k=1
+
+1
+
+k + dnσ 4 − d2σ4
+
+> n
+
+X
+
+> k=1
+
+1
+
+k2
+
++ 2( d + 1) σ2
+
+> n
+
+X
+
+> k=1
+
+1
+
+k2
+
+" kX
+
+> t=1
+
+⟨Xt, :, X t, :⟩ − 1
+
+k
+
+> k
+
+X
+
+> t1,t 2
+
+⟨Xt1,:, X t1,:⟩
+
+#| {z }
+
+> Tn(X)
+
+(88) 32 Since every term except Tn(X) is independent of X, to compute both upper and lower bounds on 
+
+sup X∈X E∥Σ − bΣb
+
+> PP
+
+∥2
+
+> F
+
+, it suffices to bound the supremum of the inner difference over X:
+
+Tn := sup 
+
+> X∈X
+
+Tn(X) sup 
+
+> X∈X
+> n
+
+X
+
+> k=1
+
+1
+
+k2
+
+
+
+> k
+
+X
+
+> t=1
+
+⟨Xt, :, X t, :⟩ − 1
+
+k
+
+> k
+
+X
+
+> t1,t 2
+
+⟨Xt1,:, X t2,:
+
+| {z }
+
+> =
+
+∥P 
+
+> tXt
+
+∥22≥0
+
+⟩
+
+
+
+. (89) Since the double sum is non-negative, this leads to a trivial upper bound Tn ≤ nP 
+
+> k=1 1
+> k
+
+= Hn, 1.For the lower bound, consider Xi = ( −1) ie1. In this case, ∥Xi∥2 = 1 , but ∥P 
+
+> t
+
+Xt∥22 ≤ 1, so 
+
+> n
+
+P
+
+> k=1
+
+  1 
+
+> k
+
+− 1
+
+> k3
+
+ ≤ Tn. Therefore, 
+
+Hn, 1 − Hn, 3 ≤ Tn ≤ Hn, 1. (90) Therefore, we have the following bounds for the approximation error without a bias correction: 
+
+sup 
+
+> X∈X
+
+E∥Σ − bΣb
+
+> PP
+
+∥2 
+
+> F
+
+≤ d(d − 1) σ4
+
+> n
+
+X
+
+> k=1
+
+1
+
+k + dnσ 4 − d2σ4
+
+> n
+
+X
+
+> k=1
+
+1
+
+k2 + 2( d + 1) σ2
+
+> n
+
+X
+
+> k=1
+
+1
+
+k (91) 
+
+sup 
+
+> X∈X
+
+E∥Σ − bΣb
+
+> PP
+
+∥2 
+
+> F
+
+≥ d(d − 1) σ4
+
+> n
+
+X
+
+> k=1
+
+1
+
+k + dnσ 4 − d2σ4
+
+> n
+
+X
+
+> k=1
+
+1
+
+k2 + 2( d + 1) σ2
+
+> n
+
+X
+
+> k=1
+
+1
+
+k − 2( d + 1) σ2
+
+> n
+
+X
+
+> k=1
+
+1
+
+k3 ,
+
+(92) Now we will determine the bias term; let δi=j denote the Dirac-delta function, then the bias of bΣPP is 
+
+(EZ1 (V (Z1 • Z1) − EZ1 (V Z 1) •(V Z 1)) k,i,j = σ2δi=jnX
+
+> t=1
+
+Vk,t − V 2 
+
+> k,t
+
+(93) We also have the following set of equalities when Z1 is a Gaussian matrix. 
+
+∥EZ1 (V Z 1) •(V Z 1)∥2 
+
+> F
+
+= σ4
+
+> n
+
+X
+
+> k=1
+> d
+
+X
+
+> j=1
+> n
+
+X
+
+> t=1
+
+V 2
+
+> k,t
+
+!2
+
+= dσ 4
+
+> n
+
+X
+
+> k=1
+
+1
+
+k2 (94) 
+
+∥EZ1 V (Z1 • Z1)∥2 
+
+> F
+
+= σ4
+
+> n
+
+X
+
+> k=1
+> d
+
+X
+
+> j=1
+> n
+
+X
+
+> t=1
+
+Vk,t 
+
+!2
+
+= dnσ 4 (95) 
+
+⟨EZ1 (V Z 1) •(V Z 1), EZ1 V (Z1 • Z1)⟩F = dσ 4
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t=1
+
+V 2
+
+> k,t
+
+! nX
+
+> t=1
+
+Vk,t 
+
+!
+
+= dσ 4
+
+> n
+
+X
+
+> k=1
+
+1
+
+k (96) To remove the bias from the error we would need to add the following terms: 
+
+∥EZ1 V (Z1 • Z1)∥2 
+
+> F
+
++ ∥EZ1 (V Z 1) •(V Z 1)∥2 
+
+> F
+
+− 2⟨EZ1 (V Z 1) •(V Z 1), EZ1 V (Z1 • Z1)⟩− 2EZ1 ⟨(V Z 1) •(V Z 1), EZ1 (V Z 1) •(V Z 1)⟩F + 4 EZ1 ⟨(V Z 1) •(V Z 1), EZ1 V (Z1 • Z1)⟩− 2EZ1 ⟨V (Z1 • Z1), EZ1 V (Z1 • Z1)⟩F
+
+= −∥ EZ1 V (Z1 • Z1)∥2 
+
+> F
+
+− ∥ EZ1 (V Z 1) •(V Z 1)∥2 
+
+> F
+
++ 2 ⟨EZ1 (V Z 1) •(V Z 1), EZ1 V (Z1 • Z1)⟩
+
+= −dσ 4
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t=1
+
+Vk,t 
+
+!2
+
+− dσ 4
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t=1
+
+V 2
+
+> k,t
+
+!2
+
++ 2 dσ 4
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t=1
+
+V 2
+
+> k,t
+
+! nX
+
+> t=1
+
+Vk,t 
+
+!
+
+= −dnσ 4 − dσ 4
+
+> n
+
+X
+
+> k=1
+
+1
+
+k2 + 2 dσ 4
+
+> n
+
+X
+
+> k=1
+
+1
+
+k = −dnσ 4 − dσ 4Hn, 2 + 2 dσ 4Hn, 1.
+
+(97) 33 Combining everything together, we obtain: 
+
+E∥Σ − bΣPP ∥2 
+
+> F
+
+= d(d + 1) σ4
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t=1
+
+V 2 
+
+> k,t
+
+− 2d(d + 1) σ4
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t=1
+
+V 3
+
+> k,t
+
++ 2( d + 1) σ2
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t=1
+
+V 2
+
+> k,t d
+
+X
+
+> j=1
+
+X2
+
+> t,j
+
+− 4( d + 1) σ2
+
+> n
+
+X
+
+> k=1
+> d
+
+X
+
+> j=1
+> n
+
+X
+
+> t=1
+
+V 2
+
+> k,t
+
+Xt,j 
+
+! nX
+
+> t=1
+
+Vk,t Xt,j 
+
+!
+
++ 2( d + 1) σ2
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t=1
+
+V 2
+
+> k,t d
+
+X
+
+> j=1
+
+(V X )2 
+
+> k,j
+
++ d(d + 1) σ4
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t=1
+
+V 2
+
+> k,t
+
+!2
+
+(98) Therefore, 
+
+sup 
+
+> X∈X
+
+E∥Σ − bΣPP ∥2 
+
+> F
+
+≤ d(d + 1) σ4Hn, 1 − d(d + 1) σ4Hn, 2 + 2( d + 1) σ2Hn, 1 and (99) 
+
+sup 
+
+> X∈X
+
+E∥Σ − bΣPP ∥2 
+
+> F
+
+≥ d(d + 1) σ4Hn, 1 − d(d + 1) σ4Hn, 2 + 2( d + 1) σ2Hn, 1 − 2( d + 1) σ2Hn, 3,
+
+(100) which concludes the proof. 
+
+Lemma A.5 (Dimension Reduction) . For any vectors x, y ∈ Rd, where d ≥ 3, there exist vectors 
+
+x′, y ′ ∈ Rd−1 that for any λ > 0 satisfies the inequality: 
+
+∥x − y∥22 + λ∥x ◦ x − y ◦ y∥22 ≤ ∥ x′ − y′∥22 + λ∥x′ ◦ x′ − y′ ◦ y′∥22. (29) 
+
+Proof. We begin by selecting indices i and j such that the corresponding components xi, x j from 
+
+x and yi, y j from y satisfy (x2 
+
+> i
+
+− y2 
+
+> i
+
+)( x2 
+
+> j
+
+− y2 
+
+> j
+
+) ≥ 0. We can always find such indices because, by the pigeonhole principle for d ≥ 3, there will be pairs where either both x2 
+
+> i
+
+≥ y2 
+
+> i
+
+and x2 
+
+> j
+
+≥ y2 
+
+> j
+
+, or both x2 
+
+> i
+
+≤ y2 
+
+> i
+
+and x2 
+
+> j
+
+≤ y2 
+
+> j
+
+. We can compare the impact of these components on the sum with the values 
+
+q
+
+x2 
+
+> i
+
++ x2 
+
+> j
+
+and −
+
+q
+
+y2 
+
+> i
+
++ y2 
+
+> j
+
+, which correspond to vectors in a lower dimension. Consider the difference in the objective function and f (x,i, y i) defined below: 
+
+f (xi, y i) := 
+
+q 
+
+x2 
+
+> i
+
++ x2 
+
+> j
+
++
+
+q
+
+y2 
+
+> i
+
++ y2
+
+> j
+
+2
+
++ λ  x2 
+
+> i
+
++ x2 
+
+> j
+
+− y2 
+
+> i
+
+− y2
+
+> j
+
+2 (101) 
+
+g(xi, y i) := ( xi − yi)2 + ( xj − yj )2 + λ(x2 
+
+> i
+
+− y2 
+
+> i
+
+)2 + λ(x2 
+
+> j
+
+− y2 
+
+> j
+
+)2. (102) Note that f (xi, y i) is the objective function. Now, after algebraic manipulation, we get 
+
+f (xi, y i) − g(xi, y i) = 2 
+
+q
+
+x2 
+
+> i
+
++ x2
+
+> j
+
+q
+
+y2 
+
+> i
+
++ y2 
+
+> j
+
++ λ(x2 
+
+> i
+
+− y2 
+
+> i
+
+)( x2 
+
+> j
+
+− y2 
+
+> j
+
+) + 2 xiyi + 2 xj yj (103) 
+
+≥ λ(x2 
+
+> i
+
+− y2 
+
+> i
+
+)( x2 
+
+> j
+
+− y2 
+
+> j
+
+) ≥ 0, (104) where the first inequality follows from the Cauchy-Schwarz inequality and the second inequality is from the assumption that (x2 
+
+> i
+
+− y2 
+
+> i
+
+)( x2 
+
+> j
+
+− y2 
+
+> j
+
+) ≥ 0.For this lemma, d = 2 is indeed a special case since it is possible to find x21 > y 21 and x22 < y 22 , for which the dimension reduction argument would not work. 
+
+Lemma A.4. Consider x, y ∈ R2, and let λ > 0 then, 
+
+rdiag  
+
+> 2
+
+(λ) = sup 
+
+> ∥x∥2≤1,∥y∥2≤1
+
+∥x − y∥22 + λ∥x ◦ x − y ◦ y∥22
+
+ =
+
+4, if λ ≤ 12 ,
+
+2 + 2 λ + 12λ , if λ > 12 . (28) 34 Proof. First, we consider the effect of the signs of the components of x and y. Multiplying both xi
+
+and yi by −1 does not change the value of the expression. If xi and yi have the same sign, then by flipping the sign of one of them, we increase the difference ∥x − y∥2, while ∥x ◦ x − y ◦ y∥2 remains unchanged. Therefore, without loss of generality, we can assume x = ( x1, x 2) and y = ( −y1, −y2)
+
+for positive xi and yi. Next, note that for a fixed difference ∥x − y∥2, the functional increases as the sum x1 + y1 or x2 + y2 increases. Thus, we can assume ∥x∥2 = 1 , so x2 = p1 − x21. The norm of 
+
+y, however, can be different. Therefore, we look for a solution of the form x = ( x1, p1 − x21) and 
+
+y = ( −y1, −y2).We now consider the functional in the statement of the lemma in the following form: 
+
+Lλ(x1, y 1, y 2) = ( x1 + y1)2 +
+
+q 
+
+1 − x21 + y2
+
+2
+
++ λ  x21 − y21
+
+2 + λ  1 − x21 − y22
+
+2 . (105) We now aim to prove that sup Lλ(x1, y 1, y 2) = rdiag  
+
+> 2
+
+(λ) in the constrained domain y1 ≥ 0, y2 ≥ 0,
+
+y21 + y22 ≤ 1, 0 ≤ x1 ≤ 1. This analysis involves considering up to twenty-four different scenarios for optimization with boundaries, which, due to symmetry, can be reduced to five distinct cases. 
+
+Case I: y21 + y22 = 1 , y1 > 0, y2 > 0.
+
+We can compute y2 = p1 − y21 , then the optimization functional is 
+
+Lλ
+
+
+
+x1, y 1,
+
+q
+
+1 − y21
+
+
+
+= ( x1 + y1)2 +
+
+q 
+
+1 − x21 +
+
+q
+
+1 − y21
+
+2
+
++ λ  x21 − y21
+
+2 + λ  y21 − x21
+
+2
+
+(106) 
+
+= 2 + 2 x1y1 + 2 
+
+q
+
+1 − x21
+
+q
+
+1 − y21 + 2 λ  x21 − y21
+
+2 . (107) The cases where x1 = 0 or x1 = 1 with ∥y∥ = 1 are equivalent to the scenario where ∥x∥ = 1 and 
+
+y1 = 0 , or y1 = 1 , which we will consider later. For now, we proceed by computing the derivatives with respect to y1 and x1:
+
+∂Lλ
+
+
+
+x1, y 1, p1 − y21
+
+
+
+∂y 1
+
+= 2 x1 − 2y1
+
+p1 − x21
+
+p1 − y21
+
++ 4 y1λ  y21 − x21
+
+ = 0 ,∂Lλ
+
+
+
+x1, y 1, p1 − y21
+
+
+
+∂x 1
+
+= 2 y1 − 2x1
+
+p1 − y21
+
+p1 − x21
+
++ 4 x1λ  x21 − y21
+
+ = 0 .
+
+(108) We transform this system by summing and subtracting the equalities: 
+
+(x1 + y1) − y1 − y1x21 + x1 − x1y21
+
+p1 − y21
+
+p1 − x21
+
++ 4 λ  x31 + y31
+
+ − 4λy 1x1 (y1 + x1) = 0 ,
+
+(x1 − y1) − y1 − y1x21 − x1 + x1y21
+
+p1 − y21
+
+p1 − x21
+
++ 4 λ  y31 − x31
+
+ − 4λy 1x1 (x1 − y1) = 0 .
+
+(109) 
+
+x1 + y1 = 0 is not a solution under the constraints we are solving. However, x1 = y1 is a solution that gives Lλ(x1, x 1, p1 − x21) = 4 for any λ. From now on, consider y1̸ = x1; then we can divide by the difference, leading to the system: 
+
+1 − 1 − x1y1
+
+p1 − y21
+
+p1 − x21
+
++ 4 λ (x1 − y1)2 = 0 ,
+
+1 + 1 + x1y1
+
+p1 − y21
+
+p1 − x21
+
+− 4λ (x1 + y1)2 = 0 .
+
+(110) We consider again the sum and difference to get: 
+
+2 + 2x1y1
+
+p1 − y21
+
+p1 − x21
+
+− 16 λx 1y1 = 0 ,
+
+− 2
+
+p1 − y21
+
+p1 − x21
+
++ 8 λ  x21 + y21
+
+ = 0 .
+
+(111) 35 We solve it for λ to get the following equation: 
+
+14 ( x21 + y21 ) p1 − y21
+
+p1 − x21
+
+= 18x1y1
+
++ 18p1 − y21
+
+p1 − x21
+
+. (112) We transform it into the form 
+
+2x1y1
+
+x21 + y21
+
+− x1y1 =
+
+q
+
+1 − y21 − x21 + x21y21 . (113) By squaring both sides and subtracting x21y21 , we obtain 
+
+4x21y21
+
+(x21 + y21 )2 (1 − x21 − y21 ) = 1 − x21 − y21 . (114) So, either x21 + y21 = 1 , which implies y1 = p1 − x21, or x21 + y21 = 2 x1y1, which implies x1 = y1,which we have already discussed. We have found another potentially optimal point y1 = p1 − x21,which we will further investigate. We now consider it as a function of one variable x1:
+
+Lλ
+
+
+
+x1,
+
+q
+
+1 − x21, x 1
+
+
+
+= 2 
+
+
+
+x1 +
+
+q
+
+1 − x21
+
+2
+
++ 2 λ  1 − 2x21
+
+2 . (115) Then the optimum is either x1 = 0 , x1 = 1 with the value 4, or when the derivative is 0:
+
+∂Lλ
+
+
+
+x1, p1 − x21, x 1
+
+
+
+∂x 1
+
+= 4 
+
+q
+
+1 − x21 − 4x21
+
+p1 − x21
+
+− 16 λx 1(1 − 2x21) (116) 
+
+=4(1 − 2x21)
+
+
+
+1 − 4λx 1
+
+p1 − x21
+
+p1 − x21
+
+= 0 . (117) The first term gives x1 = 1√2 , which results in Lλ = 4 ; otherwise, 4λx 1
+
+p1 − x21 = 1 , which we can solve by first denoting x21 as a new variable in the equation −x41 + x21 − 116 λ2 = 0 . Using the quadratic formula, we find the optimal value x∗
+
+> 1
+
+, which is given by: 
+
+x∗ 
+
+> 1
+
+=
+
+s
+
+12 + 12
+
+r
+
+1 − 14λ2 ,
+
+q
+
+1 − (x∗
+
+> 1
+
+)2 =
+
+s
+
+12 − 12
+
+r
+
+1 − 14λ2 . (118) This solution exists only when λ ≥ 12 . Substituting this root back into the function gives us 
+
+Lλ
+
+
+
+x∗
+
+> 1
+
+,
+
+q
+
+1 − (x∗
+
+> 1
+
+)2, x ∗
+
+> 1
+
+
+
+= 2 + 4 x∗
+
+> 1
+
+q
+
+1 − (x∗
+
+> 1
+
+)2
+
+| {z } 
+
+> =1
+> λ
+
++2 λ + 8 λ(( x∗
+
+> 1
+
+)4 − (x∗
+
+> 1
+
+)2)
+
+| {z } 
+
+> =−12λ
+
+= 2 + 2 λ + 12λ ≥ 4,
+
+(119) which constitutes the function rdiag  
+
+> 2
+
+(λ).
+
+Case II: y21 + y22 < 1, y1, y 2 > 0 (Interior). 
+
+For the optimum, it is important that ∂Lλ 
+
+> ∂y 1
+
+= 0 and ∂Lλ 
+
+> ∂y 2
+
+= 0 . But the necessary condition for the maximum would be that the Hessian is negative semi-definite: ∂2Lλ
+
+> ∂y 21
+
+≤ 0 and ∂2Lλ
+
+> ∂y 22
+
+≤ 0. We can compute the second derivatives explicitly: 36 ∂2Lλ
+
+∂y 21
+
+= 2 + 12 λy 21 − 4λx 21 ≤ 0 ⇒ y21 ≤ x21
+
+3 . (120) Analogously, we can derive that y22 ≤ 1−x21 
+
+> 3
+
+. Then substituting this into the functional, we get: 
+
+Lλ(x1, y 1, y 2) = ( x1 + y1)2 +
+
+q 
+
+1 − x21 + y2
+
+2
+
++ λ(x21 − y21 )2 + λ  1 − x21 − y22
+
+2 (121) 
+
+≤
+
+
+
+1 + 1
+
+√3
+
+2
+
++ λ + λ
+
+9 < r 2(λ). (122) 
+
+Case III: y1 = 0 , 0 < y 2 < 1.
+
+Lλ(x1, y 1, y 2) = x21 +
+
+q 
+
+1 − x21 + y2
+
+2
+
++ λx 41 + λ  1 − x21 − y22
+
+2 . (123) As a continuous function of y2 on an open domain, it can reach a maximum only when the second derivative is non-positive, which leads to the same condition as in the previous case: y22 ≤ 1−x21 
+
+> 3
+
+.Since y1 = 0 ≤ x21 
+
+> 3
+
+, this leads to the same conclusion. 
+
+Case IV: y1 = 0 , y2 = 0 .
+
+Lλ(x1, 0, 0) = x21 + 1 + λx 41 + λ(1 − x21)2 ≤ x21 + λx 41 + λ(1 − x21)2 + 1 ≤ 1 + λ < r diag  
+
+> 2
+
+(λ).
+
+(124) 
+
+Case V: y1 = 1 , y2 = 0 .
+
+Lλ(x1, 1, 0) = ( x1 + 1) 2 + 1 − x21 + λ(1 − x21)2 + λ(1 − x21)2 = 2 + 2 x1 + 2 λ(1 − x21)2.
+
+(125) First, for λ ≤ 12 , we have: 
+
+Lλ(x1, 1, 0) ≤ 2 + 2 x1 + 1 − x21 ≤ 4. (126) For λ > 12 , we have the following inequality: 
+
+Lλ(x1, 1, 0) ≤ 2 + 2 x1 + 2 λ(1 − x21) = 2 + 2 λ + 2 x1 − 2λx 21 ≤ 2 + 2 λ + 12λ . (127) This concludes the proof. 
+
+Lemma D.5 (Expected Second Moment Error with PP) . Given the private estimation of the first moment A1(X + C−11 Z1), where A1 = B1C1, and the second moment A2(X + C−11 Z1) ◦ (X +
+
+C−11 Z1), where A2 = B2C2, with independent noise Z1 ∈ N (0 , ∥C1∥21→2σ2)n×d, the clipping norm ζ = 1 , d > 1, the expected squared Frobenius norm of the estimation error for the second moment satisfies: 
+
+sup 
+
+> X∈X
+
+EZ ∥ bDPP − D∥2 : = sup 
+
+> X∈X
+
+E∥A2(( X + C−11 Z1) ◦ (X + C−11 Z1)) − A2(X ◦ X)∥2
+
+> F
+
+= 2 dσ 4∥C1∥41→2 · tr( A⊤ 
+
+> 2
+
+A2(Q ◦ Q)) + 4 σ2∥C1∥21→2 · sup 
+
+> X∈X
+
+tr(( AT 
+
+> 2
+
+A2 ◦ Q)XX T )+ dσ 4∥C1∥41→2 · tr( A⊤ 
+
+> 2
+
+A2EQ)
+
+| {z }
+
+> bias
+
+(128) 
+
+where Q = C−11 C−⊤  
+
+> 1
+
+and EQ = diag( Q) diag ⊤(Q).
+
+37 Proof. We aim to evaluate the expected squared Frobenius norm of the error: 
+
+sup 
+
+X∈X 
+
+E∥A2(( X + C−11 Z1) ◦ (X + C−11 Z1)) − A2(X ◦ X)∥2
+
+F
+
+= 4 sup 
+
+X∈X 
+
+E∥A2(X ◦ C−11 Z1)∥2
+
+F
+
+| {z }
+
+S1
+
++ E∥A2(( C−11 Z1) ◦ (C−11 Z1)) ∥2
+
+F
+
+| {z }
+
+S2
+
+(129) We compute those terms separately. 
+
+S1 = sup 
+
+X∈X 
+
+E∥A2(X ◦ C−11 Z1)∥2
+
+F = sup 
+
+X∈X 
+
+E
+
+nX
+
+k=1 
+
+dX
+
+j=1 
+
+nX
+
+t=1 
+
+(A2)k,t Xt,j nX
+
+r=1 
+
+(C−11 )t,r (Z1)r,j 
+
+!2
+
+= sup 
+
+X∈X 
+
+nX
+
+k=1 
+
+dX
+
+j=1 
+
+nX
+
+t1,t 2
+
+(A2)k,t 1 (A2)k,t 1 Xt1,j Xt2,j nX
+
+r=1 
+
+(C−11 )t1,r (C−11 )t2,r E(Z1)2
+
+r,j 
+
+= σ2∥C1∥21→2 sup 
+
+X∈X 
+
+nX
+
+k=1 
+
+dX
+
+j=1 
+
+nX
+
+t1,t 2
+
+(A2)k,t 1 (A2)k,t 2 Xt1,j Xt2,j nX
+
+r=1 
+
+(C−11 )t1,r (C−11 )t2,r 
+
+= σ2∥C1∥21→2 sup 
+
+X∈X 
+
+nX
+
+t1,t 2
+
+⟨(A⊤
+
+2 )t1 , (A⊤
+
+2 )t2 ⟩⟨ Xt1 , X t2 ⟩⟨ (C−11 )t1 , (C−11 )t2 ⟩
+
+= σ2∥C1∥21→2 sup 
+
+X∈X 
+
+tr(( AT
+
+2 A2 ◦ Q)XX T ),
+
+(130) where Q = C−11 C−T
+
+1 .
+
+S2 = E∥A2(( C−11 Z1) ◦ (C−11 Z1)) ∥2
+
+F = E
+
+nX
+
+k=1 
+
+dX
+
+j=1 
+
+nX
+
+t=1 
+
+(A2)k,t (C−11 Z1)2
+
+t,j 
+
+!2
+
+= E
+
+nX
+
+k=1 
+
+dX
+
+j=1 
+
+nX
+
+t1,t 2
+
+(A2)k,t 1 (A2)k,t 2 (C−11 Z1)2
+
+t1,j (C−11 Z1)2
+
+t2,j .
+
+(131) First, we compute: 
+
+E(C−11 Z1)2
+
+t1,j (C−11 Z1)2
+
+t2,j = E
+
+nX
+
+r=1 
+
+(C−11 )2
+
+t1,r (C−11 )2
+
+t2,r (Z1)4
+
+r,j 
+
++ E
+
+nX
+
+r1̸ =r2
+
+(C−11 )2
+
+t1,r 1 (C−11 )2
+
+t2,r 2 (Z1)2
+
+r1,j (Z1)2
+
+r2,j 
+
++ 2 E
+
+nX
+
+r1̸ =r2
+
+(C−11 )t1,r 1 (C−11 )t1,r 2 (C−11 )t2,r 1 (C−11 )t2,r 2 (Z1)2
+
+r1,j (Z1)2
+
+r2,j 
+
+= 3 σ4∥C1∥41→2
+
+nX
+
+r=1 
+
+(C−11 )2
+
+t1,r (C−11 )2
+
+t2,r 
+
++ σ4∥C1∥41→2
+
+nX
+
+r1̸ =r2
+
+(C−11 )2
+
+t1,r 1 (C−11 )2
+
+t2,r 2
+
++ 2 σ4∥C1∥41→2
+
+nX
+
+r1̸ =r2
+
+(C−11 )t1,r 1 (C−11 )t1,r 2 (C−11 )t2,r 1 (C−11 )t2,r 2
+
+= σ4∥C1∥41→2Qt1,t 1 Qt2,t 2 + 2 σ4∥C1∥41→2Q2
+
+t1,t 2 .
+
+(132) 38 Plugging it back, we get 
+
+E∥A2(( C−11 Z1) ◦ (C−11 Z1)) ∥2 
+
+> F
+
+= dσ 4∥C1∥41→2
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t1,t 2
+
+(A2)k,t 1 (A2)k,t 2 (Qt1,t 1 Qt2,t 2 + 2 Q2 
+
+> t1,t 2
+
+)= dσ 4∥C1∥41→2
+
+> n
+
+X
+
+> k=1
+> n
+
+X
+
+> t1,t 2
+
+(A2)k,t 1 (A2)k,t 2 (Qt1,t 1 Qt2,t 2 + 2 Q2 
+
+> t1,t 2
+
+)= dσ 4∥C1∥41→2 tr( A⊤ 
+
+> 2
+
+A2EQ) + 2 dσ 4∥C1∥41→2 tr( A⊤ 
+
+> 2
+
+A2(Q ◦ Q)) ,
+
+(133) where EQ = diag( Q) diag ⊤(Q).Adding these terms together we obtain: 
+
+sup 
+
+> X∈X
+
+EZ ∥ bDPP − D∥2 = 2 dσ 4∥C1∥41→2 · tr( A⊤ 
+
+> 2
+
+A2(Q ◦ Q)) + 4 σ2∥C1∥21→2 · sup 
+
+> X∈X
+
+tr(( AT 
+
+> 2
+
+A2 ◦ Q)XX ⊤)+ dσ 4∥C1∥41→2 · tr( A⊤ 
+
+> 2
+
+A2EQ)
+
+(134) 
+
+Bias Correction. 
+
+The expectation of A2(( C−11 Z1) ◦ (C−11 Z1))] k,j introduces a bias: 
+
+[EA2(( C−11 Z1) ◦ (C−11 Z1))] k,j = E
+
+> n
+
+X
+
+> t=1
+
+(A2)k,t 
+
+> n
+
+X
+
+> r=1
+
+(C−11 )t,r (Z1)r,j 
+
+!2
+
+= σ2∥C1∥21→2
+
+> n
+
+X
+
+> t=1
+> n
+
+X
+
+> r=1
+
+(A2)k,t (C−11 )2
+
+> t,r
+
+= σ2∥C1∥21→2
+
+> n
+
+X
+
+> t=1
+
+(A2)k,t Qt,t .
+
+(135) The Frobenius norm of this bias is: 
+
+∥EA2(( C−11 Z1) ◦ (C−11 Z1)) ∥2 
+
+> F
+
+= σ4∥C1∥41→2
+
+> n
+
+X
+
+> k=1
+> d
+
+X
+
+> j=1
+> n
+
+X
+
+> t1,t 2
+
+(A2)k,t 1 (A2)k,t 2 Qt1,t 1 Qt2,t 2
+
+= dσ 4∥C1∥41→2 tr( A⊤ 
+
+> 2
+
+A2EQ)
+
+(136) If we subtract this bias from the estimate, it will increase the error by the aforementioned quantity due to the Frobenius norm of the bias but will decrease the error by two scalar products with the 
+
+A2(( C−11 Z1) ◦ (C−11 Z1)) term: 
+
+E⟨A2(( C−11 Z1)◦(C−11 Z1)) , EA2(( C−11 Z1)◦(C−11 Z1)) ⟩ = ∥EA2(( C−11 Z1)◦(C−11 Z1)) ∥2
+
+> F
+
+. (137) Thus, we can eliminate the last term ( dσ 4∥C1∥41→2 tr( A⊤ 
+
+> 2
+
+A2EQ)) in the error sum via bias correction. 39 NeurIPS Paper Checklist 
+
+1. Claims 
+
+Question: Do the main claims made in the abstract and introduction accurately reflect the paper’s contributions and scope? Answer: [Yes] Justification: Our paper claims to solve the problem of joint moment estimation, which we do, and we provide an extensive baseline comparison to justify our method. Guidelines: • The answer NA means that the abstract and introduction do not include the claims made in the paper. • The abstract and/or introduction should clearly state the claims made, including the contributions made in the paper and important assumptions and limitations. A No or NA answer to this question will not be perceived well by the reviewers. • The claims made should match theoretical and experimental results, and reflect how much the results can be expected to generalize to other settings. • It is fine to include aspirational goals as motivation as long as it is clear that these goals are not attained by the paper. 2. Limitations 
+
+Question: Does the paper discuss the limitations of the work performed by the authors? Answer: [Yes] Justification: The main limitation of our method is that, in certain circumstances—such as with high-dimensional data—it only offers an advantage over post-processing in high-accuracy regimes. We discuss this limitation in each new setting. Guidelines: • The answer NA means that the paper has no limitation while the answer No means that the paper has limitations, but those are not discussed in the paper. • The authors are encouraged to create a separate "Limitations" section in their paper. • The paper should point out any strong assumptions and how robust the results are to violations of these assumptions (e.g., independence assumptions, noiseless settings, model well-specification, asymptotic approximations only holding locally). The authors should reflect on how these assumptions might be violated in practice and what the implications would be. • The authors should reflect on the scope of the claims made, e.g., if the approach was only tested on a few datasets or with a few runs. In general, empirical results often depend on implicit assumptions, which should be articulated. • The authors should reflect on the factors that influence the performance of the approach. For example, a facial recognition algorithm may perform poorly when image resolution is low or images are taken in low lighting. Or a speech-to-text system might not be used reliably to provide closed captions for online lectures because it fails to handle technical jargon. • The authors should discuss the computational efficiency of the proposed algorithms and how they scale with dataset size. • If applicable, the authors should discuss possible limitations of their approach to address problems of privacy and fairness. • While the authors might fear that complete honesty about limitations might be used by reviewers as grounds for rejection, a worse outcome might be that reviewers discover limitations that aren’t acknowledged in the paper. The authors should use their best judgment and recognize that individual actions in favor of transparency play an impor-tant role in developing norms that preserve the integrity of the community. Reviewers will be specifically instructed to not penalize honesty concerning limitations. 3. Theory assumptions and proofs 
+
+Question: For each theoretical result, does the paper provide the full set of assumptions and a complete (and correct) proof? 40 Answer: [Yes] Justification: We recognize the importance of providing a theoretical justification and, to the best of our knowledge, fulfill this requirement. Guidelines: • The answer NA means that the paper does not include theoretical results. • All the theorems, formulas, and proofs in the paper should be numbered and cross-referenced. • All assumptions should be clearly stated or referenced in the statement of any theorems. • The proofs can either appear in the main paper or the supplemental material, but if they appear in the supplemental material, the authors are encouraged to provide a short proof sketch to provide intuition. • Inversely, any informal proof provided in the core of the paper should be complemented by formal proofs provided in appendix or supplemental material. • Theorems and Lemmas that the proof relies upon should be properly referenced. 4. Experimental result reproducibility 
+
+Question: Does the paper fully disclose all the information needed to reproduce the main ex-perimental results of the paper to the extent that it affects the main claims and/or conclusions of the paper (regardless of whether the code and data are provided or not)? Answer: [Yes] Justification: We provide pseudocode for all the algorithms we use and believe they are easily reproducible. Guidelines: • The answer NA means that the paper does not include experiments. • If the paper includes experiments, a No answer to this question will not be perceived well by the reviewers: Making the paper reproducible is important, regardless of whether the code and data are provided or not. • If the contribution is a dataset and/or model, the authors should describe the steps taken to make their results reproducible or verifiable. • Depending on the contribution, reproducibility can be accomplished in various ways. For example, if the contribution is a novel architecture, describing the architecture fully might suffice, or if the contribution is a specific model and empirical evaluation, it may be necessary to either make it possible for others to replicate the model with the same dataset, or provide access to the model. In general. releasing code and data is often one good way to accomplish this, but reproducibility can also be provided via detailed instructions for how to replicate the results, access to a hosted model (e.g., in the case of a large language model), releasing of a model checkpoint, or other means that are appropriate to the research performed. • While NeurIPS does not require releasing code, the conference does require all submis-sions to provide some reasonable avenue for reproducibility, which may depend on the nature of the contribution. For example (a) If the contribution is primarily a new algorithm, the paper should make it clear how to reproduce that algorithm. (b) If the contribution is primarily a new model architecture, the paper should describe the architecture clearly and fully. (c) If the contribution is a new model (e.g., a large language model), then there should either be a way to access this model for reproducing the results or a way to reproduce the model (e.g., with an open-source dataset or instructions for how to construct the dataset). (d) We recognize that reproducibility may be tricky in some cases, in which case authors are welcome to describe the particular way they provide for reproducibility. In the case of closed-source models, it may be that access to the model is limited in some way (e.g., to registered users), but it should be possible for other researchers to have some path to reproducing or verifying the results. 5. Open access to data and code 
+
+41 Question: Does the paper provide open access to the data and code, with sufficient instruc-tions to faithfully reproduce the main experimental results, as described in supplemental material? Answer: [No] , Justification: We provide pseudocode for all the algorithms we use and believe they are easily reproducible. However, we do not publish any source code at this time. Guidelines: • The answer NA means that paper does not include experiments requiring code. • Please see the NeurIPS code and data submission guidelines ( https://nips.cc/ public/guides/CodeSubmissionPolicy ) for more details. • While we encourage the release of code and data, we understand that this might not be possible, so “No” is an acceptable answer. Papers cannot be rejected simply for not including code, unless this is central to the contribution (e.g., for a new open-source benchmark). • The instructions should contain the exact command and environment needed to run to reproduce the results. See the NeurIPS code and data submission guidelines ( https: //nips.cc/public/guides/CodeSubmissionPolicy ) for more details. • The authors should provide instructions on data access and preparation, including how to access the raw data, preprocessed data, intermediate data, and generated data, etc. • The authors should provide scripts to reproduce all experimental results for the new proposed method and baselines. If only a subset of experiments are reproducible, they should state which ones are omitted from the script and why. • At submission time, to preserve anonymity, the authors should release anonymized versions (if applicable). • Providing as much information as possible in supplemental material (appended to the paper) is recommended, but including URLs to data and code is permitted. 6. Experimental setting/details 
+
+Question: Does the paper specify all the training and test details (e.g., data splits, hyper-parameters, how they were chosen, type of optimizer, etc.) necessary to understand the results? Answer: [Yes] Justification: All the experimental parameters can be found in the Appendix. Guidelines: • The answer NA means that the paper does not include experiments. • The experimental setting should be presented in the core of the paper to a level of detail that is necessary to appreciate the results and make sense of them. • The full details can be provided either with the code, in appendix, or as supplemental material. 7. Experiment statistical significance 
+
+Question: Does the paper report error bars suitably and correctly defined or other appropriate information about the statistical significance of the experiments? Answer: [Yes] Justification: For all plots with sufficient variability in the data points, we include error bars. Guidelines: • The answer NA means that the paper does not include experiments. • The authors should answer "Yes" if the results are accompanied by error bars, confi-dence intervals, or statistical significance tests, at least for the experiments that support the main claims of the paper. • The factors of variability that the error bars are capturing should be clearly stated (for example, train/test split, initialization, random drawing of some parameter, or overall run with given experimental conditions). 42 • The method for calculating the error bars should be explained (closed form formula, call to a library function, bootstrap, etc.) • The assumptions made should be given (e.g., Normally distributed errors). • It should be clear whether the error bar is the standard deviation or the standard error of the mean. • It is OK to report 1-sigma error bars, but one should state it. The authors should preferably report a 2-sigma error bar than state that they have a 96% CI, if the hypothesis of Normality of errors is not verified. • For asymmetric distributions, the authors should be careful not to show in tables or figures symmetric error bars that would yield results that are out of range (e.g. negative error rates). • If error bars are reported in tables or plots, The authors should explain in the text how they were calculated and reference the corresponding figures or tables in the text. 8. Experiments compute resources 
+
+Question: For each experiment, does the paper provide sufficient information on the com-puter resources (type of compute workers, memory, time of execution) needed to reproduce the experiments? Answer: [No] Justification: All our experiments require minimal resources and can be run on a single computer or, e.g., in Google Colab. Guidelines: • The answer NA means that the paper does not include experiments. • The paper should indicate the type of compute workers CPU or GPU, internal cluster, or cloud provider, including relevant memory and storage. • The paper should provide the amount of compute required for each of the individual experimental runs as well as estimate the total compute. • The paper should disclose whether the full research project required more compute than the experiments reported in the paper (e.g., preliminary or failed experiments that didn’t make it into the paper). 9. Code of ethics 
+
+Question: Does the research conducted in the paper conform, in every respect, with the NeurIPS Code of Ethics https://neurips.cc/public/EthicsGuidelines ?Answer: [Yes] Justification: To the best of our knowledge, the paper conforms with the code of ethics. Guidelines: • The answer NA means that the authors have not reviewed the NeurIPS Code of Ethics. • If the authors answer No, they should explain the special circumstances that require a deviation from the Code of Ethics. • The authors should make sure to preserve anonymity (e.g., if there is a special consid-eration due to laws or regulations in their jurisdiction). 10. Broader impacts 
+
+Question: Does the paper discuss both potential positive societal impacts and negative societal impacts of the work performed? Answer: [Yes] Justification: Differential privacy—and, to a certain extent, privacy in general—is discussed in this paper, which we view as the area with the greatest potential social impact. Guidelines: • The answer NA means that there is no societal impact of the work performed. • If the authors answer NA or No, they should explain why their work has no societal impact or why the paper does not address societal impact. 43 • Examples of negative societal impacts include potential malicious or unintended uses (e.g., disinformation, generating fake profiles, surveillance), fairness considerations (e.g., deployment of technologies that could make decisions that unfairly impact specific groups), privacy considerations, and security considerations. • The conference expects that many papers will be foundational research and not tied to particular applications, let alone deployments. However, if there is a direct path to any negative applications, the authors should point it out. For example, it is legitimate to point out that an improvement in the quality of generative models could be used to generate deepfakes for disinformation. On the other hand, it is not needed to point out that a generic algorithm for optimizing neural networks could enable people to train models that generate Deepfakes faster. • The authors should consider possible harms that could arise when the technology is being used as intended and functioning correctly, harms that could arise when the technology is being used as intended but gives incorrect results, and harms following from (intentional or unintentional) misuse of the technology. • If there are negative societal impacts, the authors could also discuss possible mitigation strategies (e.g., gated release of models, providing defenses in addition to attacks, mechanisms for monitoring misuse, mechanisms to monitor how a system learns from feedback over time, improving the efficiency and accessibility of ML). 11. Safeguards 
+
+Question: Does the paper describe safeguards that have been put in place for responsible release of data or models that have a high risk for misuse (e.g., pretrained language models, image generators, or scraped datasets)? Answer: [NA] Justification: Guidelines: • The answer NA means that the paper poses no such risks. • Released models that have a high risk for misuse or dual-use should be released with necessary safeguards to allow for controlled use of the model, for example by requiring that users adhere to usage guidelines or restrictions to access the model or implementing safety filters. • Datasets that have been scraped from the Internet could pose safety risks. The authors should describe how they avoided releasing unsafe images. • We recognize that providing effective safeguards is challenging, and many papers do not require this, but we encourage authors to take this into account and make a best faith effort. 12. Licenses for existing assets 
+
+Question: Are the creators or original owners of assets (e.g., code, data, models), used in the paper, properly credited and are the license and terms of use explicitly mentioned and properly respected? Answer: [NA] Justification: Guidelines: • The answer NA means that the paper does not use existing assets. • The authors should cite the original paper that produced the code package or dataset. • The authors should state which version of the asset is used and, if possible, include a URL. • The name of the license (e.g., CC-BY 4.0) should be included for each asset. • For scraped data from a particular source (e.g., website), the copyright and terms of service of that source should be provided. • If assets are released, the license, copyright information, and terms of use in the package should be provided. For popular datasets, paperswithcode.com/datasets 
+
+has curated licenses for some datasets. Their licensing guide can help determine the license of a dataset. 44 • For existing datasets that are re-packaged, both the original license and the license of the derived asset (if it has changed) should be provided. • If this information is not available online, the authors are encouraged to reach out to the asset’s creators. 13. New assets 
+
+Question: Are new assets introduced in the paper well documented and is the documentation provided alongside the assets? Answer: [NA] Justification: Guidelines: • The answer NA means that the paper does not release new assets. • Researchers should communicate the details of the dataset/code/model as part of their submissions via structured templates. This includes details about training, license, limitations, etc. • The paper should discuss whether and how consent was obtained from people whose asset is used. • At submission time, remember to anonymize your assets (if applicable). You can either create an anonymized URL or include an anonymized zip file. 14. Crowdsourcing and research with human subjects 
+
+Question: For crowdsourcing experiments and research with human subjects, does the paper include the full text of instructions given to participants and screenshots, if applicable, as well as details about compensation (if any)? Answer:[NA] Justification: Guidelines: • The answer NA means that the paper does not involve crowdsourcing nor research with human subjects. • Including this information in the supplemental material is fine, but if the main contribu-tion of the paper involves human subjects, then as much detail as possible should be included in the main paper. • According to the NeurIPS Code of Ethics, workers involved in data collection, curation, or other labor should be paid at least the minimum wage in the country of the data collector. 15. Institutional review board (IRB) approvals or equivalent for research with human subjects 
+
+Question: Does the paper describe potential risks incurred by study participants, whether such risks were disclosed to the subjects, and whether Institutional Review Board (IRB) approvals (or an equivalent approval/review based on the requirements of your country or institution) were obtained? Answer: [NA] Justification: Guidelines: • The answer NA means that the paper does not involve crowdsourcing nor research with human subjects. • Depending on the country in which research is conducted, IRB approval (or equivalent) may be required for any human subjects research. If you obtained IRB approval, you should clearly state this in the paper. • We recognize that the procedures for this may vary significantly between institutions and locations, and we expect authors to adhere to the NeurIPS Code of Ethics and the guidelines for their institution. • For initial submissions, do not include any information that would break anonymity (if applicable), such as the institution conducting the review. 45 16. Declaration of LLM usage 
+
+Question: Does the paper describe the usage of LLMs if it is an important, original, or non-standard component of the core methods in this research? Note that if the LLM is used only for writing, editing, or formatting purposes and does not impact the core methodology, scientific rigorousness, or originality of the research, declaration is not required. Answer: [NA] Justification: Our research is not related to LLMs. Guidelines: • The answer NA means that the core method development in this research does not involve LLMs as any important, original, or non-standard components. • Please refer to our LLM policy ( https://neurips.cc/Conferences/2025/LLM )for what should or should not be described. 46
