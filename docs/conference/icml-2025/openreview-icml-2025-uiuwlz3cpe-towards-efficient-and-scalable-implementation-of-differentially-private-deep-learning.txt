@@ -1,0 +1,589 @@
+Title: Towards Efficient and Scalable Implementationof Differentially Private Deep Learning
+
+URL Source: https://openreview.net/pdf?id=uiuwlZ3cPe
+
+Number of Pages: 17
+
+Markdown Content:
+000 001 002 003 004 005 006 007 008 009 010 011 012 013 014 015 016 017 018 019 020 021 022 023 024 025 026 027 028 029 030 031 032 033 034 035 036 037 038 039 040 041 042 043 044 045 046 047 048 049 050 051 052 053 054 
+
+# Towards Efficient and Scalable Implementation of Differentially Private Deep Learning 
+
+Anonymous Authors 1
+
+## Abstract 
+
+Differentially private stochastic gradient descent (DP-SGD) is the standard algorithm for training machine learning models under differential pri-vacy (DP). The most common DP-SGD privacy accountants rely on Poisson subsampling to en-sure the theoretical DP guarantees. Implement-ing computationally efficient DP-SGD with Pois-son subsampling is not trivial, which leads to many implementations that ignore this require-ment. We quantify the computational cost of training deep learning models under differential privacy by benchmarking efficient methods with the correct Poisson subsampling requirement. We find that using the naive implementation DP-SGD with Opacus in PyTorch has a throughput between 2.6 and 8 times lower than that of SGD. How-ever, efficient gradient clipping implementations like Ghost Clipping can roughly halve this cost. We propose alternative computationally efficient ways of implementing DP-SGD with JAX that use Poisson subsampling and performs compara-bly with efficient clipping optimizations based on PyTorch. We highlight important implementation considerations with JAX. Finally, we study the scaling behavior using up to 80 GPUs and find that DP-SGD scales better than SGD. 
+
+## 1. Introduction 
+
+Machine learning (ML) models’ training data can be vulner-able to extraction (Balle et al., 2022; Carlini et al., 2021). Differential Privacy (DP) (Dwork et al., 2006) is the gold standard for formalizing the privacy leakage of training data in ML and mitigating the risk of privacy attacks on the train-ing data. DP is deployed in many applications that involve sensitive data (Abowd, 2018; Cormode et al., 2018). 
+
+> 1
+
+Anonymous Institution, Anonymous City, Anonymous Region, Anonymous Country. Correspondence to: Anonymous Author 
+
+<anon.email@domain.com >.Preliminary work. Under review by the International Conference on Machine Learning (ICML). Do not distribute. naive DP (JAX) Opacus (PyTorch) Masked DP-SGD (JAX) GhostClipping (PyTorch) non-DP (PyTorch) 0.25 0.3 0.4 0.5 0.6 0.7 0.8 1.0 1.2 
+
+> Throughput relative to non-DP
+
+Figure 1. Relative throughput (FP32) to the respective non private baseline (higher is better) on NVIDIA A100. For each optimization method and each model size, we divide its throughput with the non-private counterpart. Throughput is the number of processed instances per second. In this benchmark we distinguish between precision modes. They are available on both frameworks and significantly improve the throughput for the different DP-SGD implementations. 
+
+The established algorithm for integrating DP into the train-ing pipeline of deep learning models is DP stochastic gradi-ent descent (DP-SGD) (Rajkumar & Agarwal, 2012; Song et al., 2013; Abadi et al., 2016), which is the DP adaptation of SGD (see also Alg. 1). DP-SGD has two major drawbacks in comparison to SGD: higher computational cost and loss in utility. DP-SGD requires more memory and is compu-tationally more expensive due to the per-example clipping. The utility in comparison to non-DP training drops, but this can be mitigated to some extent by using larger batch sizes (R ¨ais ¨a et al., 2024) and training longer (Ponomareva et al., 2023) which further increase the computational cost. Standard DP privacy accountants assume so-called Poisson subsampling, where each example is selected independently at each iteration with a fixed probability. This implies that different minibatches will be of different sizes, making ef-ficient implementation more difficult. As a result, many existing implementations forego proper implementation of Poisson subsampling. Recent research (Lebeda et al., 2024; Chua et al., 2024a;b; Annamalai et al., 2024) shows that such implementations may have significantly weaker privacy guarantees than claimed under the Poisson subsampling as-sumption. 1055 056 057 058 059 060 061 062 063 064 065 066 067 068 069 070 071 072 073 074 075 076 077 078 079 080 081 082 083 084 085 086 087 088 089 090 091 092 093 094 095 096 097 098 099 100 101 102 103 104 105 106 107 108 109 
+
+> Towards Efficient and Scalable Implementation of Differentially Private Deep Learning
+
+List of contributions In this work we conduct an extensive empirical study on the computational efficiency of DP-SGD using Poisson sub-sampling, focusing on fine-tuning a wide range of large image classification models. Our findings can be applied to any other large models trained or fine-tuned with DP-SGD. Our main contributions are as follows: 1. We re-implement all DP-SGD methods with Poisson subsampling that is fully DP and share the source code. 2. We propose a JAX implementation relying on proper Poisson sampling that is in comparison to a naive JAX implementation not prone to re-compilation and outper-forms its throughput by two times (See Sec. 3). 3. We find that non-optimized training with DP-SGD costs per-epoch between 2.6 and 3.2 times more than non-private training for ViT and 4 to 8 times for ResNets (See Sec. 5). We identify the reasons that lead to the higher computational cost of DP-SGD using profiling. 4. We benchmark different strategies that can drastically reduce this cost: (i) More efficient gradient clipping implementations of DP-SGD (See Fig. 1 and Sec. 6.1). (ii) Lower Precision with TF32 (See Sec. 6.2). 5. We scale up the training to 80 GPUs and find that DP-SGD scales better than non-private training (See Sec. 8). 
+
+## 2. Background 
+
+This section will explain the main DP-SGD algorithm and optimizations to alleviate its computational cost. 
+
+2.1. DP-SGD Algorithm 
+
+Alg. 1 is the original DP-SGD algorithm, with virtual batch-ing, as proposed by Abadi et al. (2016). 
+
+Virtual Batching distinguishes between logical and physi-cal batches. Logical batches are divided into multiple phys-ical batches to enable optimizer steps with many samples without running out of memory. For instance, we typically sample logical batch sizes of L = 25000 while the memory fits < 300 samples at a time. Implementing DP-SGD with virtual batching Alg. 1 does not modify the privacy account-ing. The amount of noise added is the same and does not affect the model utility (Ponomareva et al., 2023). 
+
+Poisson subsampling Interestingly, Bu et al. (2022) and Bu et al. (2023) never mention Poisson subsampling in their works of Mix Ghost clipping and Book Keeping. Further-more, Bu et al. (2022) claims a speed-up of ×1.7 against other algorithms with a fixed batch size, which would af-fect the privacy accounting method. The same happens in practice for JAX implementations (De et al., 2022), where sampling is done by shuffling the dataset and using each sample once per epoch. While this makes efficient imple-mentation easier, it does not use the correct Poisson subsam-pling assumed by privacy accounting methods. Therefore, 
+
+Algorithm 1 Virtual Batching DP-SGD 
+
+Input: Training data points {x1, . . . , x N }, loss function 
+
+L(θ) = 1
+
+> N
+
+P 
+
+> i
+
+L(θ, x i)
+
+Parameters: learning rate ηt, noise scale σ, gradient norm bound C, number of steps T , approximate logical batch size L, physical batch size p.
+
+for t ∈ [T ] do 
+
+B ← { xj1 , . . . , x jm } sample with rate L/N .
+
+P ← { B1, . . . , B k} split B into physical batches of size p.
+
+θacc ← 0
+
+for s ∈ [P ] do 
+
+For each i ∈ s compute gt(xi) ← ∇ θt L(θt, x i)
+
+gt(xi) ← gt/max 
+
+
+
+1, ∥gt(xi)∥2
+
+> C
+
+
+
+{Clip gradient }
+
+θacc ← θacc + P 
+
+> i
+
+gt(xi) {Accumulate gradient }
+
+end for 
+
+egt ← 1 
+
+> |L|
+
+(θacc + N (0 , σ 2C2I)) {Add noise }
+
+θt+1 ← θt − ηtegt {Step }
+
+end for Return Learned parameters θT and the privacy cost from a privacy accountant. the implementation might have significantly weaker privacy properties than claimed (Lebeda et al., 2024; Chua et al., 2024a;b; Annamalai et al., 2024). All our experiments are based on Poisson subsampling which is compliant with the commonly used privacy accounting. 
+
+2.2. DP-SGD Gradient Clipping Optimizations 
+
+We benchmark five types of clipping methods. Table 1 shows which clipping optimizations we are benchmarking against the library or framework that implements it. 
+
+Ghost clipping computes the loss gradient norm after the backpropagation step and then reweights the loss to update the clipped gradients. Its main contribution is memory sav-ings at the cost of adding another backward pass (Li et al., 2022). 
+
+Mixed Ghost clipping (Bu et al., 2022) is a method that builds on-top of Ghost clipping. It implements the ghost clipping technique for convolutional layers. Its main con-tribution is that the algorithm will decide when to clip the gradients using per-example or ghost. This difference mat-ters because the ghost clipping is less efficient when the layer’s input dimensions are too high-dimensional. E.g., for ResNets, each clipping method will be applied for half of the layers. The first layers will be clipped using the the per-example and then ghost clipping in the bottom layers. As the model goes deeper, the feature size decreases, and the number of channels increases, prioritizing ghost clipping (Bu et al., 2022). 2110 111 112 113 114 115 116 117 118 119 120 121 122 123 124 125 126 127 128 129 130 131 132 133 134 135 136 137 138 139 140 141 142 143 144 145 146 147 148 149 150 151 152 153 154 155 156 157 158 159 160 161 162 163 164 
+
+Towards Efficient and Scalable Implementation of Differentially Private Deep Learning 
+
+Table 1. Benchmarked DP-SGD frameworks and libraries. Note that Opacus Ghost Clipping is in development. PYTORCH JAX CLIPPING MODE NATIVE OPACUS PRIVATE VISION (PV) FAST DP (BK) NATIVE OURS            
+
+> (Y OUSEFPOUR ET AL ., 2021) (B U ET AL ., 2022) (B U ET AL ., 2023) NON -PRIVATE
+> PER -EXAMPLE
+> GHOST CLIPPING (L I ET AL ., 2022) ()MIX GHOST (B U ET AL ., 2022) MIX OPT (B U ET AL ., 2023) MASKED DP-SGD ( OURS , S EC . 3)
+
+Book Keeping (Bu et al., 2023) uses all the previous tech-niques but requires only one backpropagation pass without explicitly calculating the per-example gradients. It avoids the second pass that ghost clipping does by reusing the in-termediate results of the output gradients to calculate the sum of the clipped gradients and the clipping factor. Book Keeping can also be implemented together with the Mix Optimization, which does the same evaluation as the mix ghost clipping, but also determines whether doing a second backward pass is more efficient. 
+
+## 3. Avoiding Re-compilation in JAX 
+
+Using JAX for DP-SGD introduces complexities, partic-ularly around Poisson subsampling which is crucial for privacy accounting. Implementing Poisson subsampling results in variable logical batch sizes that lead to variability in the size of the last physical batch which require JIT to recompile, leading to graph retracing which is costly and contributes to execution run variability (Chua et al., 2024a). 
+
+Masked DP-SGD We propose an algorithm, called masked DP-SGD, that overcomes the issue of recompilation at the cost of computing slightly more gradients than the naive implementation while at the same time using proper Poisson subsampling and therefore ensuring the correct privacy bud-get. We execute the following sub-steps at every iteration and highlight the differences to the naive implementation (steps 2 and 4) (See also Alg. A1): 1. We sample a logical size using Poisson sampling. 2. We round up the number of samples for which we com-pute per-sample gradients so that it is divisible by the physical batch size without remainder. 
+
+3. We compute the per-sample gradients. 4. We mask out gradients so that the per-sample gradients used for the update are the actual Poisson subsampled ones, ensuring compliance with the Poisson subsampling accounting. 
+
+Extra computational cost In step 2, we round the logical batch size up to the closest larger integer divisible by the physical batch size to avoid recompiling. Hence, for any sampled logical batch size X, the difference between X
+
+and the upscaled batch size will be in {0, . . . , p − 1} for a physical batch size p. Denoting the excess batch size with 
+
+∆p(X) and the upscaled batch size with X+, we can write 
+
+E[X+] = E[X + ∆ p(X)] . (1) Now, we can form a simple upper bound for the expected relative increase of batch size given that E[X] = L as 
+
+E[X+]/E[X] ≤ 1 + ( p − 1) /L. (2) When working large number of samples and non-negligible sampling probabilities, the excess cost due to upscaling the batch size will be modest for feasible physical batch sizes. For example, in our experiments the expected batch size of the Poisson subsampling was L = 25 000 , whereas the physical batch sizes extended up to p = 64 . The expected relative increase in computed gradients would be 0.252% .A recent work by Chua et al. (2024b) proposed an alterna-tive implementation for JAX compilable implementation of Poisson subsampled DP-SGD. In their approach the logical batch sizes are sampled from a truncated Binomial distribu-tion. In App. D we show that for our settings the number of additionally computed gradients is signficantly smaller with our method. 
+
+## 4. Experiment Overview 
+
+PyTorch implementations We benchmark a native Py-Torch (Ansel et al., 2024) implementation with PyTorch-based libraries Opacus (Yousefpour et al., 2021) (details on gradsampling in App. A.3), PrivateVision (PV) (Bu et al., 2022), and FastDP (BK) (Bu et al., 2023), see Table 1. At submission time ghost clipping in Opacus was still undergo-ing changes and was unstable in our experiments. 
+
+JAX implementations We benchmark two JAX implemen-tations. Our method Masked DP-SGD and a native JAX (Bradbury et al., 2018) implementation that clips the per-sample gradients with Optax (DeepMind et al., 2020) with-out utilizing any further optimization. This naive implemen-tation in JAX is prone to recompilation due to changing tensor sizes caused by the Poisson subsampling. 3165 166 167 168 169 170 171 172 173 174 175 176 177 178 179 180 181 182 183 184 185 186 187 188 189 190 191 192 193 194 195 196 197 198 199 200 201 202 203 204 205 206 207 208 209 210 211 212 213 214 215 216 217 218 219 
+
+> Towards Efficient and Scalable Implementation of Differentially Private Deep Learning
+
+Implementation of Poisson sampling Opacus sam-ples the logical batches using Poisson sampling and then divides them into physical batches using their 
+
+BatchMemoryManager class. The other PyTorch im-plementations considered in our experiments do not support virtual batching out-of-the-box. To make a fair comparison between all methods, we implemented Poisson subsampling in the same way as Opacus for all frameworks and adapted the BatchMemoryManager to support them. Thus, all experiments are seeded to ensure the same logical batch sizes. 
+
+Metrics We compare the throughput, defined as how many samples can be processed per second during training, and the maximum physical batch size that can fit in memory. 
+
+Dataset We benchmark with the CIFAR100 (Krizhevsky & Hinton, 2009) resized to 224x224. 
+
+Models We train two families of models: Vision Transformer (ViT) (Dosovitskiy et al., 2021) and ResNet (Kolesnikov et al., 2020) (See Table 2). Both are pre-trained on ImageNet-21k (Russakovsky et al., 2015).                     
+
+> Table 2. Number of parameters (millions) for used models.
+> Vision Transformer (ViT) ResNet Type # Params Type # Params
+> Tiny 5.7 M 50 ×123.7 M Small 22.1 M 101 ×142.7 M Base 86.6 M 50 ×3211.8 M Large 304.3 M 101 ×3382.4 M Huge 630.8 M 152 ×4929.2 M
+
+Parameterization While parameter-efficient fine-tuning of some parts of the model has been shown to be effective under DP (Yu et al., 2022; Tobaben et al., 2023), our work focuses on the computational efficiency of DP-SGD and thus we consider the worst-case scenario of fine-tuning all parameters of the model. Furthermore, any training from scratch requires training all parameters. 
+
+Hyperparameters We train for four optimization steps with a sampling rate of 0.5 (expected batch size of 25000), which allows us to quickly test the experiments with a realistic high batch size (Ponomareva et al., 2023; R ¨ais ¨a et al., 2024). We do not focus on finding the best possible utility, which requires training for many more epochs (See Table A2 for the accuracy after training for four steps). 
+
+Environment specifications We use two GPU architectures: NVIDIA V100 (32 GB VRAM) and A100 (40 GB VRAM) with identical Python environments. Each node contains four GPUs. We use 16 CPU workers for data loading. In the distributed case of more than one GPU, only one worked per device is used. 
+
+Source code We provide the code for reproducing the ex-periments in the supplementary material and will publish the code in an open repository after acceptance of the paper. 
+
+## 5. What is the Computational Cost of DP in Deep Learning 
+
+We quantify the computational cost of deploying DP training by comparing the throughputs and maximum physical batch sizes between the non-private training with PyTorch and private training with Opacus, the most widely used DP-SGD implementation. Additionally, we identify the reasons for the higher computational cost of DP-SGD through profiling. 
+
+5.1. Throughput and Maximum Batch Size Comparison 
+
+We compare relative throughput (Fig. 2) and the maximum physical batch size (Fig. 3) between DP-SGD (Opacus) and non-private training with PyTorch. The main metric of inter-est is the throughput as it quantifies the training speed, but the maximum physical batch size becomes important when training models that are too large to fit even one example at a time. For both metrics, DP-SGD becomes more expensive with larger models, but the detailed trends differ. 
+
+Vision Transformer The throughput difference between Opacus and the non-private baseline with PyTorch (see Fig. 2(a)) grows steadily as a function of model size, which is interesting considering how big the relative difference in the maximum physical batch size (Fig. 3(a)) is: the through-put ranges from a relative difference of ×2.6 for the smallest model to ×3.17 for the largest model while the maximum physical batch size has a relative difference of around ×4
+
+for the smallest model and ×11 for the largest model. 
+
+ResNets As depicted in Fig. 2(b), we observe a more ir-regular throughput and relative slowdown for the ResNets models size as their size grows. The contrast in Fig. 2 be-tween ViT and ResNet models is due to the architecture and types of layers. The parameter space grows as the width factor (see Table 2) for the ResNets, so the ×3 makes the neural network wider by a factor of three. Based on our re-sults, the width of the layers affects throughput much more than the depth of the network. ResNet models with the same width and different depths exhibit comparable throughput, but increasing the width will make the model in the private setting much slower and reduce the maximum batch size significantly. 
+
+How much does finding the maximum physical batch size matter? In Fig. A.3 in the Appendix, we display the rel-ative throughput as a percentage by dividing the throughput at a particular physical batch size by the maximum achiev-able throughput. We see that as the physical batch size increases, the throughput will grow as expected, but there is no significant further improvement at some point. Practition-ers may estimate the optimal batch size based on available 4220 221 222 223 224 225 226 227 228 229 230 231 232 233 234 235 236 237 238 239 240 241 242 243 244 245 246 247 248 249 250 251 252 253 254 255 256 257 258 259 260 261 262 263 264 265 266 267 268 269 270 271 272 273 274 
+
+Towards Efficient and Scalable Implementation of Differentially Private Deep Learning tiny small base large huge 
+
+Model     
+
+> 2468
+> Relative Slowdown
+> 2.60 2.67 2.78 2.96 3.17
+
+(a) Vision Transformer Models R50x1 R101x1 R50x3 R101x3 R152x4 
+
+Model     
+
+> 2468
+> Relative Slowdown
+> 4.07 4.22 6.73 6.24 7.96
+
+(b) ResNet Models 
+
+Figure 2. Relative slowdown in mean throughputs between Opacus per-example clipping and the non-private baseline (A100 GPU). The relative slowdown is calculated as the ratio of private-throughput to non-private-throughput. A lower value indicates a better performance, closer to 1 indicates that Opacus is as fast as non-private training. This highlights the computational cost associated with private training. tiny small base large huge 
+
+Model     
+
+> 0500 1000
+> Physical Batch Size  1130 555 268 93 35 276 111 35 10 3
+> non-DP (PyTorch) Opacus (PyTorch)
+
+(a) Vision Transformer Models R50x1 R101x1 R50x3 R101x3 R152x4 
+
+Model        
+
+> 0500 1000
+> Physical Batch Size
+> 510 333 150 56 24 178 135 23 15 4
+> non-DP (PyTorch) Opacus (PyTorch)
+
+(b) ResNet Models 
+
+Figure 3. Maximum achievable physical batch size by the different model sizes on A100 GPU (40 GB) before they reach Out Of Memory (OOM) Error. The model sizes grow from left to right (Refer to Table 2 for number of parameters). 
+
+Table 3. Average processing time in milliseconds for each section of the algorithm. We are comparing the non-private and Opacus clipping on A100, with the same physical batch size. We profile the time using NVIDIA Nsight Systems. All the measurements include the synchronization time, which is needed for the profiling, but adds additional time that is not part of the normal execution. SECTION NON -DP (P YTORCH )OPACUS 
+
+(P YTORCH )FORWARD 81.14 101.53 BACKWARD 163.85 681.48 CLIP & A CCUMULATE 0 26.76 OPTIMIZER STEP 38.17 99.65 
+
+memory and performance trade-offs. Using the maximum physical batch size is not crucial, but a large enough value is sufficient. Typically, the throughput of smaller batches is limited by data loading speeds, but computation becomes the limiting factor as batch size increases. 
+
+5.2. Reasons for the Increase in Computational Cost 
+
+Giving a detailed breakdown of low-level operations associ-ated with DP is challenging. However, using GPU profiling tool NVIDIA Nsight System, we can identify three aspects which constitute the majority of DP overheads. Firstly, due to its larger memory footprint, DP-SGD is limited to consume smaller physical batches than its non-private coun-terpart. This results in a larger amount of smaller low-level kernel calls, which leads to slightly lower utilization of the GPU. Even the kernel launch overheads can become a notable factor for a slowdown at very small batch sizes. Secondly, the computation of per-example gradients intro-duces significant overhead in the backward pass as it cannot be parallelized as in batched gradient computation. This is the most prominent cause of the total overhead. Finally, an additional DP-optimizer step that clips and accumulates the per example gradients, which is not present in the non-DP algorithm, must be taken after each physical batch (see Table 3). 
+
+## 6. Decreasing the Computational Cost 
+
+This section analyzes the different strategies for training with DP-SGD more efficiently. We evaluate both algorith-mic and hardware optimizations and their combinations. 
+
+6.1. Efficient Gradient Clipping Algorithms 
+
+First, we evaluate the more efficient gradient clipping im-plementations that have been described in Sec. 2.2 using the Vision Transformer base model. We chose it as our bench-5275 276 277 278 279 280 281 282 283 284 285 286 287 288 289 290 291 292 293 294 295 296 297 298 299 300 301 302 303 304 305 306 307 308 309 310 311 312 313 314 315 316 317 318 319 320 321 322 323 324 325 326 327 328 329          
+
+> Towards Efficient and Scalable Implementation of Differentially Private Deep Learning non-DP (PyTorch) PV ghost PV ghost mixed BK ghost BK MixOpt BK MixGhost Opacus (PyTorch)
+> Clipping Mode
+> 050 100 150
+> Throughput (samples/s)  112 62 62 69 68 68 37 149 80 80 92 92 92 54
+> V100 A100
+> Figure 4. Throughput using the maximum batch size for each clip-ping algorithm. It compares the executions for both V100 and A100, for the ViT Base model.
+
+mark model because the middle model size is large enough to evaluate the advantages of the optimized gradient clipping algorithms but does not require excessive amount of time to train. The non-Opacus implementations do not support the ResNet due to their custom weight standardization layer. 
+
+Throughput Comparison Fig. 4 displays the throughput for each clipping algorithm for each tested GPU. Moving from a V100 to an A100 GPU increased the throughput by ×1.3
+
+times on average over all clipping methods. The one that benefited the most is the per-example clipping by Opacus with a ×1.46 improvement in throughput. This is because of Opacus-specific optimizations. Their implementation is optimized to vectorize the virtual batches and get the most out of the processing unit to compensate for the per-example clipping. We base our virtual batching module on Opacus, which may have further contributed to the advantage seen for Opacus. The other implementations showed benefits similar to those of non-private training. For both GPUs, the clipping optimizations consistently maintained their relative throughput difference to their non private baseline. Private Vision gets closer to the non-private baseline physical batch size, but Book Keeping is closer to its throughput with a smaller physical batch size (see Fig. 6). Without sacrificing utility (see Table A2), these optimiza-tions offer an alternative to the original per-example clip-ping algorithm. Although Book Keeping has a slightly better throughput, the margin is narrow, making Private Vision and FastDP viable options as ghost clipping implementations. The difference between the two algorithms is the second backward pass over the neural network. The Book Keeping trick avoids this second backward pass, resulting in higher throughput at a small memory cost. Mixed ghost clipping does not yield any improvement be-cause it determines whether to apply ghost or per-example clipping, based on the size of the inputs and the parameter space. For large dimensions, ghost clipping will be more expensive (Bu et al., 2022). In ViT models, the dimensions change less than in a convolutional network. Therefore, despite continually evaluating which method to apply, it                               
+
+> Table 4. Maximum physical batch size reachable for each clipping method and GPU using for the ViT base model.
+> CLIPPING MODE V100 A100
+> (32GB) (40GB) NON PRIVATE BASELINE 216 268 PER -EXAMPLE (O PACUS )28 35 GHOST (P RIVATE VISION )203 257 MIX GHOST (P RIVATE VISION )203 257 BK G HOST (F AST DP) 189 209 BK M IX GHOST (F AST DP) 189 209 BK M IX OPT (F AST DP) 189 209
+
+consistently defaults to ghost clipping. Conversely, mix optimization applied to a ResNet model should outperform ghost clipping since it is optimized for convolutional layers. This could not be tested on ResNet models due to incom-patibilities with Private Vision and FastDP, preventing an assessment of mixed optimization methods. 
+
+Maximum physical batch size Table 4 compares the max-imum physical batch size for both available GPUs. The maximum physical batch size is larger for the optimizations of DP-SGD than for Opacus because they do not require per-example gradients. Consequently, these optimizations en-able training much larger models without exhausting mem-ory. The maximum physical batch size using the Private Vision library is the closest to the non-private baseline. Gen-erally, the methods are consistent within implementations, with Private Vision and FastDP achieving the same maxi-mum physical batch size regardless of the clipping mode. As expected, the A100 consistently attains higher maximum physical batch sizes than the V100 due to its larger VRAM. 
+
+6.2. Lower Precision 
+
+We consider using lower precision to speed up computation. We evaluate the use of TensorFloat-32 (TF32) for training. TF32 has 10 bits for precision, with eight range bits, giving it the same range but less precision than 32-bit single preci-sion floats (FP32) (Kharya, 2020). Using lower precision can have benefits exactly where DP training struggles: it requires less memory, uses fewer bits to represent the data, and its operations are optimized for GPU, making them much faster (NVIDIA, 2023). It is special math mode intro-duced for the A100 GPU and unavailable for the V100, so we compared training on the A100 with and without TF32. 
+
+Experimental results In Fig. 5, we display the relative dif-ference between mean throughput using TF32 and FP32. For non-private training, throughput increases with model size. For private training throughput increases for the smaller models, but it goes down again as the model size grows after the base size. Models that are too small do not gain much from TF32, and the larger ones have too small 6330 331 332 333 334 335 336 337 338 339 340 341 342 343 344 345 346 347 348 349 350 351 352 353 354 355 356 357 358 359 360 361 362 363 364 365 366 367 368 369 370 371 372 373 374 375 376 377 378 379 380 381 382 383 384      
+
+> Towards Efficient and Scalable Implementation of Differentially Private Deep Learning tiny small base large huge
+> Model Size
+> 1234
+> Relative difference throughput
+> non-DP (PyTorch) Opacus (PyTorch)
+> Figure 5. Relative difference in mean throughput between TF32 and FP32 Training for ViT Models.
+
+maximum physical batch size to benefit (See detailed discus-sion of this in App. C). Regarding the memory advantages by TF32, we could not see an improvement. The maximum physical batch size is unaffected by the precision. 
+
+Concerns regarding TF32 under DP There are two con-cerns with using lower precision in DP deep learning: its effects on utility and privacy. Lower precision may affect utility, as it is less precise. We did not find a significant decay in the accuracy of the models compared to the models with FP32; it differs by decimal points at the ×10 −6 preci-sion (See Table A2). Regarding privacy, all floating point implementations provide imperfect implementations of real-valued mechanisms, that might introduce additional privacy vulnerabilities (Mironov, 2012). Lower precision may ex-acerbate this issue. Discrete mechanisms (e.g. Canonne et al., 2020; Agarwal et al., 2021) avoid these theoretical challenges, but are often less convenient and may reduce utility, especially in low precision settings. The efficiency of different discrete mechanisms in TF32 is an interesting topic of further research. 
+
+## 7. Comparison of JAX Implementations 
+
+We compare the performance of a naive non-private JAX, a naive JAX, and our proposed masked DP-SGD method with all other DP-SGD frameworks (all based on PyTorch). The utility is the same as in PyTorch (See Table A2). To provide a fair comparison, we implemented non-private and native DP JAX training using the same virtual batching as PyTorch. Note that JAX defaults to TF32 when available and FP32 needs to be explicitly forced. 
+
+Throughput comparison (FP32) In Fig. 6 (left), we com-pare the throughput using FP32. The naive DP-SGD JAX is the slowest implementation due to the JAX recompilation. Our proposed method masked DP-SGD outperforms Opacus and nearly matches the performance of PV Ghost Clipping despite not utilizing any optimizations regarding clipping. The masked DP-SGD exhibits higher throughput compared to other JAX implementations. This is primarily because the entire logical batch is accommodated in CPU memory, allowing it to be split into static sizes. Consequently, the compilation time is elevated for the first logical batch; how-ever, subsequent iterations benefit from increased speed as recompilation is unnecessary. In Fig. 6 (middle) we com-pare the throughput using TF32 and for this precision the results indicate that masked DP-SGD performs comparably to Opacus in terms of throughput. However, our method performs better on regimes with fewer samples (Fig. A.2) and allows for a larger physical batch size (Fig. 6 right). 
+
+Compilation The compilation time must be taken into ac-count, given that the DP-SGD implementations in PyTorch do not compile. We measure it as the duration to process the first batch, since the execution times for each batch show that the first batch takes much more time than the others, including the compilation time (see Fig. A.4). The compila-tion time increases with batch size. For the private model, the compiled function is more complex than the non-private counterpart. It includes expanding the dimensions and clip-ping the gradients, while the non-private directly computes the gradient of the whole mini-batch. Although compiling PyTorch is possible, we did not ob-serve any significant speed improvements. Compiling the non-private model yielded minimal speed-up, but ultimately even lower when accounting for the compilation. PyTorch also recompiles after a batch size change, but reverts to pre-defined CUDA optimized operations. In the private setting, the compilation does not recognize Opacus hooks and con-tinues the execution without compiling them (See Fig. A.5). Leveraging the same kernels to support the private hooks and avoid the compilation would require massive engineer-ing work of writing special kernels for each specific private case. On the other hand, JAX will compile the JIT functions in XLA, but it does not fall back to the kernels, making it more generalizable (Subramani et al., 2021). 
+
+## 8. Distributed Training 
+
+We will look at another angle to train deep learning with DP faster: increasing the computational resources enough to decrease the training time. This is relevant when training cost or resource constraints are less important than the time to train a new model. We utilize V100 GPUs on HPC nodes that have 4 GPUs per node. The other experimental setting is identical to the one in Sec. 5. Results for utilizing up to 24 A100 GPUs can be found in Fig. A.7 in the Appendix. We focus on comparing the scaling behavior between the non-private baseline that uses PyTorch and the DP-SGD implementation using Opacus. Both frameworks provide mature tooling for distributed training. Fig. 7 shows the throughput increase as a function of num-ber of GPUs. The throughput does not grow linearly and changes from the ideal linear scaling after using more than 7385 386 387 388 389 390 391 392 393 394 395 396 397 398 399 400 401 402 403 404 405 406 407 408 409 410 411 412 413 414 415 416 417 418 419 420 421 422 423 424 425 426 427 428 429 430 431 432 433 434 435 436 437 438 439 
+
+Towards Efficient and Scalable Implementation of Differentially Private Deep Learning naive DP (JAX) Opacus (PyTorch) Masked DP-SGD (JAX) GhostClip (PV) GhostClip (BK) 020 40 60 80 
+
+> Throughput (samples/s)
+> Throughput (FP32)
+> naive DP (JAX) Opacus (PyTorch) Masked DP-SGD (JAX) GhostClip (PV) GhostClip (BK) 050 100 150 200 250
+> Throughput (TF32)
+> naive DP (JAX) Opacus (PyTorch) Masked DP-SGD (JAX) GhostClip (PV) GhostClip (BK) 050 100 150 200 250
+> Physical Batch Size
+> Max Physical Batch Size
+
+Figure 6. Throughput comparison across precision modes, for the ViT Base model, trained on A100 GPU. Using a lower precision should increase memory capacity and speed-up the sample processing. The results confirm that throughput is enhanced with lower precision. However, the physical batch size remained constant across precision modes. 
+
+Table 5. A summary of the lessons learnt. The relative throughput/max physical batch size is in comparison to PyTorch non-DP (higher is better) on A100. For each optimization method and each model size, we divide it with the non-private counterpart. 
+
+Method Relative to non-DP (PyTorch FP32) Supports Compilation Section Throughput ( ↑) Max Physical Batch Size ( ↑) all layers Initial Re-Opacus 0.31-0.39 0.08-0.24 - - Sec. 5 
+
+Efficient Gradient Clipping 0.49-0.54 0.88-0.95 - - Sec. 6.1 
+
+Native JAX 0.39-0.59 0.23-0.43 Sec. 7 
+
+Masked DP-SGD (ours) 0.51-0.69 0.11-0.23 Sec. 7 
+
+Masked DP-SGD + TF32 0.79-1.33 0.11-0.23 Sec. 7 
+
+Low Precision (Opacus+TF32) 0.54-0.84 0.08-0.24 - - Sec. 6.2 12 4 8 16 32 64 80  
+
+> #GPU
+> 02000 4000 6000 8000
+> Throughput (samples/s)
+> non-private (observed) Opacus (observed) non-private (linear scaling) Opacus (linear scaling)
+
+Figure 7. Comparison between the throughput by scaling the num-ber of GPUs for the non-private and Opacus training with the ViT base model on V100 GPUs. The dashed line is the ideal growth. 
+
+one node (i.e. more than 4 GPUs). While the communi-cation inside the node is fast, the communication between nodes will always be slower. The bottleneck is the network bandwidth, and it prevents the throughput from scaling lin-early. Notably, it affects the non-private training baseline much more, while the private scales close to optimal up to 32 GPUs. For the 80 GPUs, the private training achieves 69 .2% 
+
+of the ideal linear speed-up, and the non-private training only achieves 53 .3% . Private training scales better because it is slower and only sometimes saturates the network with updates. If we use Amdalh’s law to compare the parallelism percentage for each case, we can see that in the private case, we achieve a 99 .5% parallelism compared to a 98 .9% in the non-private case (See Fig. A.8). 
+
+## 9. Conclusion 
+
+We summarize the lessons learnt in Table 5. While DP-SGD is significantly more costly than non-private training, we identified feasible speed-ups that are often easy to apply but have some drawbacks. These are: (i) More efficient implementations of DP-SGD which additionally decrease the memory footprint (allowing for training larger mod-els). However, these implementations are not as mature as Opacus and do not support all neural network layers (yet). (ii) JAX lacks a comprehensive DP-SGD implementation like PyTorch and exhibits greater variability in execution times. Although JAX processes samples faster than Py-Torch, it loses the advantage through frequent re-compila-tions when utilizing proper Poisson sampling. We present an efficient DP-SGD implementation with JAX called Masked DP-SGD. It leverages JAX advantages in compilation and efficient sample processing, while adhering to Poisson sub-sampling requirements for correct privacy accounting. By avoiding frequent recompilation, we mitigate execution time variability and enhances efficient performance. (iii) Lower Precision using TF32 which increases throughput but the implications on the theoretical guarantees of DP-SGD need to be explored in future work. Finally, we found that dis-tributed computing using DP-SGD scales better than non-private training and allows for fast training of models. 8440 441 442 443 444 445 446 447 448 449 450 451 452 453 454 455 456 457 458 459 460 461 462 463 464 465 466 467 468 469 470 471 472 473 474 475 476 477 478 479 480 481 482 483 484 485 486 487 488 489 490 491 492 493 494 
+
+> Towards Efficient and Scalable Implementation of Differentially Private Deep Learning
+
+## Impact Statement 
+
+This paper presents work whose goal is to advance the field of Machine Learning. There are many potential societal consequences of our work, none which we feel must be specifically highlighted here. 
+
+## References 
+
+Abadi, M., Chu, A., Goodfellow, I. J., McMahan, H. B., Mironov, I., Talwar, K., and Zhang, L. Deep learn-ing with differential privacy. In Weippl, E. R., Katzen-beisser, S., Kruegel, C., Myers, A. C., and Halevi, S. (eds.), Proceedings of the 2016 ACM SIGSAC Confer-ence on Computer and Communications Security, Vi-enna, Austria, October 24-28, 2016 , pp. 308–318. ACM, 2016. doi: 10.1145/2976749.2978318. URL https: //doi.org/10.1145/2976749.2978318 .Abowd, J. M. The U.S. Census Bureau adopts differen-tial privacy. In Guo, Y. and Farooq, F. (eds.), Proceed-ings of the 24th ACM SIGKDD International Confer-ence on Knowledge Discovery & Data Mining, KDD 2018, London, UK, August 19-23, 2018 , pp. 2867. ACM, 2018. doi: 10.1145/3219819.3226070. URL https: //doi.org/10.1145/3219819.3226070 .Agarwal, N., Kairouz, P., and Liu, Z. The skellam mecha-nism for differentially private federated learning. In Ran-zato, M., Beygelzimer, A., Dauphin, Y. N., Liang, P., and Vaughan, J. W. (eds.), Advances in Neural Information Processing Systems 34: Annual Conference on Neural Information Processing Systems 2021, NeurIPS 2021, De-cember 6-14, 2021, virtual , pp. 5052–5064, 2021. URL 
+
+https://proceedings.neurips.cc/paper /2021/hash/285baacbdf8fda1de94b19282 acd23e2-Abstract.html .Annamalai, M. S. M. S., Balle, B., Cristofaro, E. D., and Hayes, J. To shuffle or not to shuffle: Auditing DP-SGD with shuffling. CoRR , abs/2411.10614, 2024. doi: 10.48550/ARXIV.2411.10614. URL https://doi. org/10.48550/arXiv.2411.10614 .Ansel, J., Yang, E. Z., He, H., Gimelshein, N., Jain, A., Voznesensky, M., Bao, B., Bell, P., Berard, D., Burovski, E., Chauhan, G., Chourdia, A., Constable, W., Desmai-son, A., DeVito, Z., Ellison, E., Feng, W., Gong, J., Gschwind, M., Hirsh, B., Huang, S., Kalambarkar, K., Kirsch, L., Lazos, M., Lezcano, M., Liang, Y., Liang, J., Lu, Y., Luk, C. K., Maher, B., Pan, Y., Puhrsch, C., Reso, M., Saroufim, M., Siraichi, M. Y., Suk, H., Zhang, S., Suo, M., Tillet, P., Zhao, X., Wang, E., Zhou, K., Zou, R., Wang, X., Mathews, A., Wen, W., Chanan, G., Wu, P., and Chintala, S. PyTorch 2: Faster machine learning through dynamic Python bytecode transforma-tion and graph compilation. In Gupta, R., Abu-Ghazaleh, N. B., Musuvathi, M., and Tsafrir, D. (eds.), Proceedings of the 29th ACM International Conference on Architec-tural Support for Programming Languages and Oper-ating Systems, Volume 2, ASPLOS 2024, La Jolla, CA, USA, 27 April 2024- 1 May 2024 , pp. 929–947. ACM, 2024. doi: 10.1145/3620665.3640366. URL https: //doi.org/10.1145/3620665.3640366 .Balle, B., Cherubin, G., and Hayes, J. Reconstructing train-ing data with informed adversaries. In 43rd IEEE Sympo-sium on Security and Privacy, SP 2022, San Francisco, CA, USA, May 22-26, 2022 , pp. 1138–1156. IEEE, 2022. doi: 10.1109/SP46214.2022.9833677. URL https:// doi.org/10.1109/SP46214.2022.9833677 .Bradbury, J., Frostig, R., Hawkins, P., Johnson, M. J., Leary, C., Maclaurin, D., Necula, G., Paszke, A., VanderPlas, J., Wanderman-Milne, S., and Zhang, Q. JAX: composable transformations of Python+NumPy programs. http: //github.com/google/jax , 2018. Bu, Z., Mao, J., and Xu, S. Scalable and efficient train-ing of large convolutional neural networks with dif-ferential privacy. In Koyejo, S., Mohamed, S., Agar-wal, A., Belgrave, D., Cho, K., and Oh, A. (eds.), Ad-vances in Neural Information Processing Systems 35: Annual Conference on Neural Information Processing Systems 2022, NeurIPS 2022, New Orleans, LA, USA, November 28 - December 9, 2022 , 2022. URL http: //papers.nips.cc/paper_files/paper/2 022/hash/fa5617c176e76fee83f3f9947fd f9f3f-Abstract-Conference.html .Bu, Z., Wang, Y., Zha, S., and Karypis, G. Differentially pri-vate optimization on large model at small cost. In Krause, A., Brunskill, E., Cho, K., Engelhardt, B., Sabato, S., and Scarlett, J. (eds.), International Conference on Ma-chine Learning, ICML 2023, 23-29 July 2023, Honolulu, Hawaii, USA , volume 202 of Proceedings of Machine Learning Research , pp. 3192–3218. PMLR, 2023. URL 
+
+https://proceedings.mlr.press/v202/b u23a.html .Canonne, C. L., Kamath, G., and Steinke, T. The discrete gaussian for differential privacy. In Larochelle, H., Ran-zato, M., Hadsell, R., Balcan, M., and Lin, H. (eds.), 
+
+Advances in Neural Information Processing Systems 33: Annual Conference on Neural Information Processing Systems 2020, NeurIPS 2020, December 6-12, 2020, vir-tual , 2020. URL https://proceedings.neurip s.cc/paper/2020/hash/b53b3a3d6ab90ce 0268229151c9bde11-Abstract.html .Carlini, N., Tram `er, F., Wallace, E., Jagielski, M., Herbert-Voss, A., Lee, K., Roberts, A., Brown, T. B., Song, D., 9495 496 497 498 499 500 501 502 503 504 505 506 507 508 509 510 511 512 513 514 515 516 517 518 519 520 521 522 523 524 525 526 527 528 529 530 531 532 533 534 535 536 537 538 539 540 541 542 543 544 545 546 547 548 549 
+
+> Towards Efficient and Scalable Implementation of Differentially Private Deep Learning
+
+Erlingsson, ´U., Oprea, A., and Raffel, C. Extracting train-ing data from large language models. In Bailey, M. and Greenstadt, R. (eds.), 30th USENIX Security Symposium, USENIX Security 2021, August 11-13, 2021 , pp. 2633– 2650. USENIX Association, 2021. URL https://ww w.usenix.org/conference/usenixsecuri ty21/presentation/carlini-extracting .Chua, L., Ghazi, B., Kamath, P., Kumar, R., Manurangsi, P., Sinha, A., and Zhang, C. How private are DP-SGD implementations? In Forty-first International Conference on Machine Learning, ICML 2024, Vienna, Austria, July 21-27, 2024 . OpenReview.net, 2024a. URL https: //openreview.net/forum?id=xWI0MKwJSS .Chua, L., Ghazi, B., Kamath, P., Kumar, R., Manurangsi, P., Sinha, A., and Zhang, C. Scalable DP-SGD: Shuffling vs. poisson subsampling. In The Thirty-eighth Annual Conference on Neural Information Processing Systems ,2024b. URL https://openreview.net/forum ?id=6gMnj9oc6d .Cormode, G., Jha, S., Kulkarni, T., Li, N., Srivastava, D., and Wang, T. Privacy at scale: Local differential privacy in practice. In Das, G., Jermaine, C. M., and Bernstein, P. A. (eds.), Proceedings of the 2018 International Con-ference on Management of Data, SIGMOD Conference 2018, Houston, TX, USA, June 10-15, 2018 , pp. 1655– 1658. ACM, 2018. doi: 10.1145/3183713.3197390. URL 
+
+https://doi.org/10.1145/3183713.3197 390 .De, S., Berrada, L., Hayes, J., Smith, S. L., and Balle, B. Unlocking high-accuracy differentially private image clas-sification through scale. ArXiv preprint , abs/2204.13650, 2022. URL https://arxiv.org/abs/2204.1 3650 .DeepMind, Babuschkin, I., Baumli, K., Bell, A., Bhupati-raju, S., Bruce, J., Buchlovsky, P., Budden, D., Cai, T., Clark, A., Danihelka, I., Dedieu, A., Fantacci, C., God-win, J., Jones, C., Hemsley, R., Hennigan, T., Hessel, M., Hou, S., Kapturowski, S., Keck, T., Kemaev, I., King, M., Kunesch, M., Martens, L., Merzic, H., Mikulik, V., Norman, T., Papamakarios, G., Quan, J., Ring, R., Ruiz, F., Sanchez, A., Sartran, L., Schneider, R., Sezener, E., Spencer, S., Srinivasan, S., Stanojevi ´c, M., Stokowiec, W., Wang, L., Zhou, G., and Viola, F. The DeepMind JAX Ecosystem. http://github.com/google-d eepmind , 2020. Dosovitskiy, A., Beyer, L., Kolesnikov, A., Weissenborn, D., Zhai, X., Unterthiner, T., Dehghani, M., Minderer, M., Heigold, G., Gelly, S., Uszkoreit, J., and Houlsby, N. An image is worth 16x16 words: Transformers for image recognition at scale. In 9th International Conference on Learning Representations, ICLR 2021, Virtual Event, Austria, May 3-7, 2021 . OpenReview.net, 2021. URL 
+
+https://openreview.net/forum?id=Yicb FdNTTy .Dwork, C., McSherry, F., Nissim, K., and Smith, A. D. Cal-ibrating noise to sensitivity in private data analysis. In Halevi, S. and Rabin, T. (eds.), Theory of Cryptography, Third Theory of Cryptography Conference, TCC 2006, New York, NY, USA, March 4-7, 2006, Proceedings , vol-ume 3876 of Lecture Notes in Computer Science , pp. 265– 284. Springer, 2006. doi: 10.1007/11681878 14. URL 
+
+https://doi.org/10.1007/11681878_14 .Kharya, P. TensorFloat-32 in the A100 GPU Accelerates AI Training, HPC up to 20x. https://blogs.nvidia .com/blog/tensorfloat-32-precision-f ormat/ , 2020. Kolesnikov, A., Beyer, L., Zhai, X., Puigcerver, J., Yung, J., Gelly, S., and Houlsby, N. Big transfer (BiT): Gen-eral visual representation learning. In Computer Vision – ECCV 2020: 16th European Conference, Glasgow, UK, August 23-28, 2020, Proceedings, Part V , pp. 491–507, Berlin, Heidelberg, 2020. Springer-Verlag. ISBN 978-3-030-58557-0. doi: 10.1007/978-3-030-58558-7 29. URL https://doi.org/10.1007/978-3-030 -58558-7_29 .Krizhevsky, A. and Hinton, G. Learning multiple layers of features from tiny images. Technical Report 0, University of Toronto, Toronto, Ontario, 2009. URL https://ww w.cs.toronto.edu/˜kriz/learning-featu res-2009-TR.pdf .Lebeda, C. J., Regehr, M., Kamath, G., and Steinke, T. Avoiding pitfalls for privacy accounting of subsampled mechanisms under composition. CoRR , abs/2405.20769, 2024. doi: 10.48550/ARXIV.2405.20769. URL https: //doi.org/10.48550/arXiv.2405.20769 .Li, X., Tram `er, F., Liang, P., and Hashimoto, T. Large lan-guage models can be strong differentially private learn-ers. In The Tenth International Conference on Learn-ing Representations, ICLR 2022, Virtual Event, April 25-29, 2022 . OpenReview.net, 2022. URL https: //openreview.net/forum?id=bVuP3ltATMz .Mironov, I. On significance of the least significant bits for differential privacy. In Yu, T., Danezis, G., and Gligor, V. D. (eds.), Proceedings of the 2012 ACM Conference on Computer and Communications Security , CCS ’12, pp. 650–661, New York, NY, USA, 2012. Association for Computing Machinery. ISBN 9781450316514. doi: 10.1145/2382196.2382264. URL https://doi.or g/10.1145/2382196.2382264 .10 550 551 552 553 554 555 556 557 558 559 560 561 562 563 564 565 566 567 568 569 570 571 572 573 574 575 576 577 578 579 580 581 582 583 584 585 586 587 588 589 590 591 592 593 594 595 596 597 598 599 600 601 602 603 604 
+
+> Towards Efficient and Scalable Implementation of Differentially Private Deep Learning
+
+NVIDIA. Train with mixed precision. https://docs .nvidia.com/deeplearning/performance /mixed-precision-training/index.html ,2023. Ponomareva, N., Vassilvitskii, S., Xu, Z., McMahan, B., Kurakin, A., and Zhang, C. How to dp-fy ML: A practical tutorial to machine learning with differential privacy. In Singh, A. K., Sun, Y., Akoglu, L., Gunopulos, D., Yan, X., Kumar, R., Ozcan, F., and Ye, J. (eds.), Proceedings of the 29th ACM SIGKDD Conference on Knowledge Discovery and Data Mining, KDD 2023, Long Beach, CA, USA, August 6-10, 2023 , pp. 5823–5824. ACM, 2023. doi: 10.1145/3580305.3599561. URL https://doi. org/10.1145/3580305.3599561 .R ¨ais ¨a, O., J ¨alk ¨o, J., and Honkela, A. Subsampling is not magic: Why large batch sizes work for differentially pri-vate stochastic optimisation. In Forty-first International Conference on Machine Learning, ICML 2024, Vienna, Austria, July 21-27, 2024 . OpenReview.net, 2024. URL 
+
+https://openreview.net/forum?id=gTBj kJvadC .Rajkumar, A. and Agarwal, S. A differentially private stochastic gradient descent algorithm for multiparty clas-sification. In Lawrence, N. D. and Girolami, M. A. (eds.), 
+
+Proceedings of the Fifteenth International Conference on Artificial Intelligence and Statistics, AISTATS 2012, La Palma, Canary Islands, Spain, April 21-23, 2012 , vol-ume 22 of JMLR Proceedings , pp. 933–941. JMLR.org, 2012. URL http://proceedings.mlr.press/ v22/rajkumar12.html .Russakovsky, O., Deng, J., Su, H., Krause, J., Satheesh, S., Ma, S., Huang, Z., Karpathy, A., Khosla, A., Bernstein, M., Berg, A. C., and Fei-Fei, L. ImageNet Large Scale Visual Recognition Challenge. International Journal of Computer Vision (IJCV) , 115(3):211–252, 2015. doi: 10.1007/s11263-015-0816-y. Song, S., Chaudhuri, K., and Sarwate, A. D. Stochas-tic gradient descent with differentially private updates. In IEEE Global Conference on Signal and Informa-tion Processing, GlobalSIP 2013, Austin, TX, USA, De-cember 3-5, 2013 , pp. 245–248. IEEE, 2013. doi: 10.1109/GlobalSIP.2013.6736861. URL https://do i.org/10.1109/GlobalSIP.2013.6736861 .Stosic, D. and Micikevicius, P. Accelerating AI training with NVIDIA TF32 tensor cores. https://develo per.nvidia.com/blog/accelerating-ai-t raining-with-tf32-tensor-cores/ , 2021. Subramani, P., Vadivelu, N., and Kamath, G. Enabling fast differentially private SGD via just-in-time compi-lation and vectorization. In Ranzato, M., Beygelzimer, A., Dauphin, Y. N., Liang, P., and Vaughan, J. W. (eds.), 
+
+Advances in Neural Information Processing Systems 34: Annual Conference on Neural Information Processing Systems 2021, NeurIPS 2021, December 6-14, 2021, vir-tual , pp. 26409–26421, 2021. URL https://procee dings.neurips.cc/paper/2021/hash/ddf 9029977a61241841edeae15e9b53f-Abstrac t.html .Tobaben, M., Shysheya, A., Bronskill, J., Paverd, A., Tople, S., B ´eguelin, S. Z., Turner, R. E., and Honkela, A. On the efficacy of differentially private few-shot image classification. Transactions on Machine Learn-ing Research , 2023. ISSN 2835-8856. URL https: //openreview.net/forum?id=hFsr59Imzm .Yousefpour, A., Shilov, I., Sablayrolles, A., Testuggine, D., Prasad, K., Malek, M., Nguyen, J., Ghosh, S., Bharadwaj, A., Zhao, J., Cormode, G., and Mironov, I. Opacus: User-friendly differential privacy library in PyTorch. ArXiv preprint , abs/2109.12298, 2021. URL https://arxi v.org/abs/2109.12298 .Yu, D., Naik, S., Backurs, A., Gopi, S., Inan, H. A., Kamath, G., Kulkarni, J., Lee, Y. T., Manoel, A., Wutschitz, L., Yekhanin, S., and Zhang, H. Differentially private fine-tuning of language models. In The Tenth International Conference on Learning Representations, ICLR 2022, Virtual Event, April 25-29, 2022 . OpenReview.net, 2022. URL https://openreview.net/forum?id= Q42f0dfjECO .11 605 606 607 608 609 610 611 612 613 614 615 616 617 618 619 620 621 622 623 624 625 626 627 628 629 630 631 632 633 634 635 636 637 638 639 640 641 642 643 644 645 646 647 648 649 650 651 652 653 654 655 656 657 658 659 
+
+> Towards Efficient and Scalable Implementation of Differentially Private Deep Learning
+
+## A. Training Details 
+
+A.1. Models 
+
+• Vision Transformer (ViT) (Dosovitskiy et al., 2021). Taken from https://huggingface.co/timm/vit_ba se_patch16_224.orig_in21k 
+
+• Big Transfer ResNet (Kolesnikov et al., 2020). Taken from https://github.com/google-research/big_ transfer 
+
+A.2. Hyperparameters 
+
+We use the hyperparameters obtained on request from Tobaben et al. (2023). The hyperparameters for both models are in Table A1. Even though model utility is not the main objective in this work, in the non-private case, the learning rate is suboptimal. By changing it to 0.00027 we see an accuracy improvement, therefore the one we are using.                     
+
+> Table A1. Hyperparameters used for each model architecture. MODEL TRAINABLE PARAMETERS EPSILON DELTA LEARNING RATE MAX GRAD NORM
+> VITALL 82.04 e−50.00031 4.63 RES NET ALL 82.04 e−50.00098 6.53
+
+A.3. Grad sample modes in Opacus 
+
+Opacus supports multiple different gradient sampling methods as indicated in the documentation 1. In our original experiments we used the grad sample mode hooks that is the default. This will use custom opacus modules when they are defined for that layer and functorch as a fallback. Based on the feedback by a reviewer we tried out different methods listed in the documentation for both ResNet and ViT models: • f unctorch : We forced opacus to use functorch but did not observe any significant speed differences to using hooks .This is in line with the opacus documentation which writes that the speed is 0 − 50% slower than hooks .• ExpandedW eigths : We tried this approach but ran into runtime errors. Interestingly, when looking through the issues others have reported issues 23 but it seems to be more a PyTorch problem and has not been addressed for years. According to the documentation ExpandedW eights is still in beta status. • GhostClipping : Note that this method only works for ViT as described in Sec. 6.1. At first we did not manage to decrease the loss with this implementation due to the implementation in opacus being unstable. After some fixes, the correct accuracy is achieved but we noticed that the speed-ups are not significant, and even lower than flat clipping. Therefore, we decided to not include them, as it is still in development. When ready, we expect a similar speed-up to the observed in our experiments in Sec. 6.1 as the underlying algorithm is the same. 
+
+A.4. Poisson Subsampling JAX Algorithm 
+
+We present our DP-SGD implementation in JAX that uses the correct Poisson subsampling and therefore we can account for its privacy. The main problem with implementing DP-SGD with JAX is the batches of variable size. In order to address this issue, we compute always full physical batches and mask out gradients so that the total number of used gradients is equal the sampled logical batch sizes. This means that we always compute a little more gradients that required due to sampling. This prevents the recompiling. 
+
+Variability in experiments One difference between the two frameworks is the variability in the experiments. PyTorch runs are remarkably consistent, maintaining low variance, and yielding the same throughput result for a fixed seed. In 
+
+> 1https://github.com/pytorch/opacus/tree/61ae0ea4fb37a835e93040b5de19e8dfcd465a07/opacus /grad_sample
+> 2https://github.com/pytorch/opacus/issues/464
+> 3https://github.com/pytorch/opacus/issues/584
+
+12 660 661 662 663 664 665 666 667 668 669 670 671 672 673 674 675 676 677 678 679 680 681 682 683 684 685 686 687 688 689 690 691 692 693 694 695 696 697 698 699 700 701 702 703 704 705 706 707 708 709 710 711 712 713 714 
+
+Towards Efficient and Scalable Implementation of Differentially Private Deep Learning 
+
+Algorithm A1 Virtual Batching DP-SGD JAX 
+
+Input: Training data points {x1, . . . , x N }, loss function L(θ) = 1
+
+> N
+
+P 
+
+> i
+
+L(θ, x i)
+
+Parameters: Parameters: learning rate ηt, noise scale σ, gradient norm bound C, number of steps T , expected logical batch size L, physical batch size p.
+
+Start for t ∈ [T ] do 
+
+tl ∼ Binomial  N, LN
+
+ {Sample the true batch size }
+
+Find minimum k ∈ N such that p · k ≥ tl {Check how many full physical batches are required }
+
+m ← k · pB ← { xj1 , . . . , x jm }
+
+P ← { B1, . . . , B k} { Divide the maximum logical batch B into physical batches of size p}.
+
+M ← { 10, 11, . . . , 1tl −1, 0, 0, . . . , 0m−tl +1 } { Create masks so that Pmi Mi = tl }
+
+θacc ← 0
+
+for s ∈ [P ] do for i ∈ s do gt(xi) ← ∇ θt L(θt, x i) {Compute gradient }
+
+gt(xi) ← Mi+( s−1) ∗p · gt/max (1 , ∥gt(xi)∥2 
+
+> C
+
+) {Clip gradient and mask }
+
+end for 
+
+θacc ← θacc + P 
+
+> i
+
+gt(xi) {Accumulate gradient }
+
+end for 
+
+egt ← 1 
+
+> |L|
+
+(θacc + N (0 , σ 2C2I)) {Add noise }
+
+θt+1 ← θt − ηtegt {Step }
+
+end for Return Learned parameters θT and the privacy cost from a privacy accountant. contrast, JAX naive executions, meaning that there is recompilation, are more variable than those of PyTorch, likely due to its sensitivity to HPC environment fluctuations and accelerator stochasticity, as noted in Fig. A.4. Additionally, JAX’s asynchronous dispatch method complicates time benchmarking by issuing a promise rather than immediate results, thereby concealing Python overheads. For our Masked DP-SGD method, by fixing the batch sizes and avoiding recompilation, we achieve consistent execution times. 
+
+## B. Additional Results 
+
+This section provides additional figures that supplement the findings in the main text. Opacus (PyTorch) GhostClipping (PyTorch) Masked DP-SGD (JAX) naive DP (JAX) non-DP (PyTorch) 0.25 0.3 0.4 0.5 0.6 0.8 1.0 1.2 1.4 1.6 22.5 33.5 4.5 
+
+> Throughput relative to non-DP
+> TF32 FP32
+
+Figure A.1. Relative throughput to the respective FP32 non private baseline (higher is better) on NVIDIA A100. For each optimization method and each model size, we divide its throughput with the non-private counterpart. In this figure we showcase for each optimization, both precision modes, relative to the FP32 baseline. 
+
+13 715 716 717 718 719 720 721 722 723 724 725 726 727 728 729 730 731 732 733 734 735 736 737 738 739 740 741 742 743 744 745 746 747 748 749 750 751 752 753 754 755 756 757 758 759 760 761 762 763 764 765 766 767 768 769 
+
+Towards Efficient and Scalable Implementation of Differentially Private Deep Learning 1 2 4 8 16 32 64 128 256 
+
+Physical Batch Size 
+
+> 25 50 75 100 125 150
+> Throughput (samples/s)  non-private Opacus ghost/PV ghost/BK masked-DP-SGD/jax naive-DP-SGD/jax
+
+(a) FP32 Precision 1 2 4 8 16 32 64 128 256 
+
+Physical Batch Size  
+
+> 25 50 75 100 125 150
+> Throughput (samples/s)
+> Opacus/tf32 non-private masked-DP-SGD/jax/tf32
+
+(b) TF32 Precision 
+
+Figure A.2. Comparison of the throughput as a function of the physical batch size between the JAX and PyTorch clipping algorithms on A100 GPU. The analysis excludes the Mix algorithms, due to their equivalent performance in ViTs. 1 2 4 8 16 32 64 128 256 
+
+Physical Batch Size 
+
+> 20 40 60 80 100
+> % of Maximum Throughtput  non-private Opacus
+
+Figure A.3. The relative difference with the throughput at the maximum batch size for the ViT base model on A100. 
+
+Table A2. Mean accuracy for CIFAR-100 test set for each clipping mode for the ViT models on A100 after training for two epochs. All use the ViT hyperparameters from Table A1. While this work does not focus on the model’s utility, having their results still allows us to compare them. The use of TF32 as a lower precision mode does not affect the model’s utility. CLIPPING MODE TEST ACCURACY 
+
+OPACUS 0.8223 OPACUS /TF32 0.8225 JAX NAIVE 0.8146 MASKED DP-SGD 0.8224 PV-GHOST 0.822 BK-GHOST 0.822 
+
+14 770 771 772 773 774 775 776 777 778 779 780 781 782 783 784 785 786 787 788 789 790 791 792 793 794 795 796 797 798 799 800 801 802 803 804 805 806 807 808 809 810 811 812 813 814 815 816 817 818 819 820 821 822 823 824 
+
+Towards Efficient and Scalable Implementation of Differentially Private Deep Learning 1 2 4 8 16 32 64 128 256 
+
+Physical Batch Size 
+
+> 16 18 20 22 24 26 28 30 32
+> Compilation time (s)
+> non-private/jax private/jax
+
+Figure A.4. Compilation time in seconds as a function of the physical batch size for JAX naive experiments for the ViT Base model on A100. The estimator is the median and the error bars are the 95% confidence interval using bootstrapping. non-private Opacus 
+
+Mode 
+
+050 100 150 
+
+> Throughput (samples/s)
+
+w compilation time wout compilation time no compilation 
+
+Figure A.5. Torch compilation experiments on A100, using the maximum physical batch size for each mode and ViT Base. PyTorch 2 enables compiling the model to (potentially) gain further speed-ups. We tried PyTorch 2 compilation to make a fair comparison with the JAX compilation but did not observe any benefits from it. We found that when trying to compile PyTorch, it first tries to compile but then falls back to NVIDIA kernels and optimizations. In the end, it does not compile, and the throughput is the same. If we take into account the first iteration (w compilation time), it is worse because of the time PyTorch spends trying to compile before falling back to NVIDIA kernels and optimizations. Disregarding the time where PyTorch tries to compile (wout compilation time), leads to nearly the same throughput as the version that does not attempt using PyTorch 2 compiling in the first place. 
+
+15 825 826 827 828 829 830 831 832 833 834 835 836 837 838 839 840 841 842 843 844 845 846 847 848 849 850 851 852 853 854 855 856 857 858 859 860 861 862 863 864 865 866 867 868 869 870 871 872 873 874 875 876 877 878 879 
+
+Towards Efficient and Scalable Implementation of Differentially Private Deep Learning 1 2 4 8 16 32 64 128 256 512 
+
+Physical Batch 
+
+> 0100 200 300 400 500
+> Throughput (samples/s)
+> non-private Opacus non-private tf32 Opacus tf32
+
+(a) 1 2 4
+
+# GPU  
+
+> 0250 500 750 1000 1250 1500 1750
+> Throughput (samples/s)
+> non-private tf32 non-private Opacus tf32 Opacus
+
+(b) 
+
+Figure A.6. Combining distributed training with the use of lower precision TF32 for the ViT base model on A100. (a) Throughput for one GPU; (b) Throughput for multiple GPUs. 1 2 4 8 16 24 
+
+# GPU 
+
+> 0500 1000 1500 2000 2500 3000 3500
+> Throughput (samples/s)
+> non-private Opacus
+
+Figure A.7. Comparison between the throughput by scaling the number of GPUs with more nodes for the non-private and Opacus training with the ViT base model on A100 GPUs. The dashed line is the ideal growth if it were linear. 1 2 4 8 16 32 64 80 
+
+# GPUs 
+
+> 10 0
+> 10 1
+> Speedup
+> non-private Opacus Amdahl’s Law 100 Amdahl’s Law 99.5 Amdahl’s Law 98.9 Amdahl’s Law 95
+
+Figure A.8. Comparison between the throughput in our experiments and the theoretical Amdahl’s Law. Both axis are in log scale. In the distributed setting, private training achieves a 99.5 % of parallel processing, with a 50 times speed up than single processing. 
+
+16 880 881 882 883 884 885 886 887 888 889 890 891 892 893 894 895 896 897 898 899 900 901 902 903 904 905 906 907 908 909 910 911 912 913 914 915 916 917 918 919 920 921 922 923 924 925 926 927 928 929 930 931 932 933 934 
+
+> Towards Efficient and Scalable Implementation of Differentially Private Deep Learning
+
+## C. Further discussion of TF32 speedups 
+
+The speedup observed in Fig. 5 peaks at the ”base” model. We believe that the reasons are the following: Speed-ups resulting from TF32 can significantly vary on per case basis as “all storage in memory and other operations remain completely in FP32, only convolutions and matrix-multiplications convert their inputs to TF32 right before multiplication.” (Stosic & Micikevicius, 2021). Until now, TF32 precision benchmarks have been limited to non-DP applications which was one of the reasons we wanted to discuss our observations in DP context. It appears the effectiveness of TF32 arithmetic peaks at “base” configuration. This due to a mix of reasons which are difficult to quantify exactly. Firstly, it is likely that matrix multiplication kernel dominance peaks at this configuration i.e. we have the most parameters whilst the batch size dimension also remains sufficiently large. With large and huge model variants the parameter count still increases but at the cost having very small batch dimension of 10 and 3, respectively. Secondly, we observe similar trend in Fig. 2(a) where the discrepancy between dp and non-dp grows as model size gets bigger. This suggests that the dominance of DP operations also grows with the model size. None of the DP-operations are cast as matrix-multiplications and hence won’t benefit from TF32. 
+
+## D. Extra computational cost of the masked dp-sgd 
+
+For the masked dp-sgd , we first sample the minibatch using Poisson subsampling and to allow JAX compilation, we round this number to the closest larger integer divisable by the physical batch size. Hence, for any sampled batch size X,the difference between X and the upscaled batch size will be in {0, . . . p − 1} for a physical batch size p. Denoting the excess batch size with ∆p(X) and the upscaled batch size with X+, we can write 
+
+E[X+] = E[X + ∆ p(X)] . (A1) Now, we can form a simple upper bound for the expected value of the upscaled batch size as 
+
+E[X+] ≤ E[X] + ( p − 1) . (A2) When working large number of samples and non-negligible sampling probabilities, the excess cost due to upscaling the batch size will be modest for feasible physical batch sizes. For example, in our experiments the expected batch size of the Poisson subsampling was 25 000 , whereas the physical batch sizes extended up to 64 .A recent work by (Chua et al., 2024b) proposed an alternative implementation for JAX compilable implementation of Poisson subsampled DP-SGD. In their approach the batch sizes are sampled from a truncated Binomial distribution. This affects the privacy guarantees of the models, and therefore they need to compensate the truncated sampling by increasing the noise std. for DP-SGD. They suggest an approach for computing the truncation bound B as 
+
+Ψ( n, b, B ) · T · (1 + eϵ) ≤ τ δ (A3) where Ψ( n, b, B ) denotes the survival function ( 1 − cdf ) of Binom (n, b/n ) at B and T are the number of steps. The parameter τ effectively scales the size of the tails and is used to calibrate the noise std by selecting σ such that the hockey-stick divergence between the Poisson subsampled Gaussian mechanisms is bound by (1 − τ )δ. (Chua et al., 2024b) choose 
+
+τ = 10 −5, which keeps the noise std. increase very small. In the implementation of (Chua et al., 2024b), the gradients are computed for B randomly selected samples, after which the final samples are chosen according to the batch size sampled from the truncated Binomial. Hence the computational excess over regular Poisson subsampling becomes B − b. For example, in our setting where ϵ = 8 , δ = 10 −5, n = 50 000 ,
+
+b/n = 1 /2 and T = 4 , the B − b = 858 , which is significantly larger than the p − 1 excess of our method for obtainable physical batch sizes ( p ≤ 64 ). 17

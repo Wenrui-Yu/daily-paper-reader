@@ -1,0 +1,2994 @@
+Title: Leveraging Randomness in Model and Data Partitioning for  Privacy Amplification
+
+URL Source: https://openreview.net/pdf?id=3K6BkFZ7ka
+
+Number of Pages: 25
+
+Markdown Content:
+# Leveraging Randomness in Model and Data Partitioning for Privacy Amplification 
+
+Andy Dong 1 Wei-Ning Chen 2 Ayfer Ozgur 1
+
+## Abstract 
+
+We study how inherent randomness in the train-ing process—where each sample (or client in fed-erated learning) contributes to only a randomly selected portion of training—can be leveraged for privacy amplification. This includes (1) model partitioning, where a sample updates only a sub-set of the model parameters, and (2) data parti-tioning, where a sample participates in only a subset of training iterations. We apply our frame-work to model parallelism in federated learning, where each client updates a randomly selected subnetwork to reduce memory and computational overhead, and show that existing methods, e.g. model splitting or dropout, provide a significant privacy amplification gain not captured by pre-vious privacy analysis techniques. Additionally, we introduce Balanced Iteration Subsampling, a new data partitioning method where each sam-ple (or client) participates in a fixed number of training iterations. We show that this method yields similar or stronger privacy amplification than Poisson (i.i.d.) sampling of data (or clients). Our results demonstrate that randomness in the training process, which is structured rather than i.i.d. and interacts with data in complex ways, can be systematically leveraged for significant privacy amplification. 
+
+## 1. Introduction 
+
+Ensuring user privacy in machine learning is critical, es-pecially in applications involving sensitive data such as healthcare, finance, and social networks. Differential pri-vacy (DP) (Dwork et al., 2006; Dwork, 2006) provides a rigorous mathematical framework to quantify and limit data      
+
+> 1Department of Electrical Engineering, Stanford University, California, USA 2Microsoft. Correspondence to: Andy Dong
+> <dxa@stanford.edu >.
+> Proceedings of the 42 nd International Conference on Machine Learning , Vancouver, Canada. PMLR 267, 2025. Copyright 2025 by the author(s).
+
+leakage, offering strong protections even against adversaries with auxiliary information. The standard way to achieve DP is to inject randomness into the training process, typi-cally by adding noise—such as in DP-SGD (Abadi et al., 2016)—which provides formal privacy guarantees. How-ever, this comes at a cost: injecting more noise strengthens privacy protections but often degrades model performance. In this paper, we ask: instead of relying solely on large noise injections to achieve strong privacy guarantees, can we leverage the inherent randomness already present in the training process? Many widely used techniques, such as dropout (which helps mitigate overfitting) and model par-allelism (which reduces memory and computational over-head), naturally introduce randomness or can be modified to incorporate randomness without fundamentally altering the training process. However, this kind of structured ran-domness interacts with data in complex ways, making the associated privacy gains difficult to quantify. The idea of leveraging randomness for privacy amplifica-tion—to reduce the amount of noise required—has been previously explored, primarily in two specific settings. The first is random subsampling, where each data point (or client in federated learning (Kairouz et al., 2021)) is randomly selected to participate in each training iteration (indepen-dently across iterations) (Kasiviswanathan et al., 2011; Li et al., 2012; Bassily et al., 2014; Wang et al., 2015; Balle et al., 2018; Wang et al., 2019; Zhu & Wang, 2019; Balle et al., 2020). The second is shuffling, where client data is individually privatized and then randomly reordered to am-plify privacy (Erlingsson et al., 2019; Girgis et al., 2021b;a; Feldman et al., 2022; 2023; Chua et al.). More recently, random gradient compression has also been shown to pro-vide privacy amplification (Chen et al., 2024b;a). However, amplification by model parallelism techniques has not been studied before. In this paper, we investigate privacy amplification in a more general context: whenever each sample (or client in the FL setting) contributes to only a randomly selected portion of the training process, this randomness—if kept secret—can be leveraged to enhance privacy. This includes data partition-ing, where a sample (or user) participates in only a subset of the training iterations, or model partitioning, where a sam-1Leveraging Randomness in Model and Data Partitioning for Privacy Amplification 
+
+ple contributes to updating only a randomly chosen subset of model parameters in each iteration. The randomness we leverage in both cases is more structured than independent subsampling or uniform shuffling and has complex interac-tions with the samples. For example, gradients computed for random subnetworks cannot be represented as simply masked versions of full gradients, so prior privacy amplifi-cation methods fail under such scenario. 
+
+Our Contributions: We develop a unified mathematical framework for privacy amplification that applies to both data and model partitioning. Specifically, our theoretical re-sults establish privacy amplification guarantees in the below settings. 
+
+Model Parallelism: When a model is partitioned into (disjoint or overlapping) subnetworks and each sample (or client) is assigned to update only a randomly chosen sub-network in each iteration, this assignment introduces addi-tional privacy beyond standard methods. Existing privacy accounting techniques fail to capture this amplification ef-fect. This privacy gain is particularly relevant for federated and distributed learning, where model parallelism is already employed for computational and memory efficiency, e.g., using various model partitioning techniques (Yuan et al., 2022; Dun et al., 2022; Fang et al., 2024), dropout layers (Hinton et al., 2012; Kone ˇcn `y, 2016) or training models in ensemble configurations (Sagi & Rokach, 2018; Ganaie et al., 2022). Our experiments show that when training a 44 million parameter model with partial model splitting and DP-SGD with (8 , 10 −5)-DP, accounting for privacy ampli-fication with our theory yields higher validation accuracy than using existing accounting methods. 
+
+Balanced Iteration Subsampling: Our framework also extends privacy amplification beyond standard independent subsampling across iterations. We introduce a new subsam-pling method in which each sample is used in a fixed number of training iterations, rather than being sampled indepen-dently in each iteration (as in Poisson Subsampling) 1. While Poisson subsampling has been a standard tool in DP due to its analytical simplicity, its practical limitations—such as un-even user participation and unpredictable system load—can undermine fair use and operational stability, so has spurred interest in alternative subsampling schemes (Chua et al.). In contrast, Balanced Iteration Subsampling ensures equi-table contribution and stable system behavior. Our analysis shows that this method retains the desirable privacy-utility tradeoffs of Poisson sampling while addressing its prac-tical drawbacks, further expanding the toolkit of privacy-preserving subsampling techniques. By rigorously quantify-ing its privacy guarantees, we offer a compelling alternative to Poisson subsampling, reinforcing the broader insight that 
+
+> 1Note that this differs from shuffling, which ensures that each sample appears only once during training.
+
+privacy amplification can be achieved through a variety of deployment-friendly approaches. Balanced Iteration Subsampling can be used in both cen-tralized training and federated learning. In the latter case, it can be viewed as a generalization of random check-ins (Balle et al., 2020), where each client in random check-ins chooses to participate in exactly one iteration with some fixed probability, whereas in our approach, each client par-ticipates in exactly k randomly chosen iterations out of T
+
+total iterations. 
+
+## 2. Background and Definitions 
+
+In this section, we provide background and definitions for the paper and set up the problem. Differenital privacy measures the stability of a randomized algorithm given changes in an input instance, thereby quan-tifying the extent to which an adversary can infer specific inputs based on the algorithm’s output. Mathematically, let 
+
+S be the set of all possible datasets. We say that S, S ′ ∈ S 
+
+are adjacent datasets if S = S′ ∪ { x} or S′ = S ∪ { x} for some single data point x.
+
+Definition 2.1. (Dwork, 2006) A randomized mechanism 
+
+M : S → Ω is said to satisfy (ϵ, δ )-DP if, for all pairs of adjacent datasets S, S ′ ∈ S and for all measurable set A, it holds that P(M(S) ∈ A) ≤ eϵP(M(S′) ∈ A) + δ. 
+
+It is often useful to analyze privacy guarantees under the notion of R´ enyi DP (RDP): 
+
+Definition 2.2 (Mironov (2017); Abadi et al. (2016)) . Arandomized mechanism M : S → Ω is said to satisfy (α, ϵ )-RDP with α ∈ (1 , ∞) if for all pairs of adjacent datasets 
+
+S, S ′ ∈ S , it holds that 
+
+Dα (M(S)∥M (S′)) := 1 
+
+> α−1
+
+log R 
+
+> ω∈Ω
+> pM(S)(ω)α
+> pM(S′)(ω)α−1
+
+dω ≤ ϵ. 
+
+One key property of RDP is its additive nature under adaptive composition (Mironov, 2017). If mechanisms 
+
+M1, M2, . . . , Mk each satisfies (α, ϵ i)-RDP, their com-bined mechanism satisfies (α, Pki=1 ϵi)-RDP, simplifying privacy accounting in iterative algorithms and giving a tight composition method. An (α, ϵ (α)) -RDP guarantee can be converted to an (ϵ, δ )-DP guarantee (Bun & Steinke, 2016; Canonne et al., 2020; Asoodeh et al., 2020): 
+
+Proposition 2.3. If M satisfies (α, ϵ (α)) -RDP, it also sat-isfies (ϵ + log 1 
+
+> δ
+> α−1
+
+, δ )-DP for any 0 < δ < 1.
+
+In this work, we use RDP to analyze the privacy guarantees of model and data partitioning techniques, allowing for fine-grained tracking of privacy loss and facilitating efficient composition analysis in complex training settings. 2Leveraging Randomness in Model and Data Partitioning for Privacy Amplification 
+
+## 3. Main Results 
+
+3.1. Main Technical Result 
+
+In this section, we present the main result as a mathemati-cal statement outside of the context of differential privacy, although we give an overview of why it is what we need in Remark 3.3. We discuss the intermediate lemmas in the proof of the theorem in a top-down fashion in Section 3.4 and defer the details to the appendix. In Section 3.2, we will show how our main theoretical result applies to quan-tifying the privacy amplification of model parallelism. In Section 3.3, we will define Balanced Iteration Subsampling and show how the same result applies to quantifying its privacy gain. 
+
+Theorem 3.1. Let Sd,k = {μ ∈ { 0, 1}d | ∥ μ∥1= k} be the set of all binary vectors in Rd with k number of 1s and d − k
+
+number of 0s. Let P = 1 
+
+> |Sd,k |
+
+P 
+
+> μ∈Sd,k
+
+N (cμ, σ 2Id) be a mixture of Gaussians and Q = N (0, σ 2Id) be a Gaussian centered at 0, where c and σ2 are positive constants. Then, 
+
+ϵ := max {Dα(P ∥ Q), D α(Q ∥ P )} (1) 
+
+≤ max 
+
+( 
+
+> 1
+> α−1
+
+log P
+
+> I∈
+
+[( dk)] α 1
+
+(dk)α exp 
+
+
+
+> c2
+> 2σ2
+
+Pi,j ∈[α] 
+
+> i̸=j
+
+μ⊺ 
+
+> Ii
+
+μIj
+
+
+
+, 
+
+> αc 2k2
+> 2σ2d
+
+## + 12( α−1) log exp    
+
+> αc 2k(d−k)
+> σ2d
+> 
+> αexp
+> c2k(d−k)
+> σ2d2
+> 
+> +(1 −α)
+> d
+
+## )
+
+(2) 
+
+≤ max 
+
+(
+
+log 1
+
+ dk
+
+
+
+> k
+
+X
+
+> l=0
+
+kl
+
+ d − kk − l
+
+
+
+exp 
+
+ αc 2l
+
+2σ2
+
+!
+
+, 
+
+> αc 2k2
+> 2σ2d
+
+## + 12( α−1) log exp    
+
+> αc 2k(d−k)
+> σ2d
+> 
+> αexp
+> c2k(d−k)
+> σ2d2
+> 
+> +(1 −α)
+> d
+
+## )
+
+(3) 
+
+for all α ≥ 2, α ∈ N, where [ dk
+
+]α is the set of all α-length tuples with entries from {1, . . . ,  dk
+
+} and μi is the 
+
+ith element of Sd,k .Remark 3.2 . In the equation above, the first term of (1) is upper bounded by the first term of (2) , which is in turn upper bounded by the first term of (3) ; likewise for the second terms. Since the R ´enyi divergence is not symmetric in its arguments, they are not the same and both are necessary for the completeness of analysis, but numerically the second terms are dominated by the first terms in the max . Also, we note that (2) gives a tighter upper bound while (3) is much more computationally efficient, so one should use (2) whenever possible. We discuss this in more detail in later subsections. 
+
+Remark 3.3 . Although later sections will show applications of Theorem 3.1 and prove why it is useful in the appendix, we preliminarily give an overview of why this is the object we study in disjoint model splitting where k = 1 . In model splitting, each μ ∈ Sd,k corresponds to a potential gradient vector, where an entry of 1 in μ corresponds to a block whose norm is constrained to c (the gradient clipping norm), while an entry of 0 in μ corresponds to a block whose gradient is 0 (i.e. not included in the submodel). The set 
+
+Sd,k is then the set of possible gradient vectors generated by the different submodels we could form, before adding noise. On the other hand, the mean of Q is the gradient of x
+
+if x is not used in training—which is 0. The above bounds look complicated and not easily inter-pretable. We argue that this is intrinsic to the problem of characterizing the R ´enyi divergence between a mixture of Gaussian and a Gaussian, which is a a difficult problem to tightly characterize with existing results (Michalowicz et al., 2008; Durrieu et al., 2012; Nielsen & Sun, 2016a;b), which do not yield useful bounds for our purposes. The bound is designed to be implemented on a computer to get a numerical answer. In later sections, we will plot this bound against existing baselines when we plug in suitable numbers for a variety of training settings. 
+
+3.2. Privacy Amplification by Model Parallelism 
+
+In this section, we apply Theorem 3.1 to various model paral-lelism techniques starting with disjoint model splitting. This approach has been utilized in (Yuan et al., 2022; Fang et al., 2024) to limit the memory and computational overhead per node in a distributed setting. We describe this framework in the language of federated learning where each client is assigned a random submodel, while the same discussion also applies to distributed training. In the following sections we extend model parallelism to overlapping subnetworks, where only a subset of the parameters of the model are split between subnetworks (Dun et al., 2022). Finally, we discuss how the analysis applies to models with dropout layers. 3.2.1. D ISJOINT MODEL SPLITTING 
+
+Consider a model with m trainable parameters. In each iteration, we partition the model into d disjoint submodels (which do not need to contain the same number of param-eters). The partition may or may not be the same across iterations. That is, we may form completely different sub-models in each iteration, or may use the same partitioning strategy throughout. The model partitioning, random or not, is assumed to be known by the adversary and is not used for privacy amplification. What we leverage for pri-vacy amplification is the random assignment of one of the 
+
+d submodels to each client, which remains hidden to an adversary. More precisely, for each client we independently and uniformly select one of the d submodels and send it for an update. The clients compute the gradients on their corresponding submodels and send these gradients back to 3Leveraging Randomness in Model and Data Partitioning for Privacy Amplification 
+
+Algorithm 1 Differentially Private Model-Parallel Training 
+
+Input: T iterations, m model weights, d submodels, dataset S, clipping norm c, noise variance σ2
+
+M ← init (m) // initialize weights 
+
+for t = 1 to T do 
+
+M1, M 2, . . . , M d ← create subnets (M , d)
+
+grad sum ← zero_vector(size= m)
+
+for x in S do 
+
+k ← random_integer( 1, 2, . . . , d )grad ← ∂∂M Loss( Mk, x ) // gradient descent, treating gradient of entries not in Mk as 0
+
+grad ← clip(grad, c)grad sum ← grad sum + grad 
+
+end for 
+
+noisy grad sum ← N (grad sum, σ2)update_model( M , noisy grad sum) 
+
+end for 
+
+the server. The server collects the gradients, treating the gradient of any parameter not in the submodel as 0, and clips the per-client gradient norm to c. The server then sums or averages the clipped gradients and adds per-coordinate Gaussian noise with variance determined through privacy accounting. We summarize the centralized counterpart of this in Algorithm 1, which can be extended to the federated setting by treating the dataset as the set of clients. 
+
+Theorem 3.4. Each iteration of Algorithm 1 ( d submodels, noise standard deviation σ, gradient clipping norm c) with a deterministic disjoint model splitting method satisfies (α, ϵ )-RDP with ϵ given by Theorem 3.1, where k = 1 .
+
+The proof is in Appendix A.9. Figure 1 compares the DP guarantee provided by Theo-rem 3.4 to a baseline analysis with no amplification, for 
+
+{2, 4, 6, 8} submodels. The baseline is calculated using RDP accounting for the DP-SGD Gaussian mechanism (and is shared by all numbers of submodels because existing methods do not take model parallelism into account). The improvement is significant. More figures can be found in the appendix, in Figures 5 and 6. 3.2.2. P ARTIAL MODEL SPLITTING 
+
+In practice, the model splitting method we use may not split the entirety of trainable parameters into disjoint submodels. For example, (Dun et al., 2022) argues that when applying independent subnet training to ResNet, the first few blocks and the last few blocks of the model are sensitive to pruning while the middle blocks are less sentitive. When forming submodels, we may want to include the first and last blocks in all submodels while partitioning the middle blocks into d
+
+disjoint sets. In this such cases, Theorem 3.4 does not directly apply, but            
+
+> Figure 1. The graph compares the noise standard deviation vs the
+> ϵprivacy cost in (ϵ, δ )-DP with and without applying our amplifi-cation, where δ= 10 −5and we train for 1200 iterations. The data is Poisson subsampled with rate 0.1. Lower ϵand less noise are better.
+
+we can proceed by dividing the model into a “non-split” part and a “split” part. In the example above, the non-split part would be the first and the last blocks of ResNet and the split part would be the middle blocks. We can use separate clipping norms for these two parts, and for the non-split part we can use a regular privacy accounting method while the split part can benefit from privacy amplification via the method described in Sections 3.2.1. The RDP costs of the two parts can be directly added together by the composition theorem of RDP. 3.2.3. M ODEL SPLITTING WITH DROPOUT 
+
+In Sections 3.2.1 and 3.2.2, we show how the analysis ap-plies to models with some parameters subject to splitting and some not, while requiring that the parameters subject to splitting be split into disjoint subsets. This section shows that the requirement for disjoint subnets can be relaxed. For example, subnetworks can be created locally and indepen-dently at each client by using dropout. This approach has been used in (Kone ˇcn `y, 2016; Wen et al., 2022; Guliani et al., 2022) to limit per client communication and computation. In Section 3.2.1, any arbitrary way to split the model into disjoint submodels is valid. In fact, if we have multiple ways to split the model into disjoint submodels, we can also use a probabilistic mixture of these disjoint partitionings as stated in the next theorem. In order to assign a subnetwork to a client in a given iteration, we now proceed in two steps. We first choose a way to partition the model into disjoint submodels (possibly in a probabilistic manner, not necessar-ily uniformly at random) and then one submodel from the chosen partitioning uniformly at random, which is then as-4Leveraging Randomness in Model and Data Partitioning for Privacy Amplification 
+
+signed to the client. While the subnetwork assigned to each client comes from this probabilistic mixture of disjoint par-titionings, assignment is still independent across different users. Also note that with this probabilistic mixture model, it is possible the submodels trained in a given iteration are no longer disjoint. In the next theorem, we show that a similar privacy guarantee to Theorem 3.4 still holds in this case. 
+
+Theorem 3.5. Each iteration of Algorithm 1 ( d submodels, noise standard deviation σ, gradient clipping norm c) with a model splitting method that is a probabilistic mixture of disjoint model splitting methods satisfies (α, ϵ )-RDP with ϵ
+
+given by Theorem 3.1, where k = 1 .
+
+The proof is in Appendix A.10. 
+
+Remark 3.6 . We believe Theorem 3.5 can be potentially tightened. It only utilizes the randomness in submodel se-lection conditioned on disjoint partitioning of the model, but not the randomness in how the disjoint partitioning is selected. Thus, it has the same privacy guarantee as Theo-rem 3.4. As a corollary, Theorem 3.5 applies to a special case of dropout—that is, dropout layers that drop each node in the layer (and its associated inputs and outputs) with probability 
+
+0.5, which happens to be a common choice of dropout rate when applied to a hidden layer. In a broad sense, dropout can be seen as a form of implicit model parallelism, as it effectively trains different submodels by randomly deacti-vating neurons during training. To state it formally, we first note that if a node in a network is dropped out, gradients of the weights touching that node in the preceding and succeeding layers are 0, because in the preceding layer, weights that contribute to the dropped node no longer participate in training, and in the succeeding layer, weights that interact with the dropped node are no longer in training. Assuming dropout is applied to a subset of the hidden layers, we consider the “split part” of the network (see Section 3.2.2) to be the model coefficients preceding and succeeding these dropout layers (this is the set of parameters that can be potentially impacted by dropping the nodes in these layers). Similar to Section 3.2.2, we use Algorithm 2 to update the gradients in this “split part” (and regular DP-SGD on the “non-split part”) which results in the following privacy amplification guarantee. 
+
+Corollary 3.7. Each iteration of Algorithm 2 (noise stan-dard deviation σ, gradient clipping norm c) satisfies (α, ϵ )-RDP with ϵ given by Theorem 3.1, where d = 2 and k = 1 .
+
+The proof is in Appendix A.11. 
+
+Algorithm 2 Differentially Private Training with Dropout 
+
+Input: T iterations, m model weights, dataset S, clipping norm c, noise variance σ2
+
+M ← init (m) // initialize weights 
+
+for t = 1 to T do 
+
+grad sum ← zero_vector(size= m)
+
+for x in S do 
+
+grad ← ∂∂M Loss( M, x , dropout rate= 0.5) 
+
+// gradient descent 
+
+grad ← clip(grad, c)grad sum ← grad sum + grad 
+
+end for 
+
+noisy grad sum ← N (grad sum, σ2)update_model( M , noisy grad sum) 
+
+end for 3.3. Balanced Iteration Subsampling 
+
+In this section, we present a novel data subsampling scheme, and show that Theorem 3.1 can be applied to analyze its associated privacy gain. This data subsampling method can be used both in centralized (single-server) private training or in a federated scenario. We note that this data partitioning approach is orthogonal to the model partitioning approaches we studied in the previous section. Consider the following sampling scheme for differentially private neural network training. Let T be the total number of iterations in the training process. For each sample x
+
+in our dataset, we randomly choose k of the T iterations, include x in the k chosen iterations, and not include x in the remaining T − k iterations. Then, for each iteration, we form our training subset by gathering all samples for which we chose this iteration. The randomization in the procedure (i.e. samples used in each iteration) shall remain hidden from the adversary. 2 In the case of federated learning (where instead of samples we assign clients to iterations), this procedure is similar to random check-ins (Balle et al., 2020), in which each client “opts in” at a random iteration with probability p and “opts out” from training entirely with probability 1 − p. When p = 1 , this model corresponds to Balanced Iteration Subsampling for k = 1 .It is also worthwhile to compare Balanced Iteration Subsam-pling to Poisson Subsampling (Zhu & Wang, 2019), where in each iteration, we include each sample with probability γ.The main difference is that in Poisson sampling, the num-ber of times each sample is included in training follows a 
+
+Binomial( T, γ ) distribution, with an expectation of T γ but it could range from 0 to T , whereas in our case, each sample is included in training exactly k times. If γ = kT , as T → ∞ ,  
+
+> 2A concurrent work (Feldman & Shenfeld, 2025) analyzes the same subsampling technique and proposes an RDP bound that is a special case of our (2) with k= 1 . See Remark 3.9 for more.
+
+5Leveraging Randomness in Model and Data Partitioning for Privacy Amplification 
+
+these two subsampling schemes become equivalent. 
+
+Theorem 3.8. Balanced Iteration Subsampling composed with Gaussian Mechanism with l2 sensitivity c satisfies 
+
+(α, ϵ )-RDP with ϵ given by Theorem 3.1, where d = T , the total number of iterations, and k is the number of iterations each sample participates in. 
+
+The proof is found in Appendix A.12. 
+
+Remark 3.9 . When k = 1 , the first term in (2) is exactly the same as the expression computed in the unpublished work (Liew & Takahashi, 2022) and the concurrent work (Feldman & Shenfeld, 2025) modulo minor combinatorial simplifications, where it appears that in the former, the au-thors mistakenly use the bound for the Shuffle Gaussian Mechanism. In the Shuffle Gaussian Mechanism, each sam-ple is used in only one random iteration, but the assignments of different samples to iterations are dependent since the batch size used in each iteration is fixed, so the analysis (A.12) does not apply to this case. Our Balanced Iteration Subsampling with k = 1 is similar to the Shuffle Gaus-sian Mechanism in the sense that each sample is used in only one random iteration but it maintains independence across samples. We also remark that the second term in (2) is numerically smaller than the first term, so (2) and the aforementioned works are practically the same, while (3) is slightly looser but much more computationally efficient. 
+
+Remark 3.10 . When applying Balanced Iteration Subsam-pling, we could also use a small T and k and compose 
+
+N sequential training runs, where each run would be one epoch. Doing so would incur a slightly higher privacy cost than running T N iterations total and using each data point in kN random iterations, which is intuitive because there is less randomness in the first case when the iterations are organized in smaller epochs. Figure 4 showcases this. It is natural to compare the privacy guarantee in Theorem 3.8 to Poisson Subsampling, whose RDP privacy guarantee is stated in the below theorem for reference. 
+
+Theorem 3.11. (Zhu & Wang, 2019) The Poisson Subsam-pled Gaussian Mechanism with l2 sensitivity c and subsam-pling rate γ satisfies (α, ϵ )-RDP with 
+
+ϵ(α) = 1
+
+α − 1 log 
+
+(
+
+(1 − γ)α−1(αγ − γ + 1) +
+
+> α
+
+X
+
+> l=2
+
+αl
+
+
+
+(1 − γ)α−lγl exp 
+
+ l(l − 1) c2
+
+2σ2
+
+)
+
+.
+
+When using the tighter upper bound given by (2) , the RDP privacy guarantee of Balanced Iteration Subsampling is al-ways better than Poisson Subsampling, with a small margin when T, k are large and a slightly larger margin when T is very small. The computationally efficient upper bound (3)                 
+
+> Figure 2. The ϵ(α)vs αgraph for Balanced Iteration Subsampling and Poisson Subsampling, where T= 1000 ,k= 100 , and σ= 2 .Lower ϵis better. For a large Tlike this, the noise standard deviation to achieve the same privacy guarantee is almost identical.
+
+is better than Poisson Subsampling whenever kT ⪆ 0.2 and similarly wins by a larger margin when T is very small. The similarity in performance of these two subsampling methods when T, k are large is intuitive, because the num-ber of times a data point gets used by Poisson Subsampling tends to be close to its expectation as the number of iter-ations is large, so the two methods become similar in the limit T → ∞ . Figure 2 shows this. On the other hand, when T is small—for example, on the order of 10—there is a nontrivial probability that the number of times Poisson Subsampling picks a sample significantly exceeds the expectation, which will leak more information about that particular sample. In these cases, a large α will keenly capture this nontrivial probability of failure, leading to a sharp increase in the RDP privacy guarantee ϵ we can provide for Poisson Subsampling, as illustrated in Figure 3. This comparison also sheds light on why the ϵPoisson (α)
+
+curve spikes up for large values of α relative to T . Fig-ure 4 showcases the difference between the two subsampling methods when converted to the (ϵ, δ )-DP domain. More comparisons of these two subsampling methods (both the T large and T small cases) can be found in the Appendix in Figures 7 and 8. In conclusion, we presented Balanced Iteration Subsam-pling as an appealing alternative to Poisson Subsampling with better privacy guarantees. More importantly, we have shown that two completely different sources of randomness in model and data partitioning can have a similar structure underneath and can yield a nontrivial privacy amplification 6Leveraging Randomness in Model and Data Partitioning for Privacy Amplification 
+
+Figure 3. The ϵ(α) vs α graph for Balanced Iteration Subsampling and Poisson Subsampling, where T = 10 , k = 4 , and σ = 2 .Lower ϵ is better. As α becomes large, Balanced Iteration Subsam-pling starts to perform much better than Poisson Subsampling. 
+
+gain via the same analysis. 
+
+3.4. Proof Overview of Theorem 3.1 
+
+In this final subsection, we present an overview of the proof of Theorem 3.1. We first bound Dα(P ∥Q)—which we refer to as the forward divergence—with the help of the following lemmas. 
+
+Lemma 3.12. Let P = Pni=1 νiN  μi, σ 2I and Q =
+
+N  0, σ 2I for some vectors μi, 1 ≤ i ≤ n, and probability measure ν. Then, 
+
+Dα(P ∥ Q)= 1
+
+α − 1 log X
+
+> I∈[n]α
+
+Y
+
+> i∈I
+
+νi
+
+!
+
+exp 
+
+
+
+12σ2
+
+X 
+
+> i,j ∈[α]
+> i̸=j
+
+μ⊺ 
+
+> Ii
+
+μIj
+
+ .
+
+The proof is in Appendix A.1. If we apply this to the setting in Theorem 3.1, it gives the first item in Eq. (2) . Although this gives a non-integral representation of Dα(P ∥ Q), the time complexity to compute the RHS is still O(nα), where 
+
+n is the number of mixtures in P , and in this case,  dk
+
+, so the time complexity to compute the RHS is O  dkα . In practice, to do privacy accounting, we need to efficiently calculate R ´enyi DP for α = 2 , 3, . . . , 100 , so we need the following lemma to further reduce computation. 
+
+Lemma 3.13. Let Pi = N (μi, σ 2I) for i = 1 , 2, . . . , n 
+
+be the elements of a mixture of Gaussians. For a mix-ture measure ν, if for two randomly chosen mixture centers 
+
+Figure 4. The δ vs T graph for Balanced Iteration Subsampling and Poisson Subsampling, where ϵ = 10 , γ = kT = 0 .4, and σ = 2 .Lower δ and more iterations are better. Balanced Iteration Subsam-pling Composed treats 10 iterations as an epoch, using each sample 4 times in each epoch, and composing multiple epochs together, as suggested in Remark 3.10. Poisson Subsampling accounting is done using RDP with Theorem 3.11 and using PLD with Google’s PLD library (Google Differential Privacy Team, 2024). Under these settings, with a commonly used budget δ = 10 −5 (the dotted line), either method of Balanced Iteration Subsampling is able to perform 10 more iterations out of 60. 
+
+μj , μ ki.i.d. 
+
+∼ ν it holds that μ⊺ 
+
+> j
+
+μkdist. 
+
+= μ⊺ 
+
+> j
+
+μk | μj , then 
+
+Dα
+
+> n
+
+X
+
+> i=1
+
+νiN  μi, σ 2I N  0, σ 2I!
+
+≤ D2
+
+> n
+
+X
+
+> i=1
+
+νiN
+
+
+
+μi, 2σ2
+
+α I
+
+
+
+N
+
+
+
+0, 2σ2
+
+α I
+
+!
+
+for α ≥ 2, α ∈ N.
+
+The proof is in Appendix A.2. The mixture centers Sd,k 
+
+and mixture measure that assigns 1  
+
+> |Sd,k |
+
+to everything in Theorem 3.1 satisfy the requirement of Lemma 3.13 because 
+
+Sd,k contains all permutations of the vector comprised of 
+
+k 1s and d − k 0s, so by symmetry, under μj , μ ki.i.d. 
+
+∼ ν,the distribution of μ⊺ 
+
+> j
+
+μk is invariant given μj . Combining Lemma 3.13 with Lemma 3.12 and plugging in α = 2 , we get the following upper bound on the forward divergence. 
+
+Corollary 3.14. Let P and Q be defined the same way as in Theorem 3.1. Then, 
+
+Dα(P ∥ Q) ≤ log 1
+
+ dk
+
+
+
+> k
+
+X
+
+> l=0
+
+kl
+
+ d − kk − l
+
+
+
+exp 
+
+ αc 2l
+
+2σ2
+
+!
+
+.
+
+7Leveraging Randomness in Model and Data Partitioning for Privacy Amplification 
+
+When k = 1 , the above is further simplified to 
+
+log 
+
+ 1
+
+d
+
+
+
+exp 
+
+ αc 2
+
+2σ2
+
+
+
++ ( d − 1) 
+
+ 
+
+.
+
+Corollary 3.14 merges the summation of  dk
+
+2 terms into a sum of combinatorial terms. A detailed breakdown is in Appendix A.3. It can now be computed in O(dk ) time when 
+
+k > 1 and O(1) time when k = 1 .The following lemmas build up the upper bound of 
+
+Dα(Q ∥ P )—which we refer to as the reverse divergence. 
+
+Lemma 3.15. Let Sd,k = {μ ∈ { 0, 1}d | ∥ μ∥1= k} be the set of all binary vectors in Rd with k number of 1s and 
+
+d − k number of 0s. Let P = 1 
+
+> |Sd,k |
+
+P 
+
+> μ∈Sd,k
+
+N (cμ, σ 2I)
+
+and Q = N (0, σ 2I), where c and σ2 are constants. Let 
+
+Q′ = N ( c 
+
+> |Sd,k |
+
+P 
+
+> μ∈Sd,k
+
+μ, σ2I) = N   ck d 1, σ 2I be a Gaussian centered at the average of P ’s mixture centers. Then 
+
+Dα(Q ∥ P ) = Dα(Q ∥ Q′) + Dα(Q′ ∥ P )
+
+for all α > 1.Remark 3.16 . The setup in the lemma can be more general-ized, but the current statement is sufficient for our purpose. Again, the proof is deferred to Appendix A.4. We now seek to calculate or upper bound each of Dα(Q ∥ Q′) and 
+
+Dα(Q′ ∥ P ) individually. Since Q and Q′ are both multi-variate Gaussians with the same covariance matrix, we can compute the exact divergence between them. 
+
+Corollary 3.17. Let Q and Q′ be defined the same way as in Lemma 3.15. We have 
+
+Dα(Q ∥ Q′) = αc 2k2
+
+2σ2d .
+
+A proof is in Appendix A.6. The following lemma deals with the second addend on the RHS of Lemma 3.15. 
+
+Lemma 3.18. Let Sd,k = {μ ∈ { 0, 1}d | ∥ μ∥1= k} be the set of all binary vectors in Rd with k number of 1sand d − k number of 0s. For some fixed constants c, σ 2,let μ0 = 1 
+
+> |Sd,k |
+
+P 
+
+> μ∈Sd,k
+
+μ = kd be the mean of Sd,k . Let 
+
+P ′′ = 1 
+
+> |Sd,k |
+
+P 
+
+> μ∈Sd,k
+
+N (c(μ − μ0), σ 2Id) be a mixture of Gaussians with centers Sd,k normalized to have a mean of 
+
+0 and scaled by c. Let Q′′ = N (0, σ 2Id). Then, 
+
+Dα(Q′′ ∥ P ′′ ) ≤ Dα
+
+
+
+Q′′ N
+
+
+
+0, σ 2 exp 
+
+ c2k(d−k)
+
+> σ2d2
+
+
+
+Id
+
+ 
+
+for all α ≥ 2.
+
+The proof is again deferred to Appendix A.7. Note that 
+
+Q′′ and P ′′ in Lemma 3.18 are the same as Q′ and P in Lemma 3.15 but offset by − ck d 1, so we can apply the trans-lational invariance of Renyi divergence. Now we have two multivariate Gaussians with the same mean but different covariance matrices, whose R ´enyi diver-gence we can also calculate exactly. 
+
+Corollary 3.19. Let Q′′ and P ′′ be defined the same way as in Lemma 3.18. Let Q′ and P be defiend the same way as in Lemma 3.15. Then, 
+
+Dα(Q ∥ P ′)= Dα(Q′′ ∥ P ′′ ) by translational invariance 
+
+≤ 12( α − 1) log exp 
+
+ αc 2k(d−k)
+
+> σ2d
+
+
+
+α exp 
+
+ c2k(d−k)
+
+> σ2d2
+
+
+
++ (1 − α)
+
+d .
+
+The proof is in Appendix A.8. 
+
+Proof of Theorem 3.1. Combining Corollary 3.17 and Corollary 3.19 bounds RHS of Lemma 3.15. Further com-bining with Lemma 3.12 and Corollary 3.14 gives Theo-rem 3.1. 
+
+## 4. Experiments 
+
+4.1. Model Splitting 
+
+In this section, we train ResNet-101 on CIFAR-10 with model splitting under both centralized setting and federated setting, and analyze their respective privacy guarantees by using the techniques and theoretical results presented in Sec-tions 3.2.1 and 3.2.2. We simulate a differentially private fine-tuning scenario. We split the dataset into two halves, each containing half of the images from each class. We use the first half to pre-train the model without DP, but only with 8 of the 10 classes. This non-private pretraining resembles having access to public data with a different distribution or a pretrained model for a different task. We end the pre-training when validation accuracy reaches 70%. Then, we use the second half of the dataset for private finetuning. Un-der centralized training, we train for 1000 iterations using 
+
+(8 , 10 −5)-DP. Under federated training, each user holds 2 samples and we train for 250 sessions. In each training session, each user trains their received model locally for 3 it-erations, sends the model update to the server, and the server aggregates the model updates and adds noise to ensure a user-level (8 , 10 −5)-DP. To make the training compatible with DP, we replace the batch normalization layers in the model with group normalization layers. We compare three solutions. The first “baseline” uses inde-pendent subnet training for private fine-tuning as introduced in Section 3.2.2 but the privacy analysis is done with exist-ing tools (i.e., the standard RDP accounting for DP-SGD pipeline). The second “amplification” uses the same exact 8Leveraging Randomness in Model and Data Partitioning for Privacy Amplification 
+
+Table 1. Comparison of three domain adaptation methods with a data subsampling rate of 0.1, under centralized setting for sample-level (8 , 10 −5)-DP. Noise standard deviation is relative to the clipping norm (and already divided by expected batch size). Val-idation accuracies are best of 3 random seeds and have standard deviations around 0.7% .METHOD                                 
+
+> #OF SUB -
+> MODELS
+> VALIDATION
+> ACCURACY
+> NOISE STD .DEV .ADDRESSES LIMITED COMPUTE ?BASELINE 379.80% 6.62 ×10 −4√
+> AMPLIFICATION
+> (OURS )382.43% 5.44 ×10 −4√
+> BASELINE 876.80% 6.62 ×10 −4√ √
+> AMPLIFICATION
+> (OURS )880.52% 4.96 ×10 −4√ √
+> RELAXATION 184.99% 6.62 ×10 −4×
+
+Table 2. Comparison of three domain adaptation methods under federated setting for user-level (8 , 10 −5)-DP. Noise standard de-viation is relative to the clipping norm (and already divided by number of users). Validation accuracies are best of 3 random seeds and have standard deviations around 0.7% .METHOD                                 
+
+> #OF SUB -
+> MODELS
+> VALIDATION
+> ACCURACY
+> NOISE STD .DEV .ADDRESSES LIMITED COMPUTE ?BASELINE 378.47% 6.75 ×10 −4√
+> AMPLIFICATION
+> (OURS )380.28% 5.72 ×10 −4√
+> BASELINE 876.96% 6.75 ×10 −4√ √
+> AMPLIFICATION
+> (OURS )879.11% 5.36 ×10 −4√ √
+> RELAXATION 182.18% 6.75 ×10 −4×
+
+training method but privacy accounting is done with our method in Section 3.2. In both cases, we do not split the first 5 and last 2 blocks of ResNet-101 but partition the middle 22 blocks into three or eight disjoint sets to form subnetworks, one of which is then randomly assigned to each sample. The third “relaxation” assumes client compute is not a problem and each client tunes the full model (with-out model splitting). The results are shown in Table 1 for centralized setting and Table 2 for federated setting. The results of this experiment show that in both setting, the use of model parallelism techniques to handle limited client compute is a viable strategy with some decrease in overall accuracy due to model splitting, but our privacy amplifica-tion technique improves the accuracy of model splitting by allowing to inject less noise for the same privacy guarantee. 
+
+4.2. Balanced Iteration Subsampling 
+
+We experimented with differentially private training using Balanced Iteration Subsampling vs Poisson Subsampling as the data subsampling technique. Since the number of training iterations is large (on the order of 1000), the two methods have a similar training dynamic and privacy guar-antee. In particular, the noise standard deviations differ from each other by less than 1% (similar to Figure 8b). Thus, the statistics of the validation accuracy show little difference. For training WideResNet-40-4 from scratch on CIFAR-10, 
+
+(8 , 10 −5)-DP, 2000 iterations, using each sample 655 times for Balanced Iteration Subsampling and with probability  
+
+> 655 2000
+
+in each iteration for Poisson Subsampling. Balanced Iteration Subsampling injects noise with σ = 10 .17 for val-idation accuracy of 70 .21% , while Poisson Subsampling injects noise with σ = 10 .20 for validation accuracy of 
+
+70 .13% . For finetuning ResNet-101 (using the same setting as Section 4.1 but without model splitting), Balanced Itera-tion Subsampling injects noise with σ = 2 .36 for validation accuracy of 84 .86% , while Poisson Subsampling injects noise with σ = 2 .34 for validation accuracy of 84 .99% . The results are best of 3 random seeds. This shows that the two subsampling methods achieve very similar privacy-accuracy tradeoffs experimentally, which reinforces our point that Balanced Iteration Subsampling is a valid alternative when we cannot apply Poisson Subsampling. 
+
+## 5. Conclusion 
+
+In this work, we identify and leverage the inherent random-ness in ML training algorithms for privacy amplification. These sources of randomness emerge whenever each sample interacts with a randomly selected portion of the training process, whether through submodels or structured subsam-pling. However, existing methods have not fully captured these effects. We introduce a mathematical framework to quantify the privacy gains achieved through model splitting and dropout—two techniques used in federated learning that help reduce computational and communication costs—as well as through Balanced Iteration Subsampling, an alterna-tive to Poisson Subsampling that provides improved privacy guarantees in certain regimes. This work makes one step forward to systematically quanti-fying all forms of randomness encountered in training and their contributions to privacy amplification. To this end, we provide a deeper understanding of how structured ran-domness enhances privacy-preserving machine learning. A more rigorous analysis of these interactions will lead to better theoretical bounds and improved implementations of privacy-preserving methods. A promising future direction is to extend this framework to other training paradigms, further strengthening the connection between structured random-ness and differential privacy. 9Leveraging Randomness in Model and Data Partitioning for Privacy Amplification 
+
+## Acknowledgments 
+
+This work was partially supported by the NSF grant CIF-2213223. Some of the computing for this project was performed on the Sherlock cluster. We would like to thank Stanford University and the Stanford Research Computing Center for providing computational resources and support that contributed to these research results. 
+
+## Impact Statement 
+
+This work represents an important first step in quantifying the privacy amplification effects of model parallelism meth-ods, offering new insights into enhancing privacy-preserving machine learning. By leveraging the inherent randomness in model partitioning and subsampling, our approach con-tributes to the development of more secure and efficient distributed learning frameworks, particularly in federated learning settings. This study lays the groundwork for further exploration into the interplay between model parallelism and differential privacy, fostering ongoing innovation in privacy-preserving AI. 
+
+## References 
+
+Abadi, M., Chu, A., Goodfellow, I., McMahan, H. B., Mironov, I., Talwar, K., and Zhang, L. Deep learning with differential privacy. In Proceedings of the 2016 ACM SIGSAC conference on computer and communications security , pp. 308–318, 2016. Asoodeh, S., Liao, J., Calmon, F. P., Kosut, O., and Sankar, L. A better bound gives a hundred rounds: Enhanced privacy guarantees via f-divergences. In 2020 IEEE In-ternational Symposium on Information Theory (ISIT) , pp. 920–925. IEEE, 2020. Balle, B., Barthe, G., and Gaboardi, M. Privacy amplifica-tion by subsampling: Tight analyses via couplings and divergences. Advances in neural information processing systems , 31, 2018. Balle, B., Kairouz, P., McMahan, B., Thakkar, O., and Guha Thakurta, A. Privacy amplification via random check-ins. Advances in Neural Information Processing Systems , 33:4623–4634, 2020. Bassily, R., Smith, A., and Thakurta, A. Private empirical risk minimization: Efficient algorithms and tight error bounds. In 2014 IEEE 55th annual symposium on foun-dations of computer science , pp. 464–473. IEEE, 2014. Bun, M. and Steinke, T. Concentrated differential privacy: Simplifications, extensions, and lower bounds. In Theory of cryptography conference , pp. 635–658. Springer, 2016. Canonne, C. L., Kamath, G., and Steinke, T. The discrete gaussian for differential privacy. Advances in Neural Information Processing Systems , 33:15676–15688, 2020. Chen, W.-N., Isik, B., Kairouz, P., No, A., Oh, S., and Xu, Z. Improved communication-privacy trade-offs in l 2 mean estimation under streaming differential privacy. arXiv preprint arXiv:2405.02341 , 2024a. Chen, W.-N., Song, D., Ozgur, A., and Kairouz, P. Privacy amplification via compression: Achieving the optimal privacy-accuracy-communication trade-off in distributed mean estimation. Advances in Neural Information Pro-cessing Systems , 36, 2024b. Chua, L., Ghazi, B., Kamath, P., Kumar, R., Manurangsi, P., Sinha, A., and Zhang, C. How private are dp-sgd implementations? In Forty-first International Conference on Machine Learning .Dun, C., Wolfe, C. R., Jermaine, C. M., and Kyrillidis, A. Resist: Layer-wise decomposition of resnets for dis-tributed training. In Uncertainty in Artificial Intelligence ,pp. 610–620. PMLR, 2022. Durrieu, J.-L., Thiran, J.-P., and Kelly, F. Lower and upper bounds for approximation of the kullback-leibler diver-gence between gaussian mixture models. In 2012 IEEE International Conference on Acoustics, Speech and Sig-nal Processing (ICASSP) , pp. 4833–4836. Ieee, 2012. Dwork, C. Differential privacy. In International colloquium on automata, languages, and programming , pp. 1–12. Springer, 2006. Dwork, C., McSherry, F., Nissim, K., and Smith, A. Calibrat-ing noise to sensitivity in private data analysis. In Theory of cryptography conference , pp. 265–284. Springer, 2006. Erlingsson, ´U., Feldman, V., Mironov, I., Raghunathan, A., Talwar, K., and Thakurta, A. Amplification by shuffling: From local to central differential privacy via anonymity. In Proceedings of the Thirtieth Annual ACM-SIAM Sym-posium on Discrete Algorithms , pp. 2468–2479. SIAM, 2019. Fang, W., Han, D.-J., and Brinton, C. G. Submodel par-titioning in hierarchical federated learning: Algorithm design and convergence analysis. In ICC 2024-IEEE In-ternational Conference on Communications , pp. 268–273. IEEE, 2024. Feldman, V. and Shenfeld, M. Privacy amplification by random allocation. arXiv preprint arXiv:2502.08202 ,2025. 10 Leveraging Randomness in Model and Data Partitioning for Privacy Amplification 
+
+Feldman, V., McMillan, A., and Talwar, K. Hiding among the clones: A simple and nearly optimal analysis of pri-vacy amplification by shuffling. In 2021 IEEE 62nd Annual Symposium on Foundations of Computer Science (FOCS) , pp. 954–964. IEEE, 2022. Feldman, V., McMillan, A., and Talwar, K. Stronger pri-vacy amplification by shuffling for r ´enyi and approximate differential privacy. In Proceedings of the 2023 Annual ACM-SIAM Symposium on Discrete Algorithms (SODA) ,pp. 4966–4981. SIAM, 2023. Ganaie, M. A., Hu, M., Malik, A. K., Tanveer, M., and Suganthan, P. N. Ensemble deep learning: A review. 
+
+Engineering Applications of Artificial Intelligence , 115: 105151, 2022. Gil, M., Alajaji, F., and Linder, T. R ´enyi divergence mea-sures for commonly used univariate continuous distribu-tions. Information Sciences , 249:124–131, 2013. Girgis, A., Data, D., Diggavi, S., Kairouz, P., and Suresh, A. T. Shuffled model of differential privacy in federated learning. In International Conference on Artificial Intelli-gence and Statistics , pp. 2521–2529. PMLR, 2021a. Girgis, A. M., Data, D., Diggavi, S., Suresh, A. T., and Kairouz, P. On the renyi differential privacy of the shuffle model. In Proceedings of the 2021 ACM SIGSAC con-ference on computer and communications security , pp. 2321–2341, 2021b. Google Differential Privacy Team. Google differential pri-vacy library, 2024. URL https://github.com/ google/differential-privacy . Accessed: Feb 27, 2025. Guliani, D., Zhou, L., Ryu, C., Yang, T.-J., Zhang, H., Xiao, Y., Beaufays, F., and Motta, G. Enabling on-device train-ing of speech recognition models with federated dropout. In ICASSP 2022-2022 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP) , pp. 8757–8761. IEEE, 2022. He, K., Zhang, X., Ren, S., and Sun, J. Deep residual learn-ing for image recognition. In Proceedings of the IEEE conference on computer vision and pattern recognition ,pp. 770–778, 2016. Hinton, G. E., Srivastava, N., Krizhevsky, A., Sutskever, I., and Salakhutdinov, R. R. Improving neural networks by preventing co-adaptation of feature detectors. arxiv 2012. 
+
+arXiv preprint arXiv:1207.0580 , 2012. Kairouz, P., McMahan, H. B., Avent, B., Bellet, A., Bennis, M., Bhagoji, A. N., Bonawitz, K., Charles, Z., Cormode, G., Cummings, R., et al. Advances and open problems in federated learning. Foundations and trends® in machine learning , 14(1–2):1–210, 2021. Kasiviswanathan, S. P., Lee, H. K., Nissim, K., Raskhod-nikova, S., and Smith, A. What can we learn privately? 
+
+SIAM Journal on Computing , 40(3):793–826, 2011. Kone ˇcn `y, J. Federated learning: Strategies for im-proving communication efficiency. arXiv preprint arXiv:1610.05492 , 2016. Li, N., Qardaji, W., and Su, D. On sampling, anonymization, and differential privacy or, k-anonymization meets differ-ential privacy. In Proceedings of the 7th ACM Symposium on Information, Computer and Communications Security ,pp. 32–33, 2012. Liew, S. P. and Takahashi, T. Shuffle gaussian mechanism for differential privacy. arXiv preprint arXiv:2206.09569 ,2022. Michalowicz, J. V., Nichols, J. M., and Bucholtz, F. Calcu-lation of differential entropy for a mixed gaussian distri-bution. Entropy , 10(3):200, 2008. Mironov, I. R ´enyi differential privacy. In 2017 IEEE 30th computer security foundations symposium (CSF) , pp. 263– 275. IEEE, 2017. Mironov, I., Talwar, K., and Zhang, L. R ´enyi differential pri-vacy of the sampled gaussian mechanism. arXiv preprint arXiv:1908.10530 , 2019. Nielsen, F. and Sun, K. Guaranteed bounds on the kullback– leibler divergence of univariate mixtures. IEEE Signal Processing Letters , 23(11):1543–1546, 2016a. Nielsen, F. and Sun, K. Guaranteed bounds on the kullback-leibler divergence of univariate mixtures us-ing piecewise log-sum-exp inequalities. arXiv preprint arXiv:1606.05850 , 2016b. R ´enyi, A. On measures of entropy and information. In Pro-ceedings of the fourth Berkeley symposium on mathemati-cal statistics and probability, volume 1: contributions to the theory of statistics , volume 4, pp. 547–562. University of California Press, 1961. Sagi, O. and Rokach, L. Ensemble learning: A survey. Wiley interdisciplinary reviews: data mining and knowledge discovery , 8(4):e1249, 2018. Wang, Y.-X., Fienberg, S., and Smola, A. Privacy for free: Posterior sampling and stochastic gradient monte carlo. In International Conference on Machine Learning , pp. 2493–2502. PMLR, 2015. Wang, Y.-X., Balle, B., and Kasiviswanathan, S. P. Subsam-pled r ´enyi differential privacy and analytical moments accountant. In The 22nd international conference on arti-ficial intelligence and statistics , pp. 1226–1235. PMLR, 2019. 11 Leveraging Randomness in Model and Data Partitioning for Privacy Amplification 
+
+Wen, D., Jeon, K.-J., and Huang, K. Federated dropout—a simple approach for enabling federated learning on re-source constrained devices. IEEE wireless communica-tions letters , 11(5):923–927, 2022. Yuan, B., Wolfe, C. R., Dun, C., Tang, Y., Kyrillidis, A., and Jermaine, C. Distributed learning of fully connected neural networks using independent subnet training. Pro-ceedings of the VLDB Endowment , 2022. Zhu, Y. and Wang, Y.-X. Poission subsampled r ´enyi differ-ential privacy. In International Conference on Machine Learning , pp. 7634–7642. PMLR, 2019. 12 Leveraging Randomness in Model and Data Partitioning for Privacy Amplification 
+
+## A. Proofs. 
+
+A.1. Proof of Lemma 3.12 
+
+Let d be the dimension of μi. Then, 
+
+Dα(P ∥ Q) = 1
+
+α − 1 log 
+
+# Z
+
+> Rd
+
+P αQ1−αdx 
+
+= 1
+
+α − 1 log 
+
+# Z
+
+> Rd
+
+1(2 πσ 2) d
+
+> 2
+
+X
+
+> I∈[n]α
+
+Y
+
+> i∈I
+
+νi
+
+!
+
+exp − 12σ2
+
+X
+
+> i∈I
+
+∥x − μi∥2−(α − 1) ∥x∥2
+
+!! 
+
+dx 
+
+= 1
+
+α − 1 log X
+
+> I∈[n]α
+
+Y
+
+> i∈I
+
+νi
+
+! Z
+
+> Rd
+
+1(2 πσ 2) d
+
+> 2
+
+exp − 12σ2
+
+X
+
+> i∈I
+
+∥x − μi∥2−(α − 1) ∥x∥2
+
+!! 
+
+dx 
+
+= 1
+
+α − 1 log X
+
+> I∈[n]α
+
+Y
+
+> i∈I
+
+νi
+
+!
+
+exp 
+
+ 12σ2
+
+X 
+
+> i,j ∈[α], i ̸=j
+
+μ⊺ 
+
+> Ii
+
+μIj
+
+ .
+
+The ⊺ in the superscript means transpose. The second line comes from expanding the exponentials. The third line comes from linearity. The fourth line comes from completing the squares then integrating multivariate Gaussian densities. 
+
+A.2. Proof of Lemma 3.13 
+
+Apply Lemma 3.12 to both sides and replace ν with the uniform distribution to get 
+
+Dα(P ∥ Q) = 1
+
+α − 1 log 
+
+ 1
+
+nα
+
+X
+
+> I∈[n]α
+
+exp 
+
+ 1
+
+σ2
+
+X
+
+> i,j ∈[α], i<j
+
+μ⊺ 
+
+> Ii
+
+μIj
+
+ . (4) Similarly, 
+
+D2
+
+> n
+
+X
+
+> i=1
+
+νiN
+
+
+
+μi, 2σ2
+
+α
+
+
+
+N
+
+
+
+0, 2σ2
+
+α
+
+!
+
+= log 
+
+ 1
+
+n2
+
+X
+
+> I∈[n]2
+
+exp 
+
+ 1
+
+σ2
+
+α
+
+2 μ⊺ 
+
+> I1
+
+μI2
+
+ .
+
+Exponentiating both sides and rearranging, we want to show that 
+
+1
+
+nα
+
+X
+
+> I∈[n]α
+
+exp 
+
+ 1
+
+σ2
+
+X
+
+> i,j ∈[α], i<j
+
+μ⊺ 
+
+> Ii
+
+μIj
+
+ ?
+
+≤
+
+ 1
+
+n2
+
+X
+
+> I∈[n]2
+
+exp 
+
+ 1
+
+σ2
+
+α
+
+2 μ⊺ 
+
+> I1
+
+μI2
+
+
+
+> α−1
+
+.
+
+Notice that the LHS is the MGF MX (t) of the random variable 
+
+X = X
+
+> i,j ∈[α], i<j
+
+μ⊺ 
+
+> Ii
+
+μIj
+
+where I ∼ Unif([ n]α) and t = 1 
+
+> σ2
+
+. The RHS is likewise the MGF MY (t) of Y , who is the sum of α − 1 i.i.d. copies of  
+
+> α
+> 2
+
+μ⊺ 
+
+> T1
+
+μT2 where T ∼ Unif([ n]2), i.e., 
+
+Y = α
+
+2
+
+> α−1
+
+X
+
+> k=1
+
+μ⊺ 
+
+> Tk
+> 1
+
+μT k
+
+> 2
+
+where T k i.i.d. 
+
+∼ Unif  [n]2 for k = 1 , 2, . . . , α − 1, and t = 1 
+
+> σ2
+
+. Next, since each entry of T k is chosen according to ν and we assume that μ⊺ 
+
+> j
+
+μkdist. 
+
+= μ⊺ 
+
+> j
+
+μk | μj for μj , μ ki.i.d. 
+
+∼ ν, we can set T k 
+
+> 1
+
+to be equal to T 11 for k = 2 , . . . , α − 1 and leave 
+
+Y with the same distribution (and thus the same MGF). Next, since now the T k 
+
+> 1
+
+’s are the same, we can set up a bijection between outcomes of I and the outcomes of Tk as follows: 
+
+(I1, I 2, I 3, I 4, . . . , I α) ←→ (T 11 , T 12 , T 22 , T 22 , . . . , T α−12 )
+
+13 Leveraging Randomness in Model and Data Partitioning for Privacy Amplification 
+
+and can verify that both random objects follow the same distribution Unif([ n]α). This means if now we let I ∼ Unif([ n]α)
+
+and 
+
+X = X
+
+> i,j ∈[α], i<j
+
+μ⊺ 
+
+> Ii
+
+μIj , Y = α
+
+2
+
+> α
+
+X
+
+> i=2
+
+μ⊺ 
+
+> I1
+
+μIi ,
+
+these two random variables would have the same distribution as first specified. Next, we condition on a specific histogram 
+
+h (where histogram is defined in the above section). The random variable X | h is a constant as X sums up all pair-wise correlations no matter the order. On the other hand, the distribution of Y | h is non-trivial but has mean equal to X | h
+
+because we can rewrite X and Y as 
+
+Yj =
+
+> α
+
+X
+
+> i=1
+
+μ⊺ 
+
+> Ij
+
+μIi − μ⊺ 
+
+> Ij
+
+μIj , X = 12
+
+> α
+
+X
+
+> j=1
+
+Yj , Y = α
+
+2 Y1
+
+and the Yj ’s have the same distribution given h. So, we have 
+
+E[etY | h] ≥ etE[Y |h] = E[etX | h] for t ≥ 0.
+
+Note that t ≥ 0 is always satisfied as t = 1 
+
+> σ2
+
+≥ 0. With the Law of Iterated Expectations, 
+
+MY (t) = Eh
+
+h
+
+EI [etY | h]
+
+i
+
+≥ Eh
+
+h
+
+EI [etX | h]
+
+i
+
+= MX (t).
+
+A.3. Proof of Corollary 3.14 
+
+The mixture centers of P are 
+
+c ·
+
+(
+
+v ∈ { 0, 1}d
+
+> d
+
+X
+
+> i=1
+
+vi = k
+
+)
+
+.
+
+Combining Lemma 3.13 and Equation 4, we have the following upper bound on the forward divergence: 
+
+Dα(P ∥ Q) ≤ log 
+
+ 1
+
+ dk
+
+2
+
+(dk)X
+
+> i=1
+
+(dk)X
+
+> j=1
+
+exp 
+
+ α
+
+2σ2 μ⊺ 
+
+> i
+
+μj
+
+ .
+
+First, since Sd,k contains all permutations of binary vectors with k 1s, by symmetry, the value of Pnj=1 exp   α 
+
+> 2σ2
+
+μ⊺ 
+
+> i
+
+μj
+
+ is not dependent on μi, so we reduce it to 
+
+log 
+
+ 1
+
+ dk
+
+
+
+> n
+
+X
+
+> j=1
+
+exp 
+
+ α
+
+2σ2 μ⊺ 
+
+> 1
+
+μj
+
+ .
+
+Next, we count how many ways μ⊺ 
+
+> 1
+
+μj can equal c2l for 0 ≤ l ≤ k. The vector μj needs to have l number of 1s in the first k
+
+entries, and the rest k − l number of 1s in the last d − k entries, giving a total of  kl
+
+  d−kk−l
+
+ ways. So, 
+
+Dα(P ∥ Q) ≤ log 1
+
+ dk
+
+
+
+> k
+
+X
+
+> l=0
+
+kl
+
+ d − kk − l
+
+
+
+exp 
+
+ αc 2l
+
+2σ2
+
+!
+
+. (5) In the case that k = 1 (used in model splitting), the above is further reduced to 
+
+log 1
+
+ d
+
+> 1
+
+ 10
+
+ d − 11
+
+
+
+exp(0) + 
+
+11
+
+ d − 10
+
+
+
+exp 
+
+ αc 2
+
+2σ2
+
+ !
+
+= log 
+
+ 1
+
+d
+
+
+
+exp 
+
+ αc 2
+
+2σ2
+
+
+
++ ( d − 1) 
+
+ 
+
+.
+
+14 Leveraging Randomness in Model and Data Partitioning for Privacy Amplification 
+
+A.4. Proof of Lemma 3.15 
+
+Without loss of generality, let c = 1 as c is a scaling factor for all Gaussian centers so we can instead re-scale the standard deviation σ to achieve the same effect. To prove the lemma, we apply an offset vector − kα d 1 to the integrand of Dα(Q′ ∥ P ),
+
+Dα(Q′ ∥ P ) = 1
+
+α − 1 log 
+
+ 2πσ 2− d
+
+> 2
+
+# Z
+
+> Rd
+
+hQdi=1 exp 
+
+
+
+− 12σ2
+
+ xi − kd
+
+2i α
+
+h 1 
+
+> |Sd,k |
+
+P
+
+> μ∈Sd,k
+
+Qdi=1 exp  − 12σ2 (xi − μi)2iα−1 dx 1 · · · dx d
+
+
+
+= 1
+
+α − 1 log 
+
+ 2πσ 2− d
+
+> 2
+
+# Z
+
+> Rd
+
+hQdi=1 exp 
+
+
+
+− 12σ2
+
+ xi − kd + kα d
+
+2i α
+
+h 1 
+
+> |Sd,k |
+
+P
+
+> μ∈Sd,k
+
+Qdi=1 exp 
+
+
+
+− 12σ2
+
+ xi − μi + kα d
+
+2i α−1 dx 1 · · · dx d
+
+ .
+
+In the exponents of the numerator, 
+
+
+
+xi − kd + kα d
+
+2
+
+=
+
+
+
+xi − kd (1 − α)
+
+2
+
+= x2 
+
+> i
+
++ 2 kd (α − 1) xi +
+
+ kd (α − 1) 
+
+2
+
+.
+
+The numerator can then be re-written as 
+
+" dY
+
+> i=1
+
+exp 
+
+
+
+− 12σ2 x2
+
+> i
+
+#α
+
+·
+
+> d
+
+Y
+
+> i=1
+
+exp 
+
+
+
+− 12σ2 · 2 kd α(α − 1) xi
+
+
+
+· exp − 12σ2 · αd 
+
+ kd (α − 1) 
+
+2!
+
+.
+
+In the exponents of the denominator, μi is either 1 or 0 since μ is a binary vector. Case by case, 
+
+
+
+xi − 1 + kα d
+
+2
+
+= ( xi − 1) 2 + 2 kα d xi − 2 kα d +
+
+ kα d
+
+2
+
+and 
+
+xi + kα d
+
+2
+
+= x2 
+
+> i
+
++ 2 kα d xi +
+
+ kα d
+
+2
+
+.
+
+Since every μ contains k number of 1s and d − k number of 0s, exactly k of the terms in the product have the former form and the rest d − k terms have the latter form. We can re-write the denominator as 
+
+ 1
+
+|Sd,k |
+
+X
+
+> μ∈Sd,k
+> d
+
+Y
+
+> i=1
+
+exp 
+
+
+
+− 12σ2 (xi − μi)2
+
+
+
+> α−1
+
+·
+
+> d
+
+Y
+
+> i=1
+
+exp 
+
+
+
+− 12σ2 · 2 kd α(α − 1) xi
+
+
+
+· exp − 12σ2 · (α − 1) d
+
+ kα d
+
+2
+
+− 2k kα d
+
+!! 
+
+.
+
+The middle terms in the numerator and denominator are the same so they cancel out, leaving us with 
+
+Dα(Q′ ∥ P ) = 1
+
+α − 1 log 
+
+(2 πσ 2)− d
+
+> 2
+
+# Z
+
+> Rd
+
+hQdi=1 exp  − 12σ2 x2
+
+> i
+
+iα
+
+h 1 
+
+> |Sd,k |
+
+P
+
+> μ∈Sd,k
+
+Qdi=1 exp  − 12σ2 (xi − μi)2iα−1 dx 1 · · · dx d
+
+·
+
+exp 
+
+
+
+− 12σ2 · αd   kd (α − 1) 2
+
+exp 
+
+
+
+− 12σ2 · (α − 1) 
+
+
+
+d   kα d
+
+2 − 2k kα d
+
+ 
+
+= 1
+
+α − 1 log 
+
+(2 πσ 2)− d
+
+> 2
+
+# Z
+
+> Rd
+
+hQdi=1 exp  − 12σ2 x2
+
+> i
+
+iα
+
+h 1 
+
+> |Sd,k |
+
+P
+
+> μ∈Sd,k
+
+Qdi=1 exp  − 12σ2 (xi − μi)2iα−1 dx 1 · · · dx d
+
+
+
+15 Leveraging Randomness in Model and Data Partitioning for Privacy Amplification 
+
++ 1
+
+α − 1 log 
+
+ exp 
+
+
+
+− 12σ2 · αd   kd (α − 1) 2
+
+exp 
+
+
+
+− 12σ2 · (α − 1) 
+
+
+
+d   kα d
+
+2 − 2k kα d
+
+ 
+
+= Dα(Q ∥ P ) + 1
+
+α − 1 log 
+
+ exp 
+
+
+
+− 12σ2 
+
+> k2
+> d
+
+α(α − 1) 2
+
+
+
+exp  − 12σ2 
+
+> k2
+> d
+
+α(α − 1)( α − 2) 
+
+= Dα(Q ∥ P ) + 1
+
+α − 1 log 
+
+
+
+exp 
+
+
+
+− 12σ2
+
+k2
+
+d α(α − 1) 
+
+ 
+
+= Dα(Q ∥ P ) − α
+
+2σ2
+
+k2
+
+d
+
+= Dα(Q ∥ P ) − α
+
+2σ2 0 − kd 1d
+
+> 22
+
+= Dα(Q ∥ P ) − Dα(Q ∥ Q′).
+
+A.5. R´ enyi Divergence between Two Multivariate Gaussians Proposition A.1. (Gil et al., 2013) Let fi = N (μi, Σ) and fj = N (μj , Σ) be two multivariate Gaussian distributions with the same covariance matrix and different means. Then, 
+
+Dα(fi ∥ fj ) = α
+
+2 (μi − μj )⊺Σ−1(μi − μj ).
+
+Proposition A.2. (Gil et al., 2013) Let fi = N (μ, Σi) and fj = N (μ, Σj ) be two multivariate Gaussian distributions with the same mean. Then, 
+
+Dα(fi ∥ fj ) = 12( α − 1) log |Σi|1−α|Σj |α
+
+|(Σ α)∗|
+
+for 
+
+(Σ α)∗ = αΣj + (1 − α)Σ i
+
+whenever αΣ−1 
+
+> i
+
++ (1 − α)Σ −1 
+
+> j
+
+is positive definite. 
+
+A.6. Proof of Corollary 3.17 
+
+The two distributions are Q = N  0, σ 2I and Q′ = N   ck d 1, σ 2I. Using Proposition A.1, 
+
+Dα(Q ∥ Q′) = α
+
+2
+
+ck d 1⊺  σ2I−1 ck d 1 = αc 2k2
+
+2d2
+
+> d
+
+X
+
+> i=1
+
+1
+
+σ2 = αc 2k2
+
+2σ2d .
+
+A.7. Proof of Lemma 3.18 
+
+The set Sd,k = {v ∈ { 0, 1}d | ∥ v∥1= k} lies in a subspace of Rd with dimension d − 1 because there is one and only one sum constraint on the entries, which removes one degree of freedom. Since we also offset Sd,k by its mean when forming the mixture centers of P ′′ , the zero vector also lies in the same subspace as Sd,k − μ. The following lemma establishes that we can instead look at Renyi divergence on the d − 1-dimensional subspace instead of Rd.
+
+Lemma A.3. Let Sd−1 be a set of points in Rd−1 and Sd be the same set of points in Rd, where each point’s last component is 0. Then, 
+
+Dα
+
+N  0, σ 2Id−1
+
+ 1
+
+|Sd−1|
+
+X
+
+> μ∈Sd−1
+
+N  μ, σ 2Id−1
+
+ = Dα
+
+N  0, σ 2Id
+
+ 1
+
+|Sd−1|
+
+X
+
+> μ∈Sd
+
+N  μ, σ 2Id
+
+
+
+for all α ≥ 2.
+
+16 Leveraging Randomness in Model and Data Partitioning for Privacy Amplification 
+
+Proof. For notational convenience, let x1: d−1 be the vector formed by taking the first d − 1 components of x, where x ∈ Rd.
+
+Dα
+
+N  0, σ 2Id
+
+ 1
+
+|Sd−1|
+
+X
+
+> μ∈Sd
+
+N  μ, σ 2Id
+
+
+
+= 1
+
+α − 1 log 
+
+# Z  2πσ 2 d 
+
+> 2
+
+exp  − 12σ2 ∥x∥22
+
+α
+
+ 1
+
+> |Sd−1|
+
+P 
+
+> μ∈Sd
+
+exp  − 12σ2 ∥x − μ∥22
+
+α−1 dx 1 . . . dx d
+
+= 1
+
+α − 1 log 
+
+# Z  2πσ 2 d
+
+> 2
+
+ exp  − 12σ2
+
+ ∥x1: d−1∥22+x2
+
+> d
+
+ α
+
+ 1
+
+> |Sd−1|
+
+P 
+
+> μ∈Sd
+
+exp  − 12σ2 (∥x1: d−1 − μ1: d−1∥22+( xd − μd)2)α−1 dx 1 . . . dx d
+
+= 1
+
+α − 1 log 
+
+# Z  2πσ 2 d
+
+> 2
+
+ exp  − 12σ2 ∥x1: d−1∥22
+
+ exp  − 12σ2 x2
+
+> d
+
+ α
+
+ 1
+
+> |Sd−1|
+
+P 
+
+> μ∈Sd
+
+exp  − 12σ2 ∥x1: d−1 − μ1: d−1∥22
+
+ exp  − 12σ2 x2
+
+> d
+
+α−1 dx 1 . . . dx d
+
+= 1
+
+α − 1 log 
+
+# Z  2πσ 2 d
+
+> 2
+
+ exp  − 12σ2 ∥x1: d−1∥22
+
+ α
+
+ 1
+
+> |Sd−1|
+
+P 
+
+> ν∈Sd−1
+
+exp  − 12σ2 ∥x1: d−1 − ν∥22
+
+α−1 exp 
+
+
+
+− 12σ2 x2
+
+> d
+
+
+
+dx 1 . . . dx d
+
+= 1
+
+α − 1 log 
+
+# Z  2πσ 2 d−12
+
+ exp  − 12σ2 ∥x1: d−1∥22
+
+ α
+
+ 1
+
+> |Sd−1|
+
+P 
+
+> ν∈Sd−1
+
+exp  − 12σ2 ∥x1: d−1 − ν∥22
+
+α−1 dx 1 . . . dx d−1
+
+= Dα
+
+N  0, σ 2Id−1
+
+ 1
+
+|Sd−1|
+
+X
+
+> μ∈Sd−1
+
+N  μ, σ 2Id−1
+
+ .
+
+Below is the proof for Lemma 3.18. Let P ′′′ = N (0, σ 2 exp ( c2k(d−k) 
+
+> σ2d2
+
+)) . We first establish that P ′′ (0) = P ′′′ (0) ≤ Q′′ (0). To see that fact, the set Sd,k − μ is a set that contains all vectors with k entries equal to c(d−k) 
+
+> d
+
+and d − k entries equal to − ck d , so 
+
+P ′′ (0) = (2 πσ 2)− d 
+
+> 2
+
+exp 
+
+
+
+− 12σ2
+
+ c2(d − k)2
+
+d2 · k + c2k2
+
+d2 · (d − k)
+
+ 
+
+= (2 πσ 2)− d 
+
+> 2
+
+exp 
+
+
+
+− 12σ2
+
+c2k(d − k)
+
+d
+
+
+
+,P ′′′ (0) = 
+
+
+
+2πσ 2 exp 
+
+ c2k(d − k)
+
+σ2d2
+
+ − d
+
+> 2
+
+= (2 πσ 2)− d 
+
+> 2
+
+exp 
+
+
+
+− c2k(d − k)2σ2d
+
+
+
+= P ′′ (0),Q′′ (0) = (2 πσ 2)− d 
+
+> 2
+
+≥ P ′′ (0).
+
+To see the proof, we first look at the simple case when d = 2 and k = 1 so Sd,k contains two elements. By Lemma A.3, we can reduce the dimension by 1 and look at the scalar case where P ′′  
+
+> d=2
+
+= 12 (N (−1, σ 2))+ N (1 , σ 2)) and Q′′  
+
+> d=2
+
+= N (0 , σ 2),where we w.l.o.g. scale c such that P ′′  
+
+> d=2
+
+has mixture centers at −1 and 1 since scaling c by β is equivalent to scaling σ
+
+by 1 
+
+> β
+
+. Then, P ′′′  
+
+> d=2
+
+is a Gaussian centered at 0 and having variance σ2 exp ( 1 
+
+> σ2
+
+) > σ 2 such that P ′′ 
+
+> d=2
+
+(0) = P ′′′ 
+
+> d=2
+
+(0) . Since 
+
+P ′′  
+
+> d=2
+
+has smaller variance compared to P ′′′  
+
+> d=3
+
+and has mixture centers that surround 0 on both sides, as |x|→ ∞ , for small values of |x|, P ′′ 
+
+> d=2
+
+(x) either increases, or decreases slower than P ′′′ 
+
+> d=2
+
+(x), and for large values of |x|, P ′′ 
+
+> d=2
+
+(x) decreases much faster than P ′′′ 
+
+> d=2
+
+(x). Combined with the fact that P ′′ 
+
+> d=2
+
+(0) = P ′′′ 
+
+> d=2
+
+(0) , this means there exists a constant a such that 
+
+P ′′ 
+
+> d=2
+
+(x) ≥ P ′′′ 
+
+> d=2
+
+(x) for x ∈ [0 , a ] and P ′′ 
+
+> d=2
+
+(x) < P ′′′ 
+
+> d=2
+
+(x) for x ∈ (a, ∞). To complete the argument, 
+
+Dα(Q′′  
+
+> d=2
+
+∥ P ′′′ 
+
+> d=2
+
+) − Dα(Q′′  
+
+> d=2
+
+∥ P ′′ 
+
+> d=2
+
+)
+
+17 Leveraging Randomness in Model and Data Partitioning for Privacy Amplification 
+
+=
+
+# Z ∞−∞ 
+
+Q′′ 
+
+> d=2
+
+(x)α
+
+P ′′′ 
+
+> d=2
+
+(x)α−1 − Q′′ 
+
+> d=2
+
+(x)α
+
+P ′′ 
+
+> d=2
+
+(x)α−1 dx 
+
+=
+
+# Z ∞−∞ 
+
+# Z P ′′  
+
+> d=2 (x)
+> P′′′
+> d=2 (x)
+
+ddu Q′′ 
+
+> d=2
+
+(x)α
+
+uα−1 dudx by the Fundamental Theorem of Calculus 
+
+=
+
+# Z ∞−∞ 
+
+# Z P ′′  
+
+> d=2 (x)
+> P′′′
+> d=2 (x)
+
+(α − 1) 
+
+ Q′′ 
+
+> d=2
+
+(x)
+
+u
+
+α
+
+dudx 
+
+= 2( α − 1) 
+
+
+
+# Z a
+
+> 0
+
+# Z P ′′  
+
+> d=2 (x)
+> P′′′
+> d=2 (x)
+
+ Q′′ 
+
+> d=2
+
+(x)
+
+u
+
+α
+
+dudx −
+
+# Z ∞
+
+> a
+
+# Z P ′′′  
+
+> d=2 (x)
+> P′′
+> d=2 (x)
+
+ Q′′ 
+
+> d=2
+
+(x)
+
+u
+
+α
+
+dudx 
+
+ = ( ⋆).
+
+Since Q′′   
+
+> d=2 (x)
+> P′′
+> d=2 (x)
+
+and Q′′   
+
+> d=2 (x)
+> P′′′
+> d=2 (x)
+
+are both decreasing functions in x for x ≥ 0, we have for x0 ∈ [0 , a ] and x1 ∈ (a, ∞),
+
+Q′′ 
+
+> d=2
+
+(x0)
+
+P ′′′ 
+
+> d=2
+
+(x0) ≥ Q′′ 
+
+> d=2
+
+(x0)
+
+P ′′ 
+
+> d=2
+
+(x0) ≥ Q′′ 
+
+> d=2
+
+(x1)
+
+P ′′ 
+
+> d=2
+
+(x1) ≥ Q′′ 
+
+> d=2
+
+(x1)
+
+P ′′′ 
+
+> d=2
+
+(x1) ,
+
+so the first integrand is always greater than or equal to the second integrand in (⋆). Finally, since P ′′  
+
+> d=2
+
+and P ′′′  
+
+> d=2
+
+are probability densities and need to integrate to the same value of 1, 
+
+Z a
+
+> 0
+
+Z P ′′  
+
+> d=2 (x)
+> P′′′
+> d=2 (x)
+
+dudx −
+
+Z ∞
+
+> a
+
+Z P ′′′  
+
+> d=2 (x)
+> P′′
+> d=2 (x)
+
+dudx = 0 ,
+
+so it follows that (⋆) ≥ 0. It is worthwhile to note the intuition behind the proof. Of Q′′ , P ′′ , and P ′′′ , the distribution Q′′ 
+
+assigns the most probability mass near 0. So, to minimize D(Q′′ ∥ P ∗) over P ∗, P ∗ needs to assigns more probability mass near 0. And between P ′′ and P ′′′ , the distribution P ′′ is the one that assigns more mass around 0 because they have the same value at 0, but moving away from 0 in any direction is closer to (at least) one of P ′′ ’s mixture centers, so around 0, P ′′ 
+
+always dominates P ′′′ so D(Q′′ ∥ P ′′ ) ≤ D(Q′′ ∥ P ′′′ ). The same argument holds true for arbitrary d, k since the mixture centers of P ′′ surrounds 0, so along any ray from 0, there exists a such that P ′′ (x) ≥ P ′′′ (x) for x ∈ [0 , a ], and the claim follows. 
+
+A.8. Proof of Corollary 3.19 
+
+In the context of Proposition A.2, we have 
+
+Σi = σ2Id, Σj = σ2 exp 
+
+ c2k(d − k)
+
+σ2d2
+
+
+
+Id, (Σ α)∗ = σ2
+
+
+
+α exp 
+
+ c2k(d − k)
+
+σ2d2
+
+
+
++ (1 − α)
+
+
+
+Id,
+
+|(Σ α)∗| = σ2d
+
+
+
+α exp 
+
+ c2k(d − k)
+
+σ2d2
+
+
+
++ (1 − α)
+
+d
+
+, |Σi|1−α= σ2d(1 −α), |Σj |α= σ2dα exp 
+
+ c2k(d − k)ασ2d
+
+
+
+.
+
+So, by Lemma 3.18 and Proposition A.2, 
+
+Dα(Q′′ ∥ P ′′ ) ≤ Dα
+
+
+
+Q′′ N
+
+
+
+0, σ 2 exp 
+
+ c2k(d − k)
+
+σ2d2
+
+
+
+Id
+
+ 
+
+= 12( α − 1) log |Σi|1−α|Σj |α
+
+|(Σ α)∗| = 12( α − 1) log exp 
+
+ αc 2k(d−k)
+
+> σ2d
+
+
+
+α exp 
+
+ c2k(d−k)
+
+> σ2d2
+
+
+
++ (1 − α)
+
+d .
+
+18 Leveraging Randomness in Model and Data Partitioning for Privacy Amplification 
+
+A.9. Proof of Theorem 3.4 
+
+Let T ∈ [d]|S| be a random vector with |S| entries, where the kth entry denotes which submodel is used to train data point 
+
+k. Let f : S × [d]|S| → Rm be the gradient function that takes in the dataset and the model correspondence for the first 
+
+|S| data points, and outputs the resulting non-noisy sum of gradients. That means, the output of f (S, T ) is deterministic and f (S′, T ) is a random value that depends on which model is assigned to the last data point x. The function f satisfies bounded difference as a result of gradient norm clipping of c. That is, 
+
+∥f (S′, T ) − f (S, T )∥2≤ c
+
+for all adjacent datasets S, S ′ and T . We can express the output of M as a mixture of distributions, 
+
+M(S) = X
+
+> T
+
+pT N  f (S, T ), σ 2I ,
+
+M(S′) = X
+
+> T
+
+pT N  f (S′, T ), σ 2I .
+
+By the quasi-convexity of Renyi divergence, 
+
+Dα(M(S) ∥ M (S′)) ≤ sup 
+
+> T
+
+Dα
+
+ N  f (S, T ), σ 2I ∥ N  f (S′, T ), σ 2I 
+
+= sup 
+
+> T
+
+Dα
+
+ N  0, σ 2I ∥ N  f (S′, T ) − f (S, T ), σ 2I .
+
+where the last line comes as a result of the translational invariance of Renyi divergence. The first term is a Gaussian centered at 0 and the second term is a mixture of Gaussians centered at the possible outcomes of 
+
+f (S′, T ) − f (S, T ), which has d different outcomes corresponding to which of the d models the data point x is trained on, each with probability 1 
+
+> d
+
+. The d different outcomes have disjoint support because the model parameters of the d submodels are disjoint. Let the non-zero parts of these d outcomes be c1, . . . , c d such that ∥ck∥≤ c for all 1 ≤ k ≤ d. Since the covariances are symmetric, we can apply a rotation to each of the d different supports—and leave the first term N  0, σ 2I
+
+unchanged—so that ck becomes ∥ck∥e1, where e1is the first standard basis. Now in each of the d supports, the first and second terms are both product distributions that are different in the first entry and identical in the rest, so we can drop the coordinates where they are the same. The divergence thus becomes 
+
+Dα(M(S) ∥ M (S′)) ≤ sup 
+
+> ∥c1∥≤ c,..., ∥cd∥≤ c
+
+Dα N (0, σ 2I) 1
+
+d
+
+> d
+
+X
+
+> i=1
+
+N  ∥ci∥ei, σ 2I!
+
+.
+
+Setting ∥c1∥= · · · ∥ cd∥= c would achieve the supremum since they give the maximum divergence from 0, so 
+
+Dα(M(S) ∥ M (S′)) ≤ Dα N (0, σ 2I) 1
+
+d
+
+> d
+
+X
+
+> i=1
+
+N  c ei, σ 2I!
+
+where the first term matches Q and the second term matches P in Theorem 3.1 where k = 1 . Switching the order of M(S)
+
+and M(S′) requires a similar analysis, with the first and second terms switched. Thus, 
+
+ϵ = max 
+
+n
+
+Dα(M(S) ∥ M (S′)) , D α(M(S′) ∥ M (S)) 
+
+o
+
+≤ max {Dα(P ∥ Q), D α(Q ∥ P )}.
+
+A.10. Proof of Theorem 3.5 
+
+If we condition on how the model is split into submodels, then the privacy guarantee is given by Theorem 3.4, which does not depend on how the model is split. Therefore, if we do not condition on how the model is split, the resulting distribution of the submodel is a mixture of the conditional distributions, so the resulting distribution of the gradients is a mixture of the resulting conditional distributions of gradients, conditioned on how the model is split. Thus, by the quasi-convexity of R ´enyi divergence, the divergence between the unconditional distributions of gradients (resulting from using S vs S′ for the dataset) is upper-bounded by the max divergence between the conditional distributions of gradients, which is given in Theorem 3.4. 19 Leveraging Randomness in Model and Data Partitioning for Privacy Amplification 
+
+A.11. Proof of Theorem 3.7 
+
+The full proof has a lot of similarities to the proof of Theorem 3.4, which we will not repeat but only focus on the different part. We first consider the case of one dropout layer then the case of multiple dropout layers. For one dropout layer, if we let the nodes of the dropout layer be v1, . . . , v n and let the set of weights whose gradients are set to 0 by dropping node vk be Wk for k = 1 , . . . , n , then W1, . . . , W n are disjoint sets that cover the parameters of the preceding and succeeding layers. Let the combined parameters of the preceding and succeeding layers be W such that 
+
+W = Snk=1 Wk. The set of weights W can be treated as a full model for the scope of this proof since it has its own gradient clipping norm of c. Consider a particular outcome of the dropout layer that keeps nodes {vj }j∈J for some J ⊆ [n], which is equivalent to forming a submodel WJ = S 
+
+> j∈J
+
+Wj . Consider the complementary submodel W cJ = S  
+
+> j̸∈J
+
+Wj = W \ WJ .Then, conditioned on the event that the submodel formed by the dropout layer is either WJ or W cJ , each has a conditional probability of 0.5 because each has the same unconditional probability of (0 .5) n, so WJ and W cJ form one way to partition the model. Then, the dropout layer is a mixture of WJ and W cJ for all possible J, and thus Theorem 3.5 applies where 
+
+d = 2 .For the case of multiple dropout layers, if the dropout layers have no overlapping parameters whose gradients are directly affected (i.e., whose gradient will be 0 if a node it connects to is dropped out), then the analysis remains the same. If there are, for example in the case where two dropout layers are applied to the input and output of another layer, then conditioned on J (where J is now a subset of nodes in the union of the two dropout layers), the submodels S 
+
+> j∈J
+
+Wj and S  
+
+> j̸∈J
+
+Wj no longer cover W but are still disjoint, so the analysis to quantify the divergence between the two conditional distributions of gradients (conditioned on J) using Theorem 3.1 is still valid, since the gradients not covered by either the submodels are 0
+
+regardless of which dataset is used, so we can throw away these coordinates in analyzing the R´ enyi divergence. 
+
+A.12. Proof of Theorem 3.8 
+
+Consider two adjacent datasets S, S ′ ∈ S , where S′ = S ∪ { x}. Let A ∈ R|S′|× T be the random sampling matrix, whose entries are binary and each row contains k 1s and T − k 0s, where the entry at i, t is 1 if the ith data point is used in the tth iteration, and 0 otherwise. Let AS be the first |S| rows of A and A|S′| be the last row of A, where A|S′| will be disregarded if the dataset is S. Let P denote the implied distribution of any function of A. Let d be the number of parameters in the neural network with a gradient. Let Yt ∈ Rd be the noisy sum of gradients in iteration t. Let gt be the gradient function of the tth iteration, which take in as inputs S or S′ (the dataset), A·,t (the sampling mask used in this iteration), and y1, . . . , y t−1 (the previous gradients, or equivalently, the previous model updates), and satisfies that 
+
+∥gt(S, A ·,t ; y1, . . . , y t) − gt(S′, A ·,t ; y1, . . . , y t)∥2 ≤ c
+
+for all t, A, y 1, . . . , y t, which follows from l2 norm clipping of each gradient. Let P0(Y1, . . . , Y T ) be the joint distribution of the noise gradients if S is used, and Q0(Y1, . . . , Y T ) if S′ is used. Their distributions can be written as 
+
+P0(Y1, . . . , Y T ) = X
+
+> AS
+
+P(AS )P0(Y1, . . . , Y T | AS )
+
+and 
+
+Q0(Y1, . . . , Y T ) = X
+
+> AS
+
+P(AS ) X
+
+> A|S′|
+
+P  A|S′|
+
+ Q0(Y1, . . . , Y T | AS , A |S′|).
+
+Since Renyi divergence is quasi-convex, the Renyi divergence between P0(Y1, . . . , Y T ) and Q0(Y1, . . . , Y T ) is upper bounded by 
+
+Dα(P0 ∥ Q0) ≤ sup 
+
+> AS
+
+Dα
+
+P0(Y1, . . . , Y T | AS ) X
+
+> A|S′|
+
+P  A|S′|
+
+ Q0(Y1, . . . , Y T | A)
+
+
+
+= sup 
+
+> AS
+
+1
+
+α − 1 log 
+
+# Z P0(y1, . . . , y T | AS )α
+
+( P 
+
+> A|S′|
+
+P  A|S′|
+
+ Q0(y1, . . . , y T | A)) α−1 dy 1 . . . dy T
+
+20 Leveraging Randomness in Model and Data Partitioning for Privacy Amplification 
+
+= sup 
+
+> AS
+
+1
+
+α − 1 log 
+
+# Z QTt=1 P0(yt | y1, . . . , y t−1, A S )α
+
+( P 
+
+> A|S′|
+
+P  A|S′|
+
+ Q Tt=1 Q0(yt | y1, . . . , y t−1, A )) α−1 dy 1 . . . dy T = ( ⋆).
+
+The conditional distributions in the numerator and denominator are 
+
+P0(yt | y1, . . . , y t−1, A S ) = N (gt(S, A ·,t ; y1, . . . , y t−1), σ 2Id),Q0(yt | y1, . . . , y t−1, A ) = N (gt(S′, A ·,t ; y1, . . . , y t−1), σ 2Id).
+
+Consider the substitution 
+
+xt = yt − gt(S, A ·,t ; y1, . . . , y t−1)
+
+so that 
+
+P0(xt | y1, . . . , y t−1, A S ) = N (0, σ 2Id),Q0(xt | y1, . . . , y t−1, A ) = N (gt(S′, A ·,t ; y1, . . . , y t−1) − gt(S, A ·,t ; y1, . . . , y t−1), σ 2Id)=
+
+(
+
+N (ctvt, σ 2Id) A|S′|,t = 1 
+
+N (0, σ 2Id) A|S′|,t = 0 = N
+
+
+
+ctvt1{A|S′|,t =1 }, σ 2Id
+
+
+
+where ct ≤ c and ∥vt∥2= 1 , both of which may depend on A, y 1, . . . , y t−1. Also, since there is a bijection between xt and 
+
+yt given A, y 1, . . . , y t−1, by a recursive argument, there is a bijection between x1, . . . , x t and y1, . . . , y t given A for all t.Thus, the conditioning on y1, . . . , y t−1 is equivalent to conditioning on x1, . . . , x t−1, so we can write 
+
+P0(yt | y1, . . . , y t−1, A S ) = P0(yt | x1, . . . , x t−1, A S ),Q0(yt | y1, . . . , y t−1, A ) = Q0(yt | x1, . . . , x t−1, A ).
+
+Lastly, for each variable yt in the integration in (⋆), we replace it by yt − gt(S, A ·,t ; y1, . . . , y t−1). The integration over yt
+
+is on Rd so the new integration region over yt − gt(S, A ·,t ; y1, . . . , y t−1) is still on Rd. Then we apply the substitutions, 
+
+(⋆) = sup 
+
+> AS
+
+1
+
+α − 1 log 
+
+# Z QTt=1 P0(xt | x1, . . . , x t−1, A S )α
+
+( P 
+
+> A|S′|
+
+P  A|S′|
+
+ Q Tt=1 Q0(xt | x1, . . . , x t−1, A )) α−1 dx 1 . . . dx T
+
+= sup 
+
+> AS
+
+1
+
+α − 1 log 
+
+# Z QTt=1 N (0, σ 2Id)α
+
+( P 
+
+> A|S′|
+
+P  A|S′|
+
+ Q Tt=1 N (ctvt1{A|S′|,t =1 }, σ 2Id)α−1 dx 1 . . . dx T
+
+= sup 
+
+> AS
+
+Dα
+
+
+
+> T
+
+Y
+
+> t=1
+
+N (0, σ 2Id) X
+
+> A|S′|
+
+P  A|S′|
+
+ TY
+
+> t=1
+
+N (ctvt1{A|S′|,t =1 }, σ 2Id)
+
+
+
+≤ sup  
+
+> ct≤c, ∥vt∥2≤1
+
+Dα
+
+
+
+> T
+
+Y
+
+> t=1
+
+N (0, σ 2Id) X
+
+> A|S′|
+
+P  A|S′|
+
+ TY
+
+> t=1
+
+N (ctvt1{A|S′|,t =1 }, σ 2Id)
+
+ = ( ⋆⋆ )
+
+where in the second-to-last line, P  A|S′|
+
+ is a constant that does not depend on the choice of AS , and the only item that depends on AS is ctvt. The supremum is achieved by the choice of ct and vt such that ct = c and vt = e1 (or any vector with norm 1, but all are equivalent due to the rotation symmetry of QTt=1 N (0, σ 2Id) around 0). Then, since x1, . . . , x T
+
+are either e1 or 0 under Q0 and 0 under P0, we only need to integrate over their first components and ignore the rest d − 1
+
+components since the rest have the same distribution under P0 and Q0. So, 
+
+(⋆⋆ ) ≤ Dα
+
+
+
+> T
+
+Y
+
+> t=1
+
+N (0 , σ 2) X
+
+> A|S′|
+
+P  A|S′|
+
+ TY
+
+> t=1
+
+N (c1{A|S′|,t =1 }, σ 2)
+
+
+
+21 Leveraging Randomness in Model and Data Partitioning for Privacy Amplification 
+
+= Dα
+
+
+
+> T
+
+Y
+
+> t=1
+
+N (0 , σ 2) X
+
+> μ∈ST ,k
+
+1
+
+|St,k |
+
+> T
+
+Y
+
+> t=1
+
+N (c1{μt = 1 }, σ 2)
+
+
+
+= Dα
+
+N (0, σ 2IT ) X
+
+> μ∈ST ,k
+
+1
+
+|St,k | N (cμ, σ 2IT )
+
+
+
+= Dα(P ∥ Q).
+
+The same proof goes for Dα(Q ∥ P ) by switching the numerator and denominator, and taking the maximum of the two completes the proof. 22 Leveraging Randomness in Model and Data Partitioning for Privacy Amplification 
+
+## B. More Graphs. 
+
+(a) The graph compares the noise standard deviation vs the 
+
+ϵ privacy cost in (ϵ, δ )-DP with and without applying our amplification, where δ = 10 −5 and we train for 400 iterations. The data is Poisson subsampled with rate 0.1. Lower ϵ and less noise are better. 
+
+(b) The graph compares the noise standard deviation vs the ϵ
+
+privacy cost in (ϵ, δ )-DP with and without applying our am-plification, where δ = 10 −5 and we train for 2000 iterations. The data is Poisson subsampled with rate 0.1. Lower ϵ and less noise are better. 
+
+(c) The graph compares the noise standard deviation vs the ϵ
+
+privacy cost in (ϵ, δ )-DP with and without applying our am-plification, where δ = 10 −6 and we train for 1500 iterations. The data is Poisson subsampled with rate 0.08 . Lower ϵ and less noise are better. 
+
+(d) The graph compares the noise standard deviation vs the 
+
+ϵ privacy cost in (ϵ, δ )-DP with and without applying our amplification, where δ = 10 −5 and we train for 600 iterations. The data is Poisson subsampled with rate 0.15 . Lower ϵ and less noise are better. 
+
+Figure 5. More comparison for disjoint submodel splitting. 
+
+23 Leveraging Randomness in Model and Data Partitioning for Privacy Amplification 
+
+(a) The graph compares the noise standard deviation vs the number of training iterations with and without applying our amplification, where (ϵ, δ ) = (1 , 10 −5). The data is Poisson subsampled with rate 0.1. More iterations and less noise are better. 
+
+(b) The graph compares the noise standard deviation vs the number of training iterations with and without applying our amplification, where (ϵ, δ ) = (3 , 10 −5). The data is Poisson subsampled with rate 0.1. More iterations and less noise are better. 
+
+(c) The graph compares the noise standard deviation vs the number of training iterations with and without applying our amplification, where (ϵ, δ ) = (5 , 10 −6). The data is Poisson subsampled with rate 0.15 . More iterations and less noise are better. 
+
+(d) The graph compares the noise standard deviation vs the number of training iterations with and without applying our amplification, where (ϵ, δ ) = (8 , 10 −6). The data is Poisson subsampled with rate 0.3. More iterations and less noise are better. 
+
+Figure 6. More comparison for disjoint submodel splitting. 
+
+24 Leveraging Randomness in Model and Data Partitioning for Privacy Amplification 
+
+(a) The ϵ vs α graph for Balanced Iteration Subsampling and Poisson Subsampling, where T = 1000 , k = 100 , and σ = 2 .Lower ϵ is better. 
+
+(b) The ϵ vs α graph for Balanced Iteration Subsampling and Poisson Subsampling, where T = 200 , k = 100 , and σ = 4 .Lower ϵ is better. 
+
+Figure 7. More comparison for Balanced Iteration Subsampling vs Poisson Subsampling. 
+
+(a) The ϵ privacy cost (in (ϵ, δ )-DP) vs noise standard devia-tion σ graph for Balanced Iteration Subsampling and Poisson Subsampling, where T = 10 , k = 5 , and δ = 10 −6. Lower 
+
+ϵ and less noise are better. For small T , Balanced Iteration Subsampling can achieve the same privacy guarantee with less noise injection. 
+
+(b) The ϵ privacy cost (in (ϵ, δ )-DP) vs noise standard devia-tion σ graph for Balanced Iteration Subsampling and Poisson Subsampling, where T = 1500 , k = 120 , and δ = 10 −4.Lower ϵ and less noise are better. For large T , the two curves are nearly identical. 
+
+Figure 8. More comparison for Balanced Iteration Subsampling vs Poisson Subsampling. 
+
+25

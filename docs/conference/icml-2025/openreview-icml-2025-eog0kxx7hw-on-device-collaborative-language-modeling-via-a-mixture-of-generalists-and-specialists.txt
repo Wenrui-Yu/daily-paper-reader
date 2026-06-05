@@ -1,0 +1,1890 @@
+Title: On-Device Collaborative Language Modeling  via a Mixture of Generalists and Specialists
+
+URL Source: https://openreview.net/pdf?id=Eog0kXX7hW
+
+Number of Pages: 29
+
+Markdown Content:
+# On-Device Collaborative Language Modeling via a Mixture of Generalists and Specialists 
+
+Dongyang Fan * 1 Bettina Messmer * 1 Nikita Doikov 1 Martin Jaggi 1
+
+## Abstract 
+
+On-device LLMs have gained increasing attention for their ability to enhance privacy and provide a personalized user experience. To facilitate private learning with scarce data, Federated Learning has become a standard approach. However, it faces challenges such as computational resource hetero-geneity and data heterogeneity among end users. We propose CoMiGS ( Co llaborative learning with a Mi xture of Generalists and Specialists), the first approach to address both challenges. A key inno-vation of our method is the bi-level optimization formulation of the Mixture-of-Experts learning objective, where the router is optimized using a separate validation set to ensure alignment with the target distribution. We solve our objective with alternating minimization, for which we pro-vide a theoretical analysis. Our method shares generalist experts across users while localizing a varying number of specialist experts, thereby adapting to users’ computational resources and preserving privacy. Through extensive experi-ments, we show CoMiGS effectively balances general and personalized knowledge for each to-ken generation. We demonstrate that CoMiGS re-mains robust against overfitting—due to the gen-eralists’ regularizing effect—while adapting to local data through specialist expertise. We open source our codebase for collaborative LLMs. 
+
+## 1. Introduction 
+
+Large Language Models (LLMs) have been showing great success serving as foundation models, evidenced by their capability to understand a wide range of tasks, such as ChatGPT (OpenAI, 2023), Claude (Anthropic, 2023), Gem-ini (DeepMind, 2023) and etc. However, cloud-based in-     
+
+> *Equal contribution 1EPFL, Switzerland. Correspondence to: Dongyang Fan <dongyang.fan@epfl.ch >.
+> Proceedings of the 42 nd International Conference on Machine Learning , Vancouver, Canada. PMLR 267, 2025. Copyright 2025 by the author(s).
+
+Figure 1: Chat box between two users with different charac-teristics. Next word prediction for smart keyboards should be tailored to users’ topic preferences for personalization. However, to ensure factual accuracy and linguistic consis-tency, the results of next word prediction should maintain universality. 
+
+Figure 2: Diagram of our proposed method CoMiGS il-lustrated with a simplified 2-heterogenous-models setup (corresponding to the two users in Figure 1). Generalist ex-perts ( θG 
+
+> 1
+
+, θG 
+
+> 2
+
+) are aggregated across users, and specialist experts ( {θSi 
+
+> 1
+
+}3 
+
+> i=1
+
+, {θS1 
+
+> 2
+
+} ) and Routers ( ϕ1 , ϕ2 ) are kept local. ference introduces significant delays for end users, and it often fails to meet their personalized needs (Ding et al., 2024; Iyengar & Adusumilli, 2024). Recently, there has been growing interest in deploying LLMs on edge devices, which offer benefits like lower latency, data localization, and more personalized user experiences (Xu et al., 2024). For instance, Apple (2024) recently launched on-device founda-tion models as part of its personal intelligence system. Meta (2024), Qwen (2024) newly released lightweight models with less than 3B parameters targeting edge AI. On-device LLMs present challenges such as limited and vari-able computational resources, scarce and heterogeneous lo-cal data, and privacy concerns related to data sharing (Peng 1CoMiGS: On-Device Collaborative Language Modeling 
+
+et al., 2024; Wagner et al., 2024). Fine-tuning is typically performed on-device to quickly adapt to users’ individual needs. While data sharing is a common solution to address local data scarcity, on-device data is often privacy-sensitive and must remain on the device. To overcome this, Federated Learning has been proposed as a method for enabling col-laborative learning while preserving user privacy, allowing end users to collaborate by sharing model parameters (Chen et al., 2023; Zhang et al., 2023). Federated fine-tuning of LLMs is predominately done through Low-Rank Adaptation (LoRA, Hu et al. (2021)) due to its lightweight nature so that the communication costs can be largely mitigated. Yet end devices may have different capacities, resulting in different LoRA ranks or different numbers of LoRA modules allowed on devices. Previous works have proposed various techniques for aggre-gating LoRA modules of different ranks (Cho et al., 2023; Bai et al., 2024). However, in both works, the devices are only equipped with shared knowledge, which makes the methods unsuitable when there is data heterogeneity across users. In such cases, a more personalized solution is needed. End users’ local data distributions can exhibit significant statistical heterogeneity. For instance, mobile device users may have distinct linguistic habits, topic preferences, or language usage patterns, leading to widely varying word distributions, as illustrated in different next word predictions to the same prompt “In my free time, I like to” in Fig. 1. As a result, personalized solutions are necessary. Wagner et al. (2024) explored three personalized collaborator selection protocols, allowing each end user to choose their collabo-rators. Although these protocols effectively address data heterogeneity, they depend on model aggregation, which can only occur when users share the same model architecture. There has not yet been a solution to deal with both model heterogeneity and data heterogeneity. Towards this goal, we propose a novel Co llaborative learning approach via a 
+
+Mi xture of Generalists and Specialists (CoMiGS). Our ap-proach allows users to share part of the knowledge while keeping some knowledge user-specific, thus providing per-sonalized solutions. We name the shared part generalists and the user-specific part specialists . Like all previous works, the generalists and specialists are simply LoRA modules. At the same time, as long as the shared part can be aggregated, the user-specific part can be of different sizes, which can be adapted to various device capacities, as illustrated by different numbers of specialists across users in Figure 2. We integrate the expertise of generalists and specialists us-ing a learned router that determines aggregation weights, following the Mixture-of-Experts (MoE) architecture (Fe-dus et al., 2022b). As in typical MoE designs for language modeling (Jiang et al., 2024; Fan et al., 2024), we also use tokens as the routing unit. Although users may have differ-ent topic preferences or linguistic styles, they should still share common phrases, for example, when talking about factual knowledge (the result of the US presidential election should be a universal fact in Figure 1). Our goal is to route these shared tokens to the generalists so they can be jointly learned across users. We further notice a hierarchical structure between the router and the experts: the router dynamically assigns tokens based on emerging expert specializations, while the experts refine their roles to optimize token processing under the router’s guidance. Towards addressing this, we formulate our learn-ing objective as a bi-level optimization problem and propose a new first-order algorithm based on alternating minimiza-tion as a solution. Our method enjoys convergence guaran-tees and is resource-efficient for deployment. In summary, our contributions are as follows: • We propose a novel approach (CoMiGS) for on-device personalized collaborative fine-tuning of LLMs. Key parts of our approach are: 1) an innovative bi-level formulation of the MoE learning objective (Section 3.2); 2) a new al-gorithm based on alternating minimization (Alg.1); 3) a theoretical analysis with a proof showing linear conver-gence rate under suitable assumptions (Section 3.4). • Our collaborative framework effectively addresses both 
+
+data heterogeneity (Section 4.2), concerning diverse local data distributions across users, and computational resource heterogeneity (Section 4.3), with respect to varying local model architectures, making it the first model to accom-plish both. • Our framework separates model heterogeneity from data quantity (Section 4.4). Users with larger local datasets ben-efit from a bigger model, while users with more powerful models but smaller datasets are less prone to overfitting. • CoMiGS is resource-efficient: it adds marginal ( +1 .25% )computational overhead and memory requirement com-pared to FedAvg, while reducing communication costs by 50% (Section 4.5). • We release a codebase 1 for collaborative LLMs that allows users to easily implement various collaboration strategies, facilitating and advancing future research efforts in this field. 
+
+## 2. Related Work 
+
+Collaborative Fine-Tuning for LLMs. Recently, re-searchers have been investigating the application of Fed-erated Learning in language tasks. Due to the substantial number of model parameters in LLMs, the research has largely targeted the stages following pre-training, often uti- 
+
+> 1Our code base is available at https://github.com/ epfml/CoMiGS
+
+2CoMiGS: On-Device Collaborative Language Modeling 
+
+lizing parameter-efficient techniques such as adapters. Mo-htashami et al. (2023) explored a teacher-student social learning framework to aggregate private-sensitive instruc-tions. Zhang et al. (2023) directly applied FedAvg (McMa-han et al., 2017) to aggregate LoRA parameters during in-struction tuning, and reported increased performance in downstream tasks. Following that, there are various works focusing on addressing resource heterogeneity where users are equipped with different LoRA ranks. HetLoRA (Cho et al., 2023) and FlexLoRA (Bai et al., 2024) provide dif-ferent ways of aggregating and distributing LoRA modules of heterogenous ranks. However, these approaches are not designed to cope with heterogeneous data on device. In contrast, Sun et al. (2024) demonstrated that freezing LoRA A matrices at initialization leads to improved performance on heterogeneous data. Building on this, Guo et al. (2024) showed that consistently aggregating LoRA A matrices can yield even greater performance gains. Meanwhile, Wagner et al. (2024) introduced personalized approaches to effec-tively address data heterogeneity by employing three dis-tinct collaborator selection mechanisms. However, these approaches require all users to utilize the same model archi-tecture. Unlike previous works, our framework deals with both model heterogeneity and data heterogeneity. Moreover, our method offers personalized solutions at a token level, as opposed to the client-level approach in Wagner et al. (2024). 
+
+Mixture of Global and Local Experts. Gaspar & Seddon (2022) introduced a fusion of global and local experts for activity prediction based on molecular structures. Each local expert is tailored to a specific chemical series of interest us-ing loss masking, while a global expert is trained across all series. Simultaneously, a routing network learns to assign soft merging scores. This approach yielded superior empir-ical results compared to single experts. Dai et al. (2024) developed DeepSeekMoE by deterministically assigning ev-ery token to “shared” experts, whereas “routed” experts are assigned tokens based on a learnable router. DeepSeekMoE is able to approach the upper bound performance for MoE models. For both works, the notion of shared/global is with respect to input samples, i.e. a shared/global expert should see all input samples. In a collaborative setup, FDLoRA (Qi et al., 2024) learns dual LoRA modules on each client to capture personalized and global knowledge respectively. Client-wise fusion weights are learned towards the end of training to combine the two sets of knowledge. In com-parison, pFedMoE (Yi et al., 2024) jointly learns a shared homogeneous small feature extractor, a localized heteroge-neous feature extractor, and a localized routing network in an end-to-end fashion, demonstrating strong performance in the vision domain. Our work is closely related to these two works, while introducing key innovations that adapt to model heterogeneity and allow for fine-grained adaptation to target distributions. 
+
+## 3. Method 
+
+We aim to improve personalized performance for each end user, through a fine-grained mixture of general and person-alized knowledge. Building on the hierarchical insights of MoE learning, we formulate our learning objective into a bi-level optimization problem, where expert parameters are learned using the relatively large-sized training sets, while routing parameters are updated using the small-sized vali-dation sets. We further let experts diversify into generalists and specialists via parameter aggregation or localization. As the problem solver, we provide a multi-round gradient-based algorithm, of which the pseudo codes are presented in Appendix A. 
+
+3.1. Notions and Problem Setup 
+
+Each user has a training set Xtrain  
+
+> i
+
+, a small validation set 
+
+Xvalid  
+
+> i
+
+and a test set Xtest  
+
+> i
+
+, and the task is next token pre-diction. The validation set Xvalid  
+
+> i
+
+and the test set Xtest  
+
+> i
+
+are sampled from the same distribution Ptarget  
+
+> i
+
+(note this is a fuzzy concept in the language domain, by the same distribu-tion we mean from the same topic/category). The training set, Xtrain  
+
+> i
+
+, can be sampled from a different distribution than 
+
+Ptarget  
+
+> i
+
+. This is to address scenarios where distribution shifts may occur over time, such as changes in topics reflected in the typing data of mobile phone users. As illustrated in Figure 2, there are two sets of model parameters within each user: expert parameters, denoted as Θ = θG ∪ { θSi }, where 
+
+θG is shared across the users and {θSi } are user-specific specialist parameters; and routing parameters, denoted as 
+
+Φ = {ϕi}. i ∈ { 1, 2, .., N } is the user index. We use linear models as our routers. Thus, ϕix ∈ Rni produces gating values which are used to combine the ni experts at each layer, as in (1), where x is an input token, y is the corresponding layer output and Ej is the jth expert.           
+
+> pj(x) = (exp ϕix)j
+> P
+> k(exp ϕix)k
+> ,y=
+> niX
+> j=1
+> pj(x)Ej(x)(1)
+
+Our experts are simply LoRA modules, which approximate model updates ∆W ∈ Rm×n with a multiplication of two low-rank matrices A ∈ Rm×r and B ∈ Rr×n with rank 
+
+r ≪ m, n . θG and θS are disjoint sets of LoRA A and B matrices. 
+
+3.2. A Bi-Level Formulation 
+
+Instead of learning routing and expert parameters simultane-ously like the conventional way in LLMs (Zoph et al., 2022; Fedus et al., 2022a), we update the two sets of parameters in an alternating fashion. We observe a natural hierarchy between the experts and the router : the assignment of tokens to experts depends on the router’s outputs, while the experts’ parameters are updated based on the assigned tokens. In this way, the experts’ development follows the router’s decisions, 3CoMiGS: On-Device Collaborative Language Modeling 
+
+establishing an inherent leader-follower structure. Follow-ing Von Stackelberg (2010), we formulate the hierarchical problem as a bi-level optimization objective as follows: 
+
+min 
+
+> Φ
+
+X
+
+> i
+
+L(Xvalid  
+
+> i
+
+, Θ⋆(Φ), ϕi) (upper) 
+
+s.t. Θ⋆(Φ) ∈ arg min 
+
+> Θ
+
+X
+
+> i
+
+L(Xtrain  
+
+> i
+
+, θG, θSi , ϕi) (lower) where L is the language modeling loss. The routing param-eters Φ = {ϕi} are updated based on the validation loss, which reflects the target distribution (upper optimization), while the expert parameters Θ = θG ∪ { θSi } are updated using the training loss (lower optimization). This formu-lation further brings in the following benefits: 1) routing parameters are smaller in size, making them easier to overfit. By separating the two losses, the routing parameters can be updated less frequently using the smaller validation set (visual evidence of less frequent router update leading to improved performance is provided in Figure 8 in the Ap-pendix); 2) this approach handles situations where target distributions differ from training distributions more effec-tively, as the router outputs (i.e., how the experts should be weighted) can be tailored to specific tasks. 
+
+3.3. Our Algorithm 
+
+To solve our bi-level problem, we use alternating updates of the two sets of parameters. The pseudo-code of our proposed algorithm is detailed in Alg.1 in the Appendix. 
+
+Alternating Update of Θ and Φ. Alternating up-date of two sets of parameters is a standard way to solve bi-level optimization problems (Chen et al., 2021). The alternating updates of expert and rout-ing parameters are performed using local training and validation sets separately. To simplify notations, we denote fvalid (Θ, Φ) := P 
+
+> i
+
+L(Xvalid  
+
+> i
+
+, θG, θSi , ϕi) and 
+
+ftrain (Θ, Φ) := P 
+
+> i
+
+L(Xtrain  
+
+> i
+
+, θG, θSi , ϕi). Note that in con-trast to (upper) bi-level formulation, we allow parameter Θ
+
+to be free in fvalid , which makes it easier to optimize. We can write the alternating update steps as follows. 
+
+Φk+1 = arg min 
+
+> Φ
+
+fvalid (Θk, Φ), (2) 
+
+Θk+1 = arg min 
+
+> Θ
+
+ftrain (Θ, Φk+1 ). (3) Since the updates of Θ and Φ are disentangled, they do not need to be updated at the same frequency. The rout-ing parameters are smaller in size and thus can be updated less frequently. When updating model parameters, we in-clude an additional load-balancing term as in Fedus et al. (2022a), which is standard in MoE implementation and en-courages even distribution of token assignments to experts. A discussion over the load balancing term is included in Appendix C.4. It is observed that a load-balancing term can improve test performance compared to not having one. However, directing more tokens to the generalists has no noticeable effect. Given that the data is distributed among clients, when solv-ing optimization problem from equation (3), we first obtain the solutions θGi and θSi to local problems, for each client i.A parameter aggregation is then performed on the user-specific θGi via a trusted server to establish a shared θG
+
+across all users. 
+
+n ˜θG,k +1  
+
+> i
+
+, ˜θS,k +1 
+
+> i
+
+oNi=1 
+
+= arg min 
+
+> Θ
+
+ftrain (Θ, Φk+1 ),
+
+Θk+1 =
+
+ 1
+
+N
+
+X
+
+> i
+
+˜θG,k +1  
+
+> i
+
+, { ˜θS,k +1  
+
+> i
+
+}
+
+
+
+.
+
+(4) In the next round, each user replaces their θGi with the global 
+
+θG, while their θSi remains local. 
+
+3.4. Convergence Results 
+
+We study the convergence properties of our alternating min-imization process. First, we establish a linear rate of con-vergence under general assumptions on our objectives, that always hold locally , when the parameters are close to the training solution (assuming the pretrained model is not far from the fine-tuned models). Then, we show that in the case of linear experts , the same optimization procedure possesses 
+
+global linear convergence. We denote partial minimization operators from (2), (3) by 
+
+u1(Θ) := arg min 
+
+> Φ
+
+fvalid (Θ, Φ),u2(Φ) := arg min 
+
+> Θ
+
+ftrain (Θ, Φ),
+
+and their compositions by T := u2 u1 and P := u1 u2.Note that both T and P act on the corresponding spaces of 
+
+Θ and Φ: T : R|Θ| → R|Θ| and P : R|Φ| → R|Φ|.
+
+Assumption 1 (Shared Optima) . There exist Θ⋆ and Φ⋆
+
+such that 
+
+Θ⋆ = T (Θ⋆) and Φ⋆ = P (Φ⋆). (5) Eq. (5) means that fvalid and ftrain share the same global optima, which is reasonable when the train and validation data are similar, Xtrain  
+
+> i
+
+∼ Xvalid  
+
+> i
+
+, and, hence, fvalid ≈ ftrain .It also holds for overparametrized models, such as LLMs. 
+
+Assumption 2 (Contraction Property) . Let u1 and u2 be Lipschitz with some constants λ1, λ 2 > 0, for any Θ, ¯Θ
+
+and Φ, ¯Φ:
+
+∥u1(Θ) − u1( ¯Θ)∥ ≤ λ1∥Θ − ¯Θ∥,
+
+∥u2(Φ) − u2( ¯Φ)∥ ≤ λ2∥Φ − ¯Φ∥. (6) 4CoMiGS: On-Device Collaborative Language Modeling 
+
+Theorem 3.1 (Convergence under Contraction) . If As-sumptions 1, 2 hold, and λ1 · λ2 < 1, then the weights 
+
+(Θk, Φk) generated by alternating updates (2), (3) con-verge to (Θ⋆, Φ⋆) with a linear rate. 
+
+The proof is provided in Appendix F.2. We show that the contraction property holds when the objectives are convex quadratics. As a consequence, it also holds locally for any sufficiently smooth models, using their Taylor expansions around a local minimum. Large models are usually smooth, and when initialized with a well-pre-trained model, it suf-fices to guarantee local convergence. Our alternating minimization process can guarantee global convergence as well, when the experts are linear models, see Appendix F.4. This indicates a wide applicability of solving MoE objectives via alternating minimization. 
+
+Theorem 3.2 (Global Convergence for Linear Experts) . If 
+
+fvalid = ftrain and all the expert modules are linear models, we have a global linear convergence rate for a practical instance of our method. 
+
+## 4. Experiments 
+
+4.1. Setup 
+
+4.1.1. D ATASETS 
+
+We selected the following datasets to demonstrate the effi-cacy of our proposed algorithm: 1) Multilingual Wikipedia :Wikipedia articles in four languages: German, French and Italian from Wikimedia-Foundation, and Dutch from Guo et al. (2020); 2) SlimPajama : We pick the following four categories – StackExchange, Github Codes, ArXiv, Book from Soboleva et al. (2023); 3) AG News : News from cat-egories of World, Sports, Business, and Sci/Tech (Zhang et al., 2016). 4) Common Corpus (pleias, 2024): specifi-cally the following three categories – YouTube-Commons, Public Domain Books, and EU Tenders collections, and the Harvard US Patent dataset from Suzgun et al. (2022). A distinct category is assigned to a user, as it simulates the most challenging scenario for collaboration. Given our emphasis on next token prediction, we anticipate shared pre-dictions among users while maintaining category-specific distinctions. We further create the following two scenarios to showcase the wide applicability of our method: 
+
+In-Distribution Tasks. For each user, we construct vali-dation and test datasets that follow the same distribution as the training data. We address two scenarios in this context: (i) variation in language usage across users (Multilingual Wikipedia), and (ii) variation in topic coverage across users (SlimPajama, Common-Corpus). 
+
+Out-of-Distribution Tasks. For each user, we create val-idation and test datasets from a distribution different from the training data. During training, each user is assigned a single category, but their validation and test sets consist of a uniform mixture of all categories. This approach accounts for potential shifts in topics within users. 4.1.2. E XPERIMENTAL DETAILS 
+
+We choose the following base model architectures: GPT2 (124M, English only) and Llama 3.2(1B, Multilingual) 2. We incorporate LoRA modules into every linear layer, including MLP and Self-Attention Layers, following the recommen-dations of Fomenko et al. (2024). A routing mechanism is exclusively implemented atop MLP layers. The number of LoRA experts in MLP blocks depends on the local resource abundance. For more experimental details, we refer readers to Appendix B. 
+
+4.2. Data-Driven Selection: Generalist vs. Specialist 
+
+We start by equipping users with the same model architec-ture locally, to illustrate the effectiveness of our hierarchical learning of routing and expert parameters. We compare our one generalist one specialist ( CoMiGS-1G1S ) method to the following baselines. In order to match the trainable pa-rameter count of our method, we use 2 times LoRA modules within each user. • Upper and lower bounds : 1) Pretrained : Pretrained checkpoints. 2) Centralized : A single model trained using data from all users. (Note this method is an unre-alistic baseline as data cannot leave the devices due to privacy concerns.) • Baselines : 1) Local : Training individually using only local data. 2) FedAvg : Aggregating LoRA parameters across users using uniform weights, which is equivalent to applying FedAvg (McMahan et al., 2017). 3) PCL :Aggregating LoRA parameters using a client-level col-laboration graph. The graph is updated using validation performances. (Strategy 2 in Wagner et al. (2024)). 4) 
+
+pFedMoE : We directly apply the method from Yi et al. (2024) in the language domain where we update routing and expert parameters at the same time and choose tokens as a routing unit. 5) FDLoRA : Global and local parame-ters are learned, and a client-wise fusion weight is learned to combine global and local parameters. (Qi et al., 2024) • Ablations : 1) CoMiGS-2S : Both experts are specialists, meaning their weights are neither shared nor aggregated. The routing parameters are updated using a separate vali-dation set like in CoMiGS-1G1S . 2) CoMiGS-2G : Both experts are generalists, meaning their weights are always shared and aggregated. The routing parameters are up-dated like in CoMiGS-1G1S .        
+
+> 2We adopt the codes from https://github. com/karpathy/nanoGPT and https://github. com/danielgrittner/nanoGPT-LoRA ,https: //github.com/pjlab-sys4nlp/llama-moe
+
+5CoMiGS: On-Device Collaborative Language Modeling 
+
+Table 1: Mean (std) test perplexity over the users with ho-mogeneous models, averaged across 3 seeds (the lower the better). Light grey denotes in-distribution tasks and dark grey denotes out-of-distrition tasks.                                                          
+
+> Base Model GPT2-124M LLAMA 3.2-1B
+> Dataset Multilingual SlimPajama AG News Com-Corpus AG News Pretrained 156.12 37.19 90.65 30.40 29.37
+> Centralized 55.41 (0.12) 19.53 (0.14) 28.19 (0.52) 17.97 (0.19) 16.12 (0.05)
+> Local 54.38 (0.32) 26.95 (0.14) 41.46 (0.06) 20.19 (0.11) 19.96 (0.01)
+> FedAvg 58.80 (0.34) 23.27 (0.05) 31.84 (0.02) 21.95 (0.11) 15.86 (0.05)
+> PCL 54.53 (0.19) 26.99 (0.19) 32.25 (0.12) 19.65 (0.03) 16.84 (0.05)
+> pFedMoE 52.27 (0.17) 25.40 (0.09) 38.72 (0.21) 20.41 (0.05) 17.84 (0.05)
+> FDLoRA 57.45 (0.81) 22.71 (0.40) 33.61 (0.07) 22.11 (0.05) 16.64 (0.02)
+> CoMiGS - 2S 46.36 (0.16) 22.51 (0.08) 35.81 (0.13) 18.46 (0.13) 18.03 (0.11)
+> CoMiGS - 2G 58.31 (0.17) 21.36 (0.01) 31.18 (0.05) 20.18 (0.09) 15.41 (0.05)
+> CoMiGS - 1G1S 47.19 (0.10) 21.79 (0.04) 33.53 (0.03) 18.37 (0.03) 16.31 (0.05)
+
+4.2.1. R ESULT ANALYSIS 
+
+The comparison between our method and the baseline meth-ods is summarized in Table 1. 
+
+Effectiveness of Our Routing Mechanism. Depend-ing on the dataset, either CoMiGS-2G or CoMiGS-2S 
+
+achieves the highest performance. The key distinction com-pared to Local or FedAvg is the existence of a layer-wise token-level router, which learns to combine the two general-ists or specialists. This emphasizes while knowledge might be present, the way it’s combined is the key. Moreover, 
+
+pFedMoE , despite having a learned router as well, under-performs our method, even in the in-distribution scenario. The reason is that the routing parameters are updated simul-taneously with the expert parameters using the training set, and thus cannot effectively adapt to the target distribution. When a separate validation set is not available, CoMiGS 
+
+can alternatively sample a new training batch to update the routers and still offer competitive results for in-distribution tasks (see Table 5). 
+
+Token-level Collaborative Decisions Outperform Client-Level. Compared to the state-of-the-art baseline PCL and 
+
+FDLoRA , our method demonstrates a clear performance improvement. While both methods require a separate valida-tion set as in our method to determine collaboration weights, 
+
+PCL determines the weights to combine each client’s mod-els iteratively while FDLoRA determines the weights for the global and local model at the end of training. Our method, in contrast, decides the collaboration pattern based on each input token, allowing the router weights to co-adapt with the expert parameters throughout training. This enables a more flexible and fine-grained collaboration. 
+
+The Necessity of the Co-existence of Generalists and Specialists. The performances of CoMiGS-2G and 
+
+CoMiGS-2S are not consistent across the different sce-narios, while our CoMiGS-1G1S can always closely track the best-performing model, which is clearly visualized in Figure 9. Even for in-distribution tasks, it is unclear whether 
+
+CoMiGS-2G or CoMiGS-2S will outperform, suggesting both generalists and specialists are necessary as it is im-possible to determine the language structure in advance. Even drastically different users still share many of the same tokens. A data-dependent combination of generalists and specialists is required. 4.2.2. R OUTING ANALYSIS 
+
+Token-wise Analysis. Figure 3 visualizes token-level rout-ing results for models fine-tuned on the SlimPajama dataset. In the first layer, function words (e.g., ”and,” ”a,” ”on,” ”the”) are predominantly routed to generalists. In contrast, in the last layer, content words are more frequently assigned to generalists. This pattern is particularly evident for the first two users, trained on math and programming texts, where domain-specific terms are primarily routed to specialists. These findings suggest that experts in later layers develop more distinct role specializations. Importantly, only the top choice is highlighted here. The abundance of blue does not imply that generalist experts play no role in predict-ing the next token. As compared to when only specialists are present ( CoMiGS-2S ), our CoMiGS-1G1S gives more consistent results. More detailed token-wise routing result visualization including out-of-distribution tasks can be seen in Appendix E. When dealing with out-of-distribution texts, there is an increasing tendency to seek generalists, as shown in the off-diagonal entries in Figure 14-19. 
+
+Layer-wise Analysis. Figure 4 depicts the evolution of averaged layer-wise router outputs for the generalist and specialist experts on the out-of-distribution task, compar-ing CoMiGS-1G1S and pFedMoE . As training progresses, 
+
+CoMiGS-1G1S undergoes a phase transition : the layer-wise routers initially favor generalists but gradually shift towards specialists. This shift is not observed in pFedMoE ,highlighting the critical role of our routing mechanism in handling out-of-distribution tasks. Additionally, we notice different layers converge to a different expert score distri-bution. When applying our CoMiGS-1G1S , for each user, there are always certain layers where the routers consistently prefer generalists, which aligns with the fact that our tar-get distribution is a union of all local training distributions. For in-distribution tasks (Figure 10), during early stage of training, some layers favor generalists. When close to con-vergence, all layers favor specialists. We attribute this to the fact that generalists are updated with more tokens and are thus knowledgable from an early stage, while it takes longer for specialists to refine their knowledge with small local training data. 
+
+4.3. Adaptation to Computational Resource Heterogeneity 
+
+4.3.1. B ASELINE COMPARISON 
+
+In this section, our focus is to deal with computational resource heterogeneity, where users can have different num-6CoMiGS: On-Device Collaborative Language Modeling StackEx User Codes User ArXiv User Book User StackEx User Codes User ArXiv User Book User 
+
+Figure 3: Visualization of in-distribution token-level routing results for CoMiGS-1G1S trained on SlimPajama. Tokens are colored with the Top1 expert choice at the first layer (top) and last layer (bottom). Orange denotes the generalist and blue denotes the specialist. Texts are generated by ChatGPT. Further colored text plots are provided in Appendix E. 50 100 150 200                       
+
+> 0.25
+> 0.50
+> 0.75
+> Average Scores  World User
+> 50 100 150 200
+> 0.25
+> 0.50
+> 0.75
+> Sports User
+> 50 100 150 200
+> 0.25
+> 0.50
+> 0.75
+> Business User
+> 50 100 150 200
+> 0.25
+> 0.50
+> 0.75
+> Sci/Tech User
+> 50 100 150 200
+> 0.25
+> 0.50
+> 0.75
+> Average Scores
+> 50 100 150 200
+> 0.25
+> 0.50
+> 0.75
+> 50 100 150 200
+> 0.25
+> 0.50
+> 0.75
+> 50 100 150 200
+> 0.25
+> 0.50
+> 0.75
+> Generalist Specialist
+
+Figure 4: Expert Scores for the generalist expert and the 
+
+specialist expert, averaged across all tokens and multiple batches for the out-of-distribution task (AG News). X-axis: number of iterations. Top: CoMiGS-1G1S , Bottom: 
+
+pFedMoE . Darker colors indicate deeper layers. bers of experts ni. We denote different experimental setup by specifying the list of nis. We still keep one generalist expert per device, but the number of specialists can vary across the users (the variation is called One-Generalist-X-Specialists, in short, CoMiGS-1GXS ). It’s important to note that the richness of computational resources doesn’t always correlate with the complexity of local data. For instance, some users may have ample computational resources but local data in small quantities. In such cases, a crucial objec-tive is to prevent overfitting due to redundant model-fitting abilities. We compare our approach to two state-of-the-art baselines: 
+
+HetLoRA from Cho et al. (2023) and FlexLoRA from Bai et al. (2024), both of which adapt LoRA ranks based on the resource capacity of each user. HetLoRA aggregates LoRA matrices A and B by zero-padding to the maximum rank and then distributes them back using rank truncation. In contrast, FlexLoRA first reconstructs model updates 
+
+∆W and redistributes the aggregated updates using SVD. We compare our method to these baselines by matching the number of tunable parameters, measured as both active and full parameters. For example, to match the full parameter count of CoMiGS-1GXS with (4 , 2, 2, 2) LoRA experts (rank 8), LoRA modules of ranks (32 , 16 , 16 , 16) would be required. With Top2 routing, to match the active parameter count, each user would need LoRA modules of rank 16. Our results, presented in Table 2, are based on allocating varying numbers of experts to users, with computational resource availability decoupled from local task complexity. Our method outperforms the baseline methods for all in-distribution tasks, regardless of matching the full parameter count or the active parameter count. This advantage stems from the fact that both HetLoRA and FlexLoRA average model parameters across users without allocating param-eters for local adaptations, focusing on building a strong generalist model. In contrast, our approach adaptively inte-grates both generalist and specialist knowledge, excelling in scenarios where specialized knowledge is crucial. Table 2: Mean test ppl (std) over users with heterogeneous models, averaged across 3 seeds. Light / dark grey denote in-distribution and out-of-distribution tasks respectively.                                                         
+
+> OURS HET LORA FLEX LORA
+> COMIGS-1GXS ACTIVE FULL ACTIVE FULL
+> GPT2-124M
+> MULTILINGUAL
+> (2,2,4,4) 46.48 (0.16) 57.76 (0.10) 58.60 (0.20) 77.71 (0.15) 77.66 (0.06)
+> (4,4,2,2) 47.24 (0.09) 57.76 (0.10) 59.14 (0.04) 77.71 (0.15) 75.64 (0.19)
+> SLIM PAJAMA
+> (2,4,4,2) 22.10 (0.17) 23.33 (0.10) 23.15 (0.09) 22.98 (0.10) 23.03 (0.07))
+> (4,2,2,4) 22.28 (0.09) 23.33 (0.10) 23.17 (0.09) 22.98 (0.10) 23.03 (0.08)
+> AG N EWS
+> (4,2,2,2) 33.66 (0.07) 31.58 (0.14) 31.95 (0.13) 36.41 (0.18) 36.62 (0.11)
+> (2,4,4,4) 34.22 (0.09) 31.58 (0.14) 32.52 (0.19) 36.41 (0.18) 36.46 (0.04)
+> Llama3.2-1B
+> COMMON -C ORPUS
+> (2,4,4,2) 18.74 (0.14) 21.41 (0.12) 21.74 (0.09) 24.63 (0.12) 25.18 (0.08)
+> (4,2,2,4) 18.68 (0.11) 21.41 (0.12) 21.61 (0.10) 24.63 (0.12) 24.74 (0.09)
+> AG N EWS
+> (4,2,2,2) 16.39 (0.11) 15.89 (0.05) 16.02 (0.05) 17.33 (0.04) 17.52 (0.04)
+> (2,4,4,4) 16.44 (0.07) 15.89 (0.05) 16.25 (0.11) 17.33 (0.04) 17.70 (0.10)
+
+4.4. User-specific Analysis 
+
+In this section, we investigate how each user can benefit from our CoMiGS-1GXS . It is observed that our approach is more robust to overfitting due to the regularizing effect 7CoMiGS: On-Device Collaborative Language Modeling 
+
+of the generalist, while at the same time better fitting local data through the incorporation of specialist knowledge. We conduct experiments using the Multilingual Wikipedia dataset, where there are enough tokens to allocate different data quantities to users. In practice, users may not know their local data complexity, leading to a potential mismatch in resource allocation relative to data quantity. To simulate such scenarios, we allocate model capabilities—measured by ni (the number of LoRA modules per user)—either posi-tively or negatively correlated with their local data size. It is important to note that one generalist is always assigned. Top2 routing is always performed is ni ≥ 2.
+
+More Specialists Help with Higher Data Quantity. High data quantity users (French and Italian) consistently benefit from having more specialists locally, as their test perplexi-ties decrease when the number of specialists increases from 1 to 3 to 7. This suggests that when sufficient local training data is available, adding more specialists leads to improved performance. 50 100 150 200            
+
+> 50
+> 60
+> 70
+> Test Perplexity
+> German User (low)
+> 50 100 150 200
+> 60
+> 80
+> Dutch User (low)
+> 50 100 150 200
+> 40
+> 50
+> 60
+> French User (high)
+> 50 100 150 200
+> 60
+> 80
+> Italian User (high)
+> 1GXS: 2,2,2,2 1GXS: 2,2,4,4 1GXS: 2,2,8,8
+
+Figure 5: Test Perplexity vs. the number of iterations. Low and high denote data quantity. Legend denotes ni.
+
+Generalists Help to Prevent Redundant Specialists from Over-Fitting. For users with low data quantities, local model training with just two LoRA modules already results in overfitting (a trend observed in Figure 9). Our method suc-ceeds to suppress overfitting, even when fine-tuning twice or four times as many expert parameters. We attribute this to the existence of the generalists. 50 100 150 200            
+
+> 50
+> 60
+> 70
+> Test Perplexity
+> German User (low)
+> 50 100 150 200
+> 60
+> 80
+> Dutch User (low)
+> 50 100 150 200
+> 40
+> 50
+> French User (high)
+> 50 100 150 200
+> 60
+> 80
+> Italian User (high)
+> 1GXS: 2,2,2,2 1GXS: 4,4,2,2 1GXS: 8,8,2,2
+
+Figure 6: Test Perplexity vs. the number of iterations. Low and high denote data quantity. Legend denotes ni.
+
+Specialists Can Benefit Generalists. What happens if users can only support a maximum of one expert? In our setup, such users must rely on the generalist expert when participating in collaboration. Interestingly, even when their collaborators are allocated more specialists, low-resourced users with only one generalist still benefit from the refined role diversification between generalists and specialists. As a result, the generalists become more powerful, as demon-strated in Figure 7. We provide an additional example of the impact of local data quantities in Appendix D using SlimPajama dataset. 50 100 150 200            
+
+> 60
+> 65
+> 70
+> Test Perplexity
+> German User (low)
+> 50 100 150 200
+> 70
+> 80
+> 90
+> Dutch User (low)
+> 50 100 150 200
+> 40
+> 50
+> 60
+> French User (high)
+> 50 100 150 200
+> 60
+> 80
+> Italian User (high)
+> 1GXS: 1,1,1,1 1GXS: 1,1,4,4 1GXS: 1,1,8,8
+
+Figure 7: Test Perplexity vs. the number of iterations. Low and high denote data quantity. Legend denotes ni.Similar conclusions can be drawn from our empirical results. However, there is a limit to how much generalists can help prevent overfitting when the local tasks are easy. 
+
+4.5. Computational and Communication Overhead 
+
+Our approach offers a significant advantage for on-device deployment due to its minimal computational and communi-cation overhead. We compare the resource consumption of our CoMiGS-1G1S to FedAvg in Table 3, matching the parameter count for LoRA modules. The communication costs are halved compared to standard 
+
+FedAvg , as only the weights of generalist experts are ex-changed. Our framework employs a first-order algorithm, ensuring that computation and memory requirements re-main on par with those of standard FedAvg algorithms. The additional memory and computational overhead primar-ily stem from the inclusion of the router, which is minimal (1.25% increase) since the router consists of a single-layer MLP. Table 3: Extra resource consumption (per device) 
+
+CoMiGS-1G1S compared to standard FedAvg , assuming base model is GPT-124M with bfloat16 training. 
+
+COMP . O VERHEAD MEMORY COMM . C OSTS 
+
+/ FORWARD PASS / ROUND 
+
++ 5 MFLOPS + 0.035 MB -1.41 MB (+1.25%) (+1.25%) (-50%) 
+
+## 5. Conclusions 
+
+We propose a novel framework for on-device personalized collaborative fine-tuning of LLMs, grounded in an innova-tive bi-level formulation of the Mixture-of-Experts learning objective. Our fine-grained integration of generalist and specialist expert knowledge achieves superior performance in balancing personalization and collaboration within Feder-ated LLMs. Furthermore, our framework is the first to address both model and data heterogeneity in collaborative LLM train-ing. It further decouples local data quantity from resource availability, allowing high-resourced users to leverage larger datasets for improved performance while remaining resilient against overfitting in low-data scenarios. CoMiGS is both theoretically sound and resource-efficient for practical de-ployment. 8CoMiGS: On-Device Collaborative Language Modeling 
+
+## Impact Statement 
+
+We offer a collaboration framework for edge devices, aim-ing to enable smaller devices to leverage large language models (LLMs) despite limited resources and data availabil-ity. Our approach enhances fairness and mitigates privacy concerns by ensuring data remains on end devices. The pri-vacy aspects can further be enhanced by differential private aggregation of generalist weights, which we do not pursue here. The robustness towards attackers is beyond the scope of our work. Our collaboration framework has no guarantee of resilience towards adversarial attackers through the aggrega-tion of the generalist weights, which could potentially lead to misuse by certain parties. Further research is required on top of our framework to guarantee its safe deployment. 
+
+## Acknowledgements 
+
+This work was supported by the Swiss State Secretariat for Education, Research and Innovation (SERI) under contract number 22.00133 and received funding from the European Union’s Horizon 2020 research and innovation programme under grant agreement No 101017915 (DIGIPREDICT). 
+
+## References 
+
+Almansoori, A. J., Horv ´ath, S., and Tak ´a ˇc, M. Collaborative and efficient personalization with mixtures of adaptors. 
+
+arXiv preprint arXiv:2410.03497 , 2024. Anthropic. Claude ai model, 2023. URL https://www. anthropic.com/index/claude . Accessed: 2024-09-24. Apple. Apple intelligence foundation language mod-els, 2024. URL https://arxiv.org/abs/2407. 21075 .Bai, J., Chen, D., Qian, B., Yao, L., and Li, Y. Feder-ated fine-tuning of large language models under heteroge-neous language tasks and client resources. arXiv preprint arXiv:2402.11505 , 2024. Chen, C., Feng, X., Zhou, J., Yin, J., and Zheng, X. Feder-ated large language model: A position paper, 2023. URL 
+
+https://arxiv.org/abs/2307.08925 .Chen, T., Sun, Y., and Yin, W. Closing the gap: Tighter anal-ysis of alternating stochastic gradient methods for bilevel problems. Advances in Neural Information Processing Systems , 34:25294–25307, 2021. Cho, Y. J., Liu, L., Xu, Z., Fahrezi, A., Barnes, M., and Joshi, G. Heterogeneous loRA for federated fine-tuning of on-device foundation models. In International Workshop on Federated Learning in the Age of Foundation Models in Conjunction with NeurIPS 2023 , 2023. URL https: //openreview.net/forum?id=EmV9sGpZ7q .Dai, D., Deng, C., Zhao, C., Xu, R. X., Gao, H., Chen, D., Li, J., Zeng, W., Yu, X., Wu, Y., Xie, Z., Li, Y. K., Huang, P., Luo, F., Ruan, C., Sui, Z., and Liang, W. Deepseekmoe: Towards ultimate expert specialization in mixture-of-experts language models, 2024. DeepMind, G. Gemini ai model, 2023. URL https: //www.deepmind.com/research/gemini . Ac-cessed: 2024-09-24. Ding, Y., Niu, C., Wu, F., Tang, S., Lyu, C., and Chen, G. Enhancing on-device llm inference with histori-cal cloud-based llm interactions. In Proceedings of the 30th ACM SIGKDD Conference on Knowledge Discovery and Data Mining , KDD ’24, pp. 597–608, New York, NY, USA, 2024. Association for Comput-ing Machinery. ISBN 9798400704901. doi: 10.1145/ 3637528.3671679. URL https://doi.org/10. 1145/3637528.3671679 .Fan, D., Messmer, B., and Jaggi, M. Towards an empir-ical understanding of moe design choices, 2024. URL 
+
+https://arxiv.org/abs/2402.13089 .Fedus, W., Zoph, B., and Shazeer, N. Switch transformers: Scaling to trillion parameter models with simple and ef-ficient sparsity. Journal of Machine Learning Research ,23(120):1–39, 2022a. Fedus, W., Zoph, B., and Shazeer, N. Switch transformers: Scaling to trillion parameter models with simple and ef-ficient sparsity, 2022b. URL https://arxiv.org/ abs/2101.03961 .Fomenko, V., Yu, H., Lee, J., Hsieh, S., and Chen, W. A note on lora, 2024. Gaspar, H. A. and Seddon, M. P. Glolloc: Mixture of global and local experts for molecular activity prediction. In 
+
+ICLR2022 Machine Learning for Drug Discovery , 2022. Guo, M., Dai, Z., Vrandecic, D., and Al-Rfou, R. Wiki-40b: Multilingual language model dataset. In LREC 2020 , 2020. URL 
+
+http://www.lrec-conf.org/proceedings/ lrec2020/pdf/2020.lrec-1.296.pdf .Guo, P., Zeng, S., Wang, Y., Fan, H., Wang, F., and Qu, L. Selective aggregation for low-rank adaptation in federated learning, 2024. URL https://arxiv.org/abs/ 2410.01463 .Hu, E. J., Shen, Y., Wallis, P., Allen-Zhu, Z., Li, Y., Wang, S., Wang, L., and Chen, W. Lora: Low-rank adaptation of 9CoMiGS: On-Device Collaborative Language Modeling 
+
+large language models. arXiv preprint arXiv:2106.09685 ,2021. Iyengar, A. and Adusumilli, P. Bigger isn’t always better: How hybrid ai pattern enables smaller lan-guage models, 2024. URL https://www.ibm. com/blog/bigger-isnt-always-better\ -how-hybrid-ai-pattern-enables\ -smaller-language-models/ .Jiang, A. Q., Sablayrolles, A., Roux, A., Mensch, A., Savary, B., Bamford, C., Chaplot, D. S., de las Casas, D., Hanna, E. B., Bressand, F., Lengyel, G., Bour, G., Lample, G., Lavaud, L. R., Saulnier, L., Lachaux, M.-A., Stock, P., Subramanian, S., Yang, S., Antoniak, S., Scao, T. L., Gervet, T., Lavril, T., Wang, T., Lacroix, T., and Sayed, W. E. Mixtral of experts, 2024. Jordan, M. I. and Jacobs, R. A. Hierarchical mixtures of experts and the em algorithm. Neural computation , 6(2): 181–214, 1994. Kalajdzievski, D. A rank stabilization scaling factor for fine-tuning with lora, 2023. McMahan, B., Moore, E., Ramage, D., Hampson, S., and y Arcas, B. A. Communication-efficient learning of deep networks from decentralized data. In Artificial intelli-gence and statistics , pp. 1273–1282. PMLR, 2017. Meta. Llama 3.2: Revolutionizing edge ai and vi-sion with open, customizable models, Septem-ber 2024. URL https://ai.meta.com/ blog/llama-3-2-connect-2024-vision\ protect\discretionary{\char\ hyphenchar\font}{}{}edge-mobile-devices/ .Accessed: 25.11.2024. Mohtashami, A., Hartmann, F., Gooding, S., Zilka, L., Shar-ifi, M., et al. Social learning: Towards collaborative learning with large language models. arXiv preprint arXiv:2312.11441 , 2023. Nesterov, Y. Lectures on convex optimization , volume 137. Springer, 2018. Nesterov, Y. Soft clustering by convex electoral model. Soft Computing , 24(23):17609–17620, 2020. OpenAI. Chatgpt (september 26 version), 2023. URL 
+
+https://chat.openai.com/ . Large language model. Peng, D., Fu, Z., and Wang, J. PocketLLM: Enabling on-device fine-tuning for personalized LLMs. In Habernal, I., Ghanavati, S., Ravichander, A., Jain, V., Thaine, P., Igamberdiev, T., Mireshghallah, N., and Feyisetan, O. (eds.), Proceedings of the Fifth Workshop on Privacy in Natural Language Processing , pp. 91–96, Bangkok, Thailand, August 2024. Association for Computational Linguistics. URL https://aclanthology.org/ 2024.privatenlp-1.10 .pleias. Common corpus, 2024. URL https: //huggingface.co/datasets/PleIAs/ common_corpus .Qi, J., Luan, Z., Huang, S., Fung, C., Yang, H., and Qian, D. Fdlora: Personalized federated learning of large language model via dual lora tuning. arXiv preprint arXiv:2406.07925 , 2024. Qwen. Qwen2.5: A party of foundation models!, September 2024. URL https://qwenlm.github.io/blog/ qwen2.5-llm/ .Raschka, S. Practical tips for finetuning llms using lora (low-rank adaptation), 2023. URL https: //magazine.sebastianraschka.com/p/ practical-tips-for-finetuning-llms .Soboleva, D., Al-Khateeb, F., Myers, R., Steeves, J. R., Hestness, J., and Dey, N. SlimPajama: A 627B token cleaned and deduplicated version of RedPa-jama. https://www.cerebras.net/blog/ slimpajama-a-627b-token-cleaned-and\ -deduplicated-version-of-redpajama ,2023. URL https://huggingface.co/ datasets/cerebras/SlimPajama-627B .Sun, Y., Li, Z., Li, Y., and Ding, B. Improving lora in privacy-preserving federated learning. ICLR , 2024. Suzgun, M., Melas-Kyriazi, L., Sarkar, S. K., Kominers, S. D., and Shieber, S. M. The harvard uspto patent dataset: A large-scale, well-structured, and multi-purpose corpus of patent applications. 2022. URL https://arxiv. org/abs/2207.04043 .Von Stackelberg, H. Market structure and equilibrium .Springer Science & Business Media, 2010. Wagner, N., Fan, D., and Jaggi, M. Personalized collabo-rative fine-tuning for on-device large language models. 
+
+Conference on Language Modeling , 2024. Wikimedia-Foundation. Wikimedia downloads. URL 
+
+https://dumps.wikimedia.org .Xu, J., Li, Z., Chen, W., Wang, Q., Gao, X., Cai, Q., and Ling, Z. On-device language models: A comprehen-sive review, 2024. URL https://arxiv.org/abs/ 2409.00088 .Yi, L., Yu, H., Ren, C., Zhang, H., Wang, G., Liu, X., and Li, X. pfedmoe: Data-level personalization with mixture of 10 CoMiGS: On-Device Collaborative Language Modeling 
+
+experts for model-heterogeneous personalized federated learning, 2024. Zhang, J., Vahidian, S., Kuo, M., Li, C., Zhang, R., Wang, G., and Chen, Y. Towards building the feder-ated gpt: Federated instruction tuning. arXiv preprint arXiv:2305.05644 , 2023. Zhang, X., Zhao, J., and LeCun, Y. Character-level convo-lutional networks for text classification, 2016. Zoph, B., Bello, I., Kumar, S., Du, N., Huang, Y., Dean, J., Shazeer, N., and Fedus, W. St-moe: Designing stable and transferable sparse expert models. arXiv preprint arXiv:2202.08906 , 2022. 11 CoMiGS: On-Device Collaborative Language Modeling 
+
+## A. Our Algorithm 
+
+The pseudo codes of our proposed CoMiGS method are presented in Alg. 1. While the scheme requires a server, it can alternatively be implemented in a serverless all2all fashion, which requires N times more communication overhead and we do not further pursue this here. 
+
+Algorithm 1 Pseudo code of our proposed algorithm 
+
+Input: Expert parameters {θGi, 0, θSi, 0}, routing parameters {ϕi, 0}. Local training data and validation data {Xtrain  
+
+> i
+
+, Xvalid  
+
+> i
+
+},
+
+i ∈ { 1, 2, .., N }. Communication round T and routing update period τ . Load balancing weight λ.
+
+for t = 1 , ..., T do 
+
+Server aggregates generalist parameters: θGt−1 = 1
+
+> N
+
+P 
+
+> i
+
+θGi,t −1
+
+for i ∈ [0 , N ) do 
+
+Users download aggregated generalist weights and prepare model parameters for training {θGt−1, θSi,t −1, ϕi,t −1}
+
+Do gradient steps on (θGt−1, θSi,t −1) towards minimizing (7) and get (θGi,t , θSi,t )min  
+
+> θGi,θSi
+
+L(f (Xtrain  
+
+> i
+
+; θGi , θSi , ϕi,t −1), Xtrain  
+
+> i
+
+)+ 
+
+λ · L LB  
+
+> i
+
+(Xtrain  
+
+> i
+
+; θGi , θSi , ϕi,t −1)
+
+(7) 
+
+if t%τ = 0 then 
+
+Do gradient steps on ϕi,t −1 towards minimizing (8) and get ϕi,t 
+
+min 
+
+> ϕi
+
+L(f (Xvalid  
+
+> i
+
+; θGi,t , θSi,t , ϕi), Xvalid  
+
+> i
+
+)+ 
+
+λ · L LB  
+
+> i
+
+(Xvalid  
+
+> i
+
+; θGi,t , θSi,t , ϕi)
+
+(8) 
+
+end if end for 
+
+Each device i ∈ { 1, 2, .., N } sends generalist weights θGi,t to the server 
+
+end for Return: Expert parameters {θGi,T , θSi,T } and routing parameters {ϕi,T }
+
+## B. Extra Experimental Details 
+
+B.1. Training Details 
+
+Following Kalajdzievski (2023), we choose γ to be a rank-stabilized value, a technique which helps stabilize gradient norms. 
+
+α and the rank r are hyper-parameters to choose from. The LoRA modules function as follows: 
+
+W = W 0 + γ · AB , γ = α
+
+√r (9) All our experiments except the centralized ones were conducted on a single A100-SXM4-40GB GPU. The centralized learning baseline experiments were conducted on a single A100-SXM4-80GB GPU, as a batch size of 64*4 requires a larger storage capacity. We use a constant learning rate of 2 × 10 −3 for updating routing parameters and a 2 × 10 −3 learning rate with a one-cycle cosine schedule for expert parameters during fine-tuning. The LoRA rank r is set to 8 unless otherwise specified, with LoRA alpha α set to 16, following the common practice of setting alpha to twice the rank (Raschka, 2023). A load balancing weight 0.01 is always applied. 
+
+GPT2 Experiments. For AG News and Multilingual Wikipedia data splits, we conduct 20 communication rounds. For SlimPajama data splits, due to greater category diversity, we conduct 50 communication rounds. Between each pair of communication rounds, there are 10 local iterations. In each iteration, a batch size of 64 is processed with a context length 12 CoMiGS: On-Device Collaborative Language Modeling 
+
+of 128. We set the routing update period to 30 iterations, and every time we update routing parameters, we do 10 gradient steps on the validation loss. The choice of the hyperparamters is from a sweep run and we provide the evidence in Figure 8. 
+
+Llama3.2 Experiments. For AG News data splits, we conduct 10 communication rounds. For Common-corpus data splits, due to greater category diversity, we conduct 20 communication rounds. Between each pair of communication rounds, there are 10 local iterations. In each iteration, a batch size of 64 is processed with a context length of 128. We set the routing update period to 30 iterations, and every time we update routing parameters, we do 10 gradient steps on the validation loss. (1, 10) (1, 20) (1, 30) (10, 10) (10, 20) (10, 30) (20, 10) (20, 20) (20, 30) (5, 10) (5, 20) (5, 30) 
+
+> ( Routing Update Steps, Routing Update Period)
+> 0
+> 10
+> 20
+> 30
+> Test Perplexity
+
+Figure 8: Sweep results on SlimPajama data splits using GPT2-124M base model. We ablate the impact of the update period (τ ) and the number of update steps ( s) on model performance. 
+
+B.2. Datasets 
+
+The number of tokens for our experiments within each user is shown in Table 4. Given the extensive pre-training of Llama 3.2 models on over 15 trillion tokens from public sources, and the multilingual capabilities of Llama 3.2 - 1B, fine-tuning on multilingual Wikipedia or SlimPajama resulted in negligible improvements likely due to significant overlap with the pre-training data corpus. We curated another more difficult fine-tuning dataset – Common Corpus to show case the distinctions of the baseline methods. Table 4: Number of tokens in each dataset splits 
+
+User 1 User 2 User 3 User 4 Multilingual 
+
+TRAINING 557’662 407’498 556’796 451’584 VALIDATION 300’764 216’318 220’071 165’984 TEST 229’720 219’741 210’570 172’547 
+
+SlimPajama 
+
+TRAINING 1’000’000 1’000’000 1’000’000 1’000’000 VALIDATION 200’000 200’000 200’000 200’000 TEST 200’000 200’000 200’000 200’000 
+
+AG News 
+
+TRAINING 761’924 756’719 814’131 771’460 VALIDATION 48’809 48’730 50’398 48’249 TEST 48’167 47’721 48’344 49’377 
+
+Common Corpus 
+
+TRAINING 1’000’000 1’000’000 1’000’000 1’000’000 VALIDATION 200’000 200’000 200’000 200’000 TEST 200’000 200’000 200’000 200’000 
+
+## C. More Tables and Figures 
+
+C.1. Learning Curves of Different Methods 
+
+See Figure 9. 13 CoMiGS: On-Device Collaborative Language Modeling 50 100 150 200 
+
+> 50
+> 60
+> 70
+> Test Perplexity
+
+German    
+
+> 50 100 150 200
+> 60
+> 80
+
+Dutch    
+
+> 50 100 150 200
+> 40
+> 50
+> 60
+
+French    
+
+> 50 100 150 200
+> 60
+> 80
+
+Italian   
+
+> 0200 400
+> 13
+> 14
+> Test Perplexity
+
+StackEx   
+
+> 0200 400
+> 9
+> 10
+> 11
+
+Codes   
+
+> 0200 400
+> 20.0
+> 22.5
+> 25.0
+
+ArXiv   
+
+> 0200 400
+> 45
+> 50
+> 55
+
+Book    
+
+> 50 100 150 200
+> 35
+> 40
+> 45
+> Test Perplexity
+
+World    
+
+> 50 100 150 200
+> 35
+> 40
+> 45
+
+Sports    
+
+> 50 100 150 200
+> 35
+> 40
+
+Business    
+
+> 50 100 150 200
+> 30
+> 40
+
+Sci/Tech 
+
+Multilingual Wikipedia 
+
+SlimPajama 
+
+AG News     
+
+> FedAvg Local CoMiGS-2G CoMiGS-2S CoMiGS-1G1S
+
+Figure 9: Test Perplexity during training (base model: GPT2-124M): our method closely follows the best performing method 50 100 150 200 
+
+> 0.5
+> 1.0
+> Average Scores
+
+German User    
+
+> 50 100 150 200
+> 0.25
+> 0.50
+> 0.75
+
+Dutch User    
+
+> 50 100 150 200
+> 0.25
+> 0.50
+> 0.75
+
+French User    
+
+> 50 100 150 200
+> 0.25
+> 0.50
+> 0.75
+
+Italian User   
+
+> 0200 400
+> 0.25
+> 0.50
+> 0.75
+> Average Scores
+
+StackEx User   
+
+> 0200 400
+> 0.25
+> 0.50
+> 0.75
+
+Codes User   
+
+> 0200 400
+> 0.25
+> 0.50
+> 0.75
+
+ArXiv User   
+
+> 0200 400
+> 0.25
+> 0.50
+> 0.75
+
+Book User 
+
+Multilingual Wikipedia 
+
+SlimPajama  
+
+> Generalist Specialist
+
+Figure 10: Expert Scores for the generalist expert and the specialist expert from our CoMiGS-1G1S method, averaged across all tokens and multiple batches for the in-distribution task, with x-axis being the number of iterations. Darker colors represent deeper layers. 
+
+C.2. Extended Baseline Comparison 
+
+An extended version of Table 1 is presented in Table 5. In this extension, we incorporate two additional ablations: 1) Integration of a routing mechanism, updated simultaneously with the expert networks; 2) Iterative updates alternating between routing and expert parameters, with the routing parameters updated using newly-sampled training batches instead of a dedicated validation set. 2) is to address the scenario where a validation set is not available. 14 CoMiGS: On-Device Collaborative Language Modeling 
+
+Moreover, we include two other baseline methods – FFA-LoRA from Sun et al. (2024) and FedSA from Guo et al. (2024). 
+
+FFA-LoRA keeps the LoRA A matrices fixed at initialization, while FedSA always aggregates LoRA A matrices but leave LoRA B matrices localized. Notably, the comparison between scenarios ii) and iii) reveals minimal disparity, underscoring the significance of having an independent validation set exclusively for routing parameter updates. Table 5: Mean test perplexity over users with homogenous models, averaged across 3 seeds. Mean (std) with a rank locator for the mean (the lower the better). Green denotes the best performing methods and red denotes our method. 
+
+IN DISTRIBUTION OUT OF DISTRIBUTION 
+
+Multilingual SlimPajama AG News 
+
+> I
+
+) W ITHOUT ROUTING 
+
+Pretrained 156.12 37.19 90.65 
+
+Centralized 55.41 (0.12) 19.53 (0.14) 28.19 (0.52) 
+
+Local 54.38 (0.32) 26.95 (0.14) 41.46 (0.06) 
+
+FedAvg 58.80 (0.34) 23.27 (0.05) 31.84 (0.02) 
+
+FFA-LoRA 66.80 (0.20) 22.85 (0.12) 33.13 (0.09) 
+
+FedSa-LoRA 57.60 (0.14) 23.40 (0.13) 31.57 (0.10) 
+
+PCL 54.53 (0.19) 26.99 (0.19) 32.25 (0.12) 
+
+> II
+
+) U PDATE ROUTING AND EXPERT PARAMS SIMULTANEOUSLY ON TRAINING LOSS 
+
+Local-MoE 55.27 (0.40) 27.16 (0.16) 41.49 (0.01) 
+
+FedAvg-MoE 56.77 (0.37) 23.32 (0.07) 32.24 (0.08) 
+
+pFedMoE 52.27 (0.17) 22.91 (0.18) 38.72 (0.21) 
+
+> III
+
+) A LTERNATING UPDATE ROUTING PARAMS ON NEWLY SAMPLED BATCHES FROM TRAINING SET 
+
+Local-MoE - tr 53.78 (0.33) 27.78 (0.06) 41.46 (0.03) 
+
+FedAvg-MoE - tr 59.39 (0.13) 23.00 (0.01) 31.70 (0.16) 
+
+CoMiGS - tr 50.86 (0.14) 25.45 (0.01) 38.93 (0.08) 
+
+> IV
+
+) A LTERNATING UPDATE ROUTING PARAMS ON A VALIDATION SET 
+
+CoMiGS - 2S 46.36 (0.16) 22.51 (0.08) 35.81 (0.13) 
+
+CoMiGS - 2G 58.31 (0.17) 21.36 (0.01) 31.18 (0.05) 
+
+CoMiGS - 1G1S 47.19 (0.10) 21.79 (0.04) 33.53 (0.03) 
+
+C.3. HetLoRA 
+
+Analogously to the baseline experiment comparison in FlexLoRA (Bai et al., 2024), we use γ = 0 .99 as pruning strength and sweep the regularization parameter in {5 × 10 −2, 5 × 10 −3, 5 × 10 −4}.
+
+C.4. Is the Standard Load Balancing Loss Sufficient? 
+
+The standard load balancing loss encourages equal assignment of tokens to each expert. When the number of experts gets larger, there might not be enough tokens routed to the generalists, which might lead to a under-developed general knowledge. We will verify if this is indeed true. To encourage enough tokens to be routed to the generalist expert such that more general knowledge can be developed, we modify our load-balancing loss by introducing importance weighting. As we separate the 0-th expert to be the generalist expert and conduct Top-2 routing, the modified load balancing loss is as follows: 
+
+LLB  
+
+> i
+
+= 1(ni − 1) 2 + 1 · f0 · P0 +
+
+> ni−1
+
+X
+
+> j=1
+
+ni − 1(ni − 1) 2 + 1 · fj · Pj (10) 15 CoMiGS: On-Device Collaborative Language Modeling 
+
+Table 6: Test perplexity with different load balancing terms with (hetero) or without (homo) resource heterogeneity. 
+
+No LB LB (uniform) LB (generalist-favored) 
+
+AG News (homo) 33.69 (0.21) 33.53 (0.03) 33.53 (0.03) AG News (hetero) 34.31 (0.05) 34.28 (0.11) 34.22 (0.09) Multi-Wiki (homo) 47.31 (0.15) 47.19 (0.10) 47.19 (0.10) Multi-Wiki (hetero) 46.36 (0.16) 46.15 (0.04) 46.48 (0.16) SlimPajama (homo) 21.77 (0.02) 21.79 (0.04) 21.79 (0.04) SlimPajama (hetero) 22.15 (0.07) 22.10 (0.11) 22.10 (0.17) 
+
+where 
+
+fj = 1
+
+T
+
+X
+
+> x∈B
+
+1{j ∈ Top2 indices of p(x)} Pj = 1
+
+T
+
+X
+
+> x∈B
+
+pj (x) (11) 
+
+j is the expert index and p(x) = [ pj (x)] ni 
+
+> j=1
+
+is the logit output from the routing network for a specific token x. The idea is that one of the top 2 tokens should always be routed to the generalist expert, i.e. the 0-th expert. Thus, p0 
+
+> 1/2
+
+should be equal to  
+
+> pi
+> 1/2( ni−1)
+
+for i̸ = 0 . As the original load balancing loss encourages uniform distribution, this modification encourages the generalist expert to have a routing probability of 0.5 on expectation. Note that when ni = 2 , this LLB  
+
+> i
+
+is the same as the original load balancing loss as proposed in Fedus et al. (2022a). We present the results in Table 6: in both scenarios, whether users have the same or different numbers of experts, including a load-balancing term leads to a slight improvement compared to omitting it. However, encouraging more tokens to be routed to the generalists does not make a significant difference. 
+
+## D. Additional Experiments 
+
+We replicate the experiments in Section 4.3 with the SlimPajama dataset, where we assign four times as many tokens to ArXiv User and Book User as to Stack Exchange User and Codes User. 
+
+More Specialists Help with Higher Data Quantity. From Figure 11, it is evident that ArXiv User and Book User, with abundant local data, benefit from having more local experts. 0 200 400         
+
+> 13.0
+> 13.5
+> 14.0
+> Test Perplexity
+> StackEx User (low)
+> 0200 400
+> 9
+> 10
+> 11
+> Codes User (low)
+> 0200 400
+> 16
+> 18
+> 20
+> 22
+> ArXiv User (high)
+> 0200 400
+> 33
+> 34
+> 35
+> Book User (high)
+> 1GXS: 2,2,4,4 1GXS: 2,2,8,8 1GXS: 2,2,2,2
+
+Figure 11: Test Perplexity during training for the SlimPajama setup. ArXiv User and Book User have more local data and thus benefit from having more experts. The numbers in the legend indicate the number of experts ni within each user. Top-2 routing is performed. 
+
+Generalists Help to Prevent Redundant Specialists from Over-Fitting? From Figure 12, we observe more prominent overfitting than in Figure 6, likely because the tasks are objectively easier, as indicated by lower test perplexity from the beginning of fine-tuning. Generalists have limited power to prevent overfitting with easy tasks. 
+
+Specialists Can Benefit Generalists. Low-resourced users that can only support a single expert setup still benefit from collaboration, as the generalist knowledge is refined through a more detailed distinction between specialist and generalist roles via other high-resourced users. This is indicated by the enhanced performances for Stack Exchange and Codes Users. 16 CoMiGS: On-Device Collaborative Language Modeling 0 200 400         
+
+> 13.0
+> 13.5
+> 14.0
+> 14.5
+> Test Perplexity
+> StackEx User (low)
+> 0200 400
+> 9
+> 10
+> 11
+> Codes User (low)
+> 0200 400
+> 18
+> 20
+> 22
+> ArXiv User (high)
+> 0200 400
+> 33
+> 34
+> 35
+> Book User (high)
+> 1GXS: 4,4,2,2 1GXS: 8,8,2,2 1GXS: 2,2,2,2
+
+Figure 12: In this SlimPajama setup, Stack Ex User and Codes User despite having low resources locally, overfit slightly on their small-sized local data. Numbers in the legend denote the number of experts ni within each user. Top2 routing is performed. 0 200 400         
+
+> 13
+> 14
+> Test Perplexity
+> StackEx User (low)
+> 0200 400
+> 9
+> 10
+> 11
+> Codes User (low)
+> 0200 400
+> 17.5
+> 20.0
+> 22.5
+> ArXiv User (high)
+> 0200 400
+> 33
+> 34
+> 35
+> Book User (high)
+> 1GXS: 1,1,1,1 1GXS: 1,1,4,4 1GXS: 1,1,8,8
+
+Figure 13: In this SlimPajama setup, Stack Ex User and Codes User, despite having only one expert locally, still benefit from other users having more experts, thereby enhancing the generalist’s performance. The numbers in the legend indicate the number of experts, ni, within each user. Top-2 routing is applied when ni ≥ 2
+
+## E. Visualization of Expert Specialization 
+
+To visualize which tokens are routed to the generalist and specialist experts for our CoMiGS-1G1S model trained on SlimPajama, we ask ChatGPT to generate texts in the style of StackExchange, Python Codes, ArXiv Paper and Books. We then feed those texts to the user-specific models and color the token with the Top1 routed index. The routing results after the very first layer (0th), a middle layer (5th), and the very last layer (11th) are presented in Figure 14, 15 and 16. We perform the same experiments on AG News, asking ChatGPT to generate News text on the topics World, Sports, Business, and Sci/Tech. The routing results after the very first layer (0th), a middle layer (5th), and the very last layer (11th) are presented in Figure 17, 18 and 19. For all the plots, diagonal entries are in-distribution texts and off-diagonal entries are out-of-distribution texts. 17 CoMiGS: On-Device Collaborative Language Modeling StackEx Codes ArXiv   
+
+> StackEx User Book
+> Codes User ArXiv User Book User
+
+Figure 14: Visualization of token-level routing results for CoMiGS-1G1S trained on SlimPajama. Tokens are colored with the first expert choice at the 0th (first) layer. Orange denotes the generalist and blue denotes the specialist. Diagonal entries are in-distribution texts and off-diagonal entries are out-of-distribution texts. Texts are generated by ChatGPT. 18 CoMiGS: On-Device Collaborative Language Modeling StackEx Codes ArXiv   
+
+> StackEx User Book
+> Codes User ArXiv User Book User
+
+Figure 15: Visualization of token-level routing results for CoMiGS-1G1S trained on SlimPajama. Tokens are colored with the first expert choice at the 5th layer. Orange denotes the generalist and blue denotes the specialist. Diagonal entries are in-distribution texts and off-diagonal entries are out-of-distribution texts. Texts are generated by ChatGPT. 19 CoMiGS: On-Device Collaborative Language Modeling StackEx Codes ArXiv   
+
+> StackEx User Book
+> Codes User ArXiv User Book User
+
+Figure 16: Visualization of token-level routing results for CoMiGS-1G1S trained on SlimPajama. Tokens are colored with the first expert choice at the 11th (last) layer. Orange denotes the generalist and blue denotes the specialist. Diagonal entries are in-distribution texts and off-diagonal entries are out-of-distribution texts. Texts are generated by ChatGPT. 20 CoMiGS: On-Device Collaborative Language Modeling World Sports Business   
+
+> World User
+> Sci/Tech
+> Sports User Business User Sci/Tech User
+
+Figure 17: Visualization of token-level routing results for CoMiGS-1G1S trained on AG News. Tokens are colored with the first expert choice at the 0th (first) layer. Orange denotes the generalist and blue denotes the specialist. Diagonal entries are in-distribution texts and off-diagonal entries are out-of-distribution texts. Texts are generated by ChatGPT. 21 CoMiGS: On-Device Collaborative Language Modeling World Sports Business   
+
+> World User
+> Sci/Tech
+> Sports User Business User Sci/Tech User
+
+Figure 18: Visualization of token-level routing results for CoMiGS-1G1S trained on AG News. Tokens are colored with the first expert choice at the 5th (middle) layer. Orange denotes the generalist and blue denotes the specialist. Diagonal entries are in-distribution texts and off-diagonal entries are out-of-distribution texts. Texts are generated by ChatGPT. 22 CoMiGS: On-Device Collaborative Language Modeling World Sports Business   
+
+> World User
+> Sci/Tech
+> Sports User Business User Sci/Tech User
+
+Figure 19: Visualization of token-level routing results for CoMiGS-1G1S trained on AG News. Tokens are colored with the first expert choice at the 11th (last) layer. Orange denotes the generalist and blue denotes the specialist. Diagonal entries are in-distribution texts and off-diagonal entries are out-of-distribution texts. Texts are generated by ChatGPT. 23 CoMiGS: On-Device Collaborative Language Modeling 
+
+## F. Alternating Minimization Convergence 
+
+F.1. Notation 
+
+Let us recall our notation from Sections 3.3 and 3.4. We have two differentiable functions f1(Θ, Φ) ≡ fvalid (Θ, Φ) and 
+
+f2(Θ, Φ) ≡ ftrain (Θ, Φ) that constitute our problem. For the sake of generality, let us assume that the target variables Θ
+
+and Φ belong to their corresponding feasible convex sets Q and Ω,
+
+Θ ∈ Q ⊆ R|Θ|, Φ ∈ Ω ⊆ R|Φ|.
+
+Then, we consider the following alternating minimization process , starting from some initial (Θ0, Φ0), for every k ≥ 0:
+
+Φk+1 = arg min 
+
+> Φ∈Ω
+
+f1(Θk, Φ),
+
+Θk+1 = arg min 
+
+> Θ∈Q
+
+f2(Θ, Φk+1 ). (12) If f1 ≡ f2 that would be a standard alternation minimization as for minimizing one function f1. However, in our setting f1
+
+and f2 can be different. For a fixed Θ and Φ, let us denote the corresponding arg min operators by 
+
+u1(Θ) := arg min 
+
+> Φ∈Ω
+
+f1(Θ, Φ)
+
+and u2(Φ) := arg min 
+
+> Θ∈Q
+
+f2(Θ, Φ).
+
+Using this notation, we can rewrite algorithm (12) as follows: 
+
+Φk+1 = u1(Θk), Θk+1 = u2(Φk+1 ), k ≥ 0. (13) We further define the following operators: 
+
+T (Θ) := u2(u1(Θ)) ∈ Q, Θ ∈ Q, P (Φ) := u1(u2(Φ)) ∈ Ω, Φ ∈ Ω.
+
+With this notation, we can rewrite the sequence {Θk}k≥0 simply as 
+
+Θk+1 = T (Θk), k ≥ 0. (14) We use the following main assumption on functions f1 and f2:
+
+Assumption 1. There exist Θ⋆ ∈ Q and Φ⋆ ∈ Ω such that 
+
+Θ⋆ = T (Θ⋆) and Φ⋆ = P (Φ⋆) (15) 
+
+Remark 1. Note that if f1 ≡ f2 ≡ f , condition (15) holds for the global minimizer of our function (Θ⋆, Φ⋆) = arg min 
+
+> Θ∈Q, Φ∈Q
+
+f (Θ, Φ).
+
+Clearly, this assumption should hold if functions f1 and f2 are sufficiently close : f1 ≈ f2, or in case of overparametrized models. It remains an interesting open question: what are the general and joint conditions on f1 and f2 that imply (15). 
+
+F.2. Contraction and Convergence 
+
+As we will see, it is natural to assume that operators u1 and u2 are contractions . We will provide a working example of our setting in the next section, where this condition will hold. We assume to have some norms fixed on Q and Ω, that are not necessarily Euclidean. For simplicity, and when it is clear from the context, we will use the same symbol ∥ · ∥ for both norms, even though they can be different for spaces of Θ and Φ.24 CoMiGS: On-Device Collaborative Language Modeling 
+
+Assumption 2. Let u1 and u2 be Lipschitz with some constants λ1, λ 2 > 0:
+
+∥u1(Θ) − u1( ¯Θ)∥ ≤ λ1∥Θ − ¯Θ∥, ∀Θ, ¯Θ ∈ Q, 
+
+∥u2(Φ) − u2( ¯Φ)∥ ≤ λ2∥Φ − ¯Φ∥, ∀Φ, ¯Φ ∈ Ω.
+
+(16) Under these assumptions we can show the convergence of the sequence {Θk}k≥0 generated by (14). Indeed, for every 
+
+k ≥ 0, we have 
+
+∥Θk+1 − Θ⋆∥ = ∥T (Θk) − Θ⋆∥ (15) 
+
+= ∥T (Θk) − T (Θ⋆)∥
+
+= ∥u2(u1(Θk)) − u2(u1(Θ⋆)) ∥ (6) 
+
+≤ λ2∥u1(Θk) − u1(Θ⋆)∥ (6) 
+
+≤ λ1λ2∥Θk − Θ⋆∥,
+
+and we see that Θk → Θ⋆ with the linear rate. The same reasoning can be applied to the sequence {Φk}k≥1. Thus, we have established the following general convergence result. 
+
+Theorem F.1 (Theorem 3.1) . Let Assumptions 1, 2 hold and λ1 · λ2 < 1. Then, the sequence (Θk, Φk)k≥0 generated by alternating process (12) converges to (Θ⋆, Φ⋆) linearly, for every k ≥ 0:
+
+∥Θk − Θ⋆∥ ≤ (λ1λ2)k∥Θ0 − Θ⋆∥,
+
+∥Φk − Φ⋆∥ ≤ (λ1λ2)k∥Φ0 − Φ⋆∥.
+
+(17) 
+
+Example 1. Consider the following quadratic objective 
+
+f (Θ, Φ) = 12 ⟨AΘ, Θ⟩ + 12 ⟨BΦ, Φ⟩ + ⟨CΘ, Φ⟩,
+
+where A = A⊤ ∈ R|Θ|×| Θ| and B = B⊤ ∈ R|Φ|×| Φ| are symmetric matrices, and C ∈ R|Φ|×| Θ|. We assume that f is strictly convex, which means 
+
+H =
+
+ A C⊤
+
+C B
+
+
+
+≻ 0.
+
+Clearly, for this objective, we have Θ⋆ = 0 and Φ⋆ = 0. Then 
+
+u1(Θ) := arg min 
+
+> Φ
+
+f (Θ, Φ) = −B−1CΘ and 
+
+u2(Φ) := arg min 
+
+> Θ
+
+f (Θ, Φ) = −A−1C⊤Φ.
+
+Hence, the composition operator T := u2 ◦ u1 is linear: 
+
+T (Θ) = A−1C⊤B−1CΘ, (18) 
+
+and it holds 
+
+∥T (Θ) − Θ⋆∥ ≤ ∥A−1C⊤B−1C∥ · ∥ Θ − Θ⋆∥.
+
+Now, denoting by μ > 0 and L ≥ μ the smallest and the largest eigenvalues of matrix H correspondingly, and using the Schur complement, we conclude that 
+
+μI ⪯ A ⪯ LI, and μI ⪯ A − C⊤B−1C ⪯ LI, (19) 
+
+from which we are able to bound the norm of our matrix as follows: 
+
+∥A−1C⊤B−1C∥ = ∥A−1/2(C⊤B−1C)A−1/2∥ (19) 
+
+≤ L−μL < 1,
+
+which proves the contraction property. 
+
+25 CoMiGS: On-Device Collaborative Language Modeling 
+
+Example 2. Note that for a general differentiable function f , using the Taylor expansion, the operator T = u2 ◦ u1, where 
+
+u1(Θ) := arg min 
+
+> Φ
+
+f (Θ, Φ) and u2(Φ) := arg min 
+
+> Θ
+
+f (Θ, Φ), can be expressed as follows (compare with (18)): 
+
+T (Θ) − Θ⋆ = H−111 H12 H−122 H21 (Θ − Θ⋆),
+
+where 
+
+H11 =
+
+> 1
+
+R 
+
+> 0
+> ∂2f∂Θ2
+
+(Θ⋆ + τ (T (Θ) − Θ⋆), Φ⋆ + τ (u1(Θ) − Φ⋆)) dτ, 
+
+H12 =
+
+> 1
+
+R 
+
+> 0
+> ∂2f∂Θ∂Φ
+
+(Θ⋆ + τ (T (Θ) − Θ⋆), Φ⋆ + τ (u1(Θ) − Φ⋆)) dτ, 
+
+H22 =
+
+> 1
+
+R 
+
+> 0
+> ∂2f∂Φ2
+
+(Θ⋆ + τ (Θ − Θ⋆), Φ⋆ + τ (u1(Θ) − Φ⋆)) dτ, 
+
+H21 =
+
+> 1
+
+R 
+
+> 0
+> ∂2f∂Φ∂Θ
+
+(Θ⋆ + τ (Θ − Θ⋆), Φ⋆ + τ (u1(Θ) − Φ⋆)) dτ. 
+
+Therefore, assuming that the Hessian is strictly positive definite and Lipschitz continuous in a neighborhood of the solution, localizing the current point to the neighborhood, Θ ≈ Θ⋆ and Φ ≈ Φ⋆, we can obtain the contraction property, as in the previous example (see, e.g., Theorem 1.2.5 in (Nesterov, 2018) for the local analysis of Newton’s method). 
+
+F.3. Linear Modeling and Decoupling 
+
+In this section, let us study an important example of linear models , applicable to both experts and the router. As we will show, in this case and under very mild assumptions we can justify all conditions from the previous section and therefore obtain the global linear convergence for our alternating process. 
+
+Problem Formulation For simplicity, we consider the case of one client and assume that training and validation datasets are the same, Xtrain = Xvalid . However, our observations can be generalized to a more general case of several clients, and different but statistically similar datasets Xtrain ∼ Xvalid . Hence, we have, f1 ≡ f2 ≡ f . Note that in this case, our bi-level formulation is also equivalent to joint minimization of f w.r.t. all variables. We assume that our client has one generalist expert model, that we denote by θ0 ∈ Rd, and N ≥ 0 specialist experts, that we denote by θ1, . . . θN ∈ Rd. We compose these models together as matrix Θ = ( θ0, . . . , θN ). In principle, different models can have different expressivity, which we take into account in our modeling by a convex set of constraints: 
+
+Θ ∈ Q ⊆ Rd×(N +1) .We denote by ϕ0, . . . , ϕN ∈ Rd the parameters of our Router, composed together as matrix Φ = ( ϕ0, . . . , ϕN ), which can also be constrained by a convex set: Φ ∈ Ω ⊆ Rd×(N +1) . For a given data input x ∈ Rd, the Router decides which experts to use with the SoftMax operation x 7 → πΦ(x) ∈ ∆N , where 
+
+∆N := 
+
+n
+
+y ∈ RN +1 + : NP
+
+> j=0
+
+y(j) = 1 
+
+o
+
+is the standard Simplex, and 
+
+π(j) 
+
+> Φ
+
+(x) := exp( ⟨ϕj ,x⟩)   
+
+> PNk=0 exp( ⟨ϕk,x⟩)
+
+. (20) Under these assumptions, we set the following structure of our optimization objective, 
+
+f (Θ, Φ) = 1
+
+> nn
+
+P
+
+> i=1
+
+ℓi
+
+ NP
+
+> j=0
+
+π(j) 
+
+> Φ
+
+(xi) · ⟨ θj , xi⟩
+
+
+
++ α
+
+> 2
+
+
+
+∥Θ∥2 
+
+> F
+
++ ∥Φ∥2
+
+> F
+
+
+
+, (21) where x1, . . . , xn are given data vectors, and ℓi(·), 1 ≤ i ≤ n are the corresponding convex losses (e.g. the logistic loss for binary classification, or the quadratic loss for regression problem). We use α ≥ 0 as a regularization parameter, which can also be seen as the weight decay , and ∥ · ∥ F is the Frobenius norm of a matrix. 26 CoMiGS: On-Device Collaborative Language Modeling 
+
+Decoupling Let us introduce the auxiliary variables , λi ∈ ∆N , 1 ≤ i ≤ n, and Λ = ( λ1, . . . , λn) ∈ ∆nN ⊆ R(N +1) ×n,which is a column-stochastic matrix. Employing the matrix notation, we can rewrite our problem in the following form: 
+
+min 
+
+> Θ∈Q, Φ∈Ω
+> Λ∈∆nN
+
+
+
+> 1
+> nn
+
+P
+
+> i=1
+
+ℓi
+
+
+
+⟨λi, Θ⊤xi⟩
+
+
+
++ α
+
+> 2
+
+
+
+∥Θ∥2 
+
+> F
+
++ ∥Φ∥2
+
+> F
+
+
+
+: λi = πΦ(xi), 1 ≤ i ≤ n
+
+
+
+. (22) Now, we apply the relaxation of constrained problem (22) by the following decouple of λi from πΦ(xi), with some parameter μ ≥ 0 and a distance function V : ∆ N × ∆N → R+ between distributions: 
+
+min 
+
+> Θ∈Q, Φ∈Ω
+> Λ∈∆nN
+
+
+
+Fμ(Θ , Φ, Λ) := 1
+
+> nn
+
+P
+
+> i=1
+
+ℓi
+
+
+
+⟨λi, Θ⊤xi⟩
+
+
+
++ α
+
+> 2
+
+
+
+∥Θ∥2 
+
+> F
+
++ ∥Φ∥2
+
+> F
+
+
+
++ μ
+
+> 2nn
+
+P
+
+> i=1
+
+V (λi; πΦ(xi)) 
+
+
+
+. (23) A natural choice for V is the Kullback–Leibler divergence , which gives, for every 1 ≤ i ≤ n:
+
+V (λi; πΦ(xi)) := NP
+
+> j=0
+
+λi(j) ln λi(j) − NP
+
+> j=0
+
+λi(j) ln πΦ(xi)(j)(20) 
+
+= NP
+
+> j=0
+
+λi(j)
+
+ln λi(j) − ⟨ ϕj , xi⟩
+
+
+
++ ln 
+
+ NP
+
+> j=0
+
+exp  ⟨ϕj , xi⟩
+
+= d(λi) − ⟨ λi, Φ⊤xi⟩ + s(Φ⊤xi),
+
+where 
+
+d(λ) := NP
+
+> j=0
+
+λ(j) ln λ(j), λ ∈ ∆N ,
+
+is the negative entropy, and 
+
+s(y) := ln 
+
+ NP
+
+> j=0
+
+exp y(j)
+
+
+
+, y ∈ RN +1 
+
+is the log-sum-exp function. Note that both d(·) and s(·) are convex functions on their domains. Moreover, it is well known that d(·) is strongly convex w.r.t. ℓ1-norm (see, e.g., Example 2.1.2 in (Nesterov, 2018)): 
+
+⟨∇ 2d(λ)h, h⟩ ≥ ∥h∥21, λ ∈ ∆N , h ∈ RN +1 . (24) Therefore, we obtain the following decoupled optimization formulation :
+
+min 
+
+> Θ∈Q, Φ∈Ω
+> Λ∈∆nN
+
+
+
+Fμ(Θ, Φ, Λ)= 1
+
+> nn
+
+P
+
+> i=1
+
+
+
+ℓi
+
+
+
+⟨λi, Θ⊤xi⟩
+
+
+
++ μ
+
+
+
+d(λi) + s(Φ⊤xi) − ⟨ λi, Φ⊤xi⟩
+
+
+
++ α
+
+> 2
+
+
+
+∥Θ∥2 
+
+> F
+
++ ∥Φ∥2
+
+> F
+
+
+
+.
+
+(25) It is clear that setting parameter μ := + ∞, we obtain that (25) is equivalent to our original problem (22). However, for 
+
+μ < +∞ we obtain more flexible formulation with auxiliary distributions λi ∈ ∆N , each for every data sample 1 ≤ i ≤ n,that makes it easier to treat the problem. Parameters (λi) has an interpretation of latent variables , which makes our approach similar to the classical EM-algorithm (Jordan & Jacobs, 1994). We note a similar work from Almansoori et al. (2024), which proposes to train a mixture of generalists on local routers, which resembles a simplified version of our method. It is clear that function Fμ(Θ, Φ, Λ) is partially convex : it is convex w.r.t (Θ, Φ) when Λ is fixed, and it is also convex w.r.t. Λ when (Θ, Φ) is fixed. In what follows, we show that under very mild conditions and choosing regularization parameter α, μ ≥ 0 sufficiently large, we can ensure that Fμ(·) is jointly strongly convex , regardless of non-convex cross terms: ℓi
+
+ ⟨λi, Θ⊤xi⟩ and ⟨λi, Φ⊤xi⟩.Our theory generalizes a recent approach to soft clustering (Nesterov, 2020). With this technique, we will be able to show the global linear convergence rate for the alternating minimization approach that we discussed in the previous sections. 27 CoMiGS: On-Device Collaborative Language Modeling 
+
+Joint Strong Convexity Let us consider the i-th term of our objective (25) that correspond to the data sample with index 
+
+1 ≤ i ≤ n. Omitting extra indices, we obtain the following function, 
+
+F (Θ, Φ, λ) = ℓ
+
+
+
+⟨λ, Θ⊤x⟩
+
+
+
+− μ⟨λ, Φ⊤x⟩ + α
+
+> 2
+
+
+
+∥Θ∥2 
+
+> F
+
++ ∥Φ∥2
+
+> F
+
+
+
++ μd (λ) + μs (Φ⊤x), (26) where Θ ∈ Q, Φ ∈ Ω, λ ∈ ∆N . Our goal is to ensure that (26) is strongly convex w.r.t to the standard Euclidean norm of the joint variable. Namely, we establish the following result. 
+
+Proposition 1. Let the loss function ℓ(·) be convex and assume that its first derivative is bounded: ρ ≥ max t ℓ′(t). Assume that the regularization coefficient is sufficiently large: 
+
+α ≥ 2∥x∥2 max μ, ρ2 
+
+> μ
+
+. (27) 
+
+Then the objective in (26) is strongly convex. Proof. Note that our objective (26) can be separated in Φ and Θ. We construct the following functions g1 and g2.
+
+g1(Θ, λ) := ℓ
+
+
+
+⟨λ, Θ⊤x⟩
+
+
+
++ α 
+
+> 4
+
+∥Θ∥2 
+
+> F
+
++ μ 
+
+> 4
+
+d(λ) and g2(Φ, λ) := −μ⟨λ, Φ⊤x⟩ + α 
+
+> 4
+
+∥Φ∥2 
+
+> F
+
++ μ 
+
+> 4
+
+d(λ) ,
+
+and F (Θ, Φ, λ) ≡ g1(Θ, λ) + g2(Φ, λ) + α
+
+> 4
+
+
+
+∥Θ∥2 
+
+> F
+
++ ∥Φ∥2
+
+> F
+
+
+
++ μ 
+
+> 2
+
+d(λ) + μs (Φ⊤x). Since the log-sum-exp function 
+
+s(·) is strictly convex, and the negative entropy d(·), as well as the Frobenius norm, are strongly convex, it suffices to prove convexity for g1 and g2. Computing the second derivative of g1 and applying it to an arbitrary direction z = [ H; h] of corresponding shapes, we get 
+
+⟨∇ 2g1(Θ, λ)z, z⟩ = α 
+
+> 2
+
+∥H∥2 
+
+> F
+
++ μ 
+
+> 4
+
+⟨∇ 2d(λ)h, h⟩
+
++ ℓ′′ (⟨λ, Θ⊤x⟩) ·
+
+h
+
+⟨h, Θ⊤x⟩2 + ⟨λ, H⊤x⟩2 + ⟨h, Θ⊤x⟩ · ⟨ λ, H⊤x⟩
+
+i| {z }
+
+> ≥0
+
++ ℓ′(⟨λ, Θ⊤x⟩) · ⟨ h, H⊤x⟩≥ α 
+
+> 2
+
+∥H∥2 
+
+> F
+
++ μ 
+
+> 4
+
+∥h∥21 − ρ∥h∥1 · ∥ H∥F · ∥ x∥
+
+> (∗)
+
+≥ ∥h∥1 · ∥ H∥F ·
+
+p αμ  
+
+> 2
+
+− ρ∥x∥
+
+ (27) 
+
+≥ 0,
+
+where we used Young’s inequality in (∗). The bound for g2 follows by the same reasoning, substituting ℓ(t) := μt and therefore setting ρ := μ.For the decoupled optimization formulation (25) it is natural to organize iterations in the following sequential order, starting from an arbitrary Θ0 ∈ Q and Φ0 ∈ Ω, for some μ > 0:
+
+Λk+1 = arg min 
+
+> Λ∈∆nN
+
+Fμ(Θk, Φk, Λ),
+
+Φk+1 = arg min 
+
+> Φ∈Ω
+
+Fμ(Θk, Φ, Λk+1 ),
+
+Θk+1 = arg min 
+
+> Θ∈Q
+
+Fμ(Θ, Φk+1 , Λk+1 ).
+
+(28) Note that each minimization subproblem in (28) is convex and can be implemented very efficiently by means of linear algebra and convex optimization. At the same time, due to decoupling of variables and strong convexity we are able to ensure the global convergence of this process to the solution of (25). 28 CoMiGS: On-Device Collaborative Language Modeling 
+
+F.4. Convergence for Functional Residual 
+
+Note that in our decoupled optimization formulation (25), variables Θ and Φ are independent of each other, when Λ is fixed. Therefore, the second and third step in iteration process (28) can be done independently. For the sake of notation, let us denote X ≡ Λ, concatenated variable Y ≡ (Θ, Φ), and the objective in new variables as f (X, Y ) ≡ Fμ(Θ, Φ, Λ). By our previous analysis, we can assume that f is strongly convex. We denote by μ the parameter of strong convexity and by L the constant of Lipschitz continuity of the gradient of f . Its global minimum is denoted by (X⋆, Y ⋆), and correspondingly f ⋆ := f (X⋆, Y ⋆).Then, iteration process (28) can be rewritten simply as the following alternating iterations, for k ≥ 0:
+
+Yk+1 = arg min  
+
+> Y∈Y
+
+f (Xk, Y ),
+
+Xk+1 = arg min 
+
+> X∈X
+
+f (X, Yk+1 ),
+
+where X and Y are the corresponding convex domains ( X ≡ ∆nN and Y ≡ Ω × Q). Then, the stationary condition for Yk+1 (see, e.g., Theorem 3.1.23 in (Nesterov, 2018)) gives 
+
+⟨ ∂f ∂Y (Xk, Yk+1 ), Y − Yk+1 ⟩ ≥ 0, ∀Y ∈ Y . (29) Choosing 
+
+γ := μL ≤ 1, (30) we obtain 
+
+γf (X⋆, Y ⋆) + (1 − γ)f (Xk, Yk+1 )
+
+> (∗)
+
+≥ γ
+
+h
+
+f (Xk, Yk+1 ) + ⟨ ∂f ∂X (Xk, Yk+1 ), X⋆ − Xk⟩ + ⟨ ∂f ∂Y (Xk, Yk+1 ), Y ⋆ − Yk+1 ⟩ + μ 
+
+> 2
+
+∥X⋆ − Xk∥2
+
+i
+
++ (1 − γ)f (Xk, Yk+1 )
+
+> (29) ,(30)
+
+≥ f (Xk, Yk+1 ) + ⟨ ∂f ∂X (Xk, Yk+1 ), γ (X⋆ − Xk)⟩ + L 
+
+> 2
+
+∥γ(X⋆ − Xk)∥2
+
+≥ min 
+
+> X∈X
+
+n
+
+f (Xk, Yk+1 ) + ⟨ ∂f ∂X (Xk, Yk+1 ), X − Xk⟩ + L 
+
+> 2
+
+∥X − Xk∥2
+
+o
+
+> (∗∗ )
+
+≥ min 
+
+> X∈X
+
+f (X, Yk+1 ) = f (Xk+1 , Yk+1 ),
+
+where in (∗) we used strong convexity, and in (∗∗ ) we used the Lipschitz continuity of the gradient. Thus, we get the following inequality: 
+
+f (Xk+1 , Yk+1 ) − f ⋆ ≤  1 − γ
+
+f (Xk, Yk+1 ) − f ⋆
+
+
+
+,
+
+and using the same reasoning for Yk 7 → Yk+1 update, we obtain 
+
+f (Xk+1 , Yk+1 ) − f ⋆ ≤  1 − γ2
+
+f (Xk, Yk) − f ⋆
+
+
+
+,
+
+which is the global linear rate. Thus, we have established formally the following convergence result. 
+
+Theorem F.2. Let f be strongly convex with constant μ > 0, and let its gradient be Lipschitz continuous with constant 
+
+L > 0. Then, for k ≥ 0 iteration of the alternating minimization process, we have 
+
+f (Xk, Yk) − f ⋆ ≤  1 − μL
+
+2k
+
+f (X0, Y0) − f ⋆
+
+
+
+.
+
+Note that this result is directly applicable for our linear models from previous sections, f (X, Y ) ≡ Fμ(Θ, Φ, Λ), as we show that objective (25) is jointly strongly convex, when the regularization parameter is sufficiently large. 29

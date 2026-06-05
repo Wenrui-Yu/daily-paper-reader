@@ -1,0 +1,2130 @@
+Title: Scalable Private Partition Selection via Adaptive Weighting
+
+URL Source: https://openreview.net/pdf?id=NEfIaE4BI5
+
+Number of Pages: 25
+
+Markdown Content:
+# Scalable Private Partition Selection via Adaptive Weighting 
+
+Justin Y. Chen 1 Vincent Cohen-Addad 2 Alessandro Epasto 2 Morteza Zadimoghaddam 3
+
+## Abstract 
+
+In the differentially private partition selection problem (a.k.a. private set union, private key discovery), users hold subsets of items from an unbounded universe. The goal is to output as many items as possible from the union of the users’ sets while maintaining user-level differen-tial privacy. Solutions to this problem are a core building block for many privacy-preserving ML applications including vocabulary extraction in a private corpus, computing statistics over cate-gorical data and learning embeddings over user-provided items. We propose an algorithm for this problem, MaxAdaptiveDegree (MAD ), which adaptively reroutes weight from items with weight far above the threshold needed for privacy to items with smaller weight, thereby increasing the proba-bility that less frequent items are output. Our algo-rithm can be efficiently implemented in massively parallel computation systems allowing scalability to very large datasets. We prove that our algo-rithm stochastically dominates the standard paral-lel algorithm for this problem. We also develop a two-round version of our algorithm, MAD2R ,where results of the computation in the first round are used to bias the weighting in the second round to maximize the number of items output. In ex-periments, our algorithms provide the best results among parallel algorithms and scale to datasets with hundreds of billions of items, up to three orders of magnitude larger than those analyzed by prior sequential algorithms. 
+
+## 1. Introduction 
+
+The availability of large amounts of user data has been one of the driving factors for the widespread adoption and rapid development of modern machine learning and data analytics.      
+
+> 1Massachusetts Institute of Technology, Cambridge, MA, USA
+> 2Google Research, New York, NY, USA 3Google Research, Zurich, Switzerland. Correspondence to: Justin Chen <justc@mit.edu >.
+> Proceedings of the 42 nd International Conference on Machine Learning , Vancouver, Canada. PMLR 267, 2025. Copyright 2025 by the author(s).
+
+Consider the example of a system releasing information on the queries asked to a search engine over a period of time (Korolova et al., 2009; Bavadekar et al., 2021). Such a system can provide valuable insights to researchers and the public (for instance on health concerns Bavadekar et al. (2021)) but care is needed in ensuring that the queries output do not leak private and sensitive user information. In this paper, we focus on the problem of private partition selection (Desfontaines et al., 2022; Gopi et al., 2020) which models the challenge of extracting as much data as possible from such a dataset while respecting user privacy. More formally, the setting of the problem (which is also known as private set union or private key discovery) is that each user has a private subset of items (e.g., the queries issued by the user) from an unknown and unbounded universe of items (e.g., all strings). The goal is to output as many of the items in the users’ sets as possible (i.e., the queries issues by the users), while providing a strong notion of privacy—User-level Differential Privacy (DP) (Dwork & Roth, 2014). Private partition selection models many challenges beyond the example above, including the problem of extracting the vocabulary (words, tokens or n-gram) present in a private corpus (Zhang et al., 2022; Kim et al., 2021). This task is a fundamental prerequisite for many privacy-preserving natural language processing algorithms (Wilson et al., 2019; Gopi et al., 2020), including for training language mod-els for sentence completion and response generation for emails (Kim et al., 2021). Similarly, learning embedding models over categorical data often requires to identify the categories present in a private dataset (Ghazi et al., 2023; 2024). Partition selection underpins many other appli-cations including analyzing private streams (Cardoso & Rogers, 2022; Zhang et al., 2023), learning sparse his-tograms (Boneh et al., 2021), answering SQL queries (Des-fontaines et al., 2022) and sparsifying the gradients in the DP SGD method (Ghazi et al., 2023). Unsurprisingly given these applications, private partition selection algorithms (Korolova et al., 2009) are a core building block of many standard differentially private libraries e.g., PyDP (PyDP, 2024), Google’s DP Libraries (Google, 2024; Amin et al., 2022), and OpenMined DP Library (OpenMined, 2024). Real-world datasets for these applications can be mas-sive, potentially containing hundreds of billions of data 1Scalable Private Partition Selection via Adaptive Weighting 
+
+points, thus requiring algorithms for partition selection that can be efficiently run in large-scale data process-ing infrastructures—e.g., MapReduce (Dean & Ghemawat, 2004), Hadoop (Apache Software Foundation), Spark (Za-haria et al., 2016). In our work, we design a highly par-allelizable algorithm for this problem which requires con-stant parallel rounds in the Massively Parallel Computing model (Karloff et al., 2010) and does not assume to fit the input in memory. This contrasts to prior algorithms such as (Gopi et al., 2020; Carvalho et al., 2022) which all require (with the key exception of the uniform weighting method described below) to process all the data sequentially on a single machine and assume storing the input in-memory thus precluding efficient parallelization. 
+
+1.1. Weight and Threshold Approach 
+
+Before introducing our algorithm, we review the popular weighting-based approach to partition selection which is used in many algorithms (Korolova et al., 2009; Gopi et al., 2020; Carvalho et al., 2022; Swanberg et al., 2023). This approach is of interest in the context of large-scale data as some of its variants can be parallelized efficiently (Korolova et al., 2009; Swanberg et al., 2023). Notice that differential privacy imposes to not output any item which is owned by only a single user. However, it is possible for a private algorithm to output items which appear in many different sets. This intuition is at the basis of the weighting-based algorithms. Algorithms in this framework start by subsampling each user’s set to bound the maximum number of items per user. Then, these algorithms proceed by increasing, for each user, the weight associated the items present in the user data. Fi-nally, the algorithm adds Gaussian (or Laplace) noise to the total accumulated weight of each item, and outputting all items with noised weight above a certain threshold (Ko-rolova et al., 2009; Gopi et al., 2020; Carvalho et al., 2022; Swanberg et al., 2023). The amount of noise and value of the threshold depends on the privacy parameters and cru-cially on the sensitivity of the weighting function to the addition or removal of any individual user’s set. Loosely speaking, the contribution of each user to the item weights must be bounded in order to achieve differential privacy. Algorithms within this framework differ in the choice of how to assign item weights, but in all designs the key goal is that of limiting the sensitivity of the weighting function. A basic strategy is uniform weighting (Korolova et al., 2009) where each user contributes equal weight to each of the items in their set. It is easy to bound the sensitivity of this basic weighting and thus to prove differential privacy. Because of its simplicity, the basic uniform weighting al-gorithm is extremely parallelizable requiring only basic counting operations over the items in the data. Unfortunately, however, uniform weighting is lossy in that it may overallocate weight far above the threshold to high frequency items, missing an opportunity to boost the weight of items closer to the decision boundary. This has inspired the design of greedy weighting schemes such as (Gopi et al., 2020; Carvalho et al., 2022) where each user’s allocations depend on data of previously analyzed users. All of these algorithms are inherently sequential and require memory proportional to the items present in the data. To our knowledge, the uniform weighting (Korolova et al., 2009) is essentially the only known solution to the private partition selection problem which is amenable to implemen-tation in a massively parallel computation framework. The sole exception is the scalable, iterative partition selection (DP-SIPS) scheme of (Swanberg et al., 2023) which has as core computation repeated invocations of the uniform weighting algorithm. 
+
+1.2. Our Contributions 
+
+In this work, we design the first, adaptive, non-uniform weighting algorithm that is amenable to mas-sively parellel implementations. Our algorithm, called 
+
+MaxAdaptiveDegree (MAD ), requires linear work in the size of the input and can be implemented in a constant num-ber of rounds in a parallel framework. From a technical point of view, the algorithm is based on a careful rerouting of overallocated weight to less frequent items, that together with a delicate sensitivity analysis shows no privacy loss compared to uniform weighting. This means that—given the same privacy parameters—both algorithms utilize exactly the same amount of noise and the same threshold (but our algorithm can better allocate the weight). As a result, we are able to prove that our algorithm stochastically dominates the basic, uniform weighting strategy. We extend our result to multiple rounds in 
+
+MaxAdaptiveDegreeTwoRounds (MAD2R ), splitting our privacy budget across the rounds, running MAD in each round, and outputting the union of items found in both rounds. Similar to DP-SIPS, in the second round, we remove from the input any items found in the first round (this is private by post-processing). By a careful generalization of the privacy analysis of the weight and threshold approach, we show that it is possible to also use the noisy weights from the prior round. We leverage this in two ways. First, we additionally remove items which have very small weights from the first round–these have little chance of being output in the second round. Second, we bias the weighting produced by MAD in the second round to further limit overallocation to items which received large weights in the first round. The combination of these ideas yields significant empirical improvements over both the basic algorithm and DP-SIPS. 2Scalable Private Partition Selection via Adaptive Weighting 
+
+In MAD , users with a too small or large of a cardinality (we equivalently refer to this as the user’s degree) are labeled non-adaptive: these users will add uniform weight to their items (or biased weight in the case of MAD2R ). The rest of the users participate in adaptive reweighting with the pri-vacy analysis making use of the upper bound on their degree. Initially each of these users sends a small amount of weight uniformly among their items (the total amount of weight sent per user is bounded by 1 rather than the square root of their degree, which is the case for the basic weighting algorithm). Then, items with weight significantly above the threshold are truncated to only have weight slightly above the threshold (we do not want to truncate all the way to the threshold as the added noise can decrease weights). The weight removed via truncation is returned to each user pro-portional to their initial contributions. Then, users reroute a carefully chosen fraction of this “excess” weight back to their items. Finally, users add additional uniform weight to their items to make up for the small amount of weight that was initially sent. Bounding the sensitivity of MAD requires a careful analysis and is significantly more involved than for basic weight-ing. Several design choices made in our algorithm, such as using an initial uniform weighting inversely proportional to cardinality rather than square root of cardinality, using a minimum and maximum adaptive degree, and choosing the fraction of how much excess weight to reroute are all required for the following theorem to hold. Furthermore, we generalize the analysis of the weight and threshold paradigm to allow us to use noisy weights from first round in biasing weights in the second round of MAD2R . This biasing fur-ther complicates the sensitivity analysis of MAD which we address by putting limits on the minimum and maximum bias. 
+
+Theorem 1.1 (Privacy, Informal version of Theorem B.1 and Corollary B.2) . Using MAD as the weighting algorithm achieves (ε, δ )-DP with the exact same noise and threshold parameters as the basic algorithm. Running MAD in two rounds with biases via MAD2R is (ε, δ )-DP. 
+
+Within MAD , items have their weight truncated if it exceeds an “adaptive threshold” τ after adding the initial weights. 
+
+τ is set to be β standard deviations of the noise above the true threshold that will be used to determine the output where β ≥ 0 is a free parameter of the algorithm. By design, before adding noise, every item which receives at least weight τ in the basic algorithm will also receive weight at least τ by MAD . Furthermore, the weights on all other items will only be increased under MAD compared to the basic algorithm. Taking the final step of adding noise, we show the following theorem. 
+
+Theorem 1.2 (Stochastic Dominance, Informal version of Theorem C.1) . Let U be the set of items output when using the basic algorithm and let U ∗ be the set of items output when using MAD as the weighting algorithm. Then, for items 
+
+i ∈ U and a free parameter β ≥ 0,
+
+• If Pr( i ∈ U ) < Φ( β), then Pr( i ∈ U ∗) ≥ Pr( i ∈ U ).
+
+• Otherwise, Pr( i ∈ U ∗) ≥ Φ( β).where Φ is the standard Gaussian cdf. 
+
+Compared to the basic algorithm, MAD has a higher proba-bility of outputting any item that does not reach the adaptive threshold in its initial stage as it reroutes excess weight to these items. The theorem shows that MAD stochastically dominates the basic algorithm on these items. For the re-maining items, they already have an overwhelming probabil-ity of being output as their final weight before adding noise is at least several standard deviations above the threshold (this is quantitatively controlled by the parameter β). In Appendix C, we also describe a simple, concrete family of instances where MAD significantly improves upon the baselines. Finally, we conduct experiments on several publicly-available datasets with up to 800 billions of (user, item) pairs (up to three orders of magnitude larger than prior datasets used in sequential algorithms). Our algorithm outperforms scalable baselines and is competitive with the sequential baselines. 
+
+1.3. Related Work 
+
+Our algorithms are in the area of privacy preserving algo-rithms with differential privacy guarantee which is the de facto standard of privacy (we refer to (Dwork & Roth, 2014) for an introduction to this area). As we covered the appli-cation and prior work on private partition selection in the introduction, we now provide more details on the work most related to our paper. The differentially private partition selection problem was first studied in (Korolova et al., 2009). They utilized the now-standard approach of subsampling to limit the number of items in each user’s set, constructing weights over items, and thresholding noised weights to produce the output. They proposed a version of the basic weighting algorithm which uses the Laplace mechanism rather than the Gaussian mech-anism. This algorithm was also used in (Wilson et al., 2020) within the context of a private SQL system. The problem received renewed study in (Gopi et al., 2020) where the au-thors propose a generic class of greedy, sequential weighting algorithms which empirically outperform basic weighting (with either the Laplace or Gaussian mechanism). (Carvalho et al., 2022) gave an alternative greedy, sequential weighting algorithm which leverages item frequencies in cases where each user has a multiset of items. (Desfontaines et al., 2022) 3Scalable Private Partition Selection via Adaptive Weighting 
+
+analyzed in depth the optimal strategy when each user has only a single item (all sets have cardinality one). This is the only work that does not utilize the weight and thresh-old approach, but it is tailored only for this special case. The work most related to ours is DP-SIPS (Swanberg et al., 2023) which proposes the first algorithm other than basic weighting which is amenable to implementation in a paral-lel environment. DP-SIPS splits the privacy budget over a small number of rounds, runs the basic algorithm as a black box each round, and iteratively removes the items found in previous rounds for future computations. This simple idea leads to large empirical improvements, giving a scalable algorithm that has competitive performance with sequential algorithms. 
+
+## 2. Preliminaries 
+
+Definition 2.1 (Differentially-Private Partition Selection) .
+
+In the differentially-private partition selection (a.k.a. private set union or key selection) problem, there are n users with each user u having a set Su of items from an unknown and possibly infinite universe Σ of items: the input is of the form 
+
+S = {(u, S u)}u∈[n]. The goal is to output a set of items 
+
+U of maximum cardinality, such that U is a subset of the union of the users’ sets U = ∪u∈[n]Su, while maintaining user-level differentially privacy. As standard in prior work (Korolova et al., 2009; Gopi et al., 2020; Carvalho et al., 2022; Swanberg et al., 2023) we consider the central differential privacy model, where the input data is available to a curator that runs the algorithm and wants to ensure differential privacy for the output of the algorithm. We now formally define these notions. 
+
+Definition 2.2 (Neighboring Datasets) . We say that two input datasets S and S′ are neighboring if one can be ob-tained by removing a single user’s set from the other, i.e., 
+
+S′ = S ∪ { (v, S v )} for some new user v.
+
+Definition 2.3 (Differential Privacy (Dwork & Roth, 2014)) .
+
+A randomized algorithm M is (ε, δ )-differentially private, or (ε, δ )-DP, if for any two neighboring datasets S and S′
+
+and for any possible subset of outputs O ⊆ { U : U ⊆ Σ},
+
+Pr( M(S) ∈ O ) ≤ eε · Pr( M(S′) ∈ O ) + δ. 
+
+Let Φ : R → R be the standard Gaussian cumulative density function. 
+
+Proposition 2.4 (Gaussian Mechanism (Balle & Wang, 2018)) . Let f : D → Rd be a function with ℓ2 sensitiv-ity ∆2. For any ε > 0 and δ ∈ (0 , 1] , the mechanism 
+
+M (x) = f (x) + Z with Z ∼ N (0 , σ 2I) is (ε, δ )-DP if 
+
+Φ
+
+ ∆2
+
+2σ − εσ 
+
+∆2
+
+
+
+− eεΦ
+
+
+
+− ∆2
+
+2σ − εσ 
+
+∆2
+
+
+
+≤ δ. 
+
+Algorithm 1 Meta-algorithm for private partition selection. 
+
+WeightAndThreshold (S, ε, δ, ∆0, ALG , h )
+
+Input: User sets S = {(u, S u)}u∈[n], privacy parame-ters ( ε, δ), degree cap ∆0, weighting algorithm ALG , upper bound on the novel ℓ∞ sensitivity, function h : N → R
+
+Output: Subset of the union of user sets U ⊆ U =
+
+∪nu=1 Su, noisy weight vector ˜wext                                                                           
+
+> 1: Select σcorresponding to the Gaussian Mechanism (Proposi-tion 2.4) for (ε, δ/ 2) -DP with ∆2= 1 .2: Set ρ←max t∈[∆ 0]h(t) + σΦ−1
+>  1−δ
+> 2
+> 1/t 
+> 3: for all u∈[n]do
+> 4: if |Su| ≥ ∆0then
+> 5: Randomly subsample Suto ∆0items. ▷Cap user degrees. 6: end if
+> 7: end for
+> 8: w←ALG (S)▷Weights on items in U
+> 9: ˜w(i)←w(i) + N(0 , σ 2I)▷Add noise 10: U← { i∈ U : ˜ w(i)≥ρ}▷Apply threshold. 11: ˜wext (i)←
+> (
+> ˜w(i)if i∈ U N(0 , σ 2I)if i∈Σ\ U
+> ▷The i∈Σ\ U part is only for privacy analysis (we only ever query this vector on i∈ U ). 12: return U, ˜wext
+
+## 3. Weight and Threshold Meta-Algorithm 
+
+In this section, we formalize the weighting-based meta-algorithm used in prior solutions to the differentially private partition selection problem (Korolova et al., 2009; Gopi et al., 2020; Carvalho et al., 2022; Swanberg et al., 2023). Our algorithm MAD also falls within this high-level approach with a novel weighting algorithm that is both adaptive and scalable to massive data. We alter the presentation of the algorithm from prior work in a subtle, but important, way by having the algorithm release a noisy weight vector ˜wext 
+
+in addition to the normal set of items U . This allows us to develop a two-round version of our algorithm MAD2R which queries noisy weights from the first round to give improved performance in the second round, leading to signficant em-pirical benefit. The weight and threshold meta-algorithm is given in Al-gorithm 1. Input is a set of user sets S = {(u, S u)}u∈[n],privacy parameters ε and δ, a maximum degree cap ∆0, and a weighting algorithm ALG (which can itself take some op-tional input parameters), and a function h : N → R which describes the sensitivity of ALG .First, each user’s set is randomly subsampled so that the size of each resulting set is at most ∆0 (the necessity of this step will be further explicated). Then, the ALG takes in the cardinality-capped sets and produces a set of weights over all items in the union. Independent Gaussian noise with standard deviation σ is added to each coordinate of the 4Scalable Private Partition Selection via Adaptive Weighting 
+
+weights, and items with weight above a certain threshold ρ
+
+are output. By construction, this algorithm will only ever output items which belong to the true union, U ⊆ U , with the size of the output depending on the number of items with noised weight above the threshold. For the sake of analysis (and not the implementation of the algorithm), we diverge from prior work to return a vector 
+
+˜wext of noisy weights over the entire universe Σ. This vector is implicitly used in the proof of privacy for releasing the set of items U , but it is never materialized as |Σ| is unbounded. Within our algorithms, we will ensure that we only ever query entries of this vector which belong to U, so we only ever have to materialize those entries. Note, however, that it would not be private to release ˜w as the output of a final algorithm as the domain of that vector is exactly the true union of the users’ sets. The privacy of this algorithm depends on certain “sensitivity” properties of ALG as well as our choice of σ and ρ. Consider any pair of neighboring inputs S and S′ = S ∪ { (v, S v )},let U and U′ be the corresponding unions, and let w and 
+
+w′ be the item weights assigned by ALG on the two inputs, respectively. 
+
+Definition 3.1. The ℓ2 sensitivity of a weighting algorithm is defined as the smallest value ∆2 such that, 
+
+∆2 ≥
+
+sX
+
+> i∈U
+
+(w′(i) − w(i)) 2 + X
+
+> i∈U ′\U
+
+w′(i)2.
+
+Given bounded ℓ2 sensitivity, choosing the scale of noise σ
+
+appropriately for the Gaussian mechanism in Proposition 2.4 ensures that outputting the noised weights on items in U
+
+satisfies  ε, δ
+
+> 2
+
+-DP. So if we knew U, then the output of the algorithm after thresholding would be private via post-processing. However, knowledge of the union U is exactly the problem we want to solve. The challenge is that there may be items in U′ which do not appear in U. Let T = U′ \ U be these “novel” items with t = |T |. As long as the probability that any of these items are output by the algorithm is at most δ 
+
+> 2
+
+,
+
+(ε, δ )-DP will be maintained. Consider a single item i ∈ T
+
+which has zero probability of being output by a weight and threshold algorithm run on S but is given some weight w′(i)
+
+when ALG is run on S′. The item will be output only if after adding the Gaussian noise with standard deviation σ, the noised weight exceeds ρ. The probability that any item in 
+
+T is output follows from a union bound. In order to union bound only over finitely many events, we rely on the fact that t ≤ ∆0; this is why the cardinalities must be capped. This motivates the second important sensitivity measure of 
+
+ALG .
+
+Definition 3.2. The novel ℓ∞ sensitivity of a weighting al-gorithm is parameterized by the number t = |T | of items which are unique to the new user, and is defined as the small-est value ∆∞(t) such that for all possible inputs {Su}nu=1 
+
+and new user sets Sv ,
+
+∆∞(t) ≥ max  
+
+> i∈T
+
+w′(i).
+
+Then, the calculation of ρ to obtain (ε, δ )-DP is obtained based on the novel ℓ∞ sensitivity, δ, σ, and ∆0. This is formalized in the following theorem whose proof is given in Appendix B. 
+
+Theorem 3.3. Let S, (ε, δ ), ∆0, ALG , h be inputs to Algo-rithm 1. If ALG has bounded ℓ2 and novel ℓ∞ sensitivities 
+
+∆2 ≤ 1 and ∆∞(t) ≤ h(t),
+
+then releasing U, ˜wext satisfies (ε, δ )-DP. 
+
+## 4. Maximum Adaptive Degree Weighting 
+
+Our main result is an adaptive weighting algorithm 
+
+MaxAdaptiveDegree (MAD ) which is amenable to par-allel implementations and has the exact same ℓ2 and novel 
+
+ℓ∞ sensitivities as Basic . Therefore, within the weight and threshold meta-algorithm, both algorithms utilize the same noise σ and threshold ρ to maintain privacy. Our algo-rithm improves upon Basic by reallocating weight from items far above the threshold to other items. We present the full algorithm in Algorithm 2. For sim-plicity, we will first describe the “unbiased” version of our algorithm where b, b min , b max are set to ones and 
+
+UserWeights (Su, b, b min , b max ) is a vector of weights over all items with 1/√|Su| for every i ∈ Su and zeros in other coordinates. The algorithm takes two additional parameters: a maximum adaptive degree dmax ∈ (1 , ∆0]
+
+and an adaptive threshold τ = ρ + βσ for a free parame-ter β ≥ 0. Users with set cardinalities greater than dmax 
+
+are set aside and contribute basic uniform weights to their items at the end of the algorithm. The rest of the users participate in adaptive reweighting. We start from a uniform weighting where each user sends 1/|Su| weight to each of their items. Items have their weights truncated to τ and any excess weight is sent back to the users proportional to the amount they contributed. Users then reroute a carefully chosen fraction (depending on dmax ) of this excess weight across their items. Finally, each user adds 1/√|Su| − 1/|Su|
+
+to the weight of each of their items. Each of these stages requires linear work in the size of the input, i.e. the sum of the sizes of the users sets. Furthermore, each stage is straightforward to implement within a parallel framework. As there are a constant number of stages, the algorithm can be implemented with total linear work and constant number of rounds. 5Scalable Private Partition Selection via Adaptive Weighting 
+
+Algorithm 2 MAD (S, τ, d max , b, b min , b max )
+
+Input: User sets S = {(u, S u)}u∈[n], adaptive threshold τ ≥ 0, maximum adaptive degree dmax > 1, biases b : U → R,minimum bias bmin ∈ [0 .5, 1] , maximum bias bmax ∈ [1 , ∞]
+
+Output: w : U → R weighting of the items 
+
+1: Initialize weight vectors w, w init , w trunc , w reroute with zeros. 2: Set reroute discount factor α = bmin − 12√dmax .3: Iadapt = {u ∈ [n] : 
+
+l 1(bmin )2
+
+m
+
+≤ | Su| ≤ dmax } ▷ Only users with certain degrees act adaptively. 4: for all u ∈ Iadapt do 
+
+5: winit (i) += 1 /|Su| ∀i ∈ Su ▷ Initial ℓ1 sensitivity bounded weights. 6: end for 
+
+7: r(i) ← min 
+
+n
+
+0, winit (i)−τwinit (i)
+
+o
+
+for i ∈ U ▷ Fraction of weight that exceeds the threshold. 8: 9: wtrunc (i) ← min {winit (i), τ } for i ∈ U ▷ Truncate weights above threshold. 10: for all u ∈ Iadapt do 
+
+11: eu ← (1 /|Su|) P 
+
+> i∈Su
+
+r(i) ▷ Excess weight returns to each user proportional to their contribution. 12: wreroute (i) += αe u/d max for i ∈ Su ▷ Reroute excess to items, discounted by α/d max .13: end for 
+
+14: w ← wtrunc + wreroute ▷ Total ℓ1 bounded adaptive weights. 15: wub ← UserWeights (Su, b, b min , b max ) ∀u ∈ [n] ▷ See Algorithm 4. 16: for all u ∈ Iadapt do 
+
+17: w(i) += wub (i) − 1/|Su| for i ∈ Su ▷ Add ℓ2 bounded weight and subtract initial weights. 18: end for 
+
+19: for all u ∈ [n] \ Iadapt do 
+
+20: w(i) += wub (i) for i ∈ Su ▷ Add ℓ2 bounded weight for non-adaptive items. 21: end for 
+
+22: return w
+
+4.1. MAD2R : Biased Weights in Multiple Rounds 
+
+This unbiased version of MAD directly improves on the basic algorithm. We further optimize our algorithm by refining an idea from the prior work of DP-SIPS (Swanberg et al., 2023). In that work, the privacy budget is split across multi-ple rounds with Basic used in each round. In each round, items found in previous rounds are removed from the users’ sets, so that in early rounds, easy-to-output (loosely speak-ing, high frequency) items are output, with more weight being allocated to harder-to-output items in future rounds. The privacy of this approach follows from post-processing: we can freely use the differentially private output U from early rounds to remove items in later rounds. We propose MaxAdaptiveDegreeTwoRounds 
+
+(MAD2R ) which as a starting point runs MAD in two rounds, splitting the privacy budget as in DP-SIPS. As MAD 
+
+stochastically dominates Basic , this provides a drop-in improvement. Our key insight comes from the modified meta-algorithm we present in Section 3 which also outputs the vector of noisy weights ˜wext . As long as the ALG 
+
+maintains bounded sensitivity, we are free to query the noisy weights from prior rounds when constructing weights in future rounds. We leverage this by running in two rounds with the full pseudocode given in Algorithm 5. In the first round, we run the unbiased version of MAD described above to produce outputs U1 = U as well as query access to ˜wext . We will only ever query items in U, so we maintain ˜w1 which is ˜wext 
+
+restricted to U without ever materializing ˜wext . Importantly though, we never release ˜w1 as a final output. In the second round, we make three preprocessing steps before running MAD . Let σ1 be the standard deviation of the noise in the first round and ρ2 be the threshold in the second round. For parameters Clb , C ub ≥ 0, Let ˜wlb =˜w1 − Clb · σ1 and ˜wub = ˜ w1 + Cub · σ1 be lower and upper confidence bounds on the true item weights w1 in the first round, respectively. (a) (DP-SIPS) We remove items from users’ sets which belong to U1.(b) (Ours) We remove items i from users’ sets which have weight significantly below the threshold where 
+
+˜wub (i) < ρ 2. If ˜wub (i) is very small, we have little chance of outputting the item in the second round and would rather not waste weight on those items. This is particularly relevant for long-tailed distributions we often see in practice where there are many elements which appear in only one or a few users’ sets. (c) (Ours) For items with ˜wlb ≥ ρ2, we assign these items biases b(i) = ρ2/ ˜wlb (i). Via UserWeights (Algo-rithm 4), we (loosely) try to have each user contribute a b(i) fraction of their normal 1/√|Su| weight while 6Scalable Private Partition Selection via Adaptive Weighting 
+
+increasing the weights on unbiased items. As the lower bound on these item weights is very large, we do not need to spend as much of our ℓ2 budget on these items. For technical reasons, in order to preserve the over-all sensitivity of MAD , we must enforce minimum and maximum bias parameters bmin ∈ [0 .5, 1] and bmax ∈
+
+[1 , ∞). The weights returned by UserWeights are in the interval [bmin /√|Su|, bmax /√|Su] and have an ℓ2
+
+norm of 1. 
+
+4.2. Privacy 
+
+We state the key lemmas that MAD , when used in the 
+
+WeightAndThreshold meta-algorithm, is (ε, δ )-DP. The privacy of MAD2R then follows from basic composi-tion, importantly using our generalized analysis in Section 3 which allows us to compute biased weights from the noisy weights of the first round. The key technical challenge is to bound the ℓ2 and novel ℓ∞ sensitivities of MAD . Given space constraints, we defer the proofs to Appendix B. 
+
+Lemma 4.1 (Novel ℓ∞ sensitivity) . Algorithm 2 has novel 
+
+ℓ∞ sensitivity bounded by ∆∞(t) ≤ bmax √t .
+
+Lemma 4.2 (ℓ2 sensitivity) . Algorithm 2 has ℓ2-sensitivity upper bounded by 1.
+
+4.3. Utility 
+
+In Theorem 1.2, we show that for any input, MAD ’s per-formance stochastically dominates Basic : the probability that an item is output by Basic is upper bounded by the probability it is output by MAD . We defer a formal statement of Theorem 1.2 and its proof to Appendix C. This result captures the worst-case behavior of MAD ; it is always at least as good as Basic . MAD can actually do much better as it increases the weight on items below the threshold τ . In Appendix C, we also show a instance where 
+
+MAD significantly improves upon Basic and DP-SIPS. 
+
+## 5. Experiments                               
+
+> Dataset Users Items Entries Higgs 2.8 × 10 55.9 × 10 44.6 × 10 5
+> IMDb 5.0 × 10 42.0 × 10 57.6 × 10 6
+> Reddit 2.2 × 10 51.5 × 10 57.9 × 10 6
+> Finance 1.4 × 10 62.7 × 10 51.7 × 10 7
+> Wiki 2.5 × 10 56.3 × 10 51.8 × 10 7
+> Twitter 7.0 × 10 51.3 × 10 62.7 × 10 7
+> Amazon 4.0 × 10 62.5 × 10 62.4 × 10 8
+> Clueweb 9.6 × 10 89.4 × 10 84.3 × 10 10
+> Common Crawl 2.9 × 10 91.8 × 10 97.8 × 10 11
+> Table 1: Number of distinct users, distinct items, and total entries (user, item pairs). The number of entries is the sum of the sizes of all the users’ sets.
+
+We now compare the empirical performance of MAD and 
+
+MAD2R against two parallel ( Basic , DP-SIPS) and two sequential algorithms (PolicyGaussian and GreedyUpdate) for the partition selection. We observe that our algorithms output most items (at parity of privacy parameter) among the parallel algorithms for every dataset and across various parameter regimes. Moreover, parallelization allows us to analyze datasets with up to 800 billion entries, orders of magnitude larger than sequential algorithms. In the rest of the section, we describe the datasets, algorithms, and com-putational setting, before presenting our empirical results. 
+
+5.1. Datasets 
+
+We consider 9 datasets with statistics detailed in Table 1. First, we consider small-scale datasets that are suitable for fast processing by sequential algorithms in a single-core architecture. These includes, for the sake of replicabil-ity, datasets used in prior works (Gopi et al., 2020; Car-valho et al., 2022; Swanberg et al., 2023). These datasets have up to 3 million distinct items and 300 million entries. Higgs (Leskovec & Krevl, 2014) is a dataset of Tweets dur-ing the discovery of the Higgs. IMDb (Maas et al., 2011) is a dataset of movie reviews, Reddit (Gopi et al., 2020) is a dataset of posts to r/askreddit , Finance (Aenlle) is dataset of financial headlines, Wiki (Wijkhuizen) is a dataset of Wikipedia abstracts, Twitter (Axelbrooke, 2017) is a dataset of customer support tweets, and Amazon (McAuley & Leskovec, 2013; Zhang et al., 2015) is a dataset of product reviews. For each of these text-based datasets we replicate prior methodology (Gopi et al., 2020; Carvalho et al., 2022) where items represent the tokens used in a document and each document corresponds to a user (in some datasets, ac-tual users are tracked across documents, in which case, we use combine the users’ documents into one document). We also consider two very-large publicly-available datasets Clueweb (Boldi et al., 2011) and Common Crawl 1. The latter has approximately 2 billion distinct items and 800 
+
+billion entries. This is 3 orders of magnitude larger than the largest dataset used in prior work. Clueweb (Boldi et al., 2011) is a dataset of web pages and their hyper-links, items corresponds to the hyperlinks on a web page and each page corresponds to a user. Common Crawl is a very-large text dataset of crawled web pages often used in LLM research. 
+
+5.2. Algorithms and Parameters 
+
+We compare our results to both sequential and parallel al-gorithms from prior work. The sequential algorithms we compare against are PolicyGaussian (Gopi et al., 2020) and GreedyUpdate (Carvalho et al., 2022). Like our algorithm, both algorithms set an adaptive threshold τ greater than the 
+
+> 1https://www.commoncrawl.org/
+
+7Scalable Private Partition Selection via Adaptive Weighting 
+
+Dataset Parallel Algorithms Sequential Algorithms 
+
+MAD (ours) MAD2R (ours) Basic DP-SIPS PolicyGaussian GreedyUpdate Higgs 1,807 (±13) 1,767 (±15) 1,791 (±18) 1,743 (±8) 1,923 (±18) 2,809 (±11) 
+
+IMDb 2,516 (±12) 3,369 (±19) 2,504 (±7) 3,076 (±16) 3,578 (±19) 1,363 (±11) 
+
+Reddit 4,162 (±19) 6,215 (±18) 4,062 (±21) 5,784 (±30) 7,170 (±39) 6,340 (±16) 
+
+Finance 12,759 (±16) 17,785 (±28) 12,412 (±50) 16,926 (±18) 20,100 (±49) 23,556 (±27) 
+
+Wiki 7,812 (±12) 10,554 (±41) 7,753 (±36) 9,795 (±21) 11,455 (±21) 4,739 (±14) 
+
+Twitter 9,074 (±23) 14,064 (±13) 8,859 (±22) 13,499 (±50) 15,907 (±30) 15,985 (±29) 
+
+Amazon 35,797 (±63) 67,086 (±59) 35,315 (±69) 66,126 (±57) 77,846 (±127) 86,841 (±95) 
+
+Clueweb 34,692,178 34,533,524 34,603,077 34,889,208 – –Common Crawl 15,815,452 29,373,829 15,734,148 28,328,613 – –Table 2: Comparison of output size of DP partition selection algorithms with ε = 1 , δ = 10 −5, and ∆0 = 100 . A standard hyperparameter setting is fixed for each algorithm, other than DP-SIPS, where the best result is taken from privacy splits [0 .1, 0.9] and [0 .05 , 0.15 , 0.8] .For smaller datasets, sequential algorithms are also reported as oracles and results are averaged over 5 trials with one standard deviation reported parenthetically. For each dataset, the best parallel result is bolded and the best sequential result is underlined. 
+
+true threshold ρ. They try to maximize weight assigned to items up to but not exceeding τ . PolicyGaussian goes through each user set one by one and adds ℓ2 bounded weight to minimize the ℓ2 distance between the current weight and the all τ vector, w(i) = τ ∀i ∈ U . GreedyUp-date goes through each user set one by one and increments the weight of a single item in the set by one, choosing an item whose weight is currently below τ .2 As observed be-fore (Swanberg et al., 2023), sequential algorithms can have arbitrary long adpativity chains (the processing of each user can depend on all prior users processed) thus allowing larger output sizes than parallel algorithms. This, however, comes at the cost of not being parallelizable (as we observe in our experiments on the larger datasets). The parallel base-lines we compare against are Basic (Korolova et al., 2009; Gopi et al., 2020) and DP-SIPS (Swanberg et al., 2023). In DP-SIPS, the privacy budget is split into a distribution over rounds. In each round, the basic algorithm is run with the corresponding privacy budget. Items found in previous rounds are removed from all user’s sets for the next rounds. We make parameter choices which are consistent with prior work and generally work well across datasets (see Ap-pendix D for more parameter settings). Unless otherwise specified, we use ε = 1 , δ = 10 −5, and ∆0 = 100 .3 For PolicyGaussian and GreedyUpdate, we set the β = 4 to be the number of standard deviations of noise to add to the base threshold to set the adaptive threshold. For DP-SIPS, we take the best result of running with a privacy split of 
+
+[0 .1, 0.9] and [0 .05 , 0.15 , 0.8] 4. For MAD and MAD2R , we 
+
+> 2
+
+Unlike all of the other algorithm, this algorithm does not do a first step of bounding users’ degrees by ∆0 as it only assigns weight to a single item per user by design. 
+
+> 3
+
+We report these privacy settings for consistency with prior work in the literature, but observe the results are consistent across various choices. For real production deployments on large-scale sensitive data, δ is usually smaller. 
+
+> 4
+
+As this choice can have a significant effect on performance, we choose the best-performing to give this baseline the benefit of the doubt. 
+
+set dmax = 50 and β = 2 . For MAD2R , we set the privacy split of [0 .1, 0.9] , bmin = 0 .5, bmax = 2 , Clb = 1 , and 
+
+Cub = 3 .
+
+5.3. Computing Details 
+
+We perform experiments in two different computational settings. First we implement a sequential, in-memory ver-sion of all algorithms (including the parallel ones) using Python.For PolicyGaussian and GreedyUpdate we use the Python implementations from prior work (Gopi et al., 2020; Carvalho et al., 2022). This allows us to fairly test the scala-bility of the algorithms not using parallelism. As we observe next, this approach does not scale to the two largest datasets we have (Clueweb, Common Crawl). Then, we implement all parallel algorithms ( MAD , MAD2R ,
+
+Basic , DP-SIPS) using C++ in a modern multi-machine massively parallel computation framework in our institution. This framework allows to use a fleet of shared (x86 64) ar-chitecture machines with 2.45GHz clocks. The machines are shared by several projects and can have up to 256 cores and up to 512GB of RAM. The jobs are dynamically allocated RAM, machines and cores depending on need and availabil-ity. As we observe, all parallel algorithm are very scalable and run on these huge datasets within 4 hours of wall-clock time. On the other hand, both sequential algorithms cannot exploit this architecture and could not complete in 16 hours on the Clueweb dataset (we estimate they would take sev-eral days to complete on the Common Crawl dataset even assuming access to enough memory). 
+
+5.4. Results Algorithm Comparison Table 2 displays the output size of the DP partition selection algorithms (i.e., the number of privatized items output). Among parallel algorithms, 
+
+MAD2R achieves the best result on seven out of nine datasets. The two exceptions are the Higgs dataset, where MAD per-forms the best, and the Clueweb dataset, where DP-SIPS 8Scalable Private Partition Selection via Adaptive Weighting 
+
+performs the best. Both of these datasets have outlier statis-tics (see Table 1): the average size of a user set in the Higgs dataset is less than 2 and the number of unique items in the Clueweb dataset is less than the number of users. Di-rectly comparing MAD with Basic , MAD is always better, corroborating our proof of stochastic dominance. Compar-ing MAD2R with DP-SIPS, MAD2R is almost always signifi-cantly better, by up to a factor of a 9.5% improvement on the IMDb dataset. On the small scale datasets where we can run sequential algorithms, as expected from prior work (Swanberg et al., 2023), one of the two sequential algorithms yield the best re-sults across all algorithms with PolicyGaussian consistently outperforming all parallel baselines. GreedyUpdate’s perfor-mance is heavily dataset dependent, sometimes performing the best and sometimes the worst out of all algorithms. This is not a surprise as the sequential algorithms utilize much more adaptivity than even our adaptive parallel algorithm at the cost of limiting scalability. Our algorithm is still com-petitive, never outputting fewer than 86% of the items of PolicyGaussian (and outperforming GreedyUpdate on many datasets). For massive datasets, where it is simply infeasible to run the sequential algorithms, however MAD2R has the best results of all parallel algorithms. Figures comparing output sizes while varying ε, δ, ∆0, and 
+
+dmax are included in Appendix D. The relative performance of the algorithms is the same across many choices. 
+
+Absolute Utility To understand the absolute utility of our algorithms (as opposed to relative to other baselines), we focus on the performance of MAD2R on the Reddit and Com-mon Crawl datasets. In order to understand the performance in a real deployment rather than compare baselines across common parameter settings, we change the δ for the large scale Common Crawl dataset to δ = 10 −11 .On the Reddit dataset, MAD2R outputs 6,340 out of 143,556 unique items ( 4.4% ). On the other hand, 98% of users have at least one outputted item, and 45% of the entries (user-item pairs) belong to an item which is output by our algorithm. The relatively small overall fraction of items output is due in part to the fact that the Reddit dataset has 
+
+58% singleton items (items only appearing in a single user’s set). Any algorithm which outputs any singleton items is not private, as it is leaking private information belonging to a single user. For any algorithm with acceptable privacy settings, outputting items with very small frequencies is also simply not possible. In Figure 1a, we break down the number of items total in the dataset and the number output by MAD2R broken down by item frequency. Our algorithm returns almost all of the items with frequency at least 100 .On the Common Crawl dataset, MAD2R outputs 16,551,550 out of 1,803,720,630 unique items ( 0.9% ). On the other hand, 99 .9% of users have at least one outputted item and 
+
+97% of entries in the dataset belong to an item in output by our algorithm. This dataset contains 61% singleton items, and many low frequency items. In Figure 1b, we break down the number of items total in the dataset and the num-ber output by MAD2R broken down by item frequency. Our algorithm returns an overwhelming fraction of items occur-ing in at least 200 user sets on a dataset with billions of users overall. [1,2) [2,50) [50,100) [100,200) [200,500) [500, )     
+
+> Frequency Bucket
+> 10 0
+> 10 1
+> 10 2
+> 10 3
+> 10 4
+> 10 5
+> Item Count
+> 0.0e0
+> 2.8e1
+> 8.8e2
+> 2.0e3 1.7e3 1.6e3
+> 8.3e4
+> 1.3e5
+> 3.2e3 2.3e3 1.7e3 1.6e3
+> Returned
+> Total
+
+(a) Reddit Item Coverage [1,2) [2,50) [50,100) [100,200) [200,500) [500,1000) [1000, )      
+
+> Frequency Bucket
+> 10 1
+> 10 3
+> 10 5
+> 10 7
+> 10 9
+> Item Count
+> 0.0e0
+> 6.9e2
+> 6.0e4
+> 5.0e5
+> 2.8e6 3.3e6
+> 9.9e6
+> 1.1e9 6.3e8
+> 2.1e7 1.5e7 1.3e7 6.3e6 1.1e7
+> Returned
+> Total
+
+(b) Common Crawl Item Coverage Figure 1: Comparison by item frequency of the output size of 
+
+MAD2R to the total items on the Reddit and Common Crawl datasets. Parameters ε = 1 and ∆0 = 100 are fixed with 
+
+δ = 10 −5 for Reddit and δ = 10 −11 for Common Crawl. 
+
+## 6. Conclusion 
+
+We introduce MAD and MAD2R , new parallel algorithms for private partition selection which provide state-of-the-art re-sults, scale to massive datasets, and provably outperform baseline algorithms. Closing the remaining gap between parallel and sequential algorithms remains an interesting direction, as well as developing new ideas to adaptive route weight to items below the privacy threshold while maintain-ing bounded sensitivity. While we are able to prove ordinal 
+
+theoretical results (our algorithm is at least as good as an-other), it is an open challenge to develop a framework where we can prove quantitative results, perhaps comparing the competitive ratio of a private partition selection algorithm compared to some reasonably defined optimum. 9Scalable Private Partition Selection via Adaptive Weighting 
+
+## Acknowledgements 
+
+Justin Chen is supported by an NSF Graduate Research Fellowship under Grant No. 17453. Part of this work was done while he was a student researcher at Google Research. 
+
+## Impact Statement 
+
+This paper presents work whose goal is to advance the field of Machine Learning. There are many potential societal consequences of our work, none which we feel must be specifically highlighted here. 
+
+## References 
+
+Aenlle, M. Daily financial news for 6000+ stocks. URL 
+
+https://www.kaggle.com/miguelaenlle/ datasets .Amin, K., Gillenwater, J., Joseph, M., Kulesza, A., and Vassilvitskii, S. Plume: Differential privacy at scale. 
+
+arXiv preprint arXiv:2201.11603 , 2022. Apache Software Foundation. Hadoop. URL https:// hadoop.apache.org .Axelbrooke, S. Customer support on twitter, 2017. URL 
+
+https://www.kaggle.com/dsv/8841 .Balle, B. and Wang, Y.-X. Improving the gaussian mecha-nism for differential privacy: Analytical calibration and optimal denoising. In International Conference on Ma-chine Learning . PMLR, 2018. Bavadekar, S., Boulanger, A., Davis, J., Desfontaines, D., Gabrilovich, E., Gadepalli, K., Ghazi, B., Griffith, T., Gupta, J., Kamath, C., et al. Google covid-19 vaccina-tion search insights: Anonymization process description. 
+
+arXiv preprint arXiv:2107.01179 , 2021. Boldi, P., Rosa, M., Santini, M., and Vigna, S. Layered label propagation: A multiresolution coordinate-free or-dering for compressing social networks. In Srinivasan, S., Ramamritham, K., Kumar, A., Ravindra, M. P., Bertino, E., and Kumar, R. (eds.), Proceedings of the 20th inter-national conference on World Wide Web , pp. 587–596. ACM Press, 2011. Boneh, D., Boyle, E., Corrigan-Gibbs, H., Gilboa, N., and Ishai, Y. Lightweight techniques for private heavy hitters. In 2021 IEEE Symposium on Security and Privacy (SP) ,pp. 762–776. IEEE, 2021. Cardoso, A. R. and Rogers, R. Differentially private his-tograms under continual observation: Streaming selection into the unknown. In International Conference on Artifi-cial Intelligence and Statistics , pp. 2397–2419. PMLR, 2022. Carvalho, R. S., Wang, K., and Gondara, L. S. Incorporat-ing item frequency for differentially private set union. In 
+
+Proceedings of the AAAI Conference on Artificial Intelli-gence , 2022. Dean, J. and Ghemawat, S. MapReduce: Simplified Data Processing on Large Clusters. In OSDI’04: Sixth Sympo-sium on Operating System Design and Implementation ,pp. 137–150, San Francisco, CA, 2004. Desfontaines, D., Voss, J., Gipson, B., and Mandayam, C. Differentially private partition selection. In Proceedings on Privacy Enhancing Technologies , 2022. Dwork, C. and Roth, A. The algorithmic foundations of differential privacy. Foundations and Trends® in Theo-retical Computer Science , 9(3–4):211–407, 2014. Ghazi, B., Huang, Y., Kamath, P., Kumar, R., Manurangsi, P., Sinha, A., and Zhang, C. Sparsity-preserving differ-entially private training of large embedding models. In 
+
+Thirty-seventh Conference on Neural Information Pro-cessing Systems , 2023. URL https://openreview. net/forum?id=sqTcCXkG4P .Ghazi, B., Guzm ´an, C., Kamath, P., Kumar, R., and Manu-rangsi, P. Differentially private optimization with sparse gradients. arXiv preprint arXiv:2404.10881 , 2024. Google. differential-privacy Library. https://github. com/google/differential-privacy/blob/ main/common_docs/partition_selection. md , May 2024. Gopi, S., Gulhane, P., Kulkarni, J., Shen, J. H., Shokouhi, M., and Yekhanin, S. Differentially private set union. In Proceedings of the 37th International Conference on Machine Learning . PMLR, 2020. Karloff, H., Suri, S., and Vassilvitskii, S. A model of com-putation for mapreduce. In Proceedings of the twenty-first annual ACM-SIAM symposium on Discrete Algorithms ,pp. 938–948. SIAM, 2010. Kim, K., Gopi, S., Kulkarni, J., and Yekhanin, S. Differ-entially private n-gram extraction. Advances in neural information processing systems , 34:5102–5111, 2021. Korolova, A., Kenthapadi, K., Mishra, N., and Ntoulas, A. Releasing search queries and clicks privately. In Proceed-ings of the 18th international conference on World wide web , 2009. Leskovec, J. and Krevl, A. SNAP Datasets: Stan-ford large network dataset collection. http://snap. stanford.edu/data , June 2014. 10 Scalable Private Partition Selection via Adaptive Weighting 
+
+Maas, A. L., Daly, R. E., Pham, P. T., Huang, D., Ng, A. Y., and Potts, C. Learning word vectors for sen-timent analysis. In Proceedings of the 49th Annual Meeting of the Association for Computational Linguis-tics: Human Language Technologies , pp. 142–150, Port-land, Oregon, USA, June 2011. Association for Com-putational Linguistics. URL http://www.aclweb. org/anthology/P11-1015 .McAuley, J. and Leskovec, J. Hidden factors and hid-den topics: understanding rating dimensions with re-view text. Proceedings of the 7th ACM conference on Recommender systems , 2013. URL https://api. semanticscholar.org/CorpusID:6440341 .OpenMined. OpenMined PipelineDP Library. https: //github.com/OpenMined/PipelineDP , May 2024. PyDP. PyDP Library: Partition Selection. https: //pydp.readthedocs.io/en/stable/pydp. html#partition-selection , May 2024. Swanberg, M., Desfontaines, D., and Haney, S. DP-SIPS: A simpler, more scalable mechanism for differentially private partition selection. In Proceedings on Privacy Enhancing Technologies , 2023. Wijkhuizen, M. Simple/normal wikipedia ab-stracts v1. URL https://www.kaggle. com/datasets/markwijkhuizen/ simplenormal-wikipedia-abstracts-v1 .Wilson, R. J., Zhang, C. Y., Lam, W., Desfontaines, D., Simmons-Marengo, D., and Gipson, B. Differentially private sql with bounded user contribution. arXiv preprint arXiv:1909.01917 , 2019. Wilson, R. J., Zhang, C. Y., Lam, W., Desfontaines, D., Simmons-Marengo, D., and Gipson, B. Differentially pri-vate SQL with bounded user contribution. In Proceedings on Privacy Enhancing Technologies , 2020. Zaharia, M., Xin, R. S., Wendell, P., Das, T., Armbrust, M., Dave, A., Meng, X., Rosen, J., Venkataraman, S., Franklin, M. J., Ghodsi, A., Gonzalez, J., Shenker, S., and Stoica, I. Apache Spark: a unified engine for big data processing. Commun. ACM , 59(11):56–65, oct 2016. ISSN 0001-0782. doi: 10.1145/2934664. URL https: //doi.org/10.1145/2934664 .Zhang, B., Doroshenko, V., Kairouz, P., Steinke, T., Thakurta, A., Ma, Z., Apte, H., and Spacek, J. Differen-tially private stream processing at scale. arXiv preprint arXiv:2303.18086 , 2023. Zhang, X., Zhao, J., and LeCun, Y. Character-level convolutional networks for text classification. In Cortes, C., Lawrence, N., Lee, D., Sugiyama, M., and Garnett, R. (eds.), Advances in Neural Information Processing Systems , volume 28. Curran Associates, Inc., 2015. URL https://proceedings.neurips. cc/paper_files/paper/2015/file/ 250cf8b51c773f3f8dc8b4be867a9a02-Paper. pdf .Zhang, Z., Hu, X., Qu, L., Wang, Q., and Xu, Z. Feder-ated model decomposition with private vocabulary for text classification. In Empirical Methods in Natural Lan-guage Processing 2022 , pp. 6413–6425. Association for Computational Linguistics (ACL), 2022. 11 Scalable Private Partition Selection via Adaptive Weighting 
+
+## A. Algorithm Pseudocode 
+
+A.1. Basic Pseudocode Algorithm 3 Basic 
+
+Input: User sets S = {(u, S u)}u∈[n]
+
+Output: w : U → R weighting of the items 
+
+1: Initialize weight vector w with zeros 
+
+2: for all u ∈ [n] do 
+
+3: w(i) += 1 /p|Su| for i ∈ Su ▷ Add basic ℓ2 bounded weight. 4: end for 
+
+5: return w
+
+A.2. MAD and MAD2R Pseudocode 
+
+See Algorithm 2 in the main text for the pseudocode of MAD . Here, we include the pseudocode for the subroutine 
+
+UserWeights and our two-round algorithm MAD2R .
+
+Algorithm 4 UserWeights (Su, b, b min , b max )
+
+Input: User set Su ⊆ U , biases b : U → [0 , 1] , minimum bias bmin ∈ [0 .5, 1] , maximum bias bmax ∈ [1 , ∞]
+
+Output: wb : Su → R weighting of the items 
+
+1: Initialize weight vector wb with zeros 
+
+2: Sbiased = {i ∈ Su : b(i) < 1}
+
+3: Sunbiased = Su \ Sbiased 
+
+4: wb(i) ← max {bmin ,b (i)}
+
+√|Su| for i ∈ Sbiased ▷ Set biased weights, respecting min bias 5: wb(i) ← min 
+
+(
+
+> bmax
+
+√|Su| ,
+
+r 1−P 
+
+> i∈Sbiased wb(i)2
+> |Sunbiased |
+
+)
+
+for i ∈ Sunbiased ▷ Allocate remaining ℓ2 budget, respecting max bias 6: while P 
+
+> i∈Su
+
+wb(i)2 < 1 do 
+
+7: Ssmall ←
+
+
+
+i ∈ Su : wb(i) < 1√|Su|
+
+
+
+8: C ← min 
+
+ bmax /√|Su|  
+
+> max i∈Ssmall wb(i)
+
+,
+
+r
+
+1 + 1−P  
+
+> i∈Su wb(i)2
+> P
+> i∈Ssmall wb(i)2
+
+
+
+9: wb(i) ← C · wb(i) for i ∈ Ssmall ▷ Increase small weights using remaining ℓ2 budget, respecting max bias 10: end while 
+
+11: return wb
+
+12 Scalable Private Partition Selection via Adaptive Weighting 
+
+Algorithm 5 MAD2R (S, (ε1, δ 1), (ε2, δ 2), ∆0, d max , β, C lb , C ub , b min , b max )
+
+Input: User sets S = {(u, S u)}u∈[n], privacy parameters (ε1, δ 1) and (ε2, δ 2), degree cap ∆0, maximum adaptive degree 
+
+dmax , adaptive threshold excess parameter β, lower bound constant Clb , upper bound constant Cub , minimum bias bmin ,maximum bias bmax 
+
+Output: Subset of the union of user sets U = ∪nu=1 Su
+
+1: For u ∈ [n], cap Su to at most ∆0 items by random subsampling 
+
+2: Select σr corresponding to the Gaussian Mechanism (Proposition 2.4) for (εr , δ r /2) -DP with ∆2 = 1 for r ∈ { 1, 2}.
+
+3: Round 1 
+
+4: Set threshold ρ1 = max t∈[∆ 0] 1√t + σ1Φ−1
+
+ 1 − δ
+
+> 2
+
+1/t 
+
+5: w1 ← MAD (S, ρ 1 + βσ 1, d max , −→
+
+1 , 1, 1) ▷ Compute MAD (Algorithm 2) weights in the first round. 6: ˜w1 ← w1 + N (0 , σ 21 I) ▷ Add noise 7: U1 ← { i ∈ U : ˜ w1(i) ≥ ρ1} ▷ Apply threshold 8: Round 2 
+
+9: Set threshold ρ2 = max t∈[∆ 0] bmax √t + σ2Φ−1
+
+ 1 − δ
+
+> 2
+
+1/t 
+
+10: ˜wlb ← max {0, ˜w1 − Clb · σ1} ▷ Weight lower bound from Round 1 11: ˜wub ← ˜w1 + Cub · σ1 ▷ Weight upper bound from Round 1 12: Ulow ← { i ∈ U : ˜ wub < ρ 2}
+
+13: Su ← Su \ (U1 ∪ Ulow ) for u ∈ [n] ▷ Remove items found in Round 1 or with a small upper bound on the weight 14: b ← min 
+
+n
+
+1, ρ2
+
+> ˜wlb
+
+o
+
+▷ Bias weights to not overshoot threshold 15: w2 ← MAD (S, ρ 2 + βσ 2, d max , b, b min , b max ) ▷ Compute MAD (Algorithm 2) in the second round 16: ˜w2 ← w2 + N (0 , σ 22 I) ▷ Add noise 17: U2 ← { i ∈ U : ˜ w2(i) ≥ ρ2} ▷ Apply threshold 18: return U1 ∪ U2
+
+13 Scalable Private Partition Selection via Adaptive Weighting 
+
+## B. Proof of Privacy 
+
+B.1. Meta-algorithm 
+
+We start by proving the privacy of the meta-algorithm described in Section 3. 
+
+Proof of Theorem 3.3. Let wext : Σ → R be an extension of the weight vector w returned by ALG where 
+
+wext (i) = 
+
+(
+
+w(i) if i ∈ U 
+
+0 if i ∈ Σ \ U .
+
+Note that ˜wext is exactly the result of applying the Gaussian Mechanism to wext . Furthermore, the ℓ2 sensitivity (Defini-tion 3.1) of computing wext is the same as that of w as items outside of U′ do not contribute to the sensitivity as they are 0
+
+regardless of whether the input is S or S′. By the choice of σ according to Proposition 2.4 with ∆2 ≤ 1, releasing ˜wext is  ε, δ
+
+> 2
+
+-DP. The privacy of releasing U depends on our choice of the threshold ρ. We will first show that the probability that any of t
+
+i.i.d. draws from a Gaussian random variable N (0 , σ 2) exceeds σΦ−1
+
+ 1 − δ
+
+> 2
+
+1/t 
+
+is exactly δ 
+
+> 2
+
+. Let A be the bad event, 
+
+Y ∼ N (0 , σ 2), and Z ∼ N (0 , 1) :
+
+Pr( A) = 1 − Pr Y ≤ σΦ−1
+
+
+
+1 − δ
+
+2
+
+1/t !! t
+
+= 1 − Pr Z ≤ Φ−1
+
+
+
+1 − δ
+
+2
+
+1/t !! t
+
+= 1 − Φ Φ−1
+
+
+
+1 − δ
+
+2
+
+1/t !! t
+
+= 1 −
+
+
+
+1 − δ
+
+2
+
+t/t 
+
+= δ
+
+2 .
+
+By the condition that h(t) is an upper bound on ∆( t), the choice of ρ implies that, no matter how many items are novel (unique to the new user in a neighboring dataset), the probability that any of them belong to U is at most δ 
+
+> 2
+
+. Conditioned on the release of ˜wext , releasing U is  0, δ
+
+> 2
+
+-DP. By basic composition, the overall release is (ε, δ )-DP, as required. 
+
+B.2. MADW and MADW2R 
+
+We now prove the privacy of our main algorithm by bounding its ℓ2 and novel ℓ∞ sensitivities. 
+
+Theorem B.1 (Privacy of MAD2R ). Algorithm 5 is (ε1 + ε2, δ 1 + δ2)-DP. 
+
+The rest of this section will be devoted to proving this theorem. We first state as a corollary that MAD run in a single round without biases is also private. 
+
+Corollary B.2 (Privacy of MAD ). Releasing the output U from Algorithm 1 run with unbiased MAD (Algorithm 2) as the weighting algorithm and with h(t) = 1√t is (ε, δ )-DP. Proof. This follows directly from Theorem B.1 by setting (ϵ1, δ 1) = ( ϵ, δ ) and (ϵ2, δ 2) = (0 , 0) .To prove privacy, consider a weight vector w returned by Algorithm 2 for an input S = {(u, S u)}nu=1 , τ, d max , b, b min , b max 
+
+and the output w′ for an input S′ = S ∪ { (v, S v )}, τ, d max , b ′, b min , b max which includes a new user v not in the original input. Let dv be the degree of the new user. Let T = Sv \ ∪ nu=1 Su be the subset of items which appear only in Sv and not in any of the original user sets, and let t = |T |. The vectors of biases b and b′ are defined on the set of items ∪nu=1 Su and 14 Scalable Private Partition Selection via Adaptive Weighting 
+
+(∪nu=1 Su) ∪ T respectively. We remind the notation used in Algorithm 2 for vector wvb to denote the biased weight vector the new user v computes by calling Algorithm 4, i.e. UserWeights .
+
+Lemma B.3 (Novel ℓ∞ sensitivity with biases) . Assume that the adaptive threshold is τ ≥ 1, and the maximum adaptive degree is dmax ≥ 4. Then, Algorithm 2 has novel ℓ∞ sensitivity bounded by 
+
+∆∞(t) ≤ bmax 
+
+√t .
+
+where t = |T | is the cardinality of T , the set of novel items. Proof. Unpacking Definition 3.2, it suffices to show that 
+
+max  
+
+> i∈T
+
+w′(i) ≤ bmax 
+
+√t .
+
+Note that this is trivially true if dv = |Sv | > d max or dv <
+
+l 1(bmin )2
+
+m
+
+since v does not participate in adaptivity due to its too low or high degree. We will proceed by assuming this is not the case. Consider the final weight of an item i in the set of novel items T ⊆ Sv :
+
+w′(i) = w′
+
+> trunc
+
+(i) + w′
+
+> reroute
+
+(i) + wvb (i) − w′
+
+> init
+
+(i).
+
+Note that for all novel items i ∈ T , w′
+
+> init
+
+(i) = 1 
+
+> dv
+
+≤ τ as v is the sole contributor to the weight of item i. Therefore, no weight is truncated or rerouted from these items: w′
+
+> trunc
+
+(i) = w′
+
+> init
+
+(i) = 1 
+
+> dv
+
+. Expanding the definition of rerouted weight, 
+
+w′
+
+> reroute
+
+(i) = αe ′
+
+> v
+
+dmax 
+
+= αdmax dv
+
+X 
+
+> j∈Sv\T
+
+r′(j)= αdmax dv
+
+X 
+
+> j∈Sv\T
+
+w′
+
+> init
+
+(j) − w′
+
+> trunc
+
+(j)
+
+w′
+
+> init
+
+(j)
+
+≤ αdmax dv
+
+(dv − t)= αdmax 
+
+
+
+1 − tdv
+
+
+
+.
+
+Finally, note that wvb (i) ≤ bmax √dv
+
+by construction (this is the meaning of bmax ). We can bound w′(i) as 
+
+w′(i) = w′
+
+> trunc
+
+(i) + w′
+
+> reroute
+
+(i) + wvb (i) − w′
+
+> init
+
+(i)
+
+≤ 1
+
+dv
+
++ αdmax 
+
+
+
+1 − tdv
+
+
+
++ bmax 
+
+√dv
+
+− 1
+
+dv
+
+= αdmax 
+
+
+
+1 − tdv
+
+
+
++ bmax 
+
+√dv
+
+. (1) In the rest of the proof, we will show that the upper bound Equation (1) is maximized when dv = t, i.e., when the first term is zero. Recall that t ≤ dv ≤ dmax . Consider the partial derivative with respect to dv :
+
+∂∂d v
+
+ αdmax 
+
+
+
+1 − tdv
+
+
+
++ bmax 
+
+√dv
+
+
+
+= αdmax 
+
+td2
+
+> v
+
+− bmax 
+
+2d3/2
+
+> v
+
+.
+
+15 Scalable Private Partition Selection via Adaptive Weighting 
+
+Consider the condition of the derivative being non-positive: 
+
+0 ≥ αdmax 
+
+td2
+
+> v
+
+− bmax 
+
+2d3/2
+
+> v
+
+⇐⇒ bmax ≥ 2αt dmax 
+
+√dv
+
+⇐= bmax ≥ 2α√tdmax 
+
+⇐= bmax ≥ 2α
+
+√dmax 
+
+.
+
+The final condition holds as α ≤ 1 and by the assumption that dmax ≥ 4. We note that bmax is always set to be at least 
+
+1. As the derivative is non-positive, the right side of Equation (1) is maximized when dv is minimized at dv = t. Then, 
+
+∆∞(t) ≤ bmax √t , as required. Following we state some properties of the biased weights wb which will be helpful in the proof. 
+
+Lemma B.4. Let Su, b, b min , b max be valid inputs to Algorithm 4, and let wb be the weight vector returned by the algorithm. Let d = |Su|. Then, the following hold: 
+
+• wb(i) = 0 for all i ∈ U \ Su
+
+• bmin √d ≤ wb(i) ≤ bmax √d for all i ∈ Su
+
+• ∥wb∥2 ≤ 1
+
+Proof. The first claim holds as the weight vector is initialized with zeros and only indices i ∈ Su are updated by the algorithm. To simplify the notation, we define d = |Su| = |Sbiased | + |Sunbiased |. As b(i) ≤ 1 for all i ∈ U , the initial weights given to items in Sbiased are between bmin √d and 1√d . We also know that 1√d ≤ bmax √d . The sum of squares of these weights will thus be between b2 
+
+> min |Sbiased |
+> d
+
+and |Sbiased | 
+
+> d
+
+. Call this value k.Weights of items in Sunbiased are given by 
+
+min 
+
+(
+
+bmax 
+
+√d ,
+
+s
+
+1 − k
+
+|Sunbiased |
+
+)
+
+We show that the minimum of these two terms is at least 1√d ≥ bmin √d . The first term is at least 1√d since bmax ≥ 1. To observe the same for the second term, one should plugg in the upper bound of k ≤ |Sbiased | 
+
+> d
+
+. By construction, the weights are upper bounded by bmax √d . Furthermore, note that the sum of squares of the entire weight vector at this point is upper bounded by 1. In particular, it is equal to 1 for the second term of the minimization: 
+
+k + X
+
+> i∈Sbiased
+
+ 1 − k
+
+|Sunbiased |
+
+
+
+= k + (1 − k) = 1 .
+
+In the remainder of the algorithm, sum of the weights of items in Ssmall ⊆ Sunbiased may increase if the ℓ2 norm of the weight vector is strictly less than 1. Consider the weights after any such update by a multiplicative factor C defined as 
+
+C = min 
+
+(
+
+bmax /√d
+
+max i∈Ssmall wb(i) ,
+
+s
+
+1 + 1 − P 
+
+> i∈Su
+
+wb(i)2
+
+P 
+
+> i∈Ssmall
+
+wb(i)2
+
+)
+
+.
+
+Note that C > 1 by definition of Ssmall and the stopping criteria of the while loop. Therefore, none of the final weights will be less than bmin √d . Consider the first case of the minimization. Any updated weight C · wb(i) for i ∈ Ssmall will be at most 16 Scalable Private Partition Selection via Adaptive Weighting  
+
+> bmax √d
+
+as 
+
+bmax /√d
+
+max j∈Ssmall wb(j) · wb(i) ≤ max 
+
+> i∗∈Ssmall
+
+bmax /√dwb(i∗) wb(i∗) = bmax /√d. 
+
+Now, consider the second case of the maximization. Then, the squared ℓ2 norm of the weight vector will be 
+
+X
+
+> i∈Su\Ssmall
+
+wb(i)2 + X
+
+> i∈Ssmall
+
+1 + 1 − P 
+
+> j∈Su
+
+wb(j)2
+
+P 
+
+> j∈Ssmall
+
+wb(j)2
+
+!
+
+wb(i)2 = X
+
+> i∈Su
+
+wb(i)2
+
+!
+
++
+
+1 − X
+
+> j∈Su
+
+wb(j)2
+
+ = 1 .
+
+As C is taken to be the minimum of these two values, the final weight vector will satisfy all of the required bounds. We will prove a useful fact that Algorithm 2 is monotone in the sense that weights when run on S′ will only increase compared to when run on only S. We apply this proposition in upper bounding the ℓ2 sensitivity of Algorithm 2 in Lemma B.6. 
+
+Proposition B.5 (Monotonicity) . For all i ∈ ∪ u∈{ 1,...,n,v }Su,
+
+w′
+
+> init
+
+(i) ≥ winit (i)
+
+w′
+
+> trunc
+
+(i) ≥ wtrunc (i)
+
+w′
+
+> reroute
+
+(i) ≥ wreroute (i).
+
+Proof. Fix any item i. As all increments to the initial ℓ1 bounded weights are positive and non-adaptive, 
+
+w′
+
+> init
+
+(i) ≥ winit (i).
+
+In fact, the two weights are either equal or differ by a factor of 1/d v depending on whether i ∈ Sv . The calculations of the fraction of excess weight that exceeds the threshold, the truncated weights, the excess weight returned to each user, and the rerouted weights are all monotonically non-decreasing with the initial weights. Therefore, 
+
+w′
+
+> trunc
+
+(i) ≥ wtrunc 
+
+and 
+
+w′
+
+> reroute
+
+(i) ≥ wreroute .
+
+Lemma B.6 (ℓ2 sensitivity with biased weights) . Algorithm 2 has ℓ2-sensitivity upper bounded by 1.Proof. Note that this is trivially true by Lemma B. 4 if |Sv | = dv > d max or dv <
+
+l 1(bmin )2
+
+m
+
+since v does not participate in adaptivity in this case. We will proceed by assuming this is not the case. Our goal is to bound the ℓ2 norm of the difference ∆ = w′ − w, the difference in final weights with and without the new user v. We will use the notation ∆subscript = w′ 
+
+> subscript
+
+− wsubscript . Note that ∆reroute = w′ 
+
+> reroute
+
+− wreroute is the additional rerouted weight after adding user v and let ∆user = ∆ − ∆reroute be the rest of the difference. Note that ∆user 
+
+is dv -sparse and only has nonzero entries on Sv , the items of the new user. Our goal will be to bound the ℓ2 norms of 
+
+∆reroute and ∆user , thus bounding the ℓ2 sensitivity of the algorithm by triangle inequality. We start by tracking the excess weight created by v which will be useful in bounding the ℓ2 norms of both ∆reroute and 
+
+∆user . It is the total amount of weight added by v to items that exceed the threshold 5:
+
+γ = ∥∆init − ∆trunc ∥1 (2) (Note that this is not the same as e′ 
+
+> v
+
+which is the amount of weight from v gets returned to reroute.) 
+
+> 5
+
+If if an item i only exceeds the threshold due to the addition of v, we only consider the allocated weight to i above the threshold. 
+
+17 Scalable Private Partition Selection via Adaptive Weighting 
+
+The total amount of weight that is returned to users to reroute is equal to the amount of weight truncated, i.e., the sum of 
+
+winit − wtrunc :
+
+> n
+
+X
+
+> u=1
+
+eu =
+
+> n
+
+X
+
+> u=1
+
+(1 /|Su|) X
+
+> i∈Su
+
+r(i)=
+
+> n
+
+X
+
+> u=1
+
+(1 /|Su|) X
+
+> i∈Su
+
+max 
+
+
+
+0, winit (i) − τwinit (i)
+
+
+
+=
+
+> n
+
+X
+
+> u=1
+
+(1 /|Su|) X
+
+> i∈Su
+
+winit (i) − wtrunc (i)
+
+winit (i)=
+
+> n
+
+X
+
+> u=1
+
+(1 /|Su|) X
+
+> i∈Su
+
+winit (i) − wtrunc (i)
+
+P 
+
+> w:i∈Sw
+
+1/|Sw|
+
+= X
+
+> i∈U
+
+(winit (i) − wtrunc (i)) P 
+
+> u:i∈Su
+
+1/|Su|
+
+P 
+
+> w:i∈Sw
+
+1/|Sw|
+
+= X
+
+> i∈U
+
+winit (i) − wtrunc (i).
+
+For notational parsimony, let ev = 0 (as v does not appear in the original input S). Note that eu is monotonically increasing with winit : if any coordinate of the initial weight increases, the excess ratio of any user will never decrease. With monotonicity of winit from Proposition B.5, it follows that w′ 
+
+> init
+
+− w′ 
+
+> trunc
+
+≥ winit − wtrunc since the threshold τ in the capping formula wtrunc (i) ← min {winit (i), τ } stays the same after adding the new user. Consequently, we have: 
+
+γ = ∥(w′ 
+
+> init
+
+− w′
+
+> trunc
+
+) − (winit − wtrunc )∥1
+
+= X
+
+> i∈U ′
+
+w′ 
+
+> init
+
+− w′
+
+> trunc
+
+!
+
+− X
+
+> i∈U
+
+winit − w′
+
+> trunc
+
+!
+
+= X
+
+> u∈{ 1,...,n,v }
+
+e′ 
+
+> u
+
+− eu.
+
+Now, we will consider ∆reroute . Recall that |Su| ≤ dmax for all u participating in adaptivity. For all other users, the terms 
+
+eu and e′ 
+
+> u
+
+are zero. 
+
+∥∆reroute ∥1 = X
+
+> u∈{ 1,...,n,v }
+
+X
+
+> i∈Su
+
+(α/d max )( e′ 
+
+> u
+
+− eu)= X
+
+> u∈{ 1,...,n,v }
+
+|Su|(α/d max )( e′ 
+
+> u
+
+− eu)
+
+≤ X
+
+> u∈{ 1,...,n,v }
+
+α(e′ 
+
+> u
+
+− eu)= αγ. 
+
+Furthermore, we can bound the ℓ∞ norm of ∆reroute as: 
+
+w′
+
+> reroute
+
+(i) − wreroute (i) ≤ (α/d max ) X
+
+> u∈{ 1,...,n,v }
+
+e′ 
+
+> u
+
+− eu = αγ/d max .
+
+By H¨ older’s inequality, 
+
+∥∆reroute ∥2 ≤ p∥∆reroute ∥1∥∆reroute ∥∞ = pα2γ2/d max = αγ 
+
+√dmax 
+
+. (3) Consider the rest of the difference ∆user . For i ∈ Sv , a single coordinate of ∆user will be comprised of the sum 
+
+∆user (i) = ∆ trunc (i) + wvb (i) − 1/d v .
+
+18 Scalable Private Partition Selection via Adaptive Weighting 
+
+Note that ∆trunc (i) ∈ [0 , 1/d v ], so 
+
+∆user (i) ∈ [wvb (i) − 1/d v , w vb (i)] .
+
+Furthermore, as ∆init (i) = 1 /d v ,
+
+∥∆user ∥1 = X
+
+> i∈Sv
+
+wvb (i) + ∆ trunc (i) − ∆init (i) = X
+
+> i∈Sv
+
+wvb (i)
+
+!
+
+− γ. 
+
+Let x : Sv → R and y : Sv → R be two sets of weights over Sv such that x(i) = wvb (i) − 1/d v , y(i) ∈ [0 , 1/d v ], and P 
+
+> i∈Sv
+
+x(i) + y(i) =  P  
+
+> i∈Sv
+
+wvb (i) − γ. Then, 
+
+∥∆user ∥2 ≤ max  
+
+> y
+
+∥x + y∥2
+
+as any valid ∆user can be expressed as the sum of x and a choice of y satisfying the above constraints. Note that 
+
+∥y∥1 = X
+
+> i∈Sv
+
+wvb (i)
+
+!
+
+− γ − X
+
+> i∈Sv
+
+x(i) = X
+
+> i∈Sv
+
+wvb (i)
+
+!
+
+− γ − X
+
+> i∈Sv
+
+wvb (i) + 1 = 1 − γ
+
+and by H¨ older’s inequality, 
+
+∥y∥2 ≤ p∥y∥1∥y∥∞ =
+
+r 1 − γdv
+
+.
+
+Then, 
+
+∥x + y∥22 = X
+
+> i∈Sv
+
+(wvb (i) − 1/d v + y(i)) 2
+
+= X
+
+> i∈Sv
+
+wvb (i)2 + 1
+
+d2
+
+> v
+
++ y(i)2 − 2wvb (i)
+
+dv
+
++ 2 y(i) · wvb (i) − 2y(i)
+
+dv
+
+= 1 + 1
+
+dv
+
++ ∥y∥22 − 2
+
+dv
+
+· ∥ wvb ∥1 + 2 ⟨y, w vb ⟩ − 2
+
+dv
+
+· ∥ y∥1
+
+≤ 1 + 1
+
+dv
+
++ 1 − γdv
+
+− 2
+
+dv
+
+· ∥ wvb ∥1 + 2 ⟨y, w vb ⟩ − 2(1 − γ)
+
+dv
+
+= 1 + 1 + 1 − γ − 2(1 − γ)
+
+dv
+
+− 2
+
+dv
+
+· ∥ wvb ∥1 + 2 ⟨y, w vb ⟩
+
+= 1 + γdv
+
+− 2
+
+dv
+
+· ∥ wvb ∥1 + 2 ⟨y, w vb ⟩
+
+Every y(i) can be written as 1/d v − z(i) for some non-negative residual z(i) with P 
+
+> i∈Sv
+
+z(i) = γ. So we continue the above equations as follows: 
+
+∥x + y∥22 ≤ 1 + γdv
+
+− 2
+
+dv
+
+· ∥ wvb ∥1 + 2 ⟨y, w vb ⟩
+
+= 1 + γdv
+
+− 2
+
+dv
+
+· ∥ wvb ∥1 + 2
+
+dv
+
+· ∥ wvb ∥1 − 2 X
+
+> i∈Sv
+
+z(i)wvb (i)= 1 + γdv
+
+− 2 X
+
+> i∈Sv
+
+z(i)wvb (i)
+
+≤ 1 + γdv
+
+− 2 · bmin 
+
+√dv
+
+· X
+
+> i∈Sv
+
+z(i)= 1 − 2bmin γ
+
+√dv
+
++ γdv
+
+.
+
+19 Scalable Private Partition Selection via Adaptive Weighting 
+
+The last inequality holds because Lemma B.4 implies that wvb (i) ≥ bmin √dv
+
+. We conclude that: 
+
+∥∆user ∥2 ≤
+
+s
+
+1 − 2bmin γ
+
+√dv
+
++ γdv
+
+.
+
+We can now bound the ℓ2-sensitivity of the entire algorithm as 
+
+∥∆∥2 ≤ ∥ ∆reroute ∥2 + ∥∆user ∥2 ≤ αγ 
+
+√dmax 
+
++
+
+s
+
+1 − 2bmin · γ
+
+√dv
+
++ γdv
+
+.
+
+As the expression − 2bmin √dv
+
++ 1 
+
+> dv
+
+is increasing for dv ≥ 1
+
+> b2
+> min
+
+, the right hand side is maximized with dv = dmax :
+
+∥∆∥2 ≤ αγ 
+
+√dmax 
+
++
+
+s
+
+1 − 2bmin · γ
+
+√dmax 
+
++ γdmax 
+
+.
+
+Our goal is to choose α ∈ [0 , 1] such that the right hand side is upper bounded by 1. We note that for γ = 0 , the above inequality proves this desired upper bound. For other cases, γ ∈ (0 , 1] , it is achieved when, 
+
+α ≤√dmax 
+
+γ 1 −
+
+s
+
+1 − 2bmin · γ
+
+√dmax 
+
++ γdmax 
+
+!
+
+. (4) By Lemma B.8 with C = 2 bmin and using the restrictions dmax > 1 and 12 ≤ bmin ≤ 1, it suffices to choose 
+
+α = bmin − 12√dmax 
+
+. (5) 
+
+Proof of Theorem B.1. Note that both rounds of MAD2R (Algorithm 5) correspond to running the WeightAndThreshold 
+
+meta-algorithm (Algorithm 1) with privacy parameters (ε1, δ 1) and (ε2, δ 2), respectively. The only difference is that we only materialize ˜w1 rather than the entire vector ˜wext from the first round. The functionality of our algorithm would be equivalent if we instead materialized the full vector as we only query weights on items in U and we never output the vector. Therefore, we will invoke Theorem 3.3 twice and apply basic composition to prove the privacy of MAD2R . By Theorem 3.3, it suffices to show that the ℓ2 and novel ℓ∞ sensitivities of the weight algorithm MAD are bounded by 1 and bmax √t , respectively. This follows directly from Lemma B.3, and Lemma B.6. 
+
+B.3. Technical Lemma Proposition B.7 (Taylor expansion of √1 + x as x → 0).
+
+lim 
+
+> x→0
+
+√1 + x =
+
+> ∞
+
+X
+
+> n=0
+
+Qnk=1 
+
+  32 − k
+
+n! xn.
+
+Lemma B.8. For a constant 1 ≤ C ≤ 2, consider the following function of x parameterized by an auxiliary variable y:
+
+f (x; y) = 
+
+√yx 1 −
+
+s
+
+1 − Cx 
+
+√y + xy
+
+!
+
+. (6) 
+
+For any y > 1,
+
+inf  
+
+> x∈(0 ,1]
+
+f (x; y) = C
+
+2 − 12√y .
+
+20 Scalable Private Partition Selection via Adaptive Weighting 
+
+Proof. To minimize f , we will evaluate the function at any stationary points (in terms of x) as well as the boundaries x = 1 
+
+and x → 0. Consider the derivative 
+
+ddx f (x; y) = −√yx2 1 −
+
+s
+
+1 − Cx 
+
+√y + xy
+
+!
+
++
+
+√yx
+
+ 
+
+> C√y
+
+− 1
+
+> y
+
+2
+
+q
+
+1 − Cx √y + xy
+
+ .
+
+Let A =
+
+q
+
+1 − Cx √y + xy . To look for stationary points and will set the derivative of f to zero: 
+
+ddx f (x; y) = 0 ⇐⇒ − 1
+
+x (1 − A) +  
+
+> C√y
+
+− 1
+
+> y
+
+2A = 0 ⇐⇒ x
+
+ C
+
+√y − 1
+
+y
+
+
+
+< 2A(1 − A)
+
+We expand A2 to get the simpler form: 
+
+Cx 
+
+√y − xy = 2 A − 2
+
+
+
+1 − Cx 
+
+√y + xy
+
+
+
+⇐⇒ 0 = 2 A − 2 + Cx 
+
+√y − xy = −A2 + 2 A − 1 = −(A − 1) 2
+
+⇐⇒ A = 1 .
+
+From the definition of A,
+
+A = 1 ⇐⇒ 1 − Cx 
+
+√y + xy = 1 ⇐⇒ Cx √y = x ⇐⇒ y = 1
+
+C2 .
+
+As C ≥ 1, in the parameter regime y > 1, f has no stationary points. It remains to check the boundary point x = 1 and the function f in the limit as x → 0. For x = 1 , the claim is reduced to this simple inequality: 
+
+√y 1 −
+
+s
+
+1 − C
+
+√y + 1
+
+y
+
+!
+
+≥ C
+
+2 − 12√y ⇐⇒ 2y 1 −
+
+s
+
+1 − C
+
+√y + 1
+
+y
+
+!
+
+≥ C√y − 1
+
+⇐⇒ (2 y − C√y + 1) 2 ≥ 4y2
+
+
+
+1 − C
+
+√y + 1
+
+y
+
+
+
+⇐⇒ 4y2 + C2y + 1 − 4Cy √y + 4 y − 2C√y ≥ 4y2 − 4Cy √y + 4 y
+
+⇐⇒ 1 + C2y − 2C√y ≥ 0
+
+⇐⇒ (C√y − 1) 2 ≥ 0
+
+which holds for any value of y. In the rest of the proof, we focus on the limit as x → 0.Via the Taylor expansion of Proposition B.7, 
+
+lim  
+
+> x→0
+
+f (x; y) = lim 
+
+> x→0
+
+√yx 1 −
+
+> ∞
+
+X
+
+> n=0
+
+Qnk=1 
+
+  32 − k
+
+n!
+
+
+
+− Cx 
+
+√y + xy
+
+n!
+
+= lim 
+
+> x→0
+
+√yx
+
+> ∞
+
+X
+
+> n=1
+
+−
+
+Qnk=1 
+
+  32 − k
+
+n!
+
+
+
+− Cx 
+
+√y + xy
+
+n
+
+.
+
+Note that the coefficients in the summation are upper bounded in magnitude by 1 as the sequence of terms in the descending factorial in the numerator is dominated by the sequence in the factorial in the denominator. We also note that the absolute value of the coefficient of the first term is a constant, i.e. 12 . So, in the limit, the summation is dominated by the lowest order terms with respect to x which correspond to n = 1 . In this case, the coefficient is − 12 and the limit evaluates to 
+
+lim  
+
+> x→0
+
+f (x; y) = 
+
+√yx
+
+ Cx 
+
+2√y − x
+
+2y
+
+
+
+= C
+
+2 − 12√y .
+
+21 Scalable Private Partition Selection via Adaptive Weighting 
+
+## C. Utility 
+
+C.1. Stochastic Dominance Proof Theorem C.1. Let β ≥ 0 be the parameter controlling the adaptive threshold excess. Let U be the set of items output when using Basic as the weighting algorithm and let U ∗ be the set of items output when using unbiased MAD as the weighting algorithm. Then, for items i ∈ U ,
+
+• If Pr( i ∈ U ) < Φ( β), then Pr( i ∈ U ∗) ≥ Pr( i ∈ U ).
+
+• Otherwise, Pr( i ∈ U ∗) ≥ Φ( β).Proof of Theorem C.1. Let w and w∗ be the weights produced by Basic and MAD , respectively. Let Iadapt = {u ∈ [n] : 
+
+|Su| ≤ dmax } be the items which participate in adaptive rerouting. For any item i ∈ U , we will consider it’s initial weight under the adaptive algorithm: 
+
+w∗
+
+> init
+
+(i) = X
+
+> u∈Iadapt :i∈Su
+
+1
+
+|Su| .
+
+We will proceed by cases. 
+
+Case 1: w∗
+
+> init
+
+(i) ≤ τ . In this case, w∗(i) ≥ w(i). In the adaptive algorithm, no weight is truncated from the initial weights, and so each user contributes to the final weight of an item 1√|Su| plus rerouted weight from other items. As the weight on item i only increases for the adaptive algorithm compared to the basic algorithm, the probability of outputting i
+
+also can only increase. 
+
+Case 2: w∗
+
+> init
+
+(i) > τ . In this case in the adaptive algorithm, the initial weight is truncated to τ , excess weight is rerouted, and a final addition of 1√|Su| − 1 
+
+> |Su|
+
+is added. As |Su| ≥ 1, the final weight w∗(i) ≥ τ . Then, i ∈ U ∗ if the added Gaussian noise does not drops the weight below the threshold ρ, i.e., if the noise is greater than or equal to 
+
+ρ − τ = ρ − (ρ + βσ ) = −βσ. 
+
+As the noise has zero mean and standard deviation σ, this probability is exactly 1 − Φ( −β) = Φ( β).
+
+C.2. Example showing a gap between MAD and Basic DP SIPS 
+
+While Theorem C.1 bounds the worst-case behavior of our algorithm compared to the basic algorithm, as MAD increases the weight of items below τ compared to the basic algorithm, it will often have a larger output. We show a simple, explicit example where our algorithm will substantially increase the output probability of all but one item. Here, we demonstrate an explicit setting where MAD outperforms the baselines. There are n users each with degree 3 as well as a single heavy item i∗ and m light items. Each user’s set is comprised of i∗ as well as two random light items. Under the basic algorithm, each user will contribute 1/√3 to each of their items. Therefore, the weights under Basic are 
+
+w(i) = 
+
+( n√3 if i = i∗ 
+
+> 2n√3m
+
+< 1.16 nm o.w. .
+
+On the other hand, assuming n >> τ , MAD will reroute almost all of the initial weight on the heavy item back to the users, so each user will have excess weight approximately 1/3. For dmax = 3 , we get discount factor α > 0.5. So, each user will send approximately 1/18 weight to each of its items. The weights under MAD are 
+
+w(i) = 
+
+(τ + n 
+
+> 18
+
+if i = i∗
+
+> 2nm
+
+ 1√3 + 118 
+
+
+
+< 1.27 nm o.w. .
+
+In this setting, our algorithm will assign close to 10% more weight to the light items (resulting in substantially higher probability of output) compared to the basic algorithm. If n/m is close to the true threshold ρ, this gap will have a large 22 Scalable Private Partition Selection via Adaptive Weighting 
+
+effect on the final output size. We empirically validate this for n = 15,000 , m = 1000 , ε = 1 , δ = 10 −5. Our algorithm returns 610 items on average. The basic algorithm returns 519 items while DP-SIPS with a privacy split of 5% , 15% , 80% 
+
+or 10% , 90% returns 332 or 514 items, respectively. In all cases, as expected, our algorithm has significantly higher average output size. 23 Scalable Private Partition Selection via Adaptive Weighting 
+
+## D. Additional Figures 0.0 0.5 1.0 1.5 2.0 2.5 3.0 
+
+2000 
+
+4000 
+
+6000 
+
+8000 
+
+10000 
+
+12000 
+
+> Output Size
+
+Basic 
+
+DP-SIPS 
+
+MAD 
+
+MAD2R 
+
+Figure 2: Comparison of output size across parallel algorithms while varying privacy parameter ε on the Reddit dataset. Other parameters are fixed as described in Section 5 with a fixed privacy split of [0 .1, 0.9] for DP-SIPS and MAD2R . The relative performance of algorithms does not change with this parameter. Increasing ε significantly improves performance at the cost of privacy by lowering the required noise and threshold. 10 10 10 9 10 8 10 7 10 6 10 5 10 4 10 3
+
+2000 
+
+3000 
+
+4000 
+
+5000 
+
+6000 
+
+7000 
+
+8000 
+
+9000 
+
+> Output Size
+
+Basic 
+
+DP-SIPS 
+
+MAD 
+
+MAD2R 
+
+Figure 3: Comparison of output size across parallel algorithms while varying privacy parameter δ on a log-scale on the Reddit dataset. Other parameters are fixed as described in Section 5 with a fixed privacy split of [0 .1, 0.9] for DP-SIPS and MAD2R . The relative performance of algorithms does not change with this parameter. Increasing δ significantly improves performance at the cost of privacy by lowering the required noise and threshold. 
+
+24 Scalable Private Partition Selection via Adaptive Weighting 25 50 75 100 125 150 175 200 
+
+> 0
+
+3500 
+
+4000 
+
+4500 
+
+5000 
+
+5500 
+
+6000 
+
+> Output Size
+
+Basic 
+
+DP-SIPS 
+
+MAD 
+
+MAD2R 
+
+Figure 4: Comparison of output size across parallel algorithms while varying maximum set size parameter δ0 on the Reddit dataset. Other parameters are fixed as described in Section 5 with a fixed privacy split of [0 .1, 0.9] for DP-SIPS and MAD2R . The relative performance of algorithms does not change with this parameter, and good results are achieved as long as it is not too small. 20 40 60 80 100 
+
+dmax 
+
+4000 
+
+4500 
+
+5000 
+
+5500 
+
+6000 
+
+> Output Size
+
+Basic 
+
+DP-SIPS 
+
+MAD 
+
+MAD2R 
+
+Figure 5: Comparison of output size across parallel algorithms while varying the parameter dmax of our algorithms on the Reddit dataset. As this parameter is only used by MAD and MAD2R , the performance of the baselines is fixed. Other parameters are fixed as described in Section 5 with a fixed privacy split of [0 .1, 0.9] for DP-SIPS and MAD2R . The performance of our algorithm is relatively insensitive to this parameter. 
+
+25
