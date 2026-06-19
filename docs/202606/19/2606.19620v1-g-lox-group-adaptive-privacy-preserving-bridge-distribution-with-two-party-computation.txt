@@ -1,0 +1,1651 @@
+Title: G-Lox: Group-Adaptive, Privacy-Preserving Bridge Distribution with Two-Party Computation
+
+URL Source: https://arxiv.org/pdf/2606.19620v1
+
+Published Time: Fri, 19 Jun 2026 00:20:21 GMT
+
+Number of Pages: 16
+
+Markdown Content:
+# G-Lox: Group-Adaptive, Privacy-Preserving Bridge Distribution with Two-Party Computation 
+
+# Baigang Chen 
+
+University of Minnesota Twin Cities, MN, USA chen9464@umn.edu 
+
+# Nicholas Hopper 
+
+University of Minnesota Twin Cities, MN, USA hoppernj@umn.edu 
+
+## Abstract 
+
+Distributing information about unlisted relays ( bridges ) to users of an Internet blocking evasion system is a key unsolved prob-lem for resilient access under strong network information controls. This is due to the tension between allowing access to users while preventing blocking authorities from enumerating bridges, and is made more difficult by the requirement to retain no metadata. We present G-Lox (group-adaptive Lox ), a bridge-distribution system that preserves Lox-style distributor blindness while enabling hid-den, stateful adaptation at the group level. G-Lox places adaptive assignment logic behind a two-server privacy wall: no single server learns group identifiers or group-to-bridge assignments, while pri-vate state access and state-dependent updates are carried out using two-server DPF/FSS protocols and secure two-party computation. This supports blockage reporting, transport-aware reassignment, and privacy-preserving group splitting without exposing sensitive assignment information. We evaluate G-Lox through both system measurements and policy simulation. Our C++/EMP implementation over real TCP sockets shows that the client-visible overhead of private state access remains small: across state sizes up to 216 , communication stays in the low-KiB range per end-to-end iteration. At 𝑀 = 1024 , the client sends 1,968 bytes, receives 1,280 bytes, and completes an iteration in about 0.25 s. Memory use is also modest, staying near 
+
+5 MB on the client and below 18 MB ( 9.79 MB at 𝑀 = 1024 ) on the state servers in our experiments. At the policy level, simulations with group-specific blocking and Sybil enumeration show that G-Lox consistently improves robustness over Lox- and rBridge-like baselines among systems that maintain broad issuance. Overall, our results show that stronger privacy for bridge-state access can be achieved with practical overhead while improving robustness under adaptive network information control. 
+
+## CCS Concepts 
+
+• Security and privacy ;
+
+## Keywords 
+
+bridge distribution, anonymous communication, function secret sharing, secure two-party computation 
+
+## 1 Introduction. 
+
+Resilience to Internet content blocking (also called network infor-mation controls) remains a growing demand, especially in settings where users increasingly face platform blocking, network filtering, and selective interference with communication services. In many regions, network information controls restrict access to major plat-forms and messaging systems, forcing users to rely on evasion tools, such as VPNs [ 1 ], Tor [ 15 ] or other proxy services, to communicate and access information. However, Internet blocking authorities in some regions can respond to this evasion by observing and blocking publicly-known entry points to these services. In this case users need alternative, unlisted channels to reach the network. In practice, this role is played by unlisted proxies (called bridges in Tor [ 14 ]), often combined with pluggable transports that attempt to evade filtering [ 19 ]. A key challenge in deploying bridges is the inherent tradeoffs in bridge distribution : a distributor must assign bridges to users while limiting enumeration by blocking authorities, adapting to blocking, and balancing load — all while leaking as little metadata as possible. While deployed systems mostly use rate-limiting to combat enu-meration and sidestep the other aspects of bridge distribution, a series of research systems [ 17 , 31 , 32 , 39 , 43 ] have made steady progress toward more effective enumeration defenses based on social-graph type defenses. In these systems, users accumulate "credit" when their assigned bridges remain available, and users with enough credit can invite additional users. Systems such as Lox [ 39 ] and related distributor-side designs, including Salmon [ 17 ], show that one can combine anonymous access with cryptographic credentials [ 9] to enforce access policies while keeping the public-facing distributor blind to user identity and linkability signals. At a high level, the distributor in Lox can verify that a request for a bridge is authorized, yet it should not learn which bridge was assigned, nor should it learn stable group identifiers that let it correlate requests across time. However, there remain some limitations induced by the gap between these designs’ assumptions and the behavior of real net-work information controls. First, all previous designs in this model implicitly rely on bridges to detect and report blocking, but in practice, a bridge often cannot reliably know when it is blocked, especially when this status might differ across blocking regions. Sec-ond, network information control is frequently transport-specific and region-specific [ 29 ], so to be most effective, a distributor needs to track per-region per-transport outcomes and rotate transports accordingly. Third, in systems that assign bridges to groups of re-lated users, a distributor must handle growth: if a group becomes too large, it should be split to balance load, yet this splitting itself is a stateful operation that can introduce new linkability if handled naively by the distributor. In this paper we seek to address these limitations by designing a new bridge-distribution algorithm and protocol implementation, with the following goals: (1) Distributor blindness: As in Lox and rBridge, the public-facing distributor should learn neither which bridge a user is assigned nor which hidden group the user belongs to. 
+
+> arXiv:2606.19620v1 [cs.CR] 17 Jun 2026 Baigang Chen and Nicholas Hopper
+
+(2) User-driven blockage recovery: Unlike prior designs that implicitly rely on bridges to self-detect blocking, we do not assume bridges can reliably determine when they are blocked. Instead, blockage is signaled by users: a user pri-vately requests a fresh assignment when their current bridge fails by reporting blockage, and the server reassigns a new bridge when reports reach a certain limit. (3) Blocking-region specific behavior: users should be assigned to (hidden) groups that experience similar blocking behav-ior. (4) Transport-aware adaptation: Bridges are associated with a set of transports/types. The system should track outcomes per group and per transport, and shift a group away from transports that appear degraded for that group. (5) Privacy-preserving load balancing: When a hidden group grows beyond a configured threshold, the system should split it into two roughly equal successor groups so that load can be balanced across bridges, without revealing co-membership or group structure to the distributor. To achieve those goals, we adapt the Lox design with additional cryptographic mechanisms to support additional functionality. We present Group-Adaptive Lox ( G-Lox ), a bridge distribution design that places all group-indexed state and assignment logic behind a two-server privacy wall 1. In our design, two non-colluding state servers jointly compute decisions using 2PC [ 21 , 44 ] on secret-shared inputs and maintain per-group state via private key–value access using two-server distributed point function/function secret sharing (DPF/FSS) point queries [ 5 , 6 ]. All assignment outputs are returned exclusively to the user inside an end-to-end encrypted payload, preventing the distributor 𝐷 from learning bridge selec-tions or stable group identifiers. We summarize our contribution as follows. (1) G-Lox design. We present G-Lox, a privacy-preserving bridge-distribution system that retains the core Lox guar-antee that the public-facing distributor learns neither users’ group membership nor their bridge assignments, while still enabling stateful adaptation. G-Lox places group-indexed state and decision logic behind a two-server privacy wall and private group-state access is realized with two-server DPF/FSS queries. This supports blockage reporting, transport-aware reassignment, and privacy-preserving group splitting without exposing sensitive assignment structure. (2) Microbenchmark evaluation. We implement the G-Lox backend in C++17 using EMP and evaluate it over real TCP sockets. Our benchmark includes private state queries, 2PC-based adaptation logic, and token-gated two-server DPF-PIR for directory redemption. Across state sizes 𝑀 ∈{210 , . . . , 216 }, client-visible communication stays in the low-KiB range per end-to-end iteration. Memory use re-mains modest, with client memory near 5 MB and state-server memory below 18 MB in our experiments. (3) Policy-level simulation. We develop a policy-level simu-lator for group-specific blocking, Sybil-driven enumeration, and report-based adaptation, and compare G-Lox against   
+
+> 1G-Lox can also stand for "Goldilocks" [ 30 ], as the user can try different types of transport till it is "just right".
+
+Lox-, rBridge-, and Salmon-like baselines. In stressed set-tings, G-Lox achieves the strongest robustness among high-issuance systems. In the main zig-zag scenario, it reaches 
+
+74 .6% day-30 success with 100% issuance, compared with 
+
+38 .9% for Lox and 44 .7% for rBridge-like baselines. 
+
+## 2 Related Work. 2.1 Background in Bridge Distribution 
+
+Onion routing and Tor. Our work builds on the onion-routing family of low-latency anonymity systems, which provide anony-mous, socket-style connections by wrapping traffic in layered en-cryption and relaying it through a chain of nodes, so that each hop sees only its immediate neighbors and local routing context. Classic onion routing formalizes this proxy-based architecture and its resistance goals against eavesdropping and traffic-analysis ad-versaries [ 8 , 22 , 36 ]. Tor instantiates and extends this approach at Internet scale with circuit construction, directory-based relay discovery, and operational mechanisms that improve deployability (e.g., forward security and exit policies) [15, 23]. 
+
+Bridges and Bridge Distribution. Because Tor’s list of relays is publicly accessible, Internet blocking authorities can easily discover and block access to Tor by IP and port, or through flow-based filtering on easily-fingerprintable traffic characteristics such as fixed cell size and non-standard TLS configurations. To counteract these threats, Tor introduced unlisted relays known as bridges [ 14 ], and can use a variety of “pluggable transports” to evade flow-based filtering [2, 4, 19, 37]. However, two remaining problems hinder the ability of Tor to counteract blocking. First, the signaling problem [ 42 ] must be solved, allowing users to communicate with a bridge authority to obtain contact information for these unlisted bridges. While Tor currently supports a variety of methods, including an email respon-der, several CDN web services, manual installation, and Telegram bot, development of other methods remains an active and important area of work. A final problem, as observed by Dingledine and Math-ewson [ 13 , 14 ], is how to balance availability of bridges against the possibility of insider enumeration. Starting with Proximax [ 31 ], a series of papers [ 17 , 31 , 32 , 39 , 43 ] have investigated methods of lim-iting this distribution through trusted “invitation”-based systems. Our work is most closely related to three representative systems: rBridge [ 43 ], Salmon [ 17 ], and Lox [ 39 ]. We summarize their core mechanisms, clarify the adversarial models they target, and identify the remaining gaps that motivate our design. We also discuss related work on private information retrieval (PIR), which provides one of the central cryptographic building blocks in our construction. 
+
+rBridge. rBridge proposes a reputation-based approach to bridge distribution: instead of revealing many bridges to every new ac-count, it grants access progressively as a user demonstrates be-nign behavior over time. The design is motivated by the insider-enumeration problem, where a blocking authority can create many accounts, request bridges, and block them at scale. To mitigate this, rBridge ties bridge allocation to a notion of accumulated reputation 
+
+through repeated interactions, paired with referral-style growth (in which high-reputation users can issue invitations to new users) to enable onboarding without globally exposing bridges [ 43 ]. rBridge G-Lox: Group-Adaptive, Privacy-Preserving Bridge Distribution with Two-Party Computation 
+
+also crystallizes the core availability–security tension: the distrib-utor must keep bridges usable for honest clients while limiting the adversary’s ability to discover and burn the bridge pool. At the same time, it highlights a problem with data-minimized sys-tems: because invitations and bridge assignments are unlinkable across interactions, blocking authorities can use "sock-puppet" in-vitations to learn and burn bridges while accumulating reputation with unblocked-but-overloaded bridges. 
+
+Salmon. Salmon studies robust proxy distribution against a net-work information controller that can create many identities, re-peatedly request proxies, and block any proxy it learns [ 17 ]. Its core design maintains a per-user suspicion score and bans users whose suspicion exceeds a threshold. In parallel, it uses discrete trust levels to control which proxies a user is eligible to receive and how quickly access expands over time. To support onboard-ing without immediately exposing high-quality proxies, Salmon introduces recommendation-based admission. It records a social graph of peer-to-peer recommendations, and, when possible, as-signs users within the same recommendation component to the same proxy servers. This perspective is useful for our setting be-cause it makes explicit that enumeration resistance requires adap-tive, stateful policies rather than one-shot disclosure. At the same time, these policies require the distributor to maintain detailed user histories, assignments, and recommendation structures, which creates a metadata-visibility risk that later systems aim to mitigate. 
+
+Lox. Lox is a modern bridge distribution system that targets both enumeration resistance and user privacy by enabling policy enforcement without requiring persistent user identifiers at the distributor [ 39 ]. Lox uses unlinkable multi-show anonymous cre-dentials that store an identifier Φ, trust level 𝐿 ∈ { 0, . . . , 4} issuance time 𝑡 , bridge bucket , invitation count 𝑎 , and migration count 𝑑 . Users can repeatedly prove authorization to access bridges in their as-signed “bucket”, and depending on their trust level, can request to “Level Up” (after a required waiting period), issue a new Invita-tion to a friend, or “migrate” to a new bridge bucket if all currrent bridges are blocked; these latter requests result in updated creden-tials. In this way, a user can repeatedly prove authorization and satisfy policy checks, e.g., rate limits, eligibility, and trust-level progression, while keeping successive requests cryptographically unlinkable using an algebraic MAC [ 9]. This lets the distributor enforce long-term policies—such as gradually granting access to more reliable users—without learning a stable account identity or reconstructing a user’s history. Lox thus adopts a trust-level perspective similar in spirit to Salmon and reputation-driven systems like rBridge, but instanti-ates it with cryptographic credentials that reduce metadata leakage about users and their relationships. Lox also highlights privacy goals specific to bridge distribution, including limiting what the distributor can infer about a user’s long-term behavior and prevent-ing trivial correlations between bridge assignments and particular users. However, Lox does not have the ability to adaptively balance bridge load, detect changes in transport filtering, or respond to regional blocking of proxies. 
+
+## 2.2 Background in Function Secret Sharing. 
+
+A central primitive in our design is function secret sharing (FSS), introduced by Boyle, Gilboa, and Ishai as a way to split a function into short keys such that each server, given only its own key, learns nothing about the function, while the parties’ evaluations combine to recover the function value [ 5]. An important special case is the 
+
+distributed point function (DPF), formalized by Gilboa and Ishai, where the shared function is zero everywhere except at one target point [ 20 ]. This point-function view is natural for private lookups and sparse updates, and it is the main FSS flavor used in G-Lox. Boyle et al. later improved and extended FSS, giving more effi-cient constructions and broadening the supported function families, with explicit motivation from applications such as private reads and writes to distributed databases [ 6]. For our purposes, these works provide the right abstraction for hiding which user, group, or directory entry is being touched, while keeping the online work low and naturally compatible with a two-server architecture. 
+
+FSS-backed secret-shared state. Our first use of FSS is in main-taining user and group state across two non-colluding servers. Con-ceptually, the system state is stored in secret-shared form, and updates are expressed through compact FSS keys that describe sparse changes to the logical database. This viewpoint matches the original motivation of FSS for securely searching and updat-ing distributed data [ 5]. In G-Lox, this allows the servers to apply state transitions without learning which logical record was updated, thereby helping realize the privacy wall between user activity and bridge-assignment logic. More broadly, the line of work on secure computation with preprocessing via FSS shows that FSS is not only a tool for private retrieval, but also a useful building block for efficient two-party computation with acceptable online cost [7]. 
+
+FSS-based two-server PIR.. Our second use of FSS is for efficient private directory lookup. Here, the relevant primitive is essentially DPF-based two-server PIR: the client secret-shares a point query into two compact keys, each server evaluates its key over the repli-cated database, and the client combines the answers to recover exactly one record while each server individually learns nothing about the queried index [ 6 , 20 ]. The appeal of this approach in G-Lox is that it fits the system architecture directly: we already assume two non-colluding servers, and the reconstruction rule is simple, while the privacy guarantee is precisely index hiding against either server alone. One server PIR is not suitable for our setting, and it is generally expensive [11, 28, 33, 34]. 
+
+## 3 Cryptographic Preliminaries 
+
+This section fixes the primitives and conventions used through-out G–Lox. Our design follows the algebraic MAC–based keyed-verification anonymous credential (KVAC) construction of [ 9], and augments it with: (i) pseudorandom functions (PRFs) to derive hid-den group tags, deterministic assignment indices, and deduplication nullifiers; (ii) authenticated encryption (AEAD-style) for capability objects returned by the back end; (iii) standard zero-knowledge proofs of knowledge to show well-formed KVACs and required statements; and (iv) a two-server back end that stores all group-keyed state and executes stateful adaptation behind a privacy wall. Concretely, the privacy wall combines a two-server Distributed Baigang Chen and Nicholas Hopper 
+
+Point Function and Function Secret Sharing point access for the group-state map with a token-gated two-server DPF-PIR protocol for directory redemption, while state updates are executed via semi-honest Yao two-party computation between the servers. This design keeps the public-facing distributor oblivious to group linkability and bridge assignments. 
+
+## 3.1 Notation and Hardness Assumptions 
+
+Let 𝜆 be the security parameter. We write 𝑥 $
+
+←− X for sampling 𝑥 
+
+uniformly at random from a finite set X. For an integer 𝑛 , [𝑛 ] :=
+
+{1, . . . , 𝑛 }. We fix a cyclic group G of prime order 𝑞 with generator 
+
+𝑔 𝑔𝑒𝑛 , where discrete logarithms are hard. Concretely, G can be instantiated as a prime-order elliptic-curve group with 𝑞 ≈ 2𝜆 . We use hash functions modeled as random oracles: 
+
+• 𝐻 attr : {0, 1}∗ → Z𝑞 maps attributes into exponents; 
+
+• 𝐻 split : {0, 1}∗ → { 0, 1}ℓsplit for split derivations. We use PRFs 𝐹 grp , 𝐹 idx , 𝐹 init , 𝐹 dedup with independent keys. 
+
+• 𝐹 grp : {0, 1}𝜆 × { 0, 1}∗ → { 0, 1}ℓtag derives hidden group tags. 
+
+• 𝐹 idx : {0, 1}𝜆 × { 0, 1}∗ → { 0, 1}ℓidx derives deterministic assignment material. 
+
+• 𝐹 init : {0, 1}𝜆 × { 0, 1}∗ → { 0, 1}𝜆 derives an initial group label from the invitation material. 
+
+• 𝐹 dedup : {0, 1}𝜆 × { 0, 1}∗ → { 0, 1}ℓnf derives deduplication nullifiers to prevent double-counting. All PRF keys used for group state ( 𝑘 grp , 𝑘 idx , 𝑘 init , 𝑘 dedup ) are secret-shared across the two state servers and evaluated only inside 2PC. We use an AEAD scheme AEAD = (Enc , Dec ) with explicit nonces, standard correctness, and IND-CCA-style confidentiality and integrity. We also use end-to-end public-key encryption to return the user’s private outputs. Concretely, we treat PKE =
+
+(KeyGen , Enc , Dec ) as a Key Encapsulation Mechanism– Data En-capsulation Mechanism (KEM–DEM) instantiation: an IND-CCA se-cure KEM encapsulates a fresh session key 𝐾 to the user’s ephemeral 
+
+𝑝𝑘 𝑈 , and an AEAD DEM encrypts the response payload under 𝐾 
+
+similar to techniques in [12, 27]. We assume standard hardness of DL/CDH in G, PRF security for the PRFs above, and standard security for AEAD and PKE .
+
+## 3.2 Algebraic MAC–based KVAC 
+
+We use the CMZ14 algebraic-MAC KVAC construction [ 9] to encode Lox and G–Lox attributes. A credential contains an attribute vector 
+
+x = (𝑥 1, . . . , 𝑥 ℓ ) ∈ X 1 × · · · × X ℓ .
+
+Each attribute is mapped injectively into Z𝑞 via a domain-separated attribute hash 
+
+b𝑥 𝑗 := 𝐻 attr ( 𝑗 ∥ encode (𝑥 𝑗 )) ∈ Z𝑞 ,
+
+which fixes a canonical field representation and prevents cross-attribute collisions. At a high level, the issuer computes an algebraic MAC on the vector (b𝑥 1, . . . , b𝑥 ℓ ) under a secret key, and the user stores the resulting credential in a form that supports selective dis-closure and unlinkable showing: during a show, the user produces a proof that it holds a valid MAC on some attribute vector, optionally revealing a subset of attributes and proving predicates over the rest in zero knowledge, without revealing the hidden attributes. In G–Lox, we use only one-show presentation: each show reveals only the ephemeral identifier Φ, which is used for one-time dedu-plication at 𝐷 , while sensitive attributes, in particular the hidden group label 𝛾 and stable hidden identifier 𝑢 , remain hidden and ap-pear only as part of ZK witnesses. This enables 𝐷 to enforce policy while remaining blind to group membership and inter-show linkage beyond the single revealed Φ. The distributor enforces one-show by rejecting any reuse of a previously revealed Φ.
+
+## 3.3 Two-Server MPC and Private State Access 
+
+To prevent the public distributor 𝐷 from learning group linkability, all group-keyed state (epoch, bad-type flags, blockage counters, dedup filters, split seed, size estimate, etc.) is maintained behind a two-server privacy wall. 
+
+Two-party MPC model (2PC).. Two non-colluding state servers 
+
+𝑆 0, 𝑆 1 jointly execute a standard secure two-party computation (2PC) protocol on secret-shared values. For bitstrings we use XOR-sharing 
+
+𝑥 = ⟨𝑥 ⟩0 ⊕ ⟨ 𝑥 ⟩1, and for arithmetic values we use additive sharing modulo an appropriate modulus. Inside 2PC, 𝑆 0, 𝑆 1 evaluate a fixed program Πstate implementing bridge assignment, blockage handling, deduplication, and splitting logic on shares. We assume the standard simulation-based privacy and correctness notion for 2PC in the semi-honest model. Our circuits can be instantiated using either Yao garbled circuits or the Goldreich–Micali–Wigderson (GMW) protocol [ 21 , 44 ] and We primarily choose Yao’s protocol because it evaluates a Boolean circuit in a constant number of online rounds, with inputs supplied via standard oblivious transfer implemented using OT extension. Online communication is then dominated by the non-linear gates, making Yao attractive when latency is non-negligible or when circuits have large Boolean depth. By contrast, GMW requires online interaction proportional to circuit depth, but can be competitive in very low-latency settings and under heavy batching of many independent instances. 
+
+FSS and DPF.. A two-server distributed point function is a func-tion secret sharing scheme for point functions. For a domain [𝑀 ] =
+
+{0, . . . , 𝑀 − 1}, DPF .Gen ( 𝑗 ) outputs two short keys (𝑘 0, 𝑘 1) such that, for every ℓ ∈ [ 𝑀 ],
+
+DPF .Eval (𝑘 0, ℓ ) ⊕ DPF .Eval (𝑘 1, ℓ ) = 1{ℓ = 𝑗 },
+
+and any single key 𝑘 𝑏 computationally hides 𝑗 . Intuitively, each server holds an additive share of the length-𝑀 indicator vector that selects exactly one position. For the group-state map keyed by tag , we implement private point access using two-server FSS for point functions, instanti-ated by DPF. Concretely, view the map as an array of 𝑀 fixed-size records DB [0..𝑀 −1], where each record is 𝐵 state bits, packed into 
+
+𝐵 = 𝐵 state /8 bytes, and the index 𝑗 is derived from tag . To read ad-dress 𝑗 , the client generates two DPF keys (𝑘 0, 𝑘 1) ← DPF .Gen ( 𝑗 )
+
+and sends 𝑘 𝑏 to server 𝑆 𝑏 . Each server locally expands its key and returns an XOR-share of the record: 
+
+𝑦 𝑏 := 
+
+> 𝑀 −1
+
+Ê
+
+> ℓ=0
+
+DB [ℓ] · DPF .Eval (𝑘 𝑏 , ℓ ) ∈ { 0, 1}𝐵 state ,G-Lox: Group-Adaptive, Privacy-Preserving Bridge Distribution with Two-Party Computation 
+
+so that 𝑦 0 ⊕ 𝑦 1 = DB [ 𝑗 ], while neither server learns 𝑗 under non-collusion. We denote this interface by FSS .Read (tag ), which returns XOR-shares of the 𝐵 state -bit record. For updates, we use the standard point-update variant. To ap-ply a masked delta Δ ∈ { 0, 1}𝐵 state to address 𝑗 , the privacy wall generates keys for the point function ℓ ↦ → Δ · 1{ℓ = 𝑗 } and sends them to 𝑆 0, 𝑆 1. Each server XORs its expanded contribution into its local database, yielding a logical operation FSS .Write (tag , Δ) that updates DB [ 𝑗 ] ← DB [ 𝑗 ] ⊕ Δ without revealing 𝑗 . This provides private key–value access under the non-collusion assumption and avoids scan-and-reshuffle for the group map. When the state grows beyond fixed-size records, or when we must hide richer access pat-terns, we can instead place the group map behind an ORAM-backed array to obtain 𝑂 (log 𝑀 ) bandwidth per logical access at the cost of a larger 2PC circuit [10, 16, 16, 38]. 
+
+## 4 G-Lox: Group-Adaptive Lox 
+
+G–Lox builds on the Lox interface and preserves its front-end cre-dential workflow: users obtain CMZ14-style credentials from the distributor, present one-show proofs, and evolve through Lox-style trust levels. However, differently to Lox, user credentials in G–Lox retain a hidden group identifier that groups together users that have a common ancestor in the invitation tree. Because we expect users to primarily issue invitations to other users in the same region, this allows G–Lox to respond adaptively to region-specific changes in network information controls, privately accumulating evidence of new transport filtering or blockage, while also further limiting the effect of Sybil and network-level surveillance attacks. Relative to Lox, the main algorithmic change is that bridge dis-tribution becomes stateful and group-adaptive : group-keyed state and bridge-selection logic are moved behind a two-server “privacy wall”, so the public-facing distributor remains oblivious to group membership and bridge assignments. We therefore focus in this section on the new stateful and privacy-preserving components, and treat the inherited Lox issuance and showing machinery as un-changed unless explicitly noted; see Appendix D or [ 39 ] for further background on Lox. Concretely, two non-colluding state servers 𝑆 0, 𝑆 1 maintain the group-state map as a two-server DPF/FSS-backed key–value store and secret-share all long-term symmetric keys. On each GetBridge 
+
+request, they run a small semi-honest Yao 2PC to derive the hidden group tag tag := 𝐹 grp (𝑘 grp , 𝛾 ), privately read/update the tag -indexed state record, and compute the bridge assignment from PRFs on 
+
+(tag , 𝑒, 𝜏 ) for stable rotation and consistent adaptation. The public distributor 𝐷 is purely front-end: it verifies one-show proofs, en-forces non-reuse of the revealed identifier Φ, and relays messages, while all linkable outputs are returned only as end-to-end cipher-texts to the client. Bridge redemption is handled by a directory that partitions Dir by transport type 𝜏 and supports token-gated lookup via two-server DPF-PIR, matching the same two-server trust split. Before presenting the construction, we recall our assumptions and threat model. 
+
+Threat model. We consider an active blocking authority that can observe and block public entry points, mount Sybil-style enu-meration to learn and burn bridges, and selectively interfere with connections in ways that may be vantage-dependent, partial, and transient. We further assume the action of information control is often transport-specific and region/group-specific, so blocking pressure may vary across transports and user groups [ 3 ]. On the infrastructure side, the public-facing distributor 𝐷 may be honest-but-curious and must learn neither users’ bridge assignments nor their group membership/linkability across requests. Our privacy guarantees rely on two non-colluding state servers 𝑆 0, 𝑆 1: as long as they do not collude, MPC+FSS hides group-keyed state and access patterns; if they collude, these privacy protections fail. 
+
+## 4.1 Settings 
+
+Participants. The system comprises a public-facing distributor 𝐷 
+
+that verifies and issues G–Lox credentials via CMZ14-style KVAC showing/issuance and relays protocol messages; two non-colluding state servers 𝑆 0, 𝑆 1 that hold secret shares of all long-term sym-metric keys, maintain group-state databases jointly via 2PC, and hold a bridge dictionary [ 41 ] where the users can redeem their bridge token privately; and a set of users who interact with 𝐷 . An anonymized connection to 𝐷 is not required for protocol correct-ness, however without it use-frequency metadata can leak. Our privacy guarantees are stated at the application layer: even with-out network-layer anonymity, 𝐷 should not learn hidden group membership or bridge assignments from the protocol transcript. 
+
+System parameters. We fix security parameter 𝜆 and transport-type set T ; a per-group report threshold 𝜃 that triggers migration; a group-size bound 𝐺 max that triggers splitting; a split-transition win-dow 𝑊 ∈ N during which the parent group may remain active for stragglers; Lox-style policy arrays DAYS [1.. 4], INVITATIONS [1.. 4],
+
+MAX_BLOCK [1.. 4], and MIN_REP [1.. 4]; and secret-shared keys held by 𝑆 0, 𝑆 1 and used only inside 2PC: ⟨𝑘 grp ⟩, ⟨𝑘 idx ⟩, ⟨𝑘 tok ⟩, ⟨𝑘 init ⟩,
+
+⟨𝑘 pir ⟩, and ⟨𝑘 dedup ⟩. Finally, each request carries a fresh user public key 𝑝𝑘 𝑈 for end-to-end encryption under PKE .
+
+Per-group state components. Each group-state record contains several compact fields used by the back-end policy logic. First, bad-type bits are a bit-vector over transport types in T ; the bit for 
+
+𝜏 ∈ T is set when the system has accumulated sufficient evidence that this transport is currently unsuitable for the group, so future assignments for that group/epoch should avoid 𝜏 . Second, a dedup filter stores short fingerprints of recently processed reports so that repeated submissions of the same effective event do not inflate the corresponding per-group counters. Concretely, in ReportBlocked 
+
+we derive a fingerprint such as 𝐹 dedup (𝑘 dedup , 𝑢 ∥𝜏 ∥𝑒 ∥𝑖 ) and count the report only if this fingerprint is fresh. These structures are maintained inside the FSS-backed group-state map and are never revealed to the public distributor. 
+
+Databases. (1) A group-state map indexed by tag := 𝐹 grp (𝑘 grp , 𝛾 ),implemented using two-server FSS/DPF ( FSS.Read /FSS.Write ) over fixed-size records that store epoch, bad-type bits, small counters, dedup filters, and optional split seed/state. (2) A bridge directory that two state servers both hold, and the user retrieves the bridge via two-party FSS-based efficient PIR. 
+
+G-Lox credential. We extend the Lox credential with group and behavior attributes: 
+
+ΨG = (Φ, 𝑡, 𝐿, 𝑎, 𝑑, 𝛾, 𝑟, 𝑢 ),Baigang Chen and Nicholas Hopper 
+
+where Φ is the token identifier used to prevent reuse; 𝑡 is the join-time attribute used for time-based trust evolution; 𝐿 is the user’s trust level; 𝑎 is the available-invitations counter; and 𝑑 is a block-age/migration counter used to bound eligibility under repeated blocking. The group label 𝛾 ∈ { 0, 1}𝜆 is a uniformly random value shared by users in the same hidden group and is always hidden from 
+
+𝐷 such that it appears only as a witness in ZK proofs. The value 𝑟 
+
+is a reputation counter checked in the level-up proof. In our design, 
+
+𝑟 is revealed only during ReportBlocked so that 𝐷 can update it, while 𝛾 and 𝑢 remain hidden. Specifically, 𝑟 is updated only during credential re-issuance based on a one-bit outcome contrib ∈ { 0, 1}
+
+produced by 2PC (Algorithm 4). Finally, 𝑢 is a stable, high-entropy hidden identifier used only inside 2PC logic, never revealed to 𝐷 .
+
+Group label forming and Type Selection. To instantiate hidden groups, users receive 𝛾 at issuance derived from invitation mate-rial. During issuance/update, the user supplies an invitation token 
+
+invTok to the state layer, and the servers compute 
+
+𝛾 := 𝐹 init (𝑘 init , invTok )
+
+under secret-shared ⟨𝑘 init ⟩; the resulting 𝛾 is issued as a hidden attribute. Users presenting the same invTok receive the same hidden 
+
+𝛾 and thus form a hidden group. Per [ 39 ], such a group can be used to construct the users’ social graph, so we shall not reveal it. To choose the transport type 𝜏 deterministically, two servers derive a pseudorandom selector 𝑢 ← 𝐹 idx (𝑘 idx , tag ∥ "TYPE" ) and run 𝜏 ← SelectType (𝑢, st .badTypes ), which maps 𝑢 to a type in the allowed set. Thus 𝜏 is consistent under replays and automatically avoids types that the group has marked as blocked. 
+
+Bridge token. In GetBridge , the MPC state layer outputs an 
+
+opaque bridge token ΩB that binds the issued assignment to a later 
+
+ReportBlocked update, while keeping the directory logic from hav-ing to interpret any group-derived identifiers. Concretely, inside 2PC, the servers derive tag := 𝐹 grp (𝑘 grp , 𝛾 ), read group state to ob-tain the current epoch 𝑒 , choose a transport type 𝜏 , compute the directory index 𝑖 , sample a fresh nonce 𝜈 $
+
+←− { 0, 1}𝜆 , and form 
+
+ΩB :=
+
+
+
+𝜈, AEAD .Enc 𝑘 tok 
+
+ 𝜈 ; AD = "BRIDGE" , msg = (𝜏, 𝑒, 𝑖 )
+
+.
+
+The associated-data label "BRIDGE" is a fixed, system-wide constant (independent of tag ), so the token format does not encode any hidden group identifier. The client receives ΩB but treats it as an opaque string: only the MPC backend, holding 𝑘 tok in secret-shared form, can later open it inside 2PC. We also include a one-time PIR authorization token. Inside 2PC, the servers sample a fresh 𝜂 $
+
+←− { 0, 1}𝜆 and set exp ← now + Δpir ,then compute 
+
+𝜎 := MAC 𝑘 pir 
+
+ "PIR" ∥𝜂 ∥𝜏 ∥exp , Ωpir := (𝜂, 𝜏, exp , 𝜎 ).
+
+The client presents Ωpir to the directory to authorize exactly one subsequent DirPIR query. 
+
+## 4.2 G-Lox Protocols 
+
+In this subsection, we concretely present our core construction of the G-Lox protocol. We reuse Lox Constructions 6–10 with the fol-lowing modifications: every issuance or update extends the attribute vector with hidden 𝛾 , 𝑟 , and 𝑢 . We remove the bucket-reachability 
+
+Algorithm 1 G-Lox LevelUp (trust 𝐿 → 𝐿 +1; rotate one-show identifier) 
+
+Require: User holds ΨG = (Φ, 𝑡, 𝐿, 𝑎, 𝑑, 𝛾, 𝑟, 𝑢 ) with 1 ≤ 𝐿 < 4.
+
+Require: Distributor 𝐷 holds policy arrays DAYS , MAX_BLOCK ,
+
+MIN_REP .
+
+Ensure: User obtains ΨGnew = (Φ′, 𝑡 ′, 𝐿 +1, 𝑎 ′, 𝑑, 𝛾, 𝑟, 𝑢 ).
+
+User:  
+
+> 1:
+
+Sample fresh Φ′ $
+
+←− { 0, 1}𝜆  
+
+> 2:
+
+𝜋 lvl ← ZKProve [ reveal Φ, 𝐿 ; hide (𝑡, 𝑎, 𝑑, 𝛾, 𝑟, 𝑢 ); valid one-show ;
+
+𝑡 +DAYS [𝐿 +1] ≤ now ∧ 𝑑 ≤ MAX_BLOCK [𝐿 +1] ∧ 𝑟 ≥
+
+MIN_REP [𝐿 +1] ]  
+
+> 3:
+
+Send LevelUpReq ⟨Φ, 𝐿, Φ′, 𝜋 lvl ⟩ to 𝐷 
+
+Distributor 𝐷 : 
+
+> 4:
+
+Verify 𝜋 lvl ; reject if Φ was previously used  
+
+> 5:
+
+Set 𝑡 ′ ← now ; set 𝑎 ′ ← INVITATIONS [𝐿 +1] 
+
+> 6:
+
+Issue new credential ΨGnew = (Φ′, 𝑡 ′, 𝐿 +1, 𝑎 ′, 𝑑, 𝛾, 𝑟, 𝑢 ) via CMZ14 issuance  
+
+> 7:
+
+Return LevelUpResp ⟨ΨGnew ⟩ to user credential ΨR, and the level-up protocol checks behavior directly via 𝑑 and 𝑟 . We present the modified level-up protocol, then the bridge-related protocols. 
+
+Level up. The G–Lox level-up protocol upgrades a user’s trust from 𝐿 to 𝐿 +1 (for 1 ≤ 𝐿 < 4) without revealing sensitive attributes or enabling linkage across shows as shown in Algorithm 1. The user reveals the current one-show identifier Φ and 𝐿 , and proves in zero knowledge that the hidden attributes satisfy the policy predicates (time, 𝑑 , and 𝑟 ). To ensure unlinkability, the user and 𝐷 jointly derive a fresh identifier Φ′ and 𝐷 issues the new credential under 
+
+Φ′, while enforcing non-reuse of Φ.
+
+Get Bridge and Redeem Bridge. Algorithm 2 describes the end-to-end GetBridge flow with (i) an FSS/DPF-backed group-state map and (ii) a PIR-gated directory redemption. The user first proves, in zero knowledge, possession of a valid one-show credential while revealing only the show identifier Φ, which 𝐷 uses to enforce one-show and rate limits. The distributor 𝐷 then acts only as a relay into a 2PC between (𝑆 0, 𝑆 1): the servers derive the hidden group tag tag = 𝐹 grp (𝑘 grp , 𝛾 ), privately read/update the corresponding group state via FSS.Read /FSS.Write , and deterministically sample an assignment (𝜏, 𝑖 ) for the current epoch 𝑒 . They return the following to the user via an encrypted channel under 𝑝𝑘 𝑈 : (a) an opaque bridge token ΩB that later authenticates ReportBlocked inside 2PC, and (b) a short-lived, one-time authorization token Ωpir that permits exactly one directory query for transport type 𝜏 .Algorithm 3 shows how the user redeems Ωpir to learn the ac-tual bridge descriptor Dir 𝜏 [𝑖 ] using two-server DPF-PIR. The user generates DPF keys (𝑘 0, 𝑘 1) for index 𝑖 and sends one key to each non-colluding directory server along with Ωpir . Each server locally checks freshness and MAC validity, enforces one-time use via a spent-set on 𝜂 , and answers with its PIR share 𝑦 𝑏 computed by evaluating the DPF over all indices and XOR-aggregating the se-lected record. The user reconstructs bridgeDesc as 𝑦 0 ⊕ 𝑦 1. Under non-collusion, neither server learns 𝑖 , while the token gate prevents unauthorized or replayed directory queries. G-Lox: Group-Adaptive, Privacy-Preserving Bridge Distribution with Two-Party Computation 
+
+Algorithm 2 G-Lox GetBridge (FSS-backed group state + PIR au-thorization) 
+
+Require: User holds ΨG = (Φ, 𝑡, 𝐿, 𝑎, 𝑑, 𝛾, 𝑟, 𝑢 ) with 𝐿 ≥ 1.
+
+Require: Distributor 𝐷 verifies KVAC shows and enforces one-show by rejecting reuse of Φ.
+
+Require: (𝑆 0, 𝑆 1) holds an FSS/DPF-backed group-state map and secret-shared keys ⟨𝑘 grp ⟩, ⟨𝑘 idx ⟩, ⟨𝑘 tok ⟩, ⟨𝑘 pir ⟩.
+
+Ensure: User obtains (𝜏, 𝑖, 𝑒, ΩB, Ωpir , SplitInfo ) without revealing 
+
+tag or (𝜏, 𝑖 ) to 𝐷 .
+
+User → 𝐷 : show + relay  
+
+> 1:
+
+(𝑝𝑘 𝑈 , 𝑠𝑘 𝑈 ) ← KeyGen (1𝜆 ) 
+
+> 2:
+
+𝜋 cred ← ZKProve [ reveal Φ; hide (𝑡, · · · , 𝑢 ); valid one-show ; 𝐿 ≥
+
+1; binds (𝛾, 𝑢 ) ]  
+
+> 3:
+
+Send GetBridgeReq ⟨Φ, 𝑝𝑘 𝑈 , 𝜋 cred ⟩ to 𝐷 ; provide MPC shares of 
+
+𝛾 𝐷 : verify and forward  
+
+> 4:
+
+Verify 𝜋 cred ; reject if Φ was previously used  
+
+> 5:
+
+Forward request + 𝛾 shares to (𝑆 0, 𝑆 1)
+
+2PC on (𝑆 0, 𝑆 1): private state access + token generation  
+
+> 6:
+
+tag ← 𝐹 grp (𝑘 grp , 𝛾 ) 
+
+> 7:
+
+st ← FSS.Read (tag ) ⊲ st holds epoch 𝑒 , badTypes , etc.  
+
+> 8:
+
+𝑒 ← st .epoch  
+
+> 9:
+
+𝜏 ← SelectType (𝐹 idx (𝑘 idx , tag ∥𝑒 ∥"TYPE" ), st .badTypes ) 
+
+> 10:
+
+𝑖 ← 𝐹 idx (𝑘 idx , tag ∥𝑒 ∥𝜏 ) mod 𝑁 𝜏  
+
+> 11:
+
+Sample 𝜈 $
+
+←− { 0, 1}𝜆  
+
+> 12:
+
+ΩB ←  𝜈, AEAD .Enc 𝑘 tok (𝜈 ; AD = "BRIDGE" , (𝜏, 𝑒, 𝑖 ))  
+
+> 13:
+
+Sample 𝜂 $
+
+←− { 0, 1}𝜆 ; set exp ← now + Δpir  
+
+> 14:
+
+𝜎 ← MAC 𝑘 pir 
+
+ "PIR" ∥𝜂 ∥𝜏 ∥exp  
+
+> 15:
+
+Ωpir ← ( 𝜂, 𝜏, exp , 𝜎 ) ⊲ one-time authorization for one DirPIR query  
+
+> 16:
+
+Update st as needed; FSS.Write (tag , Δst ) 
+
+> 17:
+
+𝐶 ← Enc 𝑝𝑘 𝑈 
+
+ 𝜏, 𝑖, 𝑒, ΩB, Ωpir , SplitInfo  
+
+> 18:
+
+Output 𝐶 to 𝐷 𝐷 : respond  
+
+> 19:
+
+Re-issue fresh one-show identifier Φ′ (standard Lox show se-mantics) and return 𝐶 to user 
+
+Report Blocked. Algorithm 4 handles a user report while keeping both the hidden group tag and any directory index information private from the distributor. The user first performs a one-show credential presentation that reveals only (Φ, 𝑟 ), where Φ enforces one-show and 𝑟 enables reputation update, and proves in zero knowledge that the request is well-formed and bound to the hidden attributes (𝛾, 𝑢 ). The distributor 𝐷 verifies the proof, rejects reuse of Φ, and then relays the request to the two state servers, which run a 2PC. Inside 2PC, (𝑆 0, 𝑆 1) derive tag = 𝐹 grp (𝑘 grp , 𝛾 ) and privately access the per-group state st via the FSS-backed map. They then validate the stored bridge token ΩB by AEAD-decrypting it under the secret-shared token key 𝑘 tok to recover the assigned tuple (𝜏, 𝑒, 𝑖 ), and enforce an epoch-consistency rule, i.e., reject unless 𝑒 matches the current epoch in st . To prevent duplicate counting, the servers compute a deduplication fingerprint nf = 𝐹 dedup (𝑘 dedup , 𝑢 ∥𝜏 ∥𝑒 ∥𝑖 )
+
+and only increment the counter st .ctr [𝜏, 𝑖 ] if nf is fresh. The bit 
+
+Algorithm 3 G-Lox RedeemDirPIR (token-gated two-server DPF-PIR for bridgeDesc )
+
+Require: Two non-colluding directory servers 𝑆 0, 𝑆 1 each store the same directory partition Dir 𝜏 [0..𝑁 𝜏 −1] of fixed-length de-scriptors. 
+
+Require: Each server maintains a local spent-set Spent 𝑏 of previ-ously redeemed nonces 𝜂 .
+
+Require: User holds (𝜏, 𝑖, 𝑒, Ωpir ) from GetBridge , where Ωpir =
+
+(𝜂, 𝜏, exp , 𝜎 ) and 𝜎 = MAC 𝑘 pir ("PIR" ∥𝜂 ∥𝜏 ∥exp ).
+
+Require: A DPF/FSS scheme for point functions with algorithms 
+
+DPF .Gen , DPF .Eval as in [5]. 
+
+Ensure: User learns bridgeDesc = Dir 𝜏 [𝑖 ]; neither 𝑆 0 nor 𝑆 1 learns 
+
+𝑖 (under non-collusion); Ωpir is usable at most once. 
+
+User: key generation  
+
+> 1:
+
+(𝑘 0, 𝑘 1) ← DPF .Gen (𝑖 )
+
+User → 𝑆 0, 𝑆 1: send query  
+
+> 2:
+
+Send (𝜏, 𝑘 0, Ωpir ) to 𝑆 0 and (𝜏, 𝑘 1, Ωpir ) to 𝑆 1
+
+Server 𝑆 𝑏 : authorize, answer, and spend token  
+
+> 3:
+
+for 𝑏 ∈ { 0, 1} in parallel do  
+
+> 4:
+
+Parse Ωpir = (𝜂, 𝜏, exp , 𝜎 ) 
+
+> 5:
+
+Reject if 𝜏 mismatches, or exp < now  
+
+> 6:
+
+Reject unless VerifyMAC 𝑘 pir 
+
+ 𝜎 ; "PIR" ∥𝜂 ∥𝜏 ∥exp  = 1 
+
+> 7:
+
+Reject if 𝜂 ∈ Spent 𝑏 ; else insert 𝜂 into Spent 𝑏  
+
+> 8:
+
+𝑦 𝑏 ← 08𝐷 ′
+
+⊲ each element in Dir is embedded as a 𝐷 ′ bytes string  
+
+> 9:
+
+for ℓ = 0 to 𝑁 𝜏 − 1 do  
+
+> 10:
+
+𝑠 ← DPF .Eval (𝑘 𝑏 , ℓ ) ⊲ 𝑠 ∈ { 0, 1} 
+
+> 11:
+
+if 𝑠 = 1 then  
+
+> 12:
+
+𝑦 𝑏 ← 𝑦 𝑏 ⊕ Dir 𝜏 [ℓ] 
+
+> 13:
+
+end if  
+
+> 14:
+
+end for  
+
+> 15:
+
+Return 𝑦 𝑏 to the user  
+
+> 16:
+
+end for User: reconstruction  
+
+> 17:
+
+bridgeDesc ← 𝑦 0 ⊕ 𝑦 1 
+
+> 18:
+
+return bridgeDesc contrib records whether this report is the threshold-crossing event that raises the counter to 𝜃 .If contrib = 1, the state servers perform thresholded migra-tion: they advance the group epoch, sample a fresh assignment 
+
+(𝜏 new , 𝑖 new ) for the new epoch, and generate fresh post-migration material, namely a new opaque bridge token ΩBnew and a one-time, short-lived PIR authorization token Ωpir new . Otherwise, these fields are set to ⊥. The servers commit the updated state back to the FSS store and return an encrypted response 𝐶 to the user, containing an acknowledgement, the contribution bit that is visible to 𝐷 , and the new assignment material. Finally, 𝐷 updates the user’s reputation using contrib , i.e., re-warding threshold-crossing contributions and optionally penalizing non-contributing reports, re-issues the credential with a fresh iden-tifier Φ′ under standard one-show semantics, and forwards the encrypted response. If migration occurred, the user redeems the new assignment by invoking RedeemDirPIR with Ωpir new to fetch the new bridge descriptor and replace the locally stored bridge token. Baigang Chen and Nicholas Hopper 
+
+Algorithm 4 G-Lox ReportBlocked 
+
+Require: ΨG = (Φ, 𝑡, 𝐿, 𝑎, 𝑑, 𝛾, 𝑟, 𝑢 ) with 𝐿 ≥ 1, bridge token ΩB.
+
+Require: 𝐷 enforces one-show use; (𝑆 0, 𝑆 1) maintain FSS-backed group state. 
+
+Ensure: Updated credential and, if contrib = 1, fresh assignment material.  
+
+> 1:
+
+(𝑝𝑘 𝑈 , 𝑠𝑘 𝑈 ) ← KeyGen (1𝜆 ) 
+
+> 2:
+
+𝜋 cred ← ZKProve [reveal (Φ, 𝑟 ); hide (𝑡, · · · , 𝑢 ); valid one-show ; 𝐿 ≥
+
+1; binds (𝛾, 𝑢 )]  
+
+> 3:
+
+User sends ⟨Φ, 𝑟, 𝑝𝑘 𝑈 , ΩB, 𝜋 cred ⟩ to 𝐷 and secret-shares (𝛾, 𝑢 )
+
+to (𝑆 0, 𝑆 1) 
+
+> 4:
+
+𝐷 rejects unless ZKVerify (𝜋 cred ) = 1 and Φ is fresh 
+
+2PC by (𝑆 0, 𝑆 1) 
+
+> 5:
+
+tag ← 𝐹 grp (𝑘 grp , 𝛾 ) 
+
+> 6:
+
+st ← FSS .Read (tag ) 
+
+> 7:
+
+(𝑏, 𝜏, 𝑒, 𝑖 ) ← OpenBridge 𝑘 tok (ΩB) 
+
+> 8:
+
+Reject if 𝑏 = 0 or 𝑒 ≠ st .epoch  
+
+> 9:
+
+nf ← 𝐹 dedup (𝑘 dedup , 𝑢 ∥𝜏 ∥𝑒 ∥𝑖 ) 
+
+> 10:
+
+fresh ← Dedup .Insert (st , nf ) 
+
+> 11:
+
+old ← st .ctr [𝜏, 𝑖 ] 
+
+> 12:
+
+st .ctr [𝜏, 𝑖 ] ← old + fresh  
+
+> 13:
+
+contrib ← 1[fresh = 1 ∧ old + 1 = 𝜃 ] 
+
+> 14:
+
+if contrib = 1 then  
+
+> 15:
+
+st .epoch ← st .epoch + 1 
+
+> 16:
+
+(𝜏 ′, 𝑖 ′) ← SampleAssign (𝑘 idx , tag , st ) 
+
+> 17:
+
+ΩBnew ← MakeBridgeTok 𝑘 tok (𝜏 ′, st .epoch , 𝑖 ′) 
+
+> 18:
+
+Ωpir new ← MakePIRTok 𝑘 pir (𝜏 ′) 
+
+> 19:
+
+else  
+
+> 20:
+
+(𝜏 ′, 𝑖 ′, ΩBnew , Ωpir new ) ← (⊥ , ⊥, ⊥, ⊥)  
+
+> 21:
+
+end if  
+
+> 22:
+
+FSS .Write (tag , st ) 
+
+> 23:
+
+𝐶 ← Enc 𝑝𝑘 𝑈 (1, contrib , 𝜏 ′, 𝑖 ′, ΩBnew , Ωpir new ) 
+
+> 24:
+
+Output 𝐶 to 𝐷 
+
+Return path  
+
+> 25:
+
+𝑟 ′ ← [ 𝑟 + 𝛼 rep contrib − 𝛽 rep (1 − contrib )] 𝑅 max  
+
+> 0
+> 26:
+
+𝐷 re-issues ΨGnew with fresh Φ′ and reputation 𝑟 ′ 
+
+> 27:
+
+User decrypts 𝐶 ; if Ωpir new ≠ ⊥, call RedeemDirPIR (𝜏 ′, 𝑖 ′, Ωpir new )
+
+Group Split. Algorithm 5 gives a lazy split procedure for over-sized hidden groups. Splitting is triggered inside an ordinary 2PC call: the servers read the hidden group state under tag = 𝐹 grp (𝑘 grp , 𝛾 ),and if the group exceeds 𝐺 max , they sample a split seed 𝑠 and return split metadata only inside the end-to-end encrypted response. Each user then migrates locally by computing 
+
+𝑏 = LSB (𝐻 split (𝑢 ∥𝑠 )) , 𝛾 ′ = 𝐻 split (𝛾 ∥𝑠 ∥𝑏 ).
+
+Thus branch choice is deterministic for the user but hidden from the distributor and unlinkable across users. The routing window 
+
+𝑊 allows stragglers to keep using the parent tag temporarily; after 
+
+𝑊 expires, parent-tag requests return the same split metadata and force migration. 
+
+## 4.3 Complexity 
+
+We analyze (i) garbled-circuit (GC) cost in AND-gate count, (ii) private group-state access cost for one read+write of a 𝐵 -byte record 
+
+Algorithm 5 G-Lox GroupSplit 
+
+Require: Group state keyed by tag = 𝐹 grp (𝑘 grp , 𝛾 ); threshold 𝐺 max ;window 𝑊 .
+
+Ensure: User replaces 𝛾 by child secret 𝛾 ′ if split metadata is re-turned. 
+
+2PC by (𝑆 0, 𝑆 1) 
+
+> 1:
+
+st ← FSS .Read (tag ) 
+
+> 2:
+
+if st .size > 𝐺 max ∧ st .splitting = 0 then  
+
+> 3:
+
+𝑠 $
+
+←− { 0, 1}𝜆  
+
+> 4:
+
+st .splitting ← 1, st .𝑠 ← 𝑠 , st .𝑊 ← 𝑊  
+
+> 5:
+
+FSS .Write (tag , st ) 
+
+> 6:
+
+end if  
+
+> 7:
+
+SplitInfo ← ( st .splitting , st .𝑠, st .𝑊 ) 
+
+> 8:
+
+Include SplitInfo in the encrypted response 𝐶 
+
+User migration  
+
+> 9:
+
+User decrypts 𝐶 and parses SplitInfo  
+
+> 10:
+
+if SplitInfo .splitting = 1 then  
+
+> 11:
+
+𝑠 ← SplitInfo .𝑠  
+
+> 12:
+
+𝑏 ← LSB (𝐻 split (𝑢 ∥𝑠 ))  
+
+> 13:
+
+𝛾 ′ ← 𝐻 split (𝛾 ∥𝑠 ∥𝑏 ) 
+
+> 14:
+
+Store 𝛾 ′ for subsequent credential presentations  
+
+> 15:
+
+end if Routing  
+
+> 16:
+
+Subsequent calls use secret-shared 𝛾 ′ 
+
+> 17:
+
+tag ′ ← 𝐹 grp (𝑘 grp , 𝛾 ′) 
+
+> 18:
+
+Servers route the call to the child state under tag ′ 
+
+> 19:
+
+Accept parent tag during 𝑊 ; after expiry, return SplitInfo and require migration under our FSS/DPF backend, (iii) directory retrieval cost via token-gated two-server DPF-PIR. We fix 𝜆 = 128 for GC security and use Yao garbled circuits with Free-XOR and Half-Gates rules. 
+
+Notation. Let 𝐺 ∧ (𝑓 ) denote the AND-gate count of the Boolean circuit for function 𝑓 , and the XOR operation is free. Let 𝐶 OT (𝑛 𝐸 )
+
+denote the amortized online cost for transferring 𝑛 𝐸 evaluator in-put bits via OT/OT-extension. Let 𝐶 dpfrw (𝑀, 𝐵 ),𝑇 dpfrw (𝑀, 𝐵 ) be the communication and per-server work for one FSS/DPF group-state read+write on an array of 𝑀 logical records of 𝐵 bytes each. For the directory, let Dir 𝜏 [0..𝑁 𝜏 −1] be the per-transport partition of 𝑁 𝜏 fixed-size descriptors, each 𝐷 bytes. Let |𝑘 DPF (𝑁 𝜏 )| be the size (bytes) of one DPF query key for domain size 𝑁 𝜏 . Let 𝐺 PRF  
+
+> ∧
+
+be the AND-gate count of one PRF evaluation. Let 𝐺 CapEnc  
+
+> ∧
+
+≈ 2𝐺 PRF 
+
+> ∧
+
+be the AND-gate count for capability encryption (mask + MAC) when modeled as two PRF calls. Let 𝐺 MAC  
+
+> ∧
+
+be the AND-gate count for one token MAC. This is typically one PRF call, so 𝐺 MAC  
+
+> ∧
+
+≈ 𝐺 PRF 
+
+> ∧
+
+up to small formatting overhead. Let 𝐺 sel  
+
+> ∧
+
+and 𝐺 fmt  
+
+> ∧
+
+capture small fixed selection and packing/formatting overheads. We summarize our analysis in Table 1, and the analysis is in Appendix E. 
+
+## 4.4 Security Discussion 
+
+G–Lox keeps the public interface close to Lox by using anonymous credentials and one-show identifiers, while moving all group-keyed state and bridge-selection logic behind a two-server privacy wall. Under non-collusion of 𝑆 0, 𝑆 1, this lets the system adapt statefully G-Lox: Group-Adaptive, Privacy-Preserving Bridge Distribution with Two-Party Computation 
+
+Component GC AND State (DPF/FSS) Online comm. 
+
+GetBridge 𝐺 GB  
+
+> ∧
+
+≈ 6𝐺 PRF  
+
+> ∧
+
++ 𝐺 sel  
+
+> ∧
+
++ 𝐺 fmt  
+
+> ∧
+
+𝐶 dpfrw (𝑀, 𝐵 ), 𝑇 dpfrw (𝑀, 𝐵 ) 2𝜆 𝐺 GB  
+
+> ∧
+
++ 𝐶 OT (𝑛 𝐸 ) (bits) + 𝐶 dpfrw (𝑀, 𝐵 )
+
+RedeemDirPIR – – 2|𝑘 DPF (𝑁 𝜏 )| + 2𝐷 + 2|Ωpir | (bytes) 
+
+ReportBlocked (best) 𝐺 RB,best  
+
+> ∧
+
+≈ 4𝐺 PRF  
+
+> ∧
+
++ 𝐺 dedup  
+
+> ∧
+
++ 𝐺 fmt  
+
+> ∧
+
+𝐶 dpfrw (𝑀, 𝐵 ), 𝑇 dpfrw (𝑀, 𝐵 ) 2𝜆 𝐺 RB,best  
+
+> ∧
+
++ 𝐶 OT (𝑛 𝐸 ) (bits) + 𝐶 dpfrw (𝑀, 𝐵 )
+
+ReportBlocked (worst) 𝐺 RB,worst  
+
+> ∧
+
+≈ 9𝐺 PRF  
+
+> ∧
+
++ 𝐺 dedup  
+
+> ∧
+
++ 𝐺 sel  
+
+> ∧
+
++ 𝐺 fmt  
+
+> ∧
+
+𝐶 dpfrw (𝑀, 𝐵 ), 𝑇 dpfrw (𝑀, 𝐵 ) 2𝜆 𝐺 RB,worst  
+
+> ∧
+
++ 𝐶 OT (𝑛 𝐸 ) (bits) + 𝐶 dpfrw (𝑀, 𝐵 )+ DirPIR 
+
+GroupSplit 𝐺 GS  
+
+> ∧
+
+≈ 𝐺 cmp  
+
+> ∧
+
++ 𝐺 mux  
+
+> ∧
+
++ 𝐺 fmt  
+
+> ∧
+
+(no extra) 2𝜆 𝐺 GS  
+
+> ∧
+
++ 𝐶 OT (𝑛 𝐸 ) (bits) 
+
+Table 1: Asymptotic costs (Yao GC: Free-XOR, Half-Gates; security 𝜆 ). 
+
+per hidden group without revealing group membership or bridge assignments to the public distributor 𝐷 . Below we summarize how G–Lox defends against common attacks. 
+
+Sybil enumeration. An adversary can create many identities to repeatedly run GetBridge , collect bridge descriptors, and burn them by disclosure for blocking. G–Lox inherits Lox-style controls at the public interface: 𝐷 enforces one-show non-reuse and rate limits, and invitation-based admission and trust evolution make large-scale Sybils costly in invitation material. G–Lox further reduces the per-invitation yield. Since the hidden group label 𝛾 is derived from the invitation token, identities created from the same invitation material share 𝛾 and therefore receive the same group-coupled assignment within an epoch. Thus repeated queries within that invitation-derived group mostly return duplicates, and enumeration pressure scales primarily with the number of distinct invitation-derived groups the adversary can obtain. 
+
+Insider disclosure and bridge burning. A malicious but legiti-mately enrolled user can disclose any bridge they obtain, enabling the adversary to block it. This cannot be prevented once a client learns a usable descriptor, so the goal is to limit how quickly an insider can obtain replacements and how much damage one in-sider can cause. As in rBridge, admission material limits how many independent identities an insider can cheaply obtain. As in Lox, clients do not receive fresh bridges on demand: rotation is tied to group evidence of blocking. Concretely, the privacy wall issues a new assignment only when the per-group counter reaches 𝜃 , and only the threshold-crossing report sets contrib = 1 for reputation credit. Deduplication prevents repeated reports from accelerating rotation, so rapid bridge burning requires many distinct insiders or sustained blocking that also impacts honest users. 
+
+Distributor-side linkage. The distributor is a high-value vantage point for inferring assignments or social structure. In G–Lox, 𝐷 
+
+never learns 𝛾 , tag , or the assignment (𝜏, 𝑖 ): all assignment material is returned only as end-to-end ciphertexts to the client, and state evolution is keyed by a hidden tag handled only inside the two-server privacy wall. 
+
+Directory scraping and bulk lookup. Even with index-private re-trieval, an adversary may attempt many lookups to harvest de-scriptors. G–Lox gates directory access with a short-lived, one-time authorization token Ωpir issued by the privacy wall. Each directory server enforces token freshness and one-time use, which limits replay and makes bulk scraping require obtaining many valid au-thorizations through GetBridge .
+
+Forged reports, replay, and counter inflation. An adversary may try to trigger migration by submitting fabricated reports, replay-ing a stale assignment after rotation, or repeatedly reporting the same assignment to inflate the threshold counter. G–Lox binds each report to a previously issued assignment using the opaque token ΩB. Inside 2PC, the servers open ΩB under the secret-shared token key and reject unless it decrypts to a valid tuple (𝜏, 𝑒, 𝑖 ),preventing forgery or tampering. They also enforce epoch consis-tency by accepting only if 𝑒 matches the current epoch stored in the group record. Finally, the servers derive a per-user nullifier 
+
+nf = 𝐹 dedup (𝑘 dedup , 𝑢 ∥𝜏 ∥𝑒 ∥𝑖 ) and increment the counter only when 
+
+nf is fresh, so repeated reports for the same assignment by the same user do not accumulate. 
+
+Zig-zag discovery pressure. Dingledine [ 13 ] describes a feedback loop where clients can try many proxies: the adversary blocks one proxy, observes which clients reconnect, and learns additional prox-ies those clients try next, gradually expanding coverage. G–Lox reduces the protocol-level surface for this loop because a client cannot freely choose among many bridges. Each GetBridge yields a single assignment determined by hidden group state, and within an epoch the assignment is stable for that hidden group, so repeated re-quests do not produce a sequence of new bridges that can be learned by successive blocking. After migration, the next assignment is again produced by the privacy wall and revealed only end-to-end to the client. This does not eliminate network-layer fingerprinting or traffic-analysis leakage; rather, it removes the mechanism that would let a client rapidly walk through many bridges in response to blocking. When the adversary learns and blocks a transport-specific assignment, G–Lox can adapt by switching to a different transport type via the per-group badTypes state. 
+
+Remark for compromised server. In the previous systems, all servers are assumed to be semi-honest. In our setting, if one of the servers is compromised, it can then see the full dictionary of bridges. To avoid this, we can enhance the PIR pre-processing that allows each server to hold only partial information of a bridge and reconstruct it in the two-party PIR with small (essentially the same) overhead. Therefore, even if a single server is fully compromised, it still learns neither user information nor the bridge list. Baigang Chen and Nicholas Hopper Users  D  
+
+> S1
+> S0
+> States DB
+> Bridge DB Request Relay
+> 2PC
+> Reply Relay Credential
+> verify
+> Group States
+> Group identifier
+> Transport / type select
+> Epoch counters ...
+> Bridge Dir
+> Type1 bridge...
+> Type2 bridges...
+> ...
+> Functions
+> FSS_write
+> FSS_read
+> ...
+> Group States: 2 Party Security Wall
+> Bridge DB
+> Bridge Dir
+> Type1 bridge...
+> Type2 bridges...
+> ...
+> Bridge Redeem: efficient FSS based PIR
+> Two server maintains two FSS DB, only Group States are behind security wall
+
+Figure 1: Double FSS-based G-lox workflow 
+
+## 5 Evaluation 
+
+We measure the concrete cost of our two-server DPF-based backend from the running code over real TCP sockets and process memory counters under Linux/WSL. Additionally, we simulate the G-Lox as-signment policies and compare them with Lox, Salmon, and rBridge. 
+
+> 2
+
+## 5.1 Evaluation: Micro Benchmark 
+
+This subsection evaluates the privacy-preserving back-end primi-tives of G-Lox using a C++17 microbenchmark built with EMP. Our goal is not to outperform the upstream Lox deployment stack, but to isolate the overhead of private state access and private state-layer policy checks in the two-server setting. 
+
+5.1.1 Setup. 
+
+Libraries. We implement the microbenchmark in C++17 using the EMP toolkit. emp-tool provides the AES-based PRG and circuit datatypes, while emp-sh2pc provides a semi-honest Yao garbled-circuit runtime. We build EMP via CMake FetchContent with pinned versions emp-tool v0.2.4 , emp-ot v0.2.2 , and emp-sh2pc v0.2.2 , compiled in Release mode with AES-NI enabled. 
+
+Implementations. We implement a real two-server DPF-PIR path for both the state map and the directory. The state map is replicated across (𝑆 0, 𝑆 1), and the client sends one DPF key share to each server. Each server evaluates its DPF share over the replicated table and returns its response share; XORing the two responses reconstructs the selected record at the client. For stateful operations, we feed the two server-side DPF response shares into a real EMP semi-honest Yao 2PC between 𝑆 0 and 𝑆 1. This 2PC executes the structured secret-state logic. Concretely, the benchmark implements three operation classes. 
+
+GetBridge performs blocked/spare handling and a conditional pro-motion rule on the selected state record. ReportBlocked updates the secret blockage counter and executes either a migration branch (rb_best ) or a no-spare branch ( rb_worst ). Redeem is implemented 
+
+> 2Repository is available as https://anonymous.4open.science/r/G-lox-5FC5/.
+
+𝑀 𝑆 0 bytes 𝑆 1 bytes 𝑆 0 ms 𝑆 1 ms 
+
+1,024 417340 8010300 554 .8 ± 5.7 427 .1 ± 3.32,048 417340 8010300 563 .6 ± 17 .6 432 .8 ± 7.14,096 417340 8010300 552 .7 ± 7.6 429 .2 ± 6.48,192 417340 8010300 552 .9 ± 8.8 429 .2 ± 5.416 ,384 417340 8010300 561 .3 ± 6.3 437 .9 ± 5.932 ,768 417340 8010300 569 .9 ± 8.4 442 .2 ± 6.865 ,536 417340 8010300 562 .3 ± 4.5 436 .6 ± 5.9
+
+Table 2: Inter-server EMP cost for G-Lox (5 runs per 𝑀 ). Bytes are deterministic; GC runtime is reported as mean ± std. 
+
+as a token-gated state check followed by a directory PIR: the client sends a private token payload, 𝑆 0 and 𝑆 1 verify it in 2PC against the selected state record, and the directory query is measured separately. Directory servers do not run 2PC. 
+
+Parameters and Measurement. Unless stated otherwise, we fix 
+
+𝜆 = 128 , state-record size 𝐵 = 128 bytes, directory descriptor size 
+
+𝐷 = 256 bytes, and directory size 𝑁 = 65 ,536 . We sweep the logical state size 𝑀 from 210 to 216 . For each run, we report: (i) client wall-clock runtime; (ii) client-visible TCP traffic; and (iii)inter-server EMP traffic and time from the server summaries. All communication uses loopback TCP under WSL/Linux. 
+
+5.1.2 Benchmark Report. We report the benchmark results in Ta-ble 4 and Table 2. The resulting benchmark should be interpreted as a back-end privacy cost study. It combines real DPF-PIR with real 2PC on structured secret state, but it is still a microbenchmark rather than a full reimplementation of upstream Lox. Thus, the appropriate baseline question is not whether G-Lox is faster than Lox overall, but what additional latency and communication are incurred by enforcing bridge-distribution policy without revealing the accessed state record to either server alone. G-Lox is slower than the open-source Lox baseline, but this is not surprising: Lox is not implemented as a two-server DPF/2PC system. The purpose of G-Lox is stronger privacy for state access and state-dependent G-Lox: Group-Adaptive, Privacy-Preserving Bridge Distribution with Two-Party Computation 
+
+𝑀 Client RSS Client HWM State max RSS State max HWM Dir max RSS Dir max HWM 
+
+1,024 4.975 ± 0.056 4.975 ± 0.056 9.793 ± 0.000 9.793 ± 0.000 20 .950 ± 0.068 20 .950 ± 0.068 2,048 5.025 ± 0.056 5.025 ± 0.056 9.860 ± 0.080 9.860 ± 0.080 20 .950 ± 0.068 20 .950 ± 0.068 4,096 5.000 ± 0.000 5.000 ± 0.000 10 .168 ± 0.000 10 .168 ± 0.000 20 .900 ± 0.056 20 .900 ± 0.056 8,192 5.000 ± 0.000 5.000 ± 0.000 10 .666 ± 0.003 10 .666 ± 0.003 20 .925 ± 0.068 20 .925 ± 0.068 16 ,384 5.000 ± 0.000 5.000 ± 0.000 11 .667 ± 0.002 11 .667 ± 0.002 20 .900 ± 0.056 20 .900 ± 0.056 32 ,768 5.000 ± 0.000 5.000 ± 0.000 13 .643 ± 0.056 13 .643 ± 0.056 20 .975 ± 0.056 20 .975 ± 0.056 65 ,536 5.000 ± 0.000 5.000 ± 0.000 17 .631 ± 0.082 17 .634 ± 0.075 20 .925 ± 0.068 20 .925 ± 0.068 
+
+Table 3: Peak memory (MB) for the G-Lox microbenchmark (5 runs per 𝑀 ), reported as mean ± std. State and directory columns report the maximum across their two servers for each run. 
+
+G-Lox Lox baseline 
+
+𝑀 Sent Recv Total Mean ms Sent Recv Total Mean ms 
+
+1,024 1,968 1,280 3,248 264 .9 ± 1.1 3,876 2,504 6,380 20 .23 ± 0.20 2,048 2,076 1,280 3,356 268 .6 ± 1.3 3,876 2,504 6,380 19 .97 ± 0.26 4,096 2,184 1,280 3,464 271 .5 ± 2.5 3,876 2,504 6,380 19 .99 ± 0.23 8,192 2,292 1,280 3,572 283 .2 ± 2.9 3,876 2,504 6,380 20 .37 ± 0.25 16 ,384 2,400 1,280 3,680 301 .2 ± 4.6 3,876 2,504 6,380 20 .37 ± 0.40 32 ,768 2,508 1,280 3,788 240 .1 ± 3.1 3,876 2,504 6,380 20 .22 ± 0.30 65 ,536 2,616 1,280 3,896 346 .3 ± 1.7 3,876 2,504 6,380 20 .13 ± 0.26 
+
+Table 4: Direct comparison of user-visible per-iteration cost for G-Lox and open-source Lox baseline over iters =10. Byte fields are deterministic; runtime is reported as mean ± std over 5 runs. 
+
+policy evaluation, not raw performance. The evaluation, therefore, quantifies the privacy overhead of this stronger threat model. 
+
+5.1.3 Baseline Comparison: Lox. We additionally measured the open-source Lox implementation as a protocol-level baseline using its Rust codebase. 3 Because upstream Lox is not implemented as a two-server DPF/PIR system, this comparison is not a primitive-for-primitive match to our EMP-based microbenchmark; instead, it is the closest operation-level baseline for the user-visible workflow. We instrumented the Lox code to run three operations per iteration: 
+
+GetBridge -like ( open_invite ), Redeem -like ( redeem_invite ), and 
+
+ReportBlocked -like ( check_blockage + blockage_migration ). For consistency with our sweep, we ran iters = 10 iterations and varied an equivalent logical state size 𝑀 eq ∈ { 210 , . . . , 216 }.Concretely, for each 𝑀 eq we instantiated 𝑀 eq /2 open-invitation buckets and 𝑀 eq /2 hot-spare buckets in Lox, matching a total of 
+
+𝑀 eq buckets. All runs used Ubuntu under WSL2 in release mode. We report serialized request bytes, serialized response bytes, and mean end-to-end per-iteration time measured by the Rust harness. Across the sweep, the measured serialized traffic is constant at 3,876 B sent and 2,504 B received per iteration, for a total of 
+
+6,380 B/iter, while latency remains approximately 19 –23 ms/iter. This is expected because the Lox protocol messages are fixed-size credential objects and do not scale with a DPF key length. At the largest point ( 𝑀 eq = 65 ,536 ), the per-operation breakdown is: Get-Bridge -like = 1,072 B and 2.276 ms, Redeem -like = 2,256 B and 
+
+7.337 ms, and ReportBlocked -like = 3,052 B and 11 .825 ms. We show the result in Table 4.  
+
+> 3Repository cloned from https://git-crysp.uwaterloo.ca/iang/lox .
+
+## 5.2 Evaluation: blocking-evasion 
+
+To evaluate how G–Lox improves Internet-blocking evasion, we implement and compare the distribution policies of G–Lox, rBridge, Lox and Salmon in a policy-level simulator. The simulator mod-els the distribution decisions of each of these systems, as well as specific attacks including group-specific blockage, Sybil-driven enu-meration, and report-based adaptation. 
+
+Baseline grounding. Our baseline abstractions are anchored to primary sources and public implementations. For Lox, we model 3-bridge bucket assignment together with reachability-triggered migration. For rBridge, we model credit-priced replacement using 
+
+𝜙 − = 45 , matching [ 43 ]. For Salmon, we model a group-level trust/-suspicion policy abstraction guided by the public Salmon codebase, with constants and update rules chosen to capture promotion/de-motion based on observed outcomes together with probabilistic issuance denial for low-trust groups. 
+
+Simulation model. We simulate 𝐺 = 128 hidden groups for 30 days over transports {obfs4 , snowflake , meek }, averaging re-sults over 14 random seeds. Each group starts with 18–24 users. Daily user arrivals are Poisson, and per-group legitimate daily de-mand is max (1, Poisson (0.26 · 𝑈 𝑔 )) . Each transport begins with 320 bridges. Daily bridge arrivals are Poisson with transport mul-tipliers (1.10 , 1.00 , 0.85 ), and group-specific blocking intensity is sampled from [0.004 , 0.018 ] and scaled by transport multipliers 
+
+(1.00 , 1.25 , 0.85 ). We consider four adversarial strategies: learn and burn, zig-zag, conservative, and blanket-transport, where the last explicitly models transport-wide blocking against selected groups. Baigang Chen and Nicholas Hopper 
+
+Policies. G-Lox uses hidden group-adaptive assignment with two deterministic slots per (𝑔, 𝜏 ), weighted tuple-level blockage reports, Sybil report weight 0.15 , decay 0.68 /day, trigger threshold 4.8, and a requirement that at least one legitimate report be present before migration. Lox is non-group-adaptive: it uses 3-slot bucket-style assignment with global report-triggered migration, threshold 12 .0,and decay 0.78 . rBridge-like augments issuance with admission throttling and credit-priced replacement, with price 45 , gain 3 per success, and replacement allowed only when sufficient credit has accumulated. Salmon-like uses group-level trust/suspicion gating. All groups begin from a common initial state; trust is updated from observed success/failure outcomes, with promotion after sustained safe behavior and demotion under persistently poor outcomes; issuance may then be probabilistically denied for sufficiently low-trust groups. 
+
+Metrics. We report the day 30 bridge-issued rate, day 30 connec-tion success rate, unique bridges exposed to Sybils, and migrations per day. Success is measured over all legitimate requests on day 30 rather than conditioned on issued requests, so selective denial reduces success unless it improves overall bridge availability. Re-porting issuance remains important because trust- or reputation-based systems can still trade broader service for lower exposure. We therefore interpret success jointly with issuance. Because migration semantics differ somewhat across systems, we treat migrations/day as a comparative stress indicator rather than a perfectly uniform operational count. 
+
+Results. In the main stress setting ( zig_zag , 𝑓 = 0.20 , user-arrival factor 1.6), G-Lox reaches 76 .3 ± 3.8% day-30 success with 
+
+100 .0% issuance. Under the same setting, Lox reaches 38 .6±3.1% suc-cess with 100 .0% issuance, rBridge-like reaches 44 .3 ± 2.4% success with 98 .2% issuance, and Salmon-like reaches 58 .8 ± 3.3% success with 73 .9% issuance (100 seeds each). Table 5 reports day-30 success as mean ± standard deviation for fixed-scenario sweeps under the higher-load user-arrival regime (factor 1.8). In the adversary-type sweep, we fix 𝑓 = 0.20 and vary the adversary. In the Sybil-fraction sweep, we fix the adversary to zig_zag and vary 𝑓 . Because each cell is computed from 100 seeds of a single configuration, the re-ported standard deviations capture within-scenario seed variability only, avoiding the inflation caused by pooling heterogeneous set-tings in the earlier aggregated table. 
+
+Takeaway. Although G-Lox is more expensive than Lox because it enforces a stronger two-server privacy model, it delivers the strongest robustness among high-issuance systems under group-specific blocking, whereas Salmon-like improves outcomes in part by selectively withholding issuance rather than by preserving broad service. 
+
+## 6 Conclusion and Future Work 
+
+G-Lox aims to make bridge distribution adaptive to real censor-ship signals while keeping the public-facing distributor oblivious to users’ bridge assignments and hidden group identifiers. Our core construction is a two-server privacy wall: the two state servers run 2PC to derive the hidden group tag, read/update group-indexed state, and generate opaque bridge tokens, while directory reso-lution is performed via a lightweight two-server FSS/DPF-based 
+
+Table 5: Day-30 success (%, mean ± std) from 100 seeds per fixed scenario. Each cell reports variation across seeds only. Adversary-type sweep (fixed Sybil fraction 𝑓 = 0.20 )
+
+System learn_burn zig_zag conservative blanket_trans G-Lox 38.1 ±3.7 76.3 ±3.8 62.0 ±4.6 70.2 ±3.6 Lox 22.9 ±2.8 38.6 ±3.1 42.0 ±2.8 52.9 ±2.7 rBridge-like 27.9 ±2.7 44.3 ±2.4 57.0 ±2.6 56.5 ±3.7 Salmon-like 53.2 ±3.5 58.8 ±3.3 68.2 ±3.1 51.6 ±3.9 
+
+Sybil-fraction sweep (fixed adversary zig_zag )
+
+System 0.10 0.20 0.30 0.40 G-Lox 82.5 ±3.4 76.3 ±3.8 71.8 ±3.5 67.0 ±3.8 Lox 47.7 ±2.9 38.6 ±3.1 33.7 ±3.5 31.1 ±3.0 rBridge-like 59.4 ±2.6 44.3 ±2.4 27.5 ±2.8 12.5 ±2.0 Salmon-like 66.7 ±2.9 58.8 ±3.3 53.3 ±3.0 46.9 ±3.0 PIR so that neither server under non-collusion assumption learns the queried index. This design supports user-driven blockage re-porting, transport-aware rotation, and privacy-preserving group splitting, without leaking stable group identifiers or assignment decisions to the distributor. Our microbenchmark over real TCP sockets makes the concrete cost of G-Lox explicit. Across group-state sizes 𝑀 ∈ { 210 , . . . , 216 }, client-visible communication stays in the low-KiB range per end-to-end iteration. The measurements show that two-server DPF/FSS-based private access keeps client-edge overhead modest, with only mild growth as 𝑀 increases. The dominant remaining cost comes from the backend 2PC required for hidden, state-dependent adaptation. Overall, the evaluation sup-ports the main design intuition behind G-Lox: private state access is practical, and the main scaling pressure lies in the adaptive logic rather than in private retrieval itself. Regarding future work, we see three natural next steps. First, one can strengthen G-Lox from a privacy-preserving back-end into a more fully metadata-hiding protocol. Our current prototype pro-tects the state-access layer, but the client-visible receive pattern still scales with system parameters, which may leak coarse information unless padded or embedded in a more fully anonymous commu-nication substrate. A natural direction is therefore to combine G-Lox with stronger metadata-hiding or anonymous-communication techniques, such as mixnet-based designs or metadata-private mes-saging systems, while preserving the bridge-distribution function-ality [ 18 , 26 , 35 , 40 ]. Second, the prototype can be optimized sub-stantially at the systems level: the benchmark suggests that the dominant cost lies in the 2PC adaptation layer rather than in the private reads themselves, so there is clear room to streamline the state logic, simplify the Boolean circuits, and use batching, pipelin-ing, vectorization, and parallelism to improve throughput. Third, it would be valuable to strengthen the security model beyond the current semi-honest prototype, for example, by moving to mali-ciously secure MPC back ends or adding stronger integrity checks for the privacy wall [ 24 , 25 ]. Taken together, these directions would move G-Lox toward a more end-to-end private, efficient, and robust bridge-distribution system. G-Lox: Group-Adaptive, Privacy-Preserving Bridge Distribution with Two-Party Computation 
+
+## References 
+
+[1] Abdullah Alshalan, Sandeep Pisharody, and Dijiang Huang. 2015. A survey of mobile VPN technologies. IEEE Communications Surveys & Tutorials 18, 2 (2015), 1177–1196. [2] Yawning Angel and Philipp Winter. 2014. obfs4 (the obfourscator). Online: https://github.com/Yawning/obfs4/blob/master/doc/obfs4-spec.txt. [3] Abhishek Bhaskar and Paul Pearce. 2024. Understanding routing-induced cen-sorship changes globally. In Proceedings of the 2024 on ACM SIGSAC Conference on Computer and Communications Security . 437–451. [4] Cecylia Bocovich, Arlo Breault, David Fifield, Serene, and Xiaokang Wang. 2024. Snowflake, a censorship circumvention system using temporary WebRTC proxies. In USENIX Security Symposium . USENIX. https://www.usenix.org/system/files/ sec24fall-prepub-1998-bocovich.pdf [5] Elette Boyle, Niv Gilboa, and Yuval Ishai. 2015. Function secret sharing. In Annual international conference on the theory and applications of cryptographic techniques .Springer, 337–367. [6] Elette Boyle, Niv Gilboa, and Yuval Ishai. 2016. Function secret sharing: Im-provements and extensions. In Proceedings of the 2016 ACM SIGSAC conference on computer and communications security . 1292–1303. [7] Elette Boyle, Niv Gilboa, and Yuval Ishai. 2019. Secure computation with pre-processing via function secret sharing. In Theory of Cryptography Conference .Springer, 341–371. [8] Jan Camenisch and Anna Lysyanskaya. 2005. A formal treatment of onion routing. In Annual International Cryptology Conference . Springer, 169–187. [9] Melissa Chase, Sarah Meiklejohn, and Greg Zaverucha. 2014. Algebraic MACs and keyed-verification anonymous credentials. In Proceedings of the 2014 acm sigsac conference on computer and communications security . 1205–1216. [10] Hao Chen, Ilaria Chillotti, and Ling Ren. 2019. Onion ring ORAM: Efficient constant bandwidth oblivious RAM from (leveled) TFHE. In Proceedings of the 2019 ACM SIGSAC Conference on Computer and Communications Security . 345– 360. [11] Simone Colombo, Kirill Nikitin, Henry Corrigan-Gibbs, David J Wu, and Bryan Ford. 2023. Authenticated private information retrieval. In 32nd USENIX security symposium (USENIX Security 23) . 3835–3851. [12] Cas Cremers, Alexander Dax, and Niklas Medinger. 2024. Keeping Up with the KEMs: Stronger Security Notions for KEMs and automated analysis of KEM-based protocols. In Proceedings of the 2024 on ACM SIGSAC Conference on Computer and Communications Security . 1046–1060. [13] Roger Dingledine. 2011. Research problems: Ten ways to discover Tor bridges. Online: https://blog.torproject.org/research-problems-ten-ways-discover-tor-bridges/. [14] Roger Dingledine and Nick Mathewson. 2006. Design of a blocking-resistant anonymity system. [15] Roger Dingledine, Nick Mathewson, and Paul Syverson. 2004. Tor: The second-generation onion router. (2004). [16] Jack Doerner and Abhi Shelat. 2017. Scaling ORAM for secure computation. In 
+
+Proceedings of the 2017 ACM SIGSAC Conference on Computer and Communications Security . 523–535. [17] Frederick Douglas, Weiyang Pan, Matthew Caesar, et al . 2016. Salmon: Ro-bust proxy distribution for censorship circumvention. Proceedings on Privacy Enhancing Technologies (2016). [18] Ellis Fenske and Aaron Johnson. 2024. Bytes to schlep? Use a FEP: Hiding protocol metadata with fully encrypted protocols. In Proceedings of the 2024 on ACM SIGSAC Conference on Computer and Communications Security . 1982–1996. [19] David Fifield, Chang Lan, Rod Hynes, Percy Wegmann, and Vern Paxson. 2015. Blocking-resistant communication through domain fronting. Proceedings on Privacy Enhancing Technologies (2015). [20] Niv Gilboa and Yuval Ishai. 2014. Distributed point functions and their appli-cations. In Annual International Conference on the Theory and Applications of Cryptographic Techniques . Springer, 640–658. [21] Oded Goldreich, Silvio Micali, and Avi Wigderson. 2019. How to play any mental game, or a completeness theorem for protocols with honest majority. In Providing sound foundations for cryptography: on the work of Shafi Goldwasser and Silvio Micali . 307–328. [22] David Goldschlag, Michael Reed, and Paul Syverson. 1999. Onion routing. Com-mun. ACM 42, 2 (1999), 39–41. [23] Rob Jansen and Aaron Johnson. 2016. Safely measuring tor. In Proceedings of the 2016 ACM SIGSAC Conference on Computer and Communications Security .1553–1567. [24] Marcel Keller, Emmanuela Orsini, and Peter Scholl. 2016. MASCOT: faster malicious arithmetic secure computation with oblivious transfer. In Proceedings of the 2016 ACM SIGSAC Conference on Computer and Communications Security .830–842. [25] Marcel Keller, Valerio Pastro, and Dragos Rotaru. 2018. Overdrive: Making SPDZ great again. In Annual International Conference on the Theory and Applications of Cryptographic Techniques . Springer, 158–189. [26] David Lazar, Yossi Gilad, and Nickolai Zeldovich. 2018. Karaoke: Distributed private messaging immune to passive traffic analysis. In 13th USENIX Symposium on Operating Systems Design and Implementation (OSDI 18) . 711–725. [27] Julia Len, Paul Grubbs, and Thomas Ristenpart. 2021. Partitioning oracle attacks. In 30th USENIX security symposium (USENIX Security 21) . 195–212. [28] Wei-Kai Lin, Ethan Mook, and Daniel Wichs. 2023. Doubly Efficient Private Information Retrieval and Fully Homomorphic RAM Computation from Ring LWE. In Proceedings of the 55th Annual ACM Symposium on Theory of Computing (STOC ’23) . ACM, 595–608. doi:10.1145/3564246.3585175 [29] Zhen Ling, Junzhou Luo, Wei Yu, Ming Yang, and Xinwen Fu. 2013. Tor bridge discovery: extensive analysis and large-scale empirical evaluation. IEEE Transac-tions on Parallel and Distributed Systems 26, 7 (2013), 1887–1899. [30] James Marshall. 1988. Goldilocks and the three bears . Penguin. [31] Damon McCoy, Jose Andre Morales, and Kirill Levchenko. 2011. Proximax: measurement-driven proxy dissemination (short paper). In International Confer-ence on Financial Cryptography and Data Security . Springer, 260–267. [32] Milad Nasr, Sadegh Farhang, Amir Houmansadr, and Jens Grossklags. 2019. Enemy At the Gateways: Censorship-Resilient Proxy Distribution Using Game Theory.. In NDSS .[33] Hiroki Okada, Rachel Player, Simon Pohmann, and Christian Weinert. 2024. To-wards practical doubly-efficient private information retrieval. In International Conference on Financial Cryptography and Data Security . Springer Nature Switzer-land, Cham, 264–282. [34] Hiroki Okada, Rachel Player, Simon Pohmann, and Christian Weinert. 2025. On algebraic homomorphic encryption and its applications to doubly-efficient PIR. In 
+
+Annual International Conference on the Theory and Applications of Cryptographic Techniques . Springer Nature Switzerland, Cham, 34–64. [35] Ania M Piotrowska, Jamie Hayes, Tariq Elahi, Sebastian Meiser, and George Danezis. 2017. The loopix anonymity system. In 26th usenix security symposium (usenix security 17) . 1199–1216. [36] Michael G Reed, Paul F Syverson, and David M Goldschlag. 2002. Anonymous connections and onion routing. IEEE Journal on Selected areas in Communications 
+
+16, 4 (2002), 482–494. [37] shelikhoo and Gustavo Gus. 2024. Hiding in plain sight: Introducing WebTunnel. Online: https://blog.torproject.org/introducing-webtunnel-evading-censorship-by-hiding-in-plain-sight/. [38] Emil Stefanov, Marten van Dijk, Elaine Shi, T-H Hubert Chan, Christopher Fletcher, Ling Ren, Xiangyao Yu, and Srinivas Devadas. 2018. Path ORAM: an extremely simple oblivious RAM protocol. Journal of the ACM (JACM) 65, 4 (2018), 1–26. [39] Lindsey Tulloch and Ian Goldberg. 2023. Lox: Protecting the Social Graph in Bridge Distribution. Proceedings on Privacy Enhancing Technologies 1 (2023), 494–509. [40] Jelle Van Den Hooff, David Lazar, Matei Zaharia, and Nickolai Zeldovich. 2015. Vuvuzela: Scalable private messaging resistant to traffic analysis. In Proceedings of the 25th Symposium on Operating Systems Principles . 137–152. [41] Martijn P van Iersel, Alexander R Pico, Thomas Kelder, Jianjiong Gao, Isaac Ho, Kristina Hanspers, Bruce R Conklin, and Chris T Evelo. 2010. The BridgeDb framework: standardized access to gene, protein and metabolite identifier map-ping services. BMC bioinformatics 11, 1 (2010), 5. [42] Paul Vines, Samuel McKay, Jesse Jenter, and Suresh Krishnaswamy. 2024. Commu-nication Breakdown: Modularizing Application Tunneling for Signaling Around Censorship. Proceedings on Privacy Enhancing Technologies (2024). [43] Qiyan Wang, Zi Lin, Nikita Borisov, and Nicholas Hopper. 2013. rBridge: User Reputation based Tor Bridge Distribution with Privacy Preservation.. In NDSS .[44] Andrew Chi-Chih Yao. 1986. How to generate and exchange secrets. In 27th annual symposium on foundations of computer science (Sfcs 1986) . IEEE, 162–167. 
+
+## A Open Science 
+
+To enable evaluation of the paper’s core contributions, we provide anonymized research artifacts for double-blind review, including: (i) the G-Lox prototype implementation, (ii) scripts for reproducing the reported benchmarks and simulations, (iii) configuration files and evaluation parameters, and (iv) documentation for building and running the artifact. Repository is available at https://anonymous. 4open.science/r/G-lox-5FC5 These materials are shared with the program committee through an anonymous artifact package and an anonymized access link included in the submission. This work does not depend on human-subject data, personal data, or proprietary datasets. We do not Baigang Chen and Nicholas Hopper 
+
+require access to production infrastructure to evaluate the paper’s main claims. We may omit deployment-sensitive operational details from the shared materials where release would create unnecessary risk for real-world bridge-distribution systems. Such omissions do not affect the ability of reviewers to assess the paper’s scientific contributions, methodology, or reported results. 
+
+## B Ethical Considerations 
+
+This paper studies privacy-preserving bridge distribution for anony-mous communication systems. Its aim is defensive: to strengthen privacy and access security in adversarial settings. We recognize the dual-use nature of this research. While ad-vances in bridge distribution can improve protections for legitimate users, they may also inform adversaries about system assumptions or limitations. Accordingly, we describe the design and analysis at a level sufficient for scientific evaluation while avoiding unnecessary operational detail. This work does not involve human subjects or personal data. We believe the defensive and privacy-preserving benefits of this research outweigh the risks associated with publication. 
+
+## C Generative AI Usage 
+
+Generative AI tools were used during the preparation of this paper. ChatGPT was used for grammar assistance, and Codex was used for code assistance and implementation support. The authors re-viewed, validated, and took responsibility for all technical content, experimental results, code, and claims in the final manuscript. 
+
+## D Lox Protocol review. 
+
+The Lox system involves three parties. The Lox Authority (LA) is a single central authority that maintains a database of Tor bridges par-titioned into buckets, maintains migration tables mapping (𝛽 FROM , 𝛽 TO )
+
+for both trust promotion and blockage migration, and acts as the is-suer and verifier for all Lox credentials and tokens. A set of users in-teracts with the LA over anonymized channels after obtaining their first bridge. Finally, an invitation token distributor (e.g., BridgeDB) hands out open-entry invitation tokens ΩI.The following credential and token types are maintained through-out the system. A Lox credential is 
+
+ΨL = (Φ, 𝑡, 𝐿, 𝛽, 𝑎, 𝑑 ),
+
+where Φ is a one-show, unlinkable credential identifier, 𝑡 is the last update time (e.g., in days), 𝐿 ∈ { 0, 1, 2, 3, 4} is the trust level, 𝛽 is the bucket identifier for the user’s current bucket, 𝑎 is the number of invitations the user still holds, and 𝑑 is a counter of bridges in the user’s bucket that have been blocked. An Invitation credential is 
+
+ΨI = (ΦI, 𝑡 I, 𝛽 I, 𝑑 I),
+
+which encodes an invitation from an existing Lox user to a new user; intuitively, (𝛽 I, 𝑑 I) mirror the inviter’s bucket and blockage count at issue time. A Bucket reachability credential is 
+
+ΨR = (𝑡 R, 𝛽 R),
+
+issued by the LA each day, attesting that bucket 𝛽 R was reachable on day 𝑡 R. Finally, a Migration token is 
+
+ΩM = (ΦL, 𝛽 FROM , 𝛽 TO , function ),
+
+created by the user after decrypting an encrypted migration table provided by the LA, where function ∈ { trust , blockage } indicates whether this is a trust-promotion migration or a blockage migration. 
+
+Algorithm 6 Lox OpenEntryJoin (join with open-entry invitation token) 
+
+Require: User holds fresh open-entry invitation token ΩI.
+
+Require: LA holds bucket state and credential-issuing state. 
+
+Ensure: User obtains initial credential ΨL =
+
+(Φ, 𝑡, 𝐿 =0, 𝛽, 𝑎 =0, 𝑑 =0).
+
+User → LA: JoinReq  
+
+> 1:
+
+Sample 𝑚 Φ
+
+> $
+
+←− M ; (𝑑, 𝐷 ) ← ElGamal .KeyGen ()  
+
+> 2:
+
+𝑐 Φ ← Enc 𝐷 (𝑚 Φ) 
+
+> 3:
+
+𝜋 user ← ZKProve (𝑐 Φ encrypts 𝑚 Φ) 
+
+> 4:
+
+Send ⟨ΩI, 𝐷, 𝑐 Φ, 𝜋 user ⟩
+
+LA: verify & issue  
+
+> 5:
+
+VerifyFresh (ΩI); MarkSpent (ΩI) 
+
+> 6:
+
+Verify 𝜋 user  
+
+> 7:
+
+Sample 𝑗 Φ
+
+> $
+
+←− J ; 𝛽 ← SampleBucket ()  
+
+> 8:
+
+(𝑡, 𝐿, 𝑎, 𝑑 ) ← ( now , 0, 0, 0) 
+
+> 9:
+
+𝜎 ← IssueMAC (𝐷, 𝑐 Φ, 𝑗 Φ, 𝑡, 𝐿, 𝛽, 𝑎, 𝑑 ) 
+
+> 10:
+
+Send JoinResp ⟨𝜎, 𝑗 Φ, 𝛽, 𝑡 ⟩
+
+User: finalize  
+
+> 11:
+
+𝑚 𝜎 ← Dec 𝑑 (𝜎 ); Φ ← 𝑚 Φ + 𝑗 Φ 
+
+> 12:
+
+Output ΨL ← ( Φ, 𝑡, 𝐿 =0, 𝛽, 𝑎 =0, 𝑑 =0)
+
+## E Complexity Analysis for G-Lox 
+
+GetBridge . Inside 2PC, the servers compute the hidden tag (1 PRF), derive a type-seed (1 PRF), derive the index 𝑖 (1 PRF), generate the bridge token ΩB (modeled as AEAD-style capability encryption: 2 PRFs), and generate a one-time PIR authorization token Ωpir (1 MAC ≈ 1 PRF). Thus the dominant symmetric-crypto count is 
+
+𝑁 GB  
+
+> PRF
+
+= 1 (tag ) + 1 (type-seed ) + 1 (𝑖 ) + 2 (ΩB) + 1 (Ωpir ) = 6,
+
+and the GC AND-gate count is 
+
+𝐺 GB  
+
+> ∧
+
+≈ 6 𝐺 PRF  
+
+> ∧
+
++ 𝐺 sel  
+
+> ∧
+
++ 𝐺 fmt  
+
+> ∧
+
+.
+
+Accordingly, the dominant online GC communication is 
+
+𝐶 Yao GC ,online (GetBridge ) ≈ 2𝜆 · 𝐺 GB  
+
+> ∧
+
+bits + 𝐶 OT (𝑛 𝐸 ).
+
+Group-state access performs one private read+write of a 𝐵 -byte record, so 
+
+𝐶 GB  
+
+> state
+
+= 𝐶 dpfrw (𝑀, 𝐵 ), 𝑇 GB  
+
+> state
+
+= 𝑇 dpfrw (𝑀, 𝐵 ).
+
+The distributor 𝐷 only relays an end-to-end ciphertext 𝐶 , so 𝐷 ’s online work is dominated by KVAC verification and network relay. G-Lox: Group-Adaptive, Privacy-Preserving Bridge Distribution with Two-Party Computation 
+
+Algorithm 7 Lox TrustPromotion+Migration (𝐿 =0 → 1 into trusted bucket) 
+
+Require: User holds ΨL 
+
+> old
+
+= (Φ, 𝑡, 𝐿 =0, 𝛽, 𝑎 =0, 𝑑 =0).
+
+Require: LA holds migration table {( 𝛽 𝑖 
+
+> FROM
+
+, 𝛽 𝑖 
+
+> TO
+
+)} 𝑖 and migration-key issuance. 
+
+Ensure: User obtains ΨL 
+
+> new
+
+= (Φ′, 𝑡 ′ = 𝛿, 𝐿 ′ = 1, 𝛽 ′ = 𝛽 TO , 𝑎 ′ =
+
+0, 𝑑 ′ = 0).
+
+Phase 1: eligibility & migration-key delivery User → LA: PromoReq  
+
+> 1:
+
+𝜋 elig ← ZKProve [reveal Φ; hide (𝑡, 𝛽 ); eligible ] 
+
+> 2:
+
+Send ⟨Φ, 𝜋 elig ⟩
+
+LA  
+
+> 3:
+
+CheckUnused (Φ); MarkPromoUsed (Φ); verify 𝜋 elig  
+
+> 4:
+
+𝜆 ← IssueMigKeyCred (Φ) 
+
+> 5:
+
+𝐶 row ← EncMigRow (𝜆 ; {( 𝛽 𝑖 
+
+> FROM
+
+, 𝛽 𝑖 
+
+> TO
+
+)} 𝑖 ) 
+
+> 6:
+
+Send PromoResp ⟨𝜆, 𝐶 row ⟩
+
+User  
+
+> 7:
+
+(𝛽 FROM , 𝛽 TO ) ← DecRow (𝜆, 𝐶 row ) 
+
+> 8:
+
+ΩM ← ( Φ, 𝛽 FROM = 𝛽, 𝛽 TO , type = trust )
+
+Phase 2: migrate & issue new credential User → LA: MigrateReq  
+
+> 9:
+
+Prepare template with (𝑡 ′ = 𝛿, 𝐿 ′ = 1, 𝑎 ′ = 0, 𝑑 ′ = 0, 𝛽 ′ = 𝛽 TO )
+
+and fresh Φ′ (jointly derived)  
+
+> 10:
+
+𝜋 mig ← ZKProve [ΩM.Φ = Φ; ΩM.𝛽 FROM = 𝛽 ; ΩM.𝛽 TO = 𝛽 ′] 
+
+> 11:
+
+Send old cred (reveal Φ; hide (𝑡, 𝛽 )), ΩM (hide buckets), new template (hide (Φ′, 𝛽 ′)), and 𝜋 mig 
+
+LA  
+
+> 12:
+
+Verify 𝜋 mig ; 𝜎 new ← IssueMAC (ΨL
+
+> new
+
+) 
+
+> 13:
+
+Send MigrateResp ⟨𝜎 new ⟩
+
+User  
+
+> 14:
+
+ΨL 
+
+> new
+
+← Finalize (𝜎 new ); store it 
+
+Algorithm 8 Lox LevelUp (𝐿 → 𝐿 +1 for 1 ≤ 𝐿 < 4)
+
+Require: Arrays DAYS [1..4], INVITATIONS [1..4], MAX_L [·]. 
+
+Require: User holds ΨL 
+
+> old
+
+= (Φ, 𝑡, 𝐿, 𝛽, 𝑎, 𝑑 ) with 1 ≤ 𝐿 < 4 and reachability cred ΨR = (𝑡 R, 𝛽 R) for today. 
+
+Ensure: User obtains ΨL 
+
+> new
+
+= (Φ′, 𝑡 ′ = 𝛿, 𝐿 ′ = 𝐿 +1, 𝛽 ′ = 𝛽, 𝑎 ′ =
+
+INVITATIONS [𝐿 +1], 𝑑 ′ = 𝑑 ).
+
+User → LA: LevelUpReq  
+
+> 1:
+
+Jointly derive fresh Φ′ with LA; set 𝛽 ′ ← 𝛽 , 𝑑 ′ ← 𝑑  
+
+> 2:
+
+𝜋 lvl ← ZKProve [𝛽 R = 𝛽 ∧ 𝑡 R = 𝛿 ∧ 𝑡 + DAYS [𝐿 +1] ≤ 𝛿 ≤
+
+𝑡 + DAYS [𝐿 +1] + 511 ∧ 𝑑 ≤ MAX_L [𝐿 +1]]  
+
+> 3:
+
+Send reveal (Φ, 𝐿 ); hide (𝑡, 𝛽, 𝑎, 𝑑 ) and 𝛽 R; include 𝜋 lvl 
+
+LA  
+
+> 4:
+
+Verify 𝜋 lvl  
+
+> 5:
+
+CheckUnused (Φ); MarkLevelUsed (Φ) 
+
+> 6:
+
+Set 𝐿 ′ ← 𝐿 +1, 𝑡 ′ ← 𝛿 , 𝑎 ′ ← INVITATIONS [𝐿 +1] 
+
+> 7:
+
+Form ΨL 
+
+> new
+
+= (Φ′, 𝑡 ′, 𝐿 ′, 𝛽 ′, 𝑎 ′, 𝑑 ′); 𝜎 new ← IssueMAC (ΨL
+
+> new
+
+) 
+
+> 8:
+
+Send LevelUpResp ⟨𝜎 new ⟩
+
+User  
+
+> 9:
+
+ΨL 
+
+> new
+
+← Finalize (𝜎 new ); store it 
+
+Algorithm 9 Lox IssueInvitation (for 𝐿 ≥ 2 and 𝑎 > 0)
+
+Require: User holds ΨL 
+
+> old
+
+= (Φ, 𝑡, 𝐿, 𝛽, 𝑎, 𝑑 ) with 𝐿 ≥ 2 and 𝑎 > 0,and reachability cred ΨR = (𝑡 R, 𝛽 R) for today. 
+
+Ensure: User obtains updated ΨL 
+
+> new
+
+= (Φ′, 𝑡, 𝐿, 𝛽, 𝑎 − 1, 𝑑 ) and in-vitation credential ΨI = (ΦI, 𝑡 I = 𝛿, 𝛽 I = 𝛽, 𝑑 I = 𝑑 ).
+
+User → LA: InviteReq  
+
+> 1:
+
+Jointly form fresh Φ′ and invitation ID ΦI with LA  
+
+> 2:
+
+Prepare hidden updates: 𝛽 ′ = 𝛽 , 𝐿 ′ = 𝐿 , 𝑡 ′ = 𝑡 , 𝑎 ′ = 𝑎 − 1,
+
+𝑑 ′ = 𝑑 ; invitation attrs 𝛽 I = 𝛽 , 𝑑 I = 𝑑 , 𝑡 I = 𝛿  
+
+> 3:
+
+𝜋 inv ← ZKProve [𝛽 R = 𝛽 ∧ 𝑡 R = 𝛿 ∧ 𝑎 > 0 ∧ ( 𝛽 ′, 𝐿 ′, 𝑡 ′, 𝑎 ′, 𝑑 ′) =
+
+(𝛽, 𝐿, 𝑡, 𝑎 − 1, 𝑑 ) ∧ ( 𝛽 I, 𝑑 I) = (𝛽, 𝑑 )]  
+
+> 4:
+
+Send reveal Φ; hide (𝑡, 𝐿, 𝛽, 𝑎, 𝑑 ) and 𝛽 R; include 𝜋 inv 
+
+LA  
+
+> 5:
+
+Verify 𝜋 inv  
+
+> 6:
+
+CheckUnused (Φ); MarkInviteUsed (Φ) 
+
+> 7:
+
+Issue ΨL 
+
+> new
+
+= (Φ′, 𝑡, 𝐿, 𝛽, 𝑎 − 1, 𝑑 ) and ΨI = (ΦI, 𝛿, 𝛽, 𝑑 ) 
+
+> 8:
+
+𝜎 new ← IssueMAC (ΨL
+
+> new
+
+); 𝜎 I ← IssueMAC (ΨI) 
+
+> 9:
+
+Send InviteResp ⟨𝜎 new , 𝜎 I⟩
+
+User  
+
+> 10:
+
+ΨL 
+
+> new
+
+← Finalize (𝜎 new ) 
+
+> 11:
+
+ΨI ← Finalize (𝜎 I); deliver ΨI to friend 
+
+Algorithm 10 Lox RedeemInvitation (join at 𝐿 = 1 using ΨI)
+
+Require: New user holds invitation credential ΨI = (ΦI, 𝑡 I, 𝛽 I, 𝑑 I).
+
+Ensure: New user obtains ΨL = (Φ, 𝑡 = 𝛿, 𝐿 = 1, 𝛽 = 𝛽 I, 𝑎 = 0, 𝑑 =
+
+𝑑 I).
+
+User → LA: RedeemReq  
+
+> 1:
+
+Prepare template: 𝛽 ← 𝛽 I, 𝑑 ← 𝑑 I, 𝐿 ← 1, 𝑡 ← 𝛿 , 𝑎 ← 0;jointly form fresh Φ with LA  
+
+> 2:
+
+𝜋 red ← ZKProve [ΨI valid & unredeemed ∧ ( 𝑡 I + 15 ≥ 𝛿 )]  
+
+> 3:
+
+Send reveal ΦI; hide (𝑡 I, 𝛽 I, 𝑑 I); include 𝜋 red 
+
+LA  
+
+> 4:
+
+Verify 𝜋 red  
+
+> 5:
+
+CheckUnused (ΦI); MarkRedeemed (ΦI) 
+
+> 6:
+
+Issue ΨL = (Φ, 𝛿, 1, 𝛽 I, 0, 𝑑 I); 𝜎 L ← IssueMAC (ΨL) 
+
+> 7:
+
+Send RedeemResp ⟨𝜎 L⟩
+
+User  
+
+> 8:
+
+ΨL ← Finalize (𝜎 L); store it 
+
+RedeemDirPIR .. Directory redemption is not executed inside the garbled circuit. Given (𝜏, 𝑖, Ωpir ), the user generates two DPF keys 
+
+(𝑘 0, 𝑘 1) ← DPF .Gen (𝑖 ) and sends (𝜏, 𝑘 𝑏 , Ωpir ) to each server 𝑆 𝑏 .Each server verifies the authorization token (one MAC check) and returns an XOR-share of the 𝐷 -byte descriptor. 
+
+Online communication per directory PIR is 
+
+𝐶 PIR ,online ≈ 2 |𝑘 DPF (𝑁 𝜏 )| + 2𝐷 + 2|Ωpir | bytes ,
+
+where 2𝐷 bytes is the total size of the two XOR-share replies and the query key size satisfies |𝑘 DPF (𝑁 𝜏 )| = 𝑂 (𝜆 log 𝑁 𝜏 ) bits. Note that if the token is transmitted once and cached at the server for a short window, the 2|Ωpir | term can be reduced accordingly. 
+
+Per-server work for redemption consists of (i) one MAC verifi-cation plus a spent-set lookup/insert, and (ii) standard DPF-PIR evaluation over the directory partition: Baigang Chen and Nicholas Hopper 
+
+𝑇 PIR (𝑁 𝜏 , 𝐷 ) = 𝑂 (1) + Θ(𝑁 𝜏 · 𝐷 ) .
+
+Since we already deploy DPF/FSS for group-state access, this re-demption step reuses the same primitive; in particular, the only new component is token gating to prevent directory enumeration. 
+
+ReportBlocked : best case. Inside 2PC, the servers compute the hidden tag (1 PRF), validate the bridge token ΩB (2 PRFs under 
+
+CapDec ), and derive the dedup nullifier (1 PRF). Thus the dominant PRF count is 
+
+𝑁 RB  
+
+> PRF ,best
+
+= 1 (tag ) + 2 (token check ) + 1 (nf ) = 4.
+
+Accordingly, the AND-gate count is 
+
+𝐺 RB,best  
+
+> ∧
+
+≈ 4 𝐺 PRF  
+
+> ∧
+
++ 𝐺 dedup  
+
+> ∧
+
++ 𝐺 fmt  
+
+> ∧
+
+.
+
+The dominant online GC communication is 
+
+𝐶 Yao GC ,online (RB,best ) ≈ 2𝜆 · 𝐺 RB,best  
+
+> ∧
+
+bits + 𝐶 OT (𝑛 𝐸 ).
+
+ReportBlocked : worst case. If contrib = 1, 2PC additionally de-rives a new type seed (1 PRF), a new index 𝑖 new (1 PRF), generates a fresh bridge token ΩBnew (2 PRFs under capability encryption), and generates a fresh one-time PIR authorization token Ωpir new (1 MAC 
+
+≈ 1 PRF). Thus 
+
+𝑁 RB  
+
+> PRF ,worst
+
+= 𝑁 RB  
+
+> PRF ,best
+
++ 1 (type-seed ) + 1 (𝑖 new )+ 2 (ΩBnew ) + 1 (Ωpir new ) = 9.
+
+Accordingly, 
+
+𝐺 RB,worst  
+
+> ∧
+
+≈ 9 𝐺 PRF  
+
+> ∧
+
++ 𝐺 dedup  
+
+> ∧
+
++ 𝐺 sel  
+
+> ∧
+
++ 𝐺 fmt  
+
+> ∧
+
+.
+
+The dominant online GC communication is 
+
+𝐶 Yao GC ,online (RB,worst ) ≈ 2𝜆 · 𝐺 RB,worst  
+
+> ∧
+
+bits + 𝐶 OT (𝑛 𝐸 ),
+
+and the state-backend cost remains one FSS/DPF read+write. When migration triggers, the user additionally redeems the new assignment via the directory PIR protocol (§3). This PIR step is outside 2PC; its online communication is analyzed as before. 
+
+Split trigger inside 2PC.. The server-side trigger checks two con-ditions on the record and, if triggered, samples and stores a fresh seed 𝑠 $
+
+←− { 0, 1}𝜆 and sets a split flag. This is dominated by simple comparisons and conditional assignment on fixed-size fields already resident in the group record. Accordingly, the AND-gate count for the split logic is 
+
+𝐺 GS  
+
+> ∧
+
+≈ 𝐺 cmp  
+
+> ∧
+
++ 𝐺 mux  
+
+> ∧
+
++ 𝐺 fmt  
+
+> ∧
+
+,
+
+where 𝐺 cmp  
+
+> ∧
+
+accounts for comparing st .size to 𝐺 max and checking the splitting bit, 𝐺 mux  
+
+> ∧
+
+accounts for writing either the old state or the updated state via multiplexing, and 𝐺 fmt  
+
+> ∧
+
+is small packing overhead. Notably, this path does not require AES/PRF-style computation; the only randomness needed is a 𝜆 -bit seed 𝑠 , which is obtained from the servers’ local randomness and injected as garbler/evaluator inputs. Thus, the dominant online GC communication for the split logic is 
+
+𝐶 Yao GC ,online (GroupSplit ) ≈ 2𝜆 · 𝐺 GS  
+
+> ∧
+
+bits + 𝐶 OT (𝑛 𝐸 ),
+
+and in practice is negligible compared to the AES-dominated costs of GetBridge /ReportBlocked .
