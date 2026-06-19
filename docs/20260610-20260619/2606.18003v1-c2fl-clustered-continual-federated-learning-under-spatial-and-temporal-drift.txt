@@ -1,0 +1,1414 @@
+Title: C2FL: Clustered Continual Federated Learning under Spatial and Temporal Drift
+
+URL Source: https://arxiv.org/pdf/2606.18003v1
+
+Published Time: Wed, 17 Jun 2026 01:09:19 GMT
+
+Number of Pages: 11
+
+Markdown Content:
+# C²FL: Clustered Continual Federated Learning under Spatial and Temporal Drift 
+
+Davide Domini 
+
+University of Bologna 
+
+Cesena, Italy davide.domini@unibo.it 
+
+Gianluca Aguzzi 
+
+University of Bologna 
+
+Cesena, Italy gianluca.aguzzi@unibo.it 
+
+Lorenzo Pellegrini 
+
+University of Bologna 
+
+Cesena, Italy l.pellegrini@unibo.it 
+
+Mirko Viroli 
+
+University of Bologna 
+
+Cesena, Italy mirko.viroli@unibo.it 
+
+Lukas Esterle 
+
+Aarhus University 
+
+Aarhus, Denmark lukas.esterle@ece.au.dk 
+
+Abstract —Collective Adaptive Systems (CAS) increasingly rely on machine learning to let each node learn from locally sensed data, aligning its behavior with the surrounding environment. Scaling this intelligence, however, raises fundamental challenges: sensed data is often privacy-sensitive, preventing centralized collection; nodes are mobile, traversing regions where nearby nodes perceive similar phenomena while distant ones observe radically different conditions, creating natural spatial clusters; and these distributions evolve over time due to mobility, in-troducing temporal drift that makes local models progressively stale. These dynamics arise across domains – vehicular sensing, drone-based monitoring, smartphone crowdsensing – yet the interplay of privacy, spatial heterogeneity, and temporal drift severely undermines conventional learning strategies. Therefore, we propose C²FL, a fully distributed Federated Learning (FL) approach where nodes self-organize into learning groups through spatial clustering, reflecting the geographic structure of the environment. To counteract temporal drift, each node combines experience replay with a dwell-time-aware adaptive averaging step, progressively incorporating the regional consensus as it remains longer within the same area, while preserving previously acquired knowledge under evolving distributions. We evaluate our approach on synthetic experiments that systematically repro-duce spatial and temporal shifts, showing that standard federated strategies degrade significantly under these conditions and that our method restores robust collective adaptation. 
+
+Index Terms —Clustered Federated Learning, Continual Learning, Collective Adaptive Systems, Decentralized Learning 
+
+I. I NTRODUCTION 
+
+Recent advancements in decentralized computing pave the way for embedding intelligence directly at the network edge, enabling entities of Collective Adaptive Systems (CAS) to autonomously tune their operations using on-device machine learning. In domains characterized by persistent mobility – such as connected vehicular networks, drone swarms, and participatory crowdsensing – these autonomous nodes must perpetually refine their understanding of the environment. However, accomplishing this adaptation while respecting strict privacy boundaries and limited communication bandwidth introduces substantial hurdles. Consequently, standard dis-tributed learning methodologies frequently prove inadequate for sustaining this pervasive edge intelligence. A primary source of difficulty stems from the spatial 
+
+structure of the observed data. Devices that are geographically close typically perceive similar phenomena and therefore collect data with comparable statistical properties, whereas IID Non-IID 
+
+Fig. 1: Proximity-based heterogeneous data distribution. Cir-cles represent devices, lines represent communication links between devices, and background colors indicate different data distributions. Data are homogeneous within subregions and non-IID across subregions. nodes located in distant regions observe radically different conditions [1], [2]. This induces a form of structured hetero-geneity in which data is approximately homogeneous within local subregions but strongly non-Independent and Identically Distributed (non-IID) across the wider environment (see Fig-ure 1). When nodes move across these regions, this spatial heterogeneity acquires a temporal dimension: each device is exposed to a sequence of locally coherent but globally distinct data regimes, making its local distribution inherently non-stationary. Over time, these mobility-induced shifts can make previously trained models stale and degrade performance on earlier contexts through catastrophic forgetting [3]. At the same time, the data sensed at the network edge is often privacy-sensitive, preventing straightforward centralized collection and training. Federated Learning (FL) has therefore emerged as a natural paradigm for this setting, allowing de-vices to collaboratively train a shared model without exchang-ing raw data [4]. FL has been successfully deployed in large-scale distributed environments [5]–[8], and has recently been applied to collective self-adaptive systems [9]. To better handle spatial non-IID data, prior work has proposed Clustered Fed-erated Learning (CFL) approaches [10], which group devices with similar distributions and train a separate model for each cluster. While effective in static populations, these methods 
+
+> arXiv:2606.18003v1 [cs.LG] 16 Jun 2026
+
+largely ignore the inherent mobility of devices in CASs and therefore do not directly address the sequential distribution shifts experienced by moving nodes. Addressing this limitation is essential to design federated algorithms that can retain prior knowledge while adapting to novel environments encountered during mobility. To close this gap, in this work, we propose C²FL (Clus-tered Continual Federated Learning), a decentralized cluster-based continual federated learning approach for mobile spatial environments. C²FL builds on the FBFL framework [11] to preserve decentralized spatial clustering, while incorporating Continual Learning (CL) mechanisms to cope with the se-quential distribution shifts induced by mobility [3]. While recent studies have begun to explore the intersection of FL, CL, and mobility [12], to the best of our knowledge no prior work has explicitly combined decentralized coordination, CFL, and continual adaptation within a unified framework. CL methods are specifically designed to enable models to adapt to sequentially changing data distributions while mitigating catastrophic forgetting, for instance by leveraging experience replay together with progressive model integration across successive regimes. In particular, we instantiate this design with replay and an adaptive averaging mechanism, which grad-ually blends the regional consensus into the device model as permanence in the current region increases, and experimentally evaluate their behavior in a federated setting characterized by spatially structured data heterogeneity and device mobility. Our experiments leverage widely used benchmark datasets synthetically partitioned to create challenging scenarios for evaluating the proposed approach. The remainder of this paper is organized as follows. Sec-tion II reviews the relevant background and related work. Sec-tion II-D presents the motivation of this work and formulates the research questions. Section III formalizes the considered system model and makes explicit how node mobility induces a continual task stream. Section IV discusses the proposed C²FL approach. Section V reports the experimental evaluation and discusses the obtained results. Finally, Section VI concludes the paper and outlines directions for future research. II. B ACKGROUND AND MOTIVATION 
+
+A. Federated Learning 
+
+Federated Learning (FL) [13], [14] has emerged as adistributed machine learning paradigm that enables multiple clients to collaboratively train a shared model while keep-ing data locally on devices, thus preserving privacy. In the standard formulation, each client performs local training and periodically shares model updates with a central server, which aggregates them to produce a global model. This process is iterated over multiple communication rounds. A key assumption underlying classical FL is that client data are independent and identically distributed (IID). However, this assumption rarely holds in real-world deployments. In practice, data across clients are typically non-IID due to vari-ations in user behavior, environmental conditions, or sensing contexts. This statistical heterogeneity is known to negatively affect convergence and model performance [15], [16], often leading to model drift and unstable optimization dynamics. To address this issue, a line of research has focused on Clustered Federated Learning [17], where the objective is no longer to learn a single global model, but rather to partition clients into groups based on similarity in their data distributions and train a separate model for each cluster. This approach enables a form of implicit personalization, improving performance in heterogeneous settings by restricting collaboration to statisti-cally similar clients. Moreover, in CAS and large-scale IoT environments, data heterogeneity often exhibits a spatial structure [18]. Devices that are geographically close tend to observe similar phenom-ena, leading to locally homogeneous data distributions, while distant devices may experience significantly different condi-tions. This results in proximity-based non-IID data (Figure 1), where heterogeneity emerges across spatial regions rather than randomly across clients. Another fundamental challenge in applying FL to CAS lies in the reliance on centralized coordination. Traditional server-based architectures introduce scalability bottlenecks, commu-nication overhead, and single points of failure, which are par-ticularly problematic in highly distributed and dynamic envi-ronments such as IoT systems. To overcome these limitations, recent works have proposed self-organizing and decentralized FL approaches [9], [11], where clients autonomously form collaboration groups and perform learning without a central coordinator. These methods improve scalability and resilience by enabling adaptive, multi-model learning through local interactions. However, existing approaches typically assume relatively static network conditions, limiting their applicability in highly dynamic scenarios characterized by mobility and evolving topologies. 
+
+B. Continual Learning 
+
+Continual Learning ( CL ), sometimes referred to as lifelong learning , studies learning systems that are exposed to a se-quence of tasks or data distributions over time, rather than to a single stationary training set [3]. The goal is to enable a model to acquire new knowledge while preserving previously learned capabilities. This setting naturally arises in long-lived adaptive systems, where the operating conditions of a device may evolve due to changes in the environment, user behavior, task requirements, or mobility. In such scenarios, retraining a model from scratch whenever new data becomes available is often impractical, either because data from past experiences is no longer accessible, or because compute, time, or other resource constraints make a full retraining infeasible. The main challenge addressed by CL is catastrophic forgetting , namely the tendency of neural models to quickly lose performance on previously learned tasks when optimized on new ones [19]. Depending on how the data stream evolves, CL problems are commonly distinguished into task-incremental, domain-incremental, and class-incremental settings [20]. In task-incremental learning, the model observes a sequence of dis-tinct tasks, often with task identifiers available at training and inference time, which serve as a way to partition a global problem into different parts. In domain/data-incremental learn-ing, the input distribution changes while the prediction space remains fixed. In class-incremental learning, new classes are progressively introduced, and the model must discriminate among all classes observed so far. Beyond this basic taxonomy, other scenarios have been proposed to better capture the properties of realistic streams. For instance, class-incremental learning with repetitions allows previously observed classes to reappear later in the stream, modeling the fact that real environments often revisit past concepts rather than presenting each class only once [21]. To mitigate forgetting, different methods have been pro-posed, which are usually grouped into three categories: (i) reg-ularization approaches constrain the update of model pa-rameters to preserve knowledge relevant to previous tasks; (ii) replay approaches store past examples and interleave them with current data [22], [23]; (iii) architectural methods allocate task-specific model components, for instance, through dynamic expansion, masking, or task-specific modules. Among these strategies, replay is particularly relevant for distributed edge settings, since it can be performed lo-cally without sharing raw data. In mobile spatial environ-ments, replay can be complemented by lightweight parameter-integration rules that progressively mix the regional consensus into the device model as the node stabilizes in a region. For mobile nodes in spatial environments, this combination pro-vides a practical way to adapt to newly visited regions while retaining knowledge acquired from regions visited earlier in time. On the other hand, architectural methods often rely on explicit task signals or well-defined task boundaries [24]–[27], which can make them less suitable for continuous adaptation in decentralized settings where task boundaries may be blurred. 
+
+C. Federated Continual Learning 
+
+Federated Continual Learning (FCL), which combines FL and CL, has emerged as a promising approach to handle non-stationary data in distributed systems, enabling models to adapt over time while preserving privacy. Existing approaches can be broadly categorized based on how they mitigate catastrophic forgetting in federated settings [28], including: (i) regulariza-tion-based methods; (ii) replay or memory-based techniques; (iii) model-integration strategies; and (iv) architectural decom-position schemes. Surveys such as [12], [29] highlight that these methods address different variants of continual learning (e.g., task-, domain-, or class-incremental) under federated constraints, and are increasingly motivated by edge and mobile applications characterized by heterogeneous and evolving data distributions. Several works explicitly consider dynamic environments where data distributions change over time due to mobility or concept drift [30], [31]. For instance, extensions of Fe-dAvg incorporate drift detection and adaptive updates to cope with non-stationary data, while other approaches introduce attention mechanisms or personalized model components to improve adaptation in rapidly changing settings. More ad-vanced frameworks, such as Cross-FCL [32], tackle scenarios where devices move across multiple edge systems, proposing parameter decomposition and cross-edge knowledge transfer to balance adaptation and retention. Similarly, lifelong federated learning [33] has been explored in mobile robotics, where agents continuously acquire new knowledge while collabo-rating through federated updates. In parallel, mobility-aware FL [34] research has shown that client movement both exac-erbates and, in some cases, alleviates statistical heterogeneity. Mobility can degrade convergence due to intermittent partici-pation and shifting data, but can also act as a mechanism for implicit data mixing and knowledge propagation across the network [35]. This dual role has motivated approaches that explicitly model mobility in the learning process, for example through hierarchical aggregation, mobility-aware sampling, or decentralized coordination strategies. However, these works typically focus on improving convergence and communication efficiency, rather than addressing continual adaptation at the model level. Despite these advances, existing FCL approaches largely assume either centralized coordination, static or weakly dy-namic client groupings, or ignore the spatial structure of data altogether. While some works combine FL and CL to handle non-stationarity, they do not explicitly consider clustered or proximity-based learning, and conversely, CFL approaches generally assume stable client memberships and do not in-corporate continual learning mechanisms. 
+
+D. Motivation and Research Questions 
+
+Existing literature still lacks a unified treatment of three aspects that jointly characterize mobile CAS scenarios: de-centralized clustered coordination, spatially structured data heterogeneity, and continual adaptation to mobility-induced distribution shifts. This limitation is particularly relevant when nodes move across regions, because each device encounters a sequence of locally coherent but distinct data regimes, which can degrade performance over time and induce catastrophic forgetting. Mobility-aware FL methods mainly target conver-gence and communication efficiency, whereas current FCL approaches do not explicitly account for decentralized clus-tered coordination in spatially structured environments. This motivates our work on a unified framework that combines de-centralized coordination, CFL, and CL to study whether such an integration can better support adaptation under mobility-induced drift. We therefore investigate the following research questions: (RQ1) Does node mobility in decentralized clustered fed-erated learning induce sequential distribution shifts that lead to performance degradation and catastrophic forgetting? (RQ2) Can a decentralized approach that balances local adap-tation with global model integration, enriched with continual learning mechanisms, improve knowledge retention and robustness under mobility-induced drift? TABLE I: Summary of the main notation used in the paper.                                                   
+
+> Symbol Meaning
+> VSet of devices
+> TNumber of learning rounds
+> SSpatial domain
+> Skk-th spatial subregion
+> KNumber of subregions
+> p(t)
+> dPosition of device dat round tr(t)
+> dRegion of device dat round t
+> R(t)
+> kDevices in region/cluster kG(t)= ( V, E (t))Communication graph
+> N(t)
+> dNeighbors of device d
+> D(t)
+> dLocal dataset of device dn(t)
+> dNumber of local samples
+> P(t)
+> dLocal data distribution
+> ϵ1, ϵ 2Intra-/inter-region thresholds
+> θ(t)
+> dDevice model parameters
+> L(t)
+> dLocal empirical objective
+> J(t)
+> kRegion-wise objective
+> T(t)
+> dTask of device dat round t
+> H(t)
+> dTask history of device dη(t)
+> dElected cluster leader
+> g(t)
+> dDistance-to-leader field
+> RCluster radius
+> eθ(t+1)
+> dLocally trained model
+> θ(t+1)
+> kRegional consensus model
+> M(t)
+> dReplay memory
+> s(t)
+> dDwell-time counter
+> HAveraging horizon
+> ΓMaximum mixing factor
+> α(t)
+> dAdaptive mixing factor
+> Acc (t)
+> d(k)Per-region accuracy
+> CAcc (t)Cumulative accuracy
+
+III. P ROBLEM FORMULATION 
+
+This section formalizes the system model and the learning problem addressed in this work; the main symbols used throughout the paper are summarized in Table I. Specifi-cally, we characterize how node mobility inherently induces a continual task stream for a set of mobile devices V, which collaboratively learn over a discrete time horizon T , i.e., for rounds t ∈ { 1, . . . , T }, while navigating a spatial environment characterized by structured data heterogeneity. To this end, we first detail the spatial environment and the mobility model (Section III-A), followed by a formalization of the region-induced data heterogeneity (Section III-B). Finally, we define the learning objectives and the resulting mobility-induced continual task stream (Sections III-C and III-D). 
+
+Notation: Throughout the remainder of the paper, we use superscripts to denote the time index (e.g., p(t) 
+
+> d
+
+for the position of device d at round t) and subscripts for the device index (e.g., 
+
+D(t) 
+
+> d
+
+for the local dataset of device d at round t). Boldface fonts (e.g., p, x) represent vectors and matrices, while regular fonts are used for scalars (e.g., t, d). 
+
+A. Spatial Environment and Mobility 
+
+Let S ⊆ R2 be a spatial domain partitioned into K disjoint subregions {S k}Kk=1 such that SKk=1 Sk = S. Each device 
+
+d ∈ V occupies a position p(t) 
+
+> d
+
+∈ S at round t. We denote by 
+
+r(t) 
+
+> d
+
+∈ { 1, . . . , K } the index of the region containing device d
+
+at time t, namely 
+
+r(t) 
+
+> d
+
+= k ⇐⇒ p(t) 
+
+> d
+
+∈ S k.
+
+Hence, the trajectory {p(t) 
+
+> d
+
+}Tt=1 induces for each device a region-membership sequence {r(t) 
+
+> d
+
+}Tt=1 . For each region k, we write 
+
+R(t) 
+
+> k
+
+= {d ∈ V : r(t) 
+
+> d
+
+= k}
+
+for the set of devices currently located in Sk.The communication pattern is modeled as a time-varying graph G(t) = (V, E(t)), where (d, d ′) ∈ E(t) if and only if devices d and d′ can directly exchange information at round t. We denote by N (t) 
+
+> d
+
+= {d′ ∈ V : ( d, d ′) ∈ E (t)}
+
+the communication neighborhood of node d. Node mobility therefore affects the system along two coupled dimensions: it changes the local environment from which a device collects data, and it changes the set of peers with which the same device can collaborate. 
+
+B. Region-Induced Data Heterogeneity 
+
+Let X and Y denote the input and output spaces, respec-tively. Specifically, X represents the space of observations locally perceived by the devices (e.g., environmental sensor readings), while Y represents the corresponding target vari-ables to be predicted. We denote outputs by y ∈ Y ; scalar targets are included as the one-dimensional special case. At round t, each device d is associated with a local dataset 
+
+D(t) 
+
+> d
+
+= {(x(t)
+
+> d,i
+
+, y(t)
+
+> d,i
+
+)}n(t) 
+
+> d
+> i=1
+
+sampled from a local distribution 
+
+P(t) 
+
+> d
+
+(x, y) over X × Y , where n(t) 
+
+> d
+
+denotes the number of samples observed by device d at round t. When the time index is implicit, we simply write Dd and Pd. Let D(·, ·) denote a statistical distance between probability distributions. Since data is generated by the surrounding physical context, P(t)
+
+> d
+
+depends on the region currently occupied by the device. 
+
+Assumption 1 (Spatial-Data Correlation) . Devices located in the same geographic region exhibit similar data distributions. Specifically, for any region h ∈ {1, . . . , K } and any two devices d, d ′ ∈ R (t) 
+
+> h
+
+,
+
+D P(t) 
+
+> d
+
+, P(t)
+
+> d′
+
+ ≤ ϵ1,
+
+for an intra-region similarity threshold ϵ1 > 0.
+
+Assumption 2 (Inter-Region Heterogeneity) . Data distribu-tions across different subregions are non-IID. For any two distinct regions i̸ = j, and any devices d ∈ R (t) 
+
+> i
+
+and d′ ∈ R (t) 
+
+> j
+
+,
+
+D P(t) 
+
+> d
+
+, P(t)
+
+> d′
+
+ ≥ ϵ2,where ϵ2 > ϵ 1 establishes a strict separation gap between inter-region heterogeneity and intra-region similarity. 
+
+Given these assumptions, when a device moves across regions, its local data distribution changes abruptly, turning spatial heterogeneity into temporal drift along its trajectory. 
+
+C. Region-Wise Objective 
+
+Let fθ : X → Y be a prediction model parameterized by 
+
+θ ∈ Rp, and let ℓ fθ (x), y be the per-sample loss (e.g., cross-entropy for classification, mean squared error for regression). We define the local empirical objective of device d at round t
+
+as 
+
+L(t) 
+
+> d
+
+(θ) := 1
+
+n(t)
+
+> dn(t)
+> d
+
+X
+
+> i=1
+
+ℓ fθ (x(t)
+
+> d,i
+
+), y(t)
+
+> d,i
+
+.
+
+For each region k ∈ { 1, . . . , K } and round t, let 
+
+N (t) 
+
+> k
+
+:= X
+
+> d∈R (t)
+> k
+
+n(t)
+
+> d
+
+denote the total number of samples currently available in region k. We then define the region-wise empirical objective 
+
+J (t) 
+
+> k
+
+(θ) := 1
+
+N (t)
+
+> k
+
+X
+
+> d∈R (t)
+> k
+> n(t)
+> d
+
+X
+
+> i=1
+
+ℓ fθ (x(t)
+
+> d,i
+
+), y(t)
+
+> d,i
+
+
+
+= 1
+
+N (t)
+
+> k
+
+X
+
+> d∈R (t)
+> k
+
+n(t) 
+
+> d
+
+L(t) 
+
+> d
+
+(θ).
+
+That is, J (t) 
+
+> k
+
+(θ) is simply the average loss over all samples currently observed by the devices located in region k, which equivalently corresponds to the weighted average of the local empirical objectives. An ideal region-specific model therefore satisfies 
+
+θ(t)⋆k ∈ arg min  
+
+> θ∈Rp
+
+J (t) 
+
+> k
+
+(θ).
+
+In the decentralized setting considered here, clustered feder-ated learning seeks distributed approximations of these region-wise optima using only local communication from the graph 
+
+G(t).
+
+D. Mobility-Induced Continual Learning Stream 
+
+Mobility implies that each device is exposed to a sequence of different local data regimes over time. To formalize this, we define 
+
+T (t) 
+
+> d
+
+:=  P(t) 
+
+> d
+
+, ℓ 
+
+as the local task experienced by device d at round t, namely the learning problem induced by the distribution currently observed at that device. 
+
+Definition 1 (Mobility-induced task stream) . For each device 
+
+d ∈ V , the trajectory {p(t) 
+
+> d
+
+}Tt=1 induces the task sequence 
+
+{T (t) 
+
+> d
+
+}Tt=1 . We denote by H(t) 
+
+> d
+
+= {T (1)  
+
+> d
+
+, . . . , T (t) 
+
+> d
+
+} the task history experienced by device d up to round t, and refer to the full sequence H(T ) 
+
+> d
+
+as its continual task stream. According to Definition 1, node mobility transforms aspatial learning problem into a sequential one: at round t, the same device starts from its current model θ(t) 
+
+> d
+
+and performs a local adaptation step while traversing different region-specific data regimes. This local continual-learning update can be abstracted as: 
+
+θ(t+1)  
+
+> d
+
+≈ Update 
+
+
+
+θ(t) 
+
+> d
+
+, L(t) 
+
+> d
+
+(θ) + λ Ω θ; H(t−1) 
+
+> d
+
+
+
+,
+
+where Update( θ0, F ) denotes a few local optimization steps on objective F starting from initialization θ0. Intuitively, L(t)
+
+> d
+
+pushes the model to fit the data currently observed by device 
+
+d, while Ω acts as a memory-preserving term that discourages the device from forgetting what it learned in previously visited regions. 
+
+E. Overall Decentralized Learning Goal 
+
+Clustered federated learning and continual learning address two complementary dimensions of the same problem, namely the spatial coordination of devices currently exposed to similar conditions (collective aspect) and the temporal robustness of the models they carry while moving across regions (individ-ual aspect). Accordingly, the overall problem can be stated as follows: design a decentralized learning process that, at each round t, simultaneously approximates the collection of region-wise objectives {J (t) 
+
+> k
+
+}Kk=1 under the communication constraints induced by G(t) and preserves model competence over the device-level task stream H(T ) 
+
+> d
+
+. Equivalently, the desired process should track region-wise optima while limiting catastrophic forgetting in mobile devices. IV. C LUSTERED CONTINUAL FEDERATED LEARNING :C²FL C²FL is an interplay of three main components: (i) a de-centralized clustering mechanism that groups devices based on the similarity of their local data distributions, (ii) a federated learning algorithm that trains cluster-specific models through collaborative optimization, and (iii) a continual learning mod-ule that enables each device to adapt to sequential distribution shifts while mitigating catastrophic forgetting. For sake of clar-ity, we present these components as distinct modules, with the same temporal ordering as the one described above. However, in practice, these processes may have different timescales and may be interleaved in various ways—more details on this aspect are discussed in Section V-B. The complete protocol for one communication round is formalized in Algorithm 1. 
+
+a) Decentralized Clustering: In C²FL, the spatial clus-tering of mobile devices is achieved through a self-stabilizing leader election process implemented using the aggregate computing paradigm [36]. Specifically, we leverage the S-building block (Sparse-choice) pattern [37], which partitions the network into contiguous regions, each centered around a dynamically elected leader. Formally, each node d ∈ V maintains a local state σ(t) 
+
+> d
+
+=
+
+⟨η(t) 
+
+> d
+
+, g (t) 
+
+> d
+
+⟩, where η(t) 
+
+> d
+
+∈ V identifies its currently elected clus-ter leader and g(t) 
+
+> d
+
+∈ R≥0 tracks the shortest communication distance to it. The process is driven by a persistent priority 
+
+vk ∈ R assigned to each node k (e.g., based on its ID or a random value), which determines the leadership hierarchy and ensures convergence. At every round t, nodes exchange their states with their neighbors N (t) 
+
+> d
+
+, and each node d updates its state through the following emergent logic: 1) Information Integration : Node d constructs a set of per-ceived leadership claims C(t) 
+
+> d
+
+by relaying advertisements from its neighbors and considering its own potential leadership:             
+
+> C(t)
+> d={(η(t−1)
+> d′, g (t−1)
+> d′+∥p(t)
+> d−p(t)
+> d′∥)|d′∈ N (t)
+> d}∪{ (d, 0) }
+> (1)
+
+where ∥p(t) 
+
+> d
+
+− p(t) 
+
+> d′
+
+∥ is the Euclidean distance to neighbor 
+
+d′. Each claim represents a candidate leader and the current estimated path length to reach it. 2) Candidate Pruning : To ensure that clusters reflect local spatial correlation, node d filters C(t) 
+
+> d
+
+to keep only those candidates reachable within a maximum radius of influ-ence R, forming the candidate set K(t) 
+
+> d
+
+= {(k, g ) ∈ C (t) 
+
+> d
+
+|
+
+g ≤ R}.3) Priority-Based Election : The node elects the “best” can-didate from K(t) 
+
+> d
+
+by maximizing the priority vk. The state is then updated as: 
+
+⟨η(t) 
+
+> d
+
+, g (t) 
+
+> d
+
+⟩ = argmax ⟨k,g ⟩∈K (t)
+
+> d
+
+{(vk, k )} (2) Assuming the radius R is chosen appropriately with respect to the spatial distribution of the nodes, this mechanism yields a Voronoi-like partition where each node d belongs to a R(t) 
+
+> k
+
+(we will use R(t) 
+
+> k
+
+to denote both the region and the corresponding cluster of devices) centered around its leader η(t) 
+
+> d
+
+, which lives inside k’s radius of influence and is separated from other clusters by a boundary of width at least R, capturing the spatial correlation structure of the data. We refer to η(t)
+
+> d→k
+
+as the cluster leader of node d in region k at round t.The logic is self-stabilizing : if a node d moves beyond its current leader’s radius or a leader fails, the corresponding claims are pruned or naturally expire, triggering a re-election that seamlessly realigns the clusters to the new topology. This ensures that learning groups remain consistent with the underlying data heterogeneity (Assumptions 1 and 2) without central coordination. 
+
+b) Decentralized Clustered-Based Federated Learning: 
+
+The federated learning process operates within the established clusters, utilizing the FBFL paradigm [11] (rooted to the SCR pattern [38]) to build regional consensus. This process is orchestrated through two complementary communication patterns from the aggregate computing literature: collect-cast 
+
+(or C-block) [39] for aggregation and gradient-cast (or G-block) for dissemination [40]. The learning cycle for each cluster R(t) 
+
+> k
+
+consists of the following steps: 1) Local Training : Each device d ∈ R (t) 
+
+> k
+
+performs a fixed number of local gradient descent steps via an optimization algorithm (e.g., Adam) on its effective local training set (potentially augmented with replayed samples from pre-vious regions, as described in the next section), starting from the local model θ(t) 
+
+> d
+
+. This yields an updated local model eθ(t+1)  
+
+> d
+
+.2) Consensus Aggregation (Collect-cast) : The locally trained models are routed towards the cluster leader η(t) 
+
+> d→k
+
+(sim-plified as η(t) 
+
+> d
+
+for sake of simplicity) by following the gradient field g(t) 
+
+> d
+
+in reverse. Formally, information flows from nodes with larger g(t) 
+
+> d
+
+to those with smaller values, effectively performing a spatial reduction over the clus-ter topology. The leader η(t) 
+
+> d
+
+collects these models and computes the new regional consensus using a weighted average: 
+
+θ(t+1)  
+
+> k
+
+= 1
+
+N (t)
+
+> k
+
+X
+
+> d∈R (t)
+> k
+
+n(t) 
+
+> d
+
+eθ(t+1)  
+
+> d
+
+(3) where N (t) 
+
+> k
+
+is the total sample count in the cluster. 3) Model Dissemination (Gradient-cast) : Once the consen-sus θ(t+1)  
+
+> k
+
+is computed, the leader broadcasts it back to all members of R(t) 
+
+> k
+
+. This dissemination follows the distance field g(t) 
+
+> d
+
+, where the leader acts as the source and the model parameters propagate “downhill” to reach every node within the radius R.The resulting dissemination and aggregation processes are inherently decentralized, allowing the system to continuously adapt to the dynamic cluster topology induced by node mo-bility. However, this fully distributed coordination introduces intrinsic communication latency, as locally trained models and regional consensus may require multiple interaction steps to propagate across the cluster via multi-hop communication. To address this, each device d performs a local knowledge merging step, reconciling the asynchronously received regional consensus with its current local state before continuing the learning process. 
+
+c) Continual Learning via Adaptive Averaging and Re-play: C²FL relies on two complementary mechanisms, namely 
+
+replay and adaptive averaging , to mitigate forgetting while allowing the model to adapt to new regions. First, the generic memory-preserving component Ω( θ; H(t−1)  
+
+> d
+
+) is realized im-plicitly through Replay : rather than adding an explicit regular-ization term in parameter space, the node augments the current local data with samples collected in previously visited regions. Denoting 
+
+bL(t) 
+
+> d
+
+(θ) := 1
+
+|M (t) 
+
+> d
+
+| + n(t)
+
+> d
+
+· X
+
+> (x,y)∈D (t)
+> d
+
+ℓ fθ (x), y
+
++ X
+
+> (x,y)∈M (t)
+> d
+
+ℓ fθ (x), y!
+
+,the replay-augmented local objective, then the Local Training 
+
+phase can be written as 
+
+eθ(t+1)  
+
+> d
+
+≈ Update  θ(t) 
+
+> d
+
+, bL(t) 
+
+> d
+
+(θ),
+
+which is the concrete realization adopted in C²FL of the abstract form L(t) 
+
+> d
+
+(θ) + λ Ω( θ; H(t−1)  
+
+> d
+
+), with the historical contribution encoded by replayed samples. Concretely, the node optimizes on M(t) 
+
+> d
+
+∪ D (t) 
+
+> d
+
+, where D(t) 
+
+> d
+
+is the latest local dataset perceived in the current region and M(t) 
+
+> d
+
+stores data collected before the current region. The replay memory is updated only when the device moves to a different region: 
+
+M(t) 
+
+> d
+
+=
+
+
+
+M(t−1)  
+
+> d
+
+, if η(t) 
+
+> d
+
+= η(t−1)  
+
+> d
+
+,
+
+M(t−1)  
+
+> d
+
+∪ D (t−1)  
+
+> d
+
+, otherwise. 
+
+M(0)  
+
+> d
+
+= ∅
+
+Thus, the current-region contribution is always given by the latest D(t) 
+
+> d
+
+, whereas the historical replay memory grows only at region changes by appending D(t−1)  
+
+> d
+
+. In this work, we assume an unbounded replay memory in order to isolate the effect of mobility-induced forgetting. An analysis on the impact of bounded-size memory replay policies, such as the ones based on class-balanced reservoir sampling [41], is left to future work. The goal of the replay mechanism is to reduce forgetting of knowledge acquired in previous regions. Second, after the 
+
+Model Dissemination step, the received regional model θ(t+1) 
+
+> k
+
+is merged into the device state through an adaptive averaging rule. Let s(t) 
+
+> d
+
+denote the number of consecutive rounds that device d has spent in its current region, namely 
+
+s(t) 
+
+> d
+
+=
+
+(
+
+s(t−1)  
+
+> d
+
++ 1 , if η(t) 
+
+> d
+
+= η(t−1)  
+
+> d
+
+,
+
+1, otherwise. Given an adaptation horizon H > 0 and a maximum collective mixing factor of Γ ∈ [0 , 1] , we define the collective mixing factor as 
+
+α(t) 
+
+> d
+
+= min 
+
+(
+
+Γ, s(t)
+
+> d
+
+H
+
+)
+
+.
+
+Denoting by eθ(t+1)  
+
+> d
+
+the model obtained after local training with replay, then the final device model is updated as 
+
+θ(t+1)  
+
+> d
+
+= (1 − α(t) 
+
+> d
+
+) eθ(t+1)  
+
+> d
+
++ α(t) 
+
+> d
+
+θ(t+1)  
+
+> k
+
+.
+
+This second stage complements the local continual update above: replay preserves knowledge from the device history, while adaptive averaging aligns the resulting model with the current cluster-level consensus. This rule makes the collective contribution small immediately after a region change and progressively stronger while the node remains in the same area, thereby integrating local-area knowledge without abrupt overwriting. For static devices, no region transition occurs, so M(t) 
+
+> d
+
+= ∅ and local training simply relies on D(t) 
+
+> d
+
+, i.e., the latest local dataset perceived in the current area. In this case, the local model progressively aligns with the regional consensus while still benefiting from local updates. Replay memory M(t) 
+
+> d
+
+is never shared with other nodes; accordingly, 
+
+Algorithm 1 C²FL: One communication round for device d.Here, D(t) 
+
+> d
+
+is the current local dataset, η(t) 
+
+> d
+
+is the current cluster leader, g(t) 
+
+> d
+
+the distance-to-leader field, s(t) 
+
+> d
+
+the permanence counter in the current region, M(t) 
+
+> d
+
+the historical replay memory, eθ(t+1)  
+
+> d
+
+the locally trained model, θ(t+1)  
+
+> k
+
+the regional consensus, Γ the maximum collective mixing factor, and H
+
+the adaptive-averaging horizon. 
+
+Require: D(t) 
+
+> d
+
+, D(t−1)  
+
+> d
+
+, {σ(t−1)  
+
+> d′
+
+}d′∈N (t)
+
+> d
+
+, θ(t) 
+
+> d
+
+, η(t−1)  
+
+> d
+
+, s(t−1)  
+
+> d
+
+,
+
+M(t−1) 
+
+> d
+
+Ensure: θ(t+1)  
+
+> d
+
+, M(t) 
+
+> d
+> 1:
+
+Phase 1: Decentralized Clustering Update  
+
+> 2:
+
+Build C(t) 
+
+> d
+
+from neighbor claims and self-claim (d, 0)  
+
+> 3:
+
+K(t) 
+
+> d
+
+← { (k, g ) ∈ C (t) 
+
+> d
+
+: g ≤ R} 
+
+> 4:
+
+(η(t) 
+
+> d
+
+, g (t) 
+
+> d
+
+) ← arg max (k,g )∈K (t)
+
+> d
+
+(vk, k ) 
+
+> 5:
+
+if η(t)
+
+> d
+
+̸ = η(t−1)  
+
+> d
+
+then  
+
+> 6:
+
+s(t) 
+
+> d
+
+← 1; M(t) 
+
+> d
+
+← M (t−1)  
+
+> d
+
+∪ D (t−1)  
+
+> d
+> 7:
+
+else  
+
+> 8:
+
+s(t) 
+
+> d
+
+← s(t−1)  
+
+> d
+
++ 1 ; M(t) 
+
+> d
+
+← M (t−1)  
+
+> d
+> 9:
+
+end if  
+
+> 10:
+
+Phase 2: Continual Local Training  
+
+> 11:
+
+eθ(t+1)  
+
+> d
+
+← LocalTrain( θ(t) 
+
+> d
+
+, M(t) 
+
+> d
+
+∪ D (t) 
+
+> d
+
+) 
+
+> 12:
+
+Phase 3: Cluster Aggregation (Collect-cast)  
+
+> 13:
+
+Route eθ(t+1)  
+
+> d
+
+toward η(t) 
+
+> d
+
+following decreasing g(t) 
+
+> d
+> 14:
+
+if d = η(t) 
+
+> d
+
+then  
+
+> 15:
+
+θ(t+1)  
+
+> k
+
+← 1 
+
+> N(t)
+> k
+
+P
+
+> d′∈R (t)
+> k
+
+n(t) 
+
+> d′
+
+eθ(t+1)  
+
+> d′
+> 16:
+
+end if  
+
+> 17:
+
+Phase 4: Model Dissemination (Gradient-cast)  
+
+> 18:
+
+Receive θ(t+1)  
+
+> k
+
+propagated from η(t) 
+
+> d
+
+via increasing g(t) 
+
+> d
+> 19:
+
+Phase 5: Local Knowledge Integration  
+
+> 20:
+
+α(t) 
+
+> d
+
+← min {Γ, s (t) 
+
+> d
+
+/H } 
+
+> 21:
+
+θ(t+1)  
+
+> d
+
+← (1 − α(t) 
+
+> d
+
+)eθ(t+1)  
+
+> d
+
++ α(t) 
+
+> d
+
+θ(t+1) 
+
+> k
+
+moving devices influence federated aggregation only through the locally trained model contributed during Consensus Aggre-gation . This model already reflects knowledge accumulated in previously visited regions r(1 ...t −1)  
+
+> d
+
+, while the adaptive averaging rule progressively aligns it with the current regional consensus as permanence in the area increases. V. E XPERIMENTAL EVALUATION 
+
+A. Experimental Setting 
+
+The experimental evaluation is designed to validate the approach introduced in Section IV in a decentralized learn-ing scenario where spatial data heterogeneity and mobility-induced temporal drift occur simultaneously. To this end, we consider a synthetic spatial environment composed of four distinct subregions. Each subregion is associated with a differ-ent data distribution, so that devices located within the same area observe statistically similar samples, whereas devices belonging to different areas observe non-IID data, consistently with the setting illustrated in Figure 1 and with the spatial-data correlation and inter-region heterogeneity assumptions formalized in Assumptions 1 and 2. We build the learning scenario using the ProFed bench-mark [18] using the Extended MNIST (EMNIST) dataset and partitioning it into multiple synthetic local datasets. The partitioning follows a proximity-based non-IID scheme: each subdataset is assigned to one specific spatial area, and de-vices placed in that area can sense samples only from the corresponding distribution. As a result, devices in the same region receive homogeneous data, while devices in different regions are exposed to heterogeneous data distributions. This construction allows us to systematically reproduce the spatial heterogeneity assumed in Section III-B and to control the distribution shifts experienced by mobile devices. The simulated system consists of 50 devices distributed approximately equally across the four subregions. Each device perceives approximately 200 local samples per round, drawn from the distribution of its current area, and trains with a batch size of 32 . The test set globally covers all four areas, with a total of 1600 samples (i.e., ∼ 400 per area). The samples are drawn from the corresponding distribution for each area, so that the test set reflects the same spatial heterogeneity as the training data. Each device independently executes the protocol described in Algorithm 1, locally training a multi-layer perceptron (MLP) with two hidden layers of 128 neurons each, ReLU activations, 28 input units, and 27 output units. Local optimization is carried out using the Adam optimizer with a learning rate of 0.001 and cross-entropy loss. A subset of devices is allowed to move across areas during the learning process, following different mobility trajectories. The fraction of mobile devices is set to 20% of the total population. These mobile devices induce temporal drift at the local model level, since their data distribution changes whenever they enter a new area. Static devices, instead, remain in their initial area and therefore provide a stable regional learning signal. The four subregions are indexed 0 through 3. Mobile devices follow a circular trajectory, transitioning to the next area in the cycle at rounds 30 , 60 , and 90 . The starting area of each mobile device is chosen independently; for instance, a device starting in area 
+
+0 visits 0 → 1 → 2 → 3, while a device starting in area 2 visits 
+
+2 → 3 → 0 → 1. In both cases, each device spends exactly 
+
+30 rounds per region. The total number of global rounds is set to 120 .As decentralized federated learning baseline, we rely on the self-organizing FBFL [11] approach implemented through the Phyelds framework [42]. This baseline is used with a twofold purpose. First, it provides a reference implementation of decentralized clustered FL under proximity-based data heterogeneity. Second, it allows us to explicitly assess whether mobility causes performance degradation and catastrophic for-getting when no continual-learning mechanism is introduced. Starting from this baseline, we implement the proposed C²FL approach as described in Section IV, enriching FBFL with replay-based local training and adaptive averaging, thereby addressing the overall decentralized learning goal of tracking region-wise objectives J (t) 
+
+> k
+
+while preserving competence over the device-level task stream H(T ) 
+
+> d
+
+formalized in Sections III-C and III-D. The adaptive averaging mechanism in Phase 5 of Algo-rithm 1 is configured with a maximum collective mixing factor of Γ = 0 .3 and an adaptation horizon of H = 30 rounds. These values govern the adaptive rule α(t) 
+
+> d
+
+= min {Γ, s (t) 
+
+> d
+
+/H }:with H = 30 , the mixing factor reaches its cap Γ = 0 .3
+
+after 9 consecutive rounds in the same region, which aligns with the typical dwell time of mobile devices ( 30 rounds per area between consecutive mobility triggers). The replay memory M(t) 
+
+> d
+
+is unbounded, i.e., every sample encountered in a region is retained and made available for local training upon subsequent visits. We adopt two complementary evaluation metrics: per-area test accuracy and cumulative accuracy . The first measures the performance of a device model on the test distribution of a single region k, thereby reflecting how well the model ap-proximates the region-wise accuracy evaluated as the empirical mean over the test set: 
+
+Acc (t) 
+
+> d
+
+(k) = 1
+
+|D test  
+
+> k
+
+|
+
+X
+
+> (x,y)∈D test
+> k
+
+1{fθ(t)
+
+> d
+
+(x) = y}
+
+where Dtest  
+
+> k
+
+denotes the held-out test set for region k, kept fixed across all rounds and never used during training, and 
+
+1{·} is the indicator function that takes value 1 when the model prediction fθ(t)
+
+> d
+
+(x) matches the true label y, and 0
+
+otherwise. This serves to visualize the impact of mobility-induced task transitions on knowledge retention across the device task stream H(T ) 
+
+> d
+
+. While the second aggregates the per-area accuracies into a single scalar measure of overall competence. We define the cumulative accuracy as the average, over all mobile devices, of the sum of their test accuracies across all regions: 
+
+CAcc (t) = 1
+
+|V mob |
+
+X
+
+> d∈V mob
+> K
+
+X
+
+> k=1
+
+Acc (t) 
+
+> d
+
+(k)
+
+where Vmob denotes the set of mobile devices. This metric was used as a proxy to compare C²FL against the ablation baselines. The learning components are implemented in PyTorch [43] All experiments are repeated over 10 independent random seeds in order to reduce the effect of lucky initializations and avoid cherry-picking. Reported curves and quantitative results correspond to averages over these independent runs. The experimental artifacts, including source code, configuration files, and scripts required to reproduce the results, are publicly released and permanently archived under a permissive license 1.
+
+B. Results 
+
+The first experiment evaluates whether mobility alone is sufficient to induce catastrophic forgetting in decentralized clustered federated learning (RQ1). To this end, we run the         
+
+> 1https://anonymous.4open.science/r/experiments-2026-ACSOS-CL-for-n odes-movement-in-CAS-53BE/ 050 100
+> Global Round
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Accuracy
+> Data from area 0
+> 050 100
+> Global Round
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Accuracy
+> Data from area 1
+> 050 100
+> Global Round
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Accuracy
+> Data from area 2
+> 050 100
+> Global Round
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Accuracy
+> Data from area 3
+
+(a) FBFL baseline 0 50 100        
+
+> Global Round
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Accuracy
+> Data from area 0
+> 050 100
+> Global Round
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Accuracy
+> Data from area 1
+> 050 100
+> Global Round
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Accuracy
+> Data from area 2
+> 050 100
+> Global Round
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Accuracy
+> Data from area 3
+
+(b) C²FL 
+
+Fig. 2: Per-area accuracy ( Acc (t) 
+
+> d
+
+(k)) of a mobile device over the learning process. Each subplot reports the accuracy on the test data associated with one spatial area. The vertical dashed red lines mark mobility-induced region transitions. scenario described in the previous section using the FBFL baseline without any continual-learning mechanism. Figure 2a reports the test accuracy of a mobile node over time on the data distributions associated with the four areas. Each subplot evaluates the same model on the test data of one specific area, while the vertical dashed red lines indicate the rounds in which the node changes area. For readability, it reports the behavior of one representative mobile node only. The same trend is observed for all mobile nodes, and all the data required to generate the corresponding charts for each of them are available in the public repository. The results show that the model achieves high accuracy only on the data distribution currently observed by the node and used for training in that time interval. Conversely, when the node moves to a different area, the accuracy drops sharply compared to the performance in the previously visited region. This results from the node not having been trained on the data of this new area. In contrast, in Figure 2b, where the same scenario is run with C²FL, the accuracy on previously visited areas is substantially preserved across region transitions, confirming that the proposed approach effectively mitigates forgetting. This behavior confirms that, in the considered setting, spatial heterogeneity becomes a temporal drift for mobile nodes: as the device sequentially adapts to different non-IID regional distributions, it overwrites previously acquired knowl-edge. Therefore, catastrophic forgetting is not only present in decentralized clustered FL under mobility, but also has a substantial impact on the ability of mobile devices to retain useful knowledge across areas. The second experiment evaluates whether the proposed approach can reduce catastrophic forgetting under mobility-induced drift (RQ2) while also benefiting from the collabora-0 20 40 60 80 100 120 
+
+> Global Round
+> 0.5
+> 1.0
+> 1.5
+> 2.0
+> Cumulative Accuracy  Experiment
+> C2FL
+> FL
+> CL
+> Local
+
+Fig. 3: Cumulative accuracy CAcc of the evaluated methods over global rounds. The proposed C²FL approach improves performance with respect to all considered baselines. tive learning process within each region (local/global knowl-edge integration). To this end, we compare C²FL against three baselines, which also serve as an ablation study of its main components, namely: (i) Local , where each mobile device trains only on the data currently sensed in its area; (ii) CL ,where the device uses continual learning with replay over the data observed along its trajectory but without federated model integration; and (iii) FL , where the device participates in federated learning using only the data currently available in the visited area. Figure 3 reports the cumulative accuracy over the regional test distributions. The Local and FL baselines show limited retention across area transitions, since neither of them includes an explicit mechanism to preserve knowledge acquired in previously visited regions. Consequently, their performance mainly reflects the ability to fit the data distribution currently perceived by the mobile device. The advantage of FL over purely local learning is visible, but moderate in this setting, likely because the considered classification task is relatively simple; in more complex sensing tasks, the contribution of collaborative learning is expected to become more pronounced. The CL baseline substantially improves over both Local and 
+
+FL , confirming that replay is effective in preserving knowledge from previously visited areas and mitigating the drops caused by mobility. While, however, it does not benefit from the regional consensus, which can be observed in the first 30 rounds, where the performance is lower than FL due to the lack of collaborative learning. Finally, C²FL achieves the best performance among all evaluated methods. This shows that combining replay-based continual learning with federated model integration allows mobile nodes to retain past knowl-edge while also benefiting from the experience of the devices currently located in the same area. The adaptive integration of the regional consensus therefore improves and accelerates the adaptation of mobile devices, providing a positive answer to RQ2. VI. C ONCLUSIONS AND FUTURE WORK 
+
+This paper addressed decentralized learning in mobile col-lective adaptive systems characterized by spatially structured non-IID data and mobility-induced temporal drift. We showed that, when devices move across different regions, standard decentralized clustered FL suffers from catastrophic forgetting, as mobile nodes progressively overwrite knowledge acquired in previously visited areas (RQ1). To mitigate this issue, we propose C²FL, a decentralized clustered continual federated learning approach that combines self-organizing spatial clus-tering, federated model integration, replay-based local train-ing, and adaptive averaging. The experimental results show that C²FL improves knowledge retention and achieves higher cumulative accuracy than all considered baselines balancing local and global objectives (RQ2). Future work will extend the evaluation along three main directions. First, we plan to validate the approach on additional and more complex datasets, including scenarios closer to real-world sensing tasks. Second, we aim to integrate and compare multiple continual learning strategies beyond replay, such as regularization-based and hybrid methods, to better understand their trade-offs in decentralized clustered FL. Third, we will study smoother mobility-induced distribution shifts. In the current setting, moving from one area to another causes an abrupt change in the observed distribution; future experiments will consider gradual transitions, where the data distribution evolves progressively across space, providing a more realistic model of environmental change. ACKNOWLEDGMENTS 
+
+The authors have removed acknowledgments to preserve double-blind review requirements. Acknowledgments will be added again upon acceptance of the paper. The authors used Gemini Pro 3.1 (Google) and ChatGPT 5.5 Edu (OpenAI) for grammar and language editing assistance throughout the manuscript. All AI-assisted text was reviewed and edited by the authors, who take full responsibility for the content of this paper. REFERENCES [1] L. J. de Melo de Azevedo, J. C. Estrella, A. C. B. Delbem, R. I. Meneguette, S. Reiff-Marganiec, and S. C. de Andrade, “Analysis of spatially distributed data in internet of things in the environmental context,” Sensors , vol. 22, no. 5, p. 1693, 2022. [Online]. Available: https://doi.org/10.3390/s22051693 [2] M. Lee, H. Kim, and C. Joo, “Geographical node clustering and grouping to guarantee data iidness in federated learning,” CoRR , vol. abs/2410.15693, 2024. [Online]. Available: https://doi.org/10.48550/a rXiv.2410.15693 [3] G. I. Parisi, R. Kemker, J. L. Part, C. Kanan, and S. Wermter, “Continual lifelong learning with neural networks: A review,” 
+
+Neural Networks , vol. 113, pp. 54–71, 2019. [Online]. Available: https://doi.org/10.1016/j.neunet.2019.01.012 [4] B. Liu, N. Lv, Y. Guo, and Y. Li, “Recent advances on federated learning: A systematic survey,” Neurocomputing , vol. 597, p. 128019, 2024. [Online]. Available: https://doi.org/10.1016/j.neucom.2024.128019 [5] A. Hard, K. Rao, R. Mathews, F. Beaufays, S. Augenstein, H. Eichner, C. Kiddon, and D. Ramage, “Federated learning for mobile keyboard prediction,” CoRR , vol. abs/1811.03604, 2018. [Online]. Available: http://arxiv.org/abs/1811.03604 [6] Z. Du, C. Wu, T. Yoshinaga, K. A. Yau, Y. Ji, and J. Li, “Federated learning for vehicular internet of things: Recent advances and open issues,” IEEE Open J. Comput. Soc. , vol. 1, pp. 45–61, 2020. [Online]. Available: https://doi.org/10.1109/OJCS.2020.2992630 [7] B. Zhao, X. Liu, W.-N. Chen, and R. H. Deng, “Crowdfl: Privacy-preserving mobile crowdsensing system via federated learning,” IEEE Transactions on Mobile Computing , vol. 22, no. 8, p. 4607–4619, Aug. 2023. [Online]. Available: https://doi.org/10.1109/TMC.2022.3157603 [8] C. Fang, A. Dziedzic, L. Zhang, L. Oliva, A. Verma, F. Razak, N. Papernot, and B. Wang, “Decentralised, collaborative, and privacy-preserving machine learning for multi-hospital data,” eBioMedicine ,vol. 101, p. 105006, 2024. [Online]. Available: https://www.sciencedir ect.com/science/article/pii/S2352396424000410 [9] D. Domini, N. Farabegoli, G. Aguzzi, M. Viroli, and L. Esterle, “Decentralized proximity-aware clustering for collective self-federated learning,” Internet of Things , vol. 35, p. 101841, 2026. [Online]. Available: https://doi.org/10.1016/j.iot.2025.101841 [10] A. Ghosh, J. Chung, D. Yin, and K. Ramchandran, “An efficient framework for clustered federated learning,” IEEE Trans. Inf. Theory , vol. 68, no. 12, pp. 8076–8091, 2022. [Online]. Available: https://doi.org/10.1109/TIT.2022.3192506 [11] D. Domini, G. Aguzzi, L. Esterle, and M. Viroli, “FBFL: A field-based coordination approach for data heterogeneity in federated learning,” 
+
+Logical Methods in Computer Science , vol. 22, p. 30, 2026. [Online]. Available: https://lmcs.episciences.org/17663 [12] Z. Wang, F. Wu, F. Yu, Y. Zhou, J. Hu, and G. Min, “Federated continual learning for edge-ai: A comprehensive survey,” CoRR , vol. abs/2411.13740, 2024. [Online]. Available: https://doi.org/10.48550/a rXiv.2411.13740 [13] B. McMahan, E. Moore, D. Ramage, S. Hampson, and B. A. y Arcas, “Communication-efficient learning of deep networks from decentralized data,” in Proceedings of the 20th International Conference on Artificial Intelligence and Statistics, AISTATS 2017, 20-22 April 2017, Fort Lauderdale, FL, USA , ser. Proceedings of Machine Learning Research, A. Singh and X. J. Zhu, Eds., vol. 54. PMLR, 2017, pp. 1273–1282. [Online]. Available: http://proceedings.mlr.press/v54/mcmahan17a.html [14] H. B. McMahan, E. Moore, D. Ramage, and B. A. y Arcas, “Federated learning of deep networks using model averaging,” CoRR ,vol. abs/1602.05629, 2016. [Online]. Available: http://arxiv.org/abs/16 02.05629 [15] W. Chung, C. Lo, Y. Lin, Z. Chen, and C. Hung, “Decentralized federated learning with non-iid data: Challenges, trends, and future opportunities,” ACM Comput. Surv. , vol. 58, no. 8, pp. 192:1–192:41, 2026. [Online]. Available: https://doi.org/10.1145/3785657 [16] H. Zhu, J. Xu, S. Liu, and Y. Jin, “Federated learning on non-iid data: A survey,” Neurocomputing , vol. 465, pp. 371–390, 2021. [Online]. Available: https://doi.org/10.1016/j.neucom.2021.07.098 [17] E. Liu, W. Yang, Y. Gu, W. Long, S. Istv´ an, and L. Jiang, “A survey of clustering federated learning in heterogeneous data scenarios,” Journal of Computing and Electronic Information Management , vol. 16, no. 3, pp. 17–22, 2025. [18] D. Domini, G. Aguzzi, and M. Viroli, “Profed: a benchmark for proximity-based non-iid federated learning,” Joural of Open Research Software , vol. 14, 2026. [Online]. Available: https: //openresearchsoftware.metajnl.com/articles/10.5334/jors.624 [19] R. M. French, “Catastrophic forgetting in connectionist networks,” 
+
+Trends in Cognitive Sciences , vol. 3, no. 4, pp. 128–135, 1999. [Online]. Available: https://www.sciencedirect.com/science/article/pii/ S1364661399012942 [20] G. M. van de Ven, T. Tuytelaars, and A. S. Tolias, “Three types of incremental learning,” Nature Machine Intelligence , vol. 4, no. 12, p. 1185–1197, Dec 2022. [Online]. Available: http://dx.doi.org/10.1038/s 42256-022-00568-3 [21] H. Hemati, A. Cossu, A. Carta, J. Hurtado, L. Pellegrini, D. Bacciu, V. Lomonaco, and D. Borth, “Class-incremental learning with repetition,” in Conference on Lifelong Learning Agents , ser. Proceedings of Machine Learning Research, S. Chandar, R. Pascanu, H. Sedghi, and D. Precup, Eds. PMLR, 2023, pp. 437–455. [Online]. Available: https://proceedings.mlr.press/v232/hemati23b.html [22] D. Lopez-Paz and M. Ranzato, “Gradient episodic memory for contin-ual learning,” in Advances in Neural Information Processing Systems ,I. Guyon, U. V. Luxburg, S. Bengio, H. Wallach, R. Fergus, S. Vish-wanathan, and R. Garnett, Eds., vol. 30. Curran Associates, Inc., 2017. [23] S.-A. Rebuffi, A. Kolesnikov, G. Sperl, and C. H. Lampert, “icarl: Incre-mental classifier and representation learning,” in 2017 IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , 2017, pp. 5533– 5542. [24] A. A. Rusu, N. C. Rabinowitz, G. Desjardins, H. Soyer, J. Kirkpatrick, K. Kavukcuoglu, R. Pascanu, and R. Hadsell, “Progressive neural networks,” CoRR , vol. abs/1606.04671, 2016. [Online]. Available: http://arxiv.org/abs/1606.04671 [25] J. Yoon, E. Yang, J. Lee, and S. J. Hwang, “Lifelong learning with dynamically expandable networks,” in 6th International Conference on Learning Representations (ICLR) , 2018. [26] A. Mallya and S. Lazebnik, “Packnet: Adding multiple tasks to a single network by iterative pruning,” in Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition . IEEE Computer Society, 2018, pp. 7765–7773. [27] A. Mallya, D. Davis, and S. Lazebnik, “Piggyback: Adapting a single network to multiple tasks by learning to mask weights,” in Computer Vision – ECCV 2018 . Berlin, Heidelberg: Springer-Verlag, 2018, p. 72–88. [28] M. F. Criado, F. E. Casado, R. Iglesias, C. V. Regueiro, and S. Barro, “Non-iid data and continual learning processes in federated learning: A long road ahead,” Information Fusion , vol. 88, pp. 263–280, 2022. [Online]. Available: https://www.sciencedirect.com/science/article/pii/ S1566253522000884 [29] P. Hamedi, R. Razavi-Far, and E. Hallaji, “Federated continual learning: Concepts, challenges, and solutions,” Neurocomputing , vol. 651, p. 130844, 2025. [Online]. Available: https://doi.org/10.1016/j.neucom.2 025.130844 [30] F. E. Casado, D. Lema, M. F. Criado, R. Iglesias, C. V. Regueiro, and S. Barro, “Concept drift detection and adaptation for federated and continual learning,” Multim. Tools Appl. , vol. 81, no. 3, pp. 3397–3419, 2022. [Online]. Available: https://doi.org/10.1007/s11042-021-11219-x [31] A. H. Estiri and M. Maheswaran, “Attentive federated learning for concept drift in distributed 5g edge networks,” CoRR , vol. abs/2111.07457, 2021. [Online]. Available: https://arxiv.org/abs/2111.0 7457 [32] Z. Zhang, B. Guo, W. Sun, Y. Liu, and Z. Yu, “Cross-fcl: Toward a cross-edge federated continual learning framework in mobile edge computing systems,” IEEE Trans. Mob. Comput. , vol. 23, no. 1, pp. 313–326, 2024. [Online]. Available: https://doi.org/10.1109/TMC.2022.3223944 [33] X. Yu, J. P. Queralta, and T. Westerlund, “Towards lifelong federated learning in autonomous mobile robots with continuous sim-to-real transfer,” in The 13th International Conference on Emerging Ubiquitous Systems and Pervasive Networks (EUSPN 2022) / The 12th International Conference on Current and Future Trends of Information and Communication Technologies in Healthcare (ICTH-2022), Leuven, Belgium, October 26-28, 2022 , ser. Procedia Computer Science, E. M. Shakshuki and A. Yasar, Eds. Elsevier, 2022, pp. 86–93. [Online]. Available: https://doi.org/10.1016/j.procs.2022.10.123 [34] C. Feng, H. H. Yang, D. Hu, Z. Zhao, T. Q. S. Quek, and G. Min, “Mobility-aware cluster federated learning in hierarchical wireless networks,” CoRR , vol. abs/2108.09103, 2021. [Online]. Available: https://arxiv.org/abs/2108.09103 [35] T. Chen, J. Yan, Y. Sun, S. Zhou, D. G¨ und¨ uz, and Z. Niu, “Mobility accelerates learning: Convergence analysis on hierarchical federated learning in vehicular networks,” IEEE Trans. Veh. Technol. ,vol. 74, no. 1, pp. 1657–1673, 2025. [Online]. Available: https: //doi.org/10.1109/TVT.2024.3466299 [36] J. Beal, D. Pianini, and M. Viroli, “Aggregate programming for the internet of things,” IEEE Computer , vol. 48, no. 9, pp. 22–30, 2015. [Online]. Available: https://doi.org/10.1109/MC.2015.261 [37] Y. Mo, J. Beal, and S. Dasgupta, “An aggregate computing approach to self-stabilizing leader election,” in 2018 IEEE 3rd International Workshops on Foundations and Applications of Self* Systems (FAS*W), Trento, Italy, September 3-7, 2018 . IEEE, 2018, pp. 112–117. [Online]. Available: https://doi.org/10.1109/FAS-W.2018.00034 [38] D. Pianini, R. Casadei, M. Viroli, and A. Natali, “Partitioned integration and coordination via the self-organising coordination regions pattern,” 
+
+Future Gener. Comput. Syst. , vol. 114, pp. 44–68, 2021. [Online]. Available: https://doi.org/10.1016/j.future.2020.07.032 [39] G. Audrito, S. Bergamini, F. Damiani, and M. Viroli, “Effective collective summarisation of distributed data in mobile multi-agent systems,” in Proceedings of the 18th International Conference on Autonomous Agents and MultiAgent Systems, AAMAS ’19, Montreal, QC, Canada, May 13-17, 2019 , E. Elkind, M. Veloso, N. Agmon, and M. E. Taylor, Eds. International Foundation for Autonomous Agents and Multiagent Systems, 2019, pp. 1618–1626. [Online]. Available: http://dl.acm.org/citation.cfm?id=3331882 [40] G. Audrito, R. Casadei, F. Damiani, and M. Viroli, “Compositional blocks for optimal self-healing gradients,” in 11th IEEE International Conference on Self-Adaptive and Self-Organizing Systems, SASO 2017, Tucson, AZ, USA, September 18-22, 2017 . IEEE Computer Society, 2017, pp. 91–100. [Online]. Available: https://doi.ieeecomputersociety. org/10.1109/SASO.2017.18 [41] A. Chrysakis and M.-F. Moens, “Online continual learning from imbalanced data,” in Proceedings of the 37th International Conference on Machine Learning , ser. Proceedings of Machine Learning Research, H. D. III and A. Singh, Eds., vol. 119. PMLR, 13–18 Jul 2020, pp. 1952–1961. [Online]. Available: https://proceedings.mlr.press/v119/chr ysakis20a.html [42] G. Aguzzi, D. Domini, N. Farabegoli, and M. Viroli, “Phyelds: A pythonic framework for aggregate computing,” CoRR , vol. abs/2603.29999, 2026. [Online]. Available: https://doi.org/10.48550/a rXiv.2603.29999 [43] A. Paszke, S. Gross, S. Chintala, G. Chanan, E. Yang, Z. DeVito, Z. Lin, A. Desmaison, L. Antiga, and A. Lerer, “Automatic differentiation in pytorch,” 2017.
