@@ -1,0 +1,1036 @@
+Title: VLALeaks: Membership Inference Attacks against Vision-Language-Action Models
+
+URL Source: https://arxiv.org/pdf/2606.15165v1
+
+Published Time: Tue, 16 Jun 2026 00:37:20 GMT
+
+Number of Pages: 16
+
+Markdown Content:
+# VLALeaks: Membership Inference Attacks against Vision-Language-Action Models 
+
+Xukun Luan ∗, Jinyan Liu ∗, Xuesong Li ∗, Yuanguo Bi †, Renjun Wu ∗, Zhongxiang Lei ∗, Di Wang ‡∗School of Computer Science and Technology, Beijing Institute of Technology 
+
+> †
+
+School of Computer Science and Engineering, Northeastern University 
+
+> ‡
+
+PRADA Lab, King Abdullah University of Science and Technology Email: xukunluan@bit.edu.cn 
+
+Abstract —Vision-Language-Action (VLA) models enable end-to-end robot control and have garnered widespread attention. However, the memorization of training data inherent to VLA, coupled with the high cost of robotic data acquisition, raises serious concerns regarding data privacy leakage and intel-lectual property infringement. Membership inference attacks (MIAs) aim to determine whether a given sample belongs to the training set. While representing a significant privacy threat, this attack remains underexplored in the context of VLA models. To bridge this gap, we propose VLALeaks, which is based on attention discrepancies in VLA models. We reveal, for the first time, the privacy vulnerabilities of VLA models. Specifically, it comprises a two-stage process: (1) membership feature extraction, and (2) attack model construction. Experi-mental results across multiple VLA benchmarks demonstrate that VLALeaks readily reveals membership information and achieves optimal attack AUC and TPR@1%FPR, highlighting the privacy vulnerabilities in current VLA model deployments. Our work is the first systematic study of MIAs on VLA models, aiming to provide insights for secure and trustworthy VLA models 1.
+
+## 1. Introduction 
+
+Leveraging the success of pretrained foundation mod-els, Large Language Models (LLMs), and Vision-Language Models (VLMs), Vision-Language-Action (VLAs) models have emerged to handle multimodal inputs—including vi-sual observations and language instructions—and to produce robotic actions that accomplish embodied tasks [1]. VLA models provide a crucial solution for robotic control and have been widely applied in industrial sorting, autonomous driving, and home assistants [2]. By successfully bridging the gap between high-level instructions and the physical world, VLA models have attracted significant attention from both industry and academia. With the iterative develop-ment of VLA models such as RT-2 [3], π0 [4], Gemini Robotics [5], Ψ0 [6], and OpenVLA [7], robotic control has ushered in a new and more generalizable framework. However, unlike traditional automated control (i.e., pre-programmed systems) [8], VLA models require large-scale, 
+
+> 1. Our code is available at https://github.com/Zili1000/VLALeaks.
+
+high-quality training sets to achieve satisfactory perfor-mance [9], [10]. The high cost of collection and the com-plexity of annotation have led to an extreme scarcity of relevant VLA data. Furthermore, most available datasets are designed for specific or limited robot embodiments and configurations, offering little cross-platform or cross-embodiment generalizability. This characteristic introduces a new and underexplored privacy vulnerability. In particular, unlike the training data for LLMs, which can be readily scraped from the Internet, the data used to train VLA models often faces challenges such as expensive motion capture equipment, the need for professional motion guidance, and long data collection cycles [11], [12]. These difficulties make VLA training data exceptionally valuable, thereby rendering its privacy protection even more critical. High-quality VLA data is remarkably expensive—comparable to gold coins [9]. Membership inference attacks (MIAs) [13], which aim to determine whether a given sample is contained in the training set, pose a significant privacy threat in this context [14]. Although traditional MIAs [15], [16], [17] have been extensively studied in the vision or language domains, they are either ineffective or exhibit low performance in the VLA context due to the following three limitations: First, 
+
+Multimodal entanglement : Vision, language, and action are aligned with one another, such that a difference in any single modality results in two distinct samples. This makes it difficult to analyze the boundary between member and non-member samples based on a single modality, thereby limiting direct threats to data privacy. Second, Constrained action output dimensionality : VLA models typically re-strict the output dimension (e.g., 7 × 256) according to the degrees of freedom of the robot, where the encoded 256-dimensional representation carries no actual semantic meaning. This renders methods that rely on output logits, confidence scores, or similarities ineffective for extract-ing membership information. Third, Minimal inter-sample variation : Robotic manipulation tasks usually require hun-dreds of execution steps. During VLA data collection, the variation between consecutive frames is subtle, resulting in numerous highly similar samples. Consequently, MIAs on VLA models demand a more fine-grained extraction of membership information. To address these challenges, we propose VLALeaks, 
+
+> arXiv:2606.15165v1 [cs.CR] 13 Jun 2026
+
+the first MIA framework specifically designed for VLA models. VLALeaks introduces a novel two-stage inference strategy. In the first stage, the adversary leverages the VLA’s self-attention mechanism to compute intra- and inter-modal membership features for information extraction. In the sec-ond stage, the adversary constructs an attack model using the features extracted in the previous stage to carry out the inference attack. VLALeaks captures membership informa-tion across the vision, language, and action modalities within VLA models, revealing a new privacy leakage channel. Our contributions are as follows:  
+
+> •
+
+We provide the first formal characterization of member-ship privacy leakage risks on VLA models, a direction not explored in prior work.  
+
+> •
+
+We propose VLALeaks, the first MIA framework specifically designed for VLA models. VLALeaks em-ploys a two-stage attack strategy that extracts mem-bership features hidden within the self-attention mech-anisms of vision, language, and action modalities to perform inference attacks.  
+
+> •
+
+We conduct extensive experiments on both simu-lated and real-world robotic platforms across multi-ple VLA models. Experimental results demonstrate that VLALeaks achieves SOTA attack AUC and TPR@1%FPR. In this paper, Section 2 introduces the background and preliminaries. Section 3 describes the threat model. Sec-tion 4 presents our method. Section 5 presents the exper-iments. Section 6 concludes this work. 
+
+## 2. Background and Preliminaries 
+
+2.1. Vision-Language-Action 
+
+Vision-Language-Action (VLA) models [2] are typically built upon VLMs [18], enabling robots to comprehend hu-man instructions and process visual inputs from cameras, thereby performing actions that adapt to the environment. VLA models achieve end-to-end control for robotic tasks. VLA models usually transform continuous action predic-tion into a classification problem by discretizing robot ac-tions [3], [7]. Specifically, the model first discretizes the continuous probability distribution into class labels y =arg max F(x), where F(·) denotes the VLA model. Sub-sequently, an action de-tokenizer generates specific actions 
+
+ˆxact = DT (y) based on these labels. By mapping action values to discrete class labels, the model converts continuous probability outputs into discrete signals. This simplification strategy helps accelerate convergence and reduce training time, and is therefore widely adopted in VLA-based robot models [4], [6]. Acquiring VLA data typically involves expensive pro-cedures such as collection and annotation. For instance, RoboCOIN [9] utilizes teleoperation to collect over 180,000 demonstrations from 15 different robot platforms. Open X-Embodiment [11] assembles a dataset from 22 distinct robots contributed by 21 institutions, covering 527 skills (160,266 tasks). Meanwhile, Ψ0 [6] trains VLA models using large-scale first-person video data, supplemented by a small amount of human-robot interaction data. Collectively, these efforts underscore the paramount importance of high-quality data for VLA models, thereby highlighting the ne-cessity of studying privacy and auditing for VLA data. Our proposed MIA effectively addresses this critical gap. This study employs a robotic arm with 7 degree-of-freedoms (DoFs) [19]. At each step, an action com-prises 7 DoFs and has clear physical meanings in three-dimensional Cartesian space, represented as follows: 
+
+Act = [∆ Px, ∆Py , ∆Pz , ∆Rx, ∆Ry , ∆Rz , gripper ], where 
+
+∆Px,y,z and ∆Rx,y,z denote the relative position changes and relative rotation changes along the x, y, z axes, re-spectively. These changes are discretized into 256 uniform bins within the action interval [yi
+
+> min
+
+, y i
+
+> max
+
+] for each degree of freedom. The gripper state is a binary variable indicating whether it is open or closed. This control mechanism intro-duces unique challenges for membership inference attacks: due to the extremely fine-grained bin division, the action differences between adjacent bins are very small (e.g., ap-proximately ±0.007 units per bin), and the output space is constrained to 7 × 256 . Therefore, more refined extraction methods are required for the membership characteristics of VLA model samples. 
+
+2.2. Attention 
+
+Transformer architecture [20] is extensively employed in VLA models. The self-attention mechanism [21] of the transformer models global token correlations using query, key, and value projections, serving as the fundamental build-ing block for multimodal interaction modeling. Given an input feature sequence, the query, key, and value matrices are obtained through linear projections: 
+
+Q = XW Q, K = XW K , V = XW V , (1) where X denotes the input sequence feature, and WQ, WK ,
+
+WV represent learnable projection parameters. The scaled dot-product is adopted to measure token-wise similarity, and the Softmax function normalizes the similarity into a valid probability distribution: 
+
+A = Softmax 
+
+ QK ⊤
+
+√dk
+
+
+
+. (2) Here, dk is the dimension of the key vector, and the scaling factor stabilizes the gradient magnitude during training. 
+
+A ∈ RS×S denotes the standardized attention matrix, in which each element Ai,j represents the attention weight from the j-th token to the i-th token. All weights satisfy the normalization constraint P 
+
+> j
+
+Ai,j = 1 .To enhance the capability of modeling diverse feature representations, multi-head attention splits the feature chan-nels into multiple groups and performs parallel self-attention computations, followed by feature concatenation and fusion: Head h = Attention (Qh, K h, V h), h = 1 , 2, ..., H, (3) MultiHead = Concat (Head 1, Head 2, ..., Head H )WO , (4) where H denotes the total number of attention heads, and 
+
+WO is the learnable output projection matrix for feature fu-sion. In this work, all attention-based analyses are conducted on the layer-wise averaged multi-head attention map: 
+
+A(l) = 1
+
+H
+
+> H
+
+X
+
+> h=1
+
+Head (l) 
+
+> h
+
+. (5) 
+
+A(l) denotes the aggregated global attention matrix of the 
+
+l-th network layer, which serves as the basic input for the extraction of layer-wise characteristics and modeling of cross-layer dynamic evolution. 
+
+2.3. Membership Inference Attacks 
+
+Membership inference attacks (MIAs) [13], [22], [23], [24], [25] aim to determine whether a given sample be-longs to the training set, which is a binary classification task. Existing works [26], [27] have extensively studied such attacks on various models. MIAs on LLMs target a single text modality and often rely on confidence scores or perplexity [28] to extract membership features. Min-k [29] pioneers the investigation of MIAs against LLMs. Win-k [30] researches the first MIAs against small language models. Deng et al. [31] propose ProjRes, the first projection residuals-based passive MIA tailored for federated large lan-guage models. MIAs on VLMs need to consider both vision and language modalities. For instance, MaxR´ enyi [32] and KCMP [33] perform attacks on image or text modalities sep-arately. Hu et al. [15] propose five types of image-text pair MIAs targeting VLMs during fine-tuning. VidLeaks [34] first investigates membership privacy leakage in the context of text-to-video models. Wang et al. [35] propose MIAs targeting graph generative diffusion models. Pang et al. [36] propose the first scores-based MIA framework tailored for fine-tuned diffusion models. Hu et al. [37] explore privacy leakage of training data members in large reasoning models. To the best of our knowledge, MIAs on VLA models remain largely underexplored. This is particularly concerning given that the privacy leakage risks associated with VLA models are increasing by the day. We argue that the internal attention matrices of VLA models may provide more discriminative membership features across the three modalities—vision, language, and action. As with the existing MIAs discussed above, analyzing the unique properties of VLA data is beneficial for guiding algorithm design. Figure 1 summarizes three intrinsic unique properties of VLA data: (1) identical text paired with visu-ally distinct input scene images; (2) unchanged observation images matched against different task texts; (3) fully consis-tent initial image-text input yet divergent robot manipulation action trajectories. These three irregular cross-modal mis-matches break the strict one-to-one correspondence among vision, language, and action modalities that conventional MIAs rely on. Classic MIAs are originally designed for unimodal or well-aligned multimodal models, which assume fixed mapping between input and model outputs. When ap-plied to VLA models, the unstable input-output correlation caused by the above three dataset characteristics severely damages the feature discrimination of traditional attacks and degrades their inference accuracy, naturally explaining the poor performance of existing MIA baselines (Section 5.2.1) in our quantitative experiments. In contrast, our proposed VLALeaks is tailored to mine modality-agnostic implicit privacy hidden amid such unaligned VLA data, thus achiev-ing remarkable attack superiority over prior arts. 
+
+2.4. Formulation of MIAs to VLA models 
+
+Let F(·) denotes a trained VLA model. The VLA model takes a triple-modal sample x = ( ximg , x txt , x act ), where 
+
+ximg denotes visual observation, xtxt denotes language instruction, and xact denotes action-related information. The model outputs a predictive action distribution F(x). We define Dtrain as the private training dataset (member) of the target VLA model and Dtest as the public non-training dataset (non-member), where Dtrain ∩ D test = ∅.We define a binary attack function: 
+
+AF (x) = 
+
+(
+
+1, x ∈ D train (member) 
+
+0, x ∈ D test (non-member) . (6) In contrast to classical MIAs [26] on unimodal models (e.g., image classifiers or text encoders), the adversary must specifically consider three heterogeneous modalities (vision, language, and action) simultaneously. The interaction among these modalities introduces unique challenges: the attack model must capture cross-modal correlations, handle poten-tial modality-wise overfitting, and exploit leakage that may arise from any single modality or their joint representation. Consequently, effective MIAs against VLA models require not only traditional membership features but also modality-specific and fused features that reflect how the VLA model integrates multi-modal information during training and in-ference. 
+
+## 3. Threat Model 
+
+3.1. Adversary’s Goal 
+
+The adversary aims to compromise the membership privacy of VLA models. Given a target sample x to be examined, the adversary attempts to perform binary classi-fication. The attack performance improves as the adversary more accurately classifies samples from the training set as 1 and samples not in the training set as 0. 
+
+3.2. Adversary’s Knowledge 
+
+We assume the adversary has white-box access to the VLA model. Specifically, the adversary can access the model’s architecture, internal parameters, and atten-tion mechanisms. This is a realistic assumption, as many (a) Subtle differences in images, but identical text; identical images, varying text. 
+
+> (b) Given identical text and the same initial image, the actions taken when performing the task differ.
+
+Figure 1: Characteristics of VLA data from VLA models pose unique challenges for MIAs. VLA models today are open-sourced (e.g., OpenVLA [7], SpatialVLA [38], π0 [4]), and developers often fine-tune these models for downstream tasks. White-box access is a common setting in the field of VLA model security [39], [40], [41]. 
+
+3.3. Adversary’s Capability 
+
+The adversary can only operate during the inference phase of the model. Specifically, the adversary feeds the tar-get sample forward through the VLA model and obtains the output attention weight matrix. Formally, for a target sample 
+
+x, the adversary can extract the attention weight matrix A,which is then used to extract membership features. 
+
+## 4. Method 
+
+We propose a two-stage MIA framework, VLALeaks, to compromise the membership information of VLA mod-els in Figure 2. As illustrated in Section 3.1, VLALeaks aims to determine whether a given sample x belongs to the training set. As shown in Algorithm 1, the two-stage inference process consists of: (1) membership feature ex-traction, where statistical membership features are computed from the model’s attention matrices; and (2) attack model construction, where a binary classifier is trained using the extracted membership features. 
+
+4.1. Stage 1: Membership Feature Extraction 
+
+The key intuition behind VLALeaks is that member and non-member samples exhibit differences in the attention matrices across vision, language, and action modalities. As shown in Figure 3, we evaluate the mean and standard deviation of the attention matrices on OpenVLA [7]. We observe that member samples exhibit a more concentrated distribution compared to non-member samples. This discrep-ancy is the key to the success of VLALeaks. To align with the structural characteristics of VLA models, we design a membership feature extraction scheme. Specifically, VLALeaks takes as input the multi-layer attention weight matrices of a VLA model and outputs membership features that integrate information from the vision, language, and action modalities. 1) Partition the attention weight matrix into three modality-specific token interaction regions (vision, lan-guage, and action) based on a sequence semantic par-titioning rule. 2) Compute, for each layer, statistical distribution features of the attention, cross-layer evolution features, and intra-modal/inter-modal interaction features. 3) Aggregate all attention features and output a multi-dimensional attention feature set, which serves as the membership feature for subsequent attack execution. 
+
+4.1.1. Partitioning Rule. The attention matrix is divided into three distinct regions corresponding to the three modal-ities:  
+
+> •
+
+Vision modality region: The first Simg tokens of the sequence, corresponding to sub-matrix A(l) 
+
+> img
+
+. 
+
+> •
+
+Language modality region: The segment between the image tokens and the action tokens, corresponding to language sub-matrix A(l)
+
+> txt
+
+. 
+
+> •
+
+Action modality region: A fixed interval at the end of the sequence, corresponding to action sub-matrix A(l)
+
+> act
+
+.
+
+4.1.2. Feature Modeling. Feature modeling is the core component of VLALeaks, comprising: (1) per-layer single attention layer feature extraction, (2) cross-layer temporal evolution feature extraction, and (3) action-modality-specific feature extraction. (1) Per-Layer Single Attention Layer Feature Extraction. We further decompose the vision and language modalities into four sub-interaction regions: intra-image interaction 
+
+A(l) 
+
+> img
+
+, image-text cross-modal interaction A(l)
+
+> img 2txt
+
+, text-image cross-modal interaction A(l) 
+
+> txt 2img
+
+, and intra-text inter-action A(l)
+
+> txt
+
+. VLALeaks iterates through the attention matrix of each layer of the model and independently computes basic representations for each of the four decomposed interaction sub-regions. The feature dimensions extracted at a single layer include:  
+
+> •
+
+Magnitude statistical features: Mean and standard devi-ation of attention weights in the region, characterizing interaction intensity and dispersion.  
+
+> •
+
+Distribution entropy features: Attention entropy, rep-resenting the degree of attention diffusion — higher entropy indicates more dispersed interaction. Stage 1 Membership Feature Extraction Partitioning Rule Feature Modeling Feature Fusion 
+
+vision language action 
+
+input attention head 
+
+VLA Model 
+
+output per-lay er feature extraction cross-lay er feature extraction action feature extraction 
+
+language vision action membership feature fusion 
+
+## Stage 2 Attack Model Construction 
+
+# √ ×Attack Model membership feature member √
+
+non-member × attention matrix Figure 2: Overview of VLALeaks. VLALeaks comprises a two-stage inference pipeline. In Stage 1, Membership Feature Extraction, the method extracts attention matrices from the VLA model for a given input. These matrices are then processed via Partitioning Rule, Feature Modeling, and Feature Fusion to construct membership features. In Stage 2, Attack Model Construction, a binary classifier (model) is trained on these features to perform membership inference. We validate our approach on both virtual simulation and real-world data.  
+
+> •
+
+Focusing degree features: Maximum attention weight ratio, measuring the model’s ability to concentrate at-tention on a single point. Statistical, distributional, and focusing features are cal-culated for single-layer attention sub-matrices. Let A denote any attention sub-matrix, and N denote the total number of elements in the sub-matrix. 
+
+Attention Mean (Interaction Intensity) 
+
+μ(A) = 1
+
+N
+
+X
+
+> i
+
+X
+
+> j
+
+Ai,j . (7) 
+
+Attention Standard Deviation (Distribution Dispersion) 
+
+σ(A) = 
+
+s 1
+
+N
+
+X
+
+> i
+
+X
+
+> j
+
+ Ai,j − μ(A)2. (8) 
+
+Attention Entropy (Distribution Diffusion) 
+
+Single-row attention entropy: 
+
+H(a) = − X
+
+> k
+
+ak log( ak + ε). (9) Regional average attention entropy: 
+
+Havg (A) = 1
+
+N
+
+X
+
+> i
+
+H(Ai, :). (10) 
+
+Attention Concentration (Focus Degree) 
+
+Maximum single-row attention weight: 
+
+m(a) = max  
+
+> k
+
+ak. (11) Regional average concentration: 
+
+C(A) = 1
+
+N
+
+X
+
+> i
+
+m(Ai, :). (12) (2) Cross-Layer Temporal Evolution Feature Extraction. Leveraging the per-layer feature extraction results across multiple layers, VLALeaks can uncover the evolution pat-terns of attention with network depth and construct inter-layer dynamic features, including:  
+
+> •
+
+Focusing trend features: The mean and fluctuation variance of cross-modal attention concentration across layers, reflecting the convergence trend of modality interaction focusing. (a) LIBERO-100 
+
+(b) LIBERO-Goal 
+
+Figure 3: Kernel density estimates of attention features for members (blue) and non-members (orange). We evaluate the mean and standard deviation of OpenVLA [7] on LIBERO-100/Goal [42]. The feature modeling process captures membership features of the VLA models, which are then used for inference in Stage 2. 
+
+Algorithm 1 VLALeaks: Two-Stage Membership Inference  
+
+> 1:
+
+Input : Target VLA model F(·), dataset with member-ship X = {xi}ni=1 , attention layers L. 
+
+> 2:
+
+Output : Attack model gϕ 
+
+> 3:
+
+Stage 1: Membership Feature Extraction  
+
+> 4:
+
+for all x ∈ X and l ∈ L do  
+
+> 5:
+
+Partitioning Rule  
+
+> 6:
+
+Extract Attention {A(l) 
+
+> img
+
+, A (l)
+
+> txt
+
+, A (l)
+
+> act
+
+} ← F (x) 
+
+> 7:
+
+Feature Modeling  
+
+> 8:
+
+F (l) 
+
+> per-layer
+
+← per-layer ({A(l) 
+
+> img
+
+, A (l)
+
+> txt
+
+, A (l)
+
+> act
+
+}) 
+
+> 9:
+
+F (l) 
+
+> cross-layer
+
+← cross-layer ({A(l) 
+
+> img
+
+, A (l)
+
+> txt
+
+, A (l)
+
+> act
+
+}) 
+
+> 10:
+
+F (l) 
+
+> action
+
+← action ({A(l) 
+
+> img
+
+, A (l)
+
+> txt
+
+, A (l)
+
+> act
+
+}) 
+
+> 11:
+
+Feature Fusion  
+
+> 12:
+
+ϕ(x) ← concat  F (l)
+
+> per-layer
+
+, F (l)
+
+> cross-layer
+
+, F (l)
+
+> action
+
+ 
+
+> l∈L
+> 13:
+
+end for  
+
+> 14:
+
+Collect all features: Φ = {ϕ(xi)}ni=1 . 
+
+> 15:
+
+Stage 2: Attack Model Construction  
+
+> 16:
+
+Build membership inference attack feature set: Dattack =
+
+{(ϕ(xi), y i)}ni=1 , y i ∈ { 0, 1}. 
+
+> 17:
+
+Initialize attack model gϕ and train on Dattack . 
+
+> 18:
+
+return gϕ 
+
+> 19:
+
+Inference  
+
+> 20:
+
+Given a target sample x, predict membership: 1/0 ←
+
+gϕ(ϕ(x)) . 
+
+> •
+
+Inter-layer similarity features: Frobenius norm distance and symmetric KL divergence are used to quantify the distribution differences of attention weights between adjacent layers, characterizing the stability of modality interaction patterns.  
+
+> •
+
+Modality interaction propensity features: The differ-ence between intra-modal interaction strength and cross-modal interaction strength is computed to deter-mine whether the model prefers intra-modal associa-tions or cross-modal semantic associations. Characterize the dynamic variation of attention features with network depth. 
+
+Attention Focus Trend 
+
+Single-layer image-to-text attention concentration: 
+
+C(l) = C
+
+
+
+A(l)
+
+> img 2txt
+
+
+
+. (13) Cross-layer concentration mean: 
+
+¯C = 1
+
+L
+
+> L−1
+
+X
+
+> l=0
+
+C(l). (14) Cross-layer concentration fluctuation variance: 
+
+σC =
+
+vuut 1
+
+L
+
+> L−1
+
+X
+
+> l=0
+
+ C(l) − ¯C2. (15) 
+
+Layer-wise Frobenius Distance 
+
+dF (P, Q ) = ∥P − Q∥F =
+
+sX
+
+> i,j
+
+(Pij − Qij )2. (16) Adjacent-layer attention distribution distance: 
+
+d(l,l +1)  
+
+> F
+
+= dF
+
+
+
+A(l)
+
+> img 2txt
+
+, A (l+1) 
+
+> img 2txt
+
+
+
+. (17) Symmetric KL Divergence 
+
+Basic KL divergence: 
+
+DKL (P ∥ Q) = X
+
+> k
+
+Pk log Pk + εQk + ε . (18) Symmetric KL divergence: 
+
+DSKL (P, Q ) = 12
+
+ DKL (P ∥ Q) + DKL (Q ∥ P ). (19) Adjacent-layer distribution difference: 
+
+D(l,l +1)  
+
+> SKL
+
+= DSKL 
+
+
+
+A(l)
+
+> img 2txt
+
+, A (l+1) 
+
+> img 2txt
+
+
+
+. (20) 
+
+Intra-modal vs Cross-modal Interaction Tendency 
+
+T (l) = 12
+
+h
+
+μ(l) 
+
+> img
+
++ μ(l) 
+
+> txt
+
+− μ(l) 
+
+> img 2txt
+
+− μ(l)
+
+> txt 2img
+
+i
+
+. (21) (3) Action-Modality-Specific Feature Extraction. An ac-tion attention extraction sub-module is invoked to supple-ment association features, covering bidirectional interaction logic:  
+
+> •
+
+Directed attention representations from action tokens to image and text modalities;  
+
+> •
+
+Interaction features from image and text modalities back to action tokens;  
+
+> •
+
+Self-attention association features within action tokens;  
+
+> •
+
+Simultaneous statistics of action attention, including mean, variance, distribution entropy, and focusing de-gree, to complete the action semantic dimension repre-sentation. 
+
+Action-to-Image & Action-to-Text Attention Statistics 
+
+Action-to-image attention mean: 
+
+μ(l) 
+
+> act 2img
+
+= 1
+
+Na · Simg 
+
+X
+
+> i,j
+
+A(l) 
+
+> act 2img,i,j
+
+. (22) Action-to-text attention mean: 
+
+μ(l) 
+
+> act 2txt
+
+= 1
+
+Na · Stxt 
+
+X
+
+> i,j
+
+A(l) 
+
+> act 2txt,i,j
+
+. (23) Action-to-image attention standard deviation: 
+
+σ(l) 
+
+> act 2img
+
+=
+
+vuutP
+
+> i,j
+
+ A(l) 
+
+> act 2img,i,j
+
+− μ(l)
+
+> act 2img
+
+2
+
+Na · Simg 
+
+. (24) Action-to-text attention standard deviation: 
+
+σ(l) 
+
+> act 2txt
+
+=
+
+s P
+
+> i,j
+
+ A(l) 
+
+> act 2txt,i,j
+
+− μ(l)
+
+> act 2txt
+
+2
+
+Na · Stxt 
+
+. (25) 
+
+Action Attention Entropy and Concentration 
+
+Action region average entropy: 
+
+H(l) 
+
+> act
+
+= − 1
+
+Na
+
+X
+
+> i
+
+X
+
+> k
+
+A(l) 
+
+> act,i,k
+
+log( A(l) 
+
+> act,i,k
+
++ ε). (26) Action region average concentration: 
+
+C(l) 
+
+> act
+
+= 1
+
+Na
+
+X
+
+> i
+
+max  
+
+> k
+
+A(l)
+
+> act,i,k
+
+. (27) 
+
+Image-to-Action & Text-to-Action Attention 
+
+Image-to-action attention mean: 
+
+μ(l) 
+
+> img 2act
+
+= 1
+
+Simg · Na
+
+X
+
+> i,j
+
+A(l) 
+
+> img 2act,i,j
+
+. (28) Text-to-action attention mean: 
+
+μ(l) 
+
+> txt 2act
+
+= 1
+
+Stxt · Na
+
+X
+
+> i,j
+
+A(l) 
+
+> txt 2act,i,j
+
+. (29) 
+
+Intra-action Self-Attention Features 
+
+Intra-action attention mean: 
+
+μ(l) 
+
+> act
+
+= 1
+
+N 2
+
+> a
+
+X
+
+> i,j
+
+A(l) 
+
+> act,i,j
+
+. (30) Intra-action attention standard deviation: 
+
+σ(l) 
+
+> act
+
+=
+
+s 1
+
+N 2
+
+> a
+
+X
+
+> i,j
+
+ A(l) 
+
+> act,i,j
+
+− μ(l)
+
+> act
+
+2. (31) 
+
+4.1.3. Feature Fusion. The per-layer regional features, cross-layer evolution features, and action interaction features are uniformly encapsulated in a key-value structured format. A multi-dimensional attention feature dictionary aligned along the batch dimension is output. The feature dimensions cover four attribute categories: static regional interaction, dynamic cross-layer evolution, bidirectional cross-modal as-sociation, and action semantic binding. This achieves com-prehensive extraction of multi-scale attention representa-tions, thereby supporting the subsequent inference attack. 
+
+4.2. Stage 2: Attack Model Construction 
+
+In this stage, VLALeaks builds a binary classification attack model using the membership features extracted in Stage 1. This attack model is used to determine whether a given sample is a member sample. Given that all extracted features contribute membership information, we argue that leveraging all features improves attack accuracy. Details are provided in Section 5.2.3. We adopt two lightweight models as attack models: Multilayer Perceptron (MLP) [43], and Random Forest (RF) [44]. These models are well-suited for membership inference due to their ability to capture non-linear feature interactions (in the case of MLP) and their robustness to high-dimensional, heterogeneous feature spaces (in the case of RF), while maintaining low training and inference overhead. By employing both models, we also enable a comparative evaluation of different decision bound-aries and ensemble behaviors in the context of membership leakage detection. 
+
+## 5. Experiments 
+
+5.1. Experimental Setup 
+
+5.1.1. Robot Setup. For virtual simulation, we use the LIBERO platform [42], focusing on experiments involving TABLE 1: AIRBOT Play arm joint position ranges.                    
+
+> Joint Range
+> J1 −180 ◦to +120 ◦
+> J2 −170 ◦to +10 ◦
+> J3 −5◦to +180 ◦
+> J4 −172 .5◦to +172 .5◦
+> J5 −105 ◦to +105 ◦
+> J6 −172 ◦to +172 ◦
+
+Figure 4: Real-world bimanual manipulation platform. Two AIRBOT Play 6-DOF arms, mounted on a fixed aluminum-profile frame, are each equipped with a parallel-jaw 1-DOF gripper and a wrist-mounted RGB camera. An overhead wide-angle camera is positioned above the midpoint between the two arms to capture the global workspace. OpenVLA [7] and OpenVLA-oft [45]. For real-world robot evaluations, our platform adopts a symmetric bimanual setup consisting of two AIRBOT Play arms (see Figure 4) as the execution (slave) units running π0 [4], and two AIRBOT Replay arms serving as the teleoperation (master) units for data collection. Each AIRBOT Play arm is a 6-DOF serial manipulator with a parallel-jaw 1-DOF gripper (opening range: 0–60,mm), operating under joint position control. The joint motion limits are listed in Table 1. Both arms are symmetrically mounted on a fixed aluminum-profile frame without a mobile base, creating a stationary biman-ual workspace well-suited for tabletop manipulation tasks. During both teleoperation and autonomous execution, joint position commands are simultaneously streamed to both arms at 10 Hz. The overall action space is 14-dimensional, consisting of six joint targets and one gripper command per arm. The perception system consists of three RGB cameras providing complementary viewpoints:  
+
+> •
+
+Wrist cameras ( ×2). Each arm is equipped with a wrist-mounted RGB camera (focal length: 2.8 mm, field of view: 75 ◦, minimal distortion) that captures 720p (1280 ×720) images. These cameras provide close-range views of the grasping region, offering fine-grained visual cues for object localization and gripper alignment.  
+
+> •
+
+Overhead camera ( ×1). A wide-angle RGB camera (focal length: 2.1 mm, 140 ◦ FoV) is mounted above and between the two arms, pointing downward to capture a global overhead view of the entire workspace. The short focal length introduces noticeable barrel distor-TABLE 2: Camera configurations for the bimanual platform.              
+
+> Camera Resolution Focal Length / FoV Distortion
+> Wrist ( ×2) 1280 ×720 2.8 mm / 75 ◦Negligible Overhead ( ×1) 1280 ×720 2.1 mm / 140 ◦Barrel (corrected)
+
+tion, which is corrected through calibrated undistortion before policy input. This wide field of view provides the full spatial layout of all trays and objects, allowing the policy to reason about tray selection and coordinate bimanual actions. All three cameras synchronously stream RGB images at 720p resolution during both data collection and policy in-ference. Their specifications are summarized in Table 2. 
+
+5.1.2. Dataset. For OpenVLA [7] and OpenVLA-oft [45], we perform MIAs and evaluation using the LIBERO dataset [42] (virtual simulation). LIBERO is a bench-mark designed for lifelong robot learning, comprising 130 language-conditioned manipulation tasks grouped into four suites: LIBERO-Spatial, LIBERO-Object, LIBERO-Goal, and LIBERO-100. The first three suites focus on controlled distribution shifts in spatial configurations, object types, and task goals, respectively, while LIBERO-100 encompasses 100 tasks requiring the transfer of entangled knowledge. For π0 [4], we collect real-world VLA data from physi-cal robot experiments. We evaluate our method on a biman-ual tabletop manipulation benchmark set in a grocery store scenario. The workspace consists of a table with multiple trays arranged in sequence, each containing items of a single category. The robot must visually identify the target tray and grasp the specified object using coordinated bimanual control. We define six tasks (a)-(f) as follows:  
+
+> •
+
+(a) Pull the tray right. Moving the tray to the right is considered a success.  
+
+> •
+
+(b) Pick up a chocolate and put it in the tray. 
+
+The robot identifies the tray containing chocolate boxes among several trays on the table and grasps one box from it. A trial is considered successful if the gripper firmly holds the chocolate box and lifts it clear of the tray. Starting with an object already held in the gripper, the robot places it into a designated black tray. The trial is successful if the object is released inside the tray and remains stable after placement.  
+
+> •
+
+(c) Pick up a cola and put it in the tray. The robot identifies the tray containing cola bottles and picks up one bottle. Success is defined as the bottle being firmly grasped and lifted without slipping. Starting with an object already held in the gripper, the robot places it into a designated black tray. The trial is successful if the object is released inside the tray and remains stable after placement.  
+
+> •
+
+(d) Pick up a candy and put it back. The robot locates the tray holding mint candies and picks up one piece. Success requires the candy to be securely grasped and lifted without dropping, and then placed back.  
+
+> •
+
+(e) Pull the tray left. Moving the tray to the left is considered a success. • (f) Pick up a snicker and put it in the tray. The robot finds the tray with Snickers bars and grasps one bar. The trial succeeds when the bar is stably held above the tray surface. Starting with an object already held in the gripper, the robot places it into a designated black tray. The trial is successful if the object is released inside the tray and remains stable after placement. We adopt a continuous collection strategy to maximize data diversity within each task category. For a given tray containing N instances of the same item (e.g., five mint candies), the teleoperator performs N consecutive grasping episodes without resetting the scene, naturally producing variations in object arrangement, grasp pose, and relative positioning as the tray becomes progressively emptier. This sequential depletion protocol yields diverse demonstrations without manual scene randomization. Each task category contains a minimum of 20 demonstrated trajectories. All demonstrations are collected via bilateral teleoperation at 10 Hz used during policy execution. 
+
+5.1.3. Evaluation Metrics. Following prior works [15], [28], [32], we adopt two standard metrics for membership inference: Attack AUC, which quantifies the method’s over-all discriminative ability, and TPR@1%FPR, which captures performance in the low-false-positive regime critical for MIAs. A high TPR@1%FPR indicates that training samples can be identified with high confidence while incurring few false alarms. All metrics are reported as averages across cross-validation folds. 
+
+5.1.4. Baselines. We compare our proposed VLALeaks against nine state-of-the-art MIAs. Loss attack [46] exploits differences in loss values on machine learning models. Min-k [29] and Min-k++ [28] leverage predicted token probabil-ities to perform text-modal MIAs on LLMs. MaxR´ enyi [32] computes the R´ enyi entropy of predicted token probabilities and applies attacks to either the text or image modal-ity on VLMs, with three variants evaluated in our study: img, inst, and desp. Additionally, Shadow Model Inference (SMI) [15], Reference Inference with Member (RIM) [15], and Reference Inference with Non-Member (RINM) [15] exploit temperature sensitivity to conduct MIAs on image-text pairs on VLMs. We employ nine of the most representative MIAs as baselines to demonstrate the superiority of our proposed VLALeaks. We adhere to the original experimental settings for the baselines and evaluate the target VLA models. 
+
+5.2. Main Results 
+
+5.2.1. Attack AUC and TPR@1%FPR. As summarized in Table 3 and Table 4, our proposed VLALeaks (including variants based on RF and MLP) consistently outperforms all baseline MIAs across all four LIBERO task splits (LIBERO-Spatial, LIBERO-Object, LIBERO-Goal, LIBERO-100) on both vanilla OpenVLA and OpenVLA-oft in terms of AUC and TPR@1%FPR. For the OpenVLA model, VLALeaks-MLP achieves near-perfect AUC values exceeding 0.99 on LIBERO-Spatial, LIBERO-Object, and LIBERO-100, with TPR@1%FPR higher than 0.93 across these three subsets, substantially surpassing previous state-of-the-art RIM (0.7520, 0.4210, and 0.4520, respectively). Notably, LIBERO-Goal serves as the most challenging setting where all baseline methods suffer severe performance degradation; even under this tough scenario, both VLALeaks-RF and VLALeaks-MLP retain obvious superiority against existing competitors. When transferred to OpenVLA-oft, conven-tional attacks (e.g., RIM) experience a dramatic performance drop, while our VLALeaks maintains robust attacking ef-ficacy: VLALeaks-MLP obtains TPR@1%FPR above 0.94 over all four dataset partitions, demonstrating exceptional re-silience. Further ablation between two instantiations reveals that the MLP variant generally surpasses the RF counter-part by modeling non-linear latent privacy patterns hidden inside VLA models, except for the vanilla LIBERO-Goal case, where RF achieves marginally better TPR@1%FPR. Overall, comprehensive comparisons validate the superior effectiveness, generalization, and robustness of VLALeaks for membership inference against VLA models. We further conduct real-world experiments across six distinct robotic manipulation tasks in Figure 5 to intu-itively verify the attack performance of VLALeaks on VLA models. As illustrated in subfigures (a)–(f) cover-ing diverse manipulation operations (tray pulling, object picking-and-placing for chocolates, cola, candies, and snick-ers), both VLALeaks-RF and VLALeaks-MLP achieve con-sistently high attack AUC scores ranging from 0.95 to 0.99 on individual downstream tasks, which demonstrates that our proposed VLALeaks can reliably capture im-plicit member privacy information embedded in multi-step robot trajectory data across varied manipulation paradigms. Specifically, RF and MLP variants deliver complementary performance: VLALeaks-RF outperforms MLP on tasks (a)(b) with AUC=0.99 vs 0.98 and 0.98 vs 0.97, whereas VLALeaks-MLP obtains superior AUC results on task (c)(d) (0.99 vs 0.98, 0.96 vs 0.95). For remaining tasks (e)(f), RF and MLP yield nearly identical AUC values of 0.97–0.98, further confirming the stable and robust attack capability of VLALeaks regardless of task-specific action logic dif-ferences. Overall, the per-task visualization results align well with our quantitative benchmark results in Tables 3, 4, solidifying that VLALeaks effectively exposes member-ship privacy risks of VLA models across real-world robot manipulation scenarios. Additional experimental results are provided in Appendix A. 
+
+5.2.2. PCA and t-SNE Visualization. To further inter-pret the underlying mechanism of VLALeaks, we visualize the extracted privacy features of member (blue) and non-member (orange) samples via Principal Component Analysis (PCA) [47] and t-distributed Stochastic Neighbor Embed-ding (t-SNE) [48] dimensionality reduction alongside cor-responding ROC curves across four LIBERO task splits in Figure 6. From the feature distribution perspective, PCA and t-SNE plots consistently demonstrate obvious separation boundaries between member and non-member representa-TABLE 3: Experimental results on OpenVLA.                                                                                                    
+
+> LIBERO-Spatial LIBERO-Object LIBERO-Goal LIBERO-10 Method AUC TPR@1%FPR AUC TPR@1%FPR AUC TPR@1%FPR AUC TPR@1%FPR Loss 0.5166 0.0152 0.4658 0.0052 0.4575 0.0016 0.4920 0.0104 Min-k 0.5980 0.0256 0.6084 0.0352 0.5319 0.0452 0.5217 0.0088 Min-k++ 0.5886 0.0272 0.5607 0.0268 0.6181 0.0212 0.5828 0.0236 MaxR-img 0.5504 0.0170 0.4984 0.0276 0.8155 0.1409 0.6267 0.0294 MaxR-inst 0.5363 0.0150 0.4917 0.0070 0.6015 0.0502 0.7031 0.0484 MaxR-desp 0.4203 0.0072 0.4837 0.0082 0.4821 0.0093 0.4920 0.0104 SMI 0.9515 0.3691 0.6970 0.1008 0.5501 0.1410 0.8699 0.1936 RIM 0.9817 0.7520 0.9222 0.4210 0.8716 0.2740 0.9393 0.4520 RINM 0.8827 0.2560 0.7580 0.1190 0.7629 0.1070 0.8877 0.2520 VLALeaks-RF 0.9946 0.8910 0.9940 0.8758 0.9508 0.4430 0.9809 0.7563
+> VLALeaks-MLP 0.9991 0.9774 0.9987 0.9798 0.9300 0.3406 0.9959 0.9310
+
+TABLE 4: Experimental results on OpenVLA-oft.                                                                                                    
+
+> LIBERO-Spatial LIBERO-Object LIBERO-Goal LIBERO-10 Method AUC TPR@1%FPR AUC TPR@1%FPR AUC TPR@1%FPR AUC TPR@1%FPR Loss 0.5042 0.0132 0.4979 0.0122 0.5369 0.0114 0.4892 0.0078 Min-k 0.4769 0.0070 0.4248 0.0124 0.4522 0.0104 0.3593 0.0060 Min-k++ 0.5028 0.0128 0.4229 0.0098 0.5295 0.0174 0.3358 0.0030 MaxR-img 0.5300 0.0170 0.6001 0.0238 0.4623 0.0048 0.4810 0.0092 MaxR-inst 0.5225 0.0176 0.4458 0.0134 0.4626 0.0038 0.3729 0.0030 MaxR-desp 0.4723 0.0056 0.4111 0.0066 0.4690 0.0090 0.3911 0.0038 SMI 0.9085 0.4707 0.9774 0.6020 0.9704 0.6024 0.9692 0.6193 RIM 0.6331 0.0240 0.7159 0.0780 0.6624 0.0270 0.6936 0.0560 RINM 0.5737 0.0160 0.8955 0.2840 0.6094 0.0220 0.7049 0.0510 VLALeaks-RF 0.9857 0.7742 0.9950 0.9106 0.9896 0.8099 0.9930 0.9094
+> VLALeaks-MLP 0.9980 0.9597 0.9995 0.9921 0.9976 0.9493 0.9972 0.9501
+
+tions on LIBERO-Spatial, LIBERO-Object and LIBERO-100 (subfigure a/b/d): the two categories of samples form concentrated, mutually isolated clusters rather than chaotic overlapping distributions. Such distinct feature discrepancy fundamentally explains why VLALeaks-RF and VLALeaks-MLP achieve ultra-high AUC values above 0.98 in these three easy-to-discriminate scenarios, as the learned privacy embedding naturally encodes discriminative membership clues from VLA model outputs. For the most challeng-ing LIBERO-Goal dataset (subfigure c), member and non-member points partially overlap in low-dimensional pro-jections, which accounts for the relatively declined AUC scores (0.9526 for RF, 0.9285 for MLP) compared with other three tasks. Nevertheless, VLALeaks still maintains competitive attack performance with AUC over 0.92, veri-fying our method can excavate subtle implicit membership differences even when privacy features are heavily entangled under complex goal-conditioned robot manipulation tasks. In terms of ROC curves, both RF and MLP variants produce curves sharply close to the top-left corner across all four benchmarks and drastically outperform the random-guess baseline (diagonal dashed line). Meanwhile, the complemen-tary performance between two backbones is observed: MLP gains marginal superiority on Spatial/Object/100 thanks to its powerful non-linear fitting capacity for continuous fea-ture space, while RF performs slightly better on the tough LIBERO-Goal split by capturing discrete statistical privacy patterns. Overall, the dimensionality reduction visualization intuitively reveals that VLALeaks effectively disentangles latent membership information hidden inside VLA’s vision-action features, which provides solid feature-level evidence for the outstanding quantitative results reported in previous tables. 
+
+5.2.3. Impact of Features Number. We perform feature-size ablation studies in Figure 7 (VLALeaks-RF) and Fig-ure 8 (VLALeaks-MLP), gradually increasing the input feature dimension from 5, 25, 50, 125, 250, 500 to the full feature set (All) across four LIBERO tasks, with AUC and critical TPR@1%FPR as evaluation metrics. For both RF and MLP variants on all four datasets, attack performance consistently rises as the number of selected features in-creases. Even with only the top-5 most informative features, VLALeaks already achieves a decent baseline AUC above 0.6 across all tasks; when feeding all extracted privacy features (All), both models reach their peak AUC and TPR@1%FPR. This trend demonstrates that the privacy clues hidden inside VLA models distribute across the full feature space, and our feature selection module can effec-tively rank high-value privacy-contributing features sequen-tially. On LIBERO-Spatial, LIBERO-Object and LIBERO-100, both RF and MLP converge rapidly: performance satu-rates early at 250-500 features, and full features only bring marginal extra improvement, with final AUC ap-(a) VLALeaks-RF(AUC=0.99) VLALeaks-MLP(AUC=0.98) (b) VLALeaks-RF(AUC=0.98) VLALeaks-MLP(AUC=0.97)   
+
+> (c) VLALeaks-RF(AUC=0.98) VLALeaks-MLP(AUC=0.99) (d) VLALeaks-RF(AUC=0.95) VLALeaks-MLP(AUC=0.96)
+> (e) VLALeaks-RF(AUC=0.97) VLALeaks-MLP(AUC=0.98) (f) VLALeaks-RF(AUC=0.98) VLALeaks-MLP(AUC=0.98)
+
+Figure 5: Attack AUC of VLALeaks on π0 across six real-world tasks. proaching 0.98-0.99. In particular, TPR@1%FPR climbs steeply from extremely low values under sparse-feature settings to near 0.95 with full features, verifying abundant discriminative privacy information exists for these three scenarios. LIBERO-Goal exhibits distinctly slower perfor-mance gain: under small feature counts (5/25/50), AUC and TPR@1%FPR remain substantially lower than other subsets, and performance continuously climbs even up to full feature input without obvious saturation. It indicates membership privacy is sparsely encoded and scattered in feature dimensions for complex long-horizon goal tasks, re-quiring sufficient feature volume to excavate subtle member-nonmember discrepancies. For low-feature regimes (5/25/50 features): RF generally outperforms MLP, since random forest excels at mining discrete statistical privacy from limited handpicked features. For high-feature and full-feature input: MLP catches up and exceeds RF, benefiting from its strong non-linear fitting ability to model complex latent correlations inside dense high-dimensional privacy features, which aligns with our prior quantitative benchmark results. Overall, the ablation results validate the effectiveness of our feature extraction pipeline: the selected features carry hierarchically ordered membership privacy signals, and VLALeaks-MLP is more suitable for high-dimensional full-feature attack, while VLALeaks-RF is more robust for lightweight sparse-feature inference, providing further in-sight for lightweight practical attack deployment on VLA models. 
+
+5.2.4. Ablation Experiments of Feature. We perform ab-lation experiments in Figure 9 to quantify the individual contribution of three core feature branches (per-layer fea-ture, cross-layer feature, action feature) in VLALeaks in two representative robotic manipulation tasks. Three ablated variants are set as: without per-layer, without cross-layer, and without action, where each setting discards one feature group and retains the other two for membership inference, and the full VLALeaks with all three feature types serves as the complete baseline. Across both task (a) and task (d), removing any single feature component consistently leads to AUC degradation for both VLALeaks-RF and VLALeaks-MLP compared with the full-model baseline. (a) LIBERO-Spatial (b) LIBERO-Object  
+
+> (c) LIBERO-Goal (d) LIBERO-100
+
+Figure 6: PCA and t-SNE of member and non-member features under OpenVLA on four datasets. PCA and t-SNE feature dimensionality reduction visualization of member and non-member feature distributions under OpenVLA on four LIBERO robotic datasets. PCA is utilized for linear dimensionality reduction to extract core feature components and eliminate redundant information, while t-SNE achieves nonlinear dimensionality reduction, intuitively visualizing the high-dimensional feature clustering and separation differences between member and non-member features in low-dimensional space. TABLE 5: Attack AUC of VLALeaks under the defense of removing partial duplicate data. We test six tasks on π0. Tasks (a)-(f) are described in Section 5.1.2.                                                                         
+
+> Method (a) (b) (c) (d) (e) (f) Loss -0.0001 -0.0001 0.0000 0.0000 -0.0001 0.0000 Min-k -0.0002 0.0000 +0.0001 0.0000 0.0000 +0.0001 Min-k++ 0.0000 -0.0000 0.0000 0.0000 -0.0001 0.0000 MaxR-img 0.0000 0.0000 -0.0003 0.0000 0.0000 0.0000 MaxR-inst 0.0000 0.0000 0.0000 0.0000 0.0000 -0.0003 MaxR-desp -0.0001 0.0000 0.0000 0.0000 0.0000 0.0000 SMI 0.0000 -0.0001 0.0000 0.0000 0.0000 0.0000 RIM 0.0000 0.0000 0.0000 0.0000 -0.0002 0.0000 RINM 0.0000 0.0000 0.0000 -0.0001 0.0000 0.0000 VLALeaks-RF 0.0000 0.0000 0.0000 0.0000 -0.0001 0.0000 VLALeaks-MLP 0.0000 0.0000 +0.0001 0.0000 0.0000 0.0000
+
+For task (a) Pull the tray right: Full VLALeaks achieves AUC=0.99 (RF)/0.98 (MLP). After feature ablation, per-formance drops to 0.85/0.88 (without per-layer), 0.91/0.90 (without cross-layer), 0.89/0.87 (without action). The most severe performance decline occurs when discarding per-layer features, demonstrating per-layer hidden features carry the richest membership privacy information for this task. For task (d) Pick up a candy and put it back: The com-plete model reaches AUC=0.95 (RF)/0.96 (MLP). The AUC drops to 0.83/0.92 (without per-layer), 0.87/0.91 (without cross-layer), 0.82/0.88 (without action). Here, eliminating action features brings the largest accuracy loss, meaning that action-related features dominate privacy leakage on this candy-manipulation task. Overall, all three feature modules deliver indispensable complementary privacy clues: none of the three feature subsets alone can replace the full fea-ture combination. The task-dependent varying importance of each feature group also explains why aggregating per-layer, cross-layer, and action features simultaneously enables VLALeaks to capture comprehensive cross-modal privacy from heterogeneous VLA data and reach optimal attack performance. 
+
+5.3. VLALeaks against Defenses 
+
+We conduct defenses in Table 5 to evaluate the re-silience of VLALeaks against partial duplicate training data removal [49], a prevalent dataset sanitization defense for mitigating model memorization risks. The table records the AUC change value (defense setting vs original baseline) of VLALeaks-RF and VLALeaks-MLP across six robot manip-ulation tasks. As observed, all AUC fluctuations of two vari-(a) Attack AUC 
+
+> (b) TPR@1%FPR
+
+Figure 7: Attack Performance of VLALeaks-RF using vary-ing numbers of features. 
+
+> (a) Attack AUC
+> (b) TPR@1%FPR
+
+Figure 8: Attack Performance of VLALeaks-MLP using varying numbers of features. ants are restricted within the tiny range [−0.0001 , +0 .0001] 
+
+across six tasks: VLALeaks-RF only obtains a negligible 
+
+−0.0001 AUC drop on task (e) and remains unchanged for all remaining five tasks; VLALeaks-MLP merely has a marginal +0 .0001 improvement on task (c) with zero varia-tion on other cases. VLALeaks extracts implicit membership privacy from the inherent statistical and nonlinear distri-bution of vision-language-action latent features rather than recurring duplicated samples. Consequently, the duplicate-data removal defense fails to eliminate the privacy vulner-ability exploited by our approach. Differential privacy [50] is widely adopted as a defense against MIAs. We attempt to incorporate it into VLA models. However, we find that differential privacy not only significantly degrades model performance but also fails to effectively defend against our proposed attack. The above results verify the outstanding anti-defense robustness of VLALeaks, demonstrating that the privacy leakage uncovered by our method is rooted in 
+
+> (a) Pull the tray right.
+> (b) Pick up a candy and put it back.
+
+Figure 9: Ablation study of attack AUC using three feature extraction groups. Experiments are performed on two tasks. Here, ’w/o’ stands for ’without’, indicating the removal of one feature group such that only the remaining two groups are used for MIAs. intrinsic VLA model characteristics. 
+
+## 6. Conclusion 
+
+In this work, we take the first step toward investigat-ing membership privacy leakage in Vision-Language-Action (VLA) models, thereby addressing a critical gap in the liter-ature. We formally define the membership inference attacks (MIAs) problem for VLA models and analyze the funda-mental reasons why existing methods fail to achieve satisfac-tory performance. To address this, we propose VLALeaks, a novel MIA specifically tailored for VLA models. Through a carefully designed two-stage pipeline, VLALeaks achieves strong attack AUC and TPR@1%FPR, approaching near-perfect inference under certain configurations. Moreover, our two-stage attack reveals the memorization of member in-formation within attention matrices, providing new insights into privacy protection for VLA models. We conduct extensive and rigorous experiments in both simulated and real-world robotic environments, demonstrat-ing the effectiveness of VLALeaks. Our attack exposes previously unidentified privacy leakage blind spots in current VLA models, underscoring their vulnerability. We hope that our work will inspire future research on privacy-preserving VLA models and inform the development of privacy audit-ing tools for robotics systems, paving the way toward secure, trustworthy VLA models. References 
+
+[1] Q. Bu, Y. Yang, J. Cai, S. Gao, G. Ren, M. Yao, P. Luo, and H. Li, “Univla: Learning to act anywhere with task-centric latent actions,” 
+
+arXiv preprint arXiv:2505.06111 , 2025. [2] Y. Ma, Z. Song, Y. Zhuang, J. Hao, and I. King, “A survey on vision–language–action models for embodied ai,” IEEE Transactions on Neural Networks and Learning Systems , 2026. [3] B. Zitkovich, T. Yu, S. Xu, P. Xu, T. Xiao, F. Xia, J. Wu, P. Wohlhart, S. Welker, A. Wahid et al. , “Rt-2: Vision-language-action models transfer web knowledge to robotic control,” in Conference on Robot Learning . PMLR, 2023, pp. 2165–2183. [4] K. Black, N. Brown, D. Driess, A. Esmail, M. Equi, C. Finn, N. Fusai, L. Groom, K. Hausman, B. Ichter et al. , “ π0: A vision-language-action flow model for general robot control,” arXiv preprint arXiv:2410.24164 , 2024. [5] G. R. Team, S. Abeyruwan, J. Ainslie, J.-B. Alayrac, M. G. Arenas, T. Armstrong, A. Balakrishna, R. Baruch, M. Bauza, M. Blokzijl 
+
+et al. , “Gemini robotics: Bringing ai into the physical world,” arXiv preprint arXiv:2503.20020 , 2025. [6] S. Wei, H. Jing, B. Li, Z. Zhao, J. Mao, Z. Ni, S. He, J. Liu, X. Liu, K. Kang et al. , “ psi 0: An open foundation model towards univer-sal humanoid loco-manipulation,” arXiv preprint arXiv:2603.12263 ,2026. [7] M. J. Kim, K. Pertsch, S. Karamcheti, T. Xiao, A. Balakrishna, S. Nair, R. Rafailov, E. Foster, G. Lam, P. Sanketi et al. , “Open-vla: An open-source vision-language-action model,” arXiv preprint arXiv:2406.09246 , 2024. [8] Y. Ze, Z. Chen, J. P. Ara´ ujo, Z.-a. Cao, X. B. Peng, J. Wu, and C. K. Liu, “Twist: Teleoperated whole-body imitation system,” arXiv preprint arXiv:2505.02833 , 2025. [9] S. Wu, X. Liu, S. Xie, P. Wang, X. Li, B. Yang, Z. Li, K. Zhu, H. Wu, Y. Liu et al. , “Robocoin: An open-sourced bimanual robotic data collection for integrated manipulation,” arXiv preprint arXiv:2511.17441 , 2025. [10] S. Fei, S. Wang, J. Shi, Z. Dai, J. Cai, P. Qian, L. Ji, X. He, S. Zhang, Z. Fei et al. , “Libero-plus: In-depth robustness analysis of vision-language-action models,” arXiv preprint arXiv:2510.13626 , 2025. [11] A. O’Neill, A. Rehman, A. Maddukuri, A. Gupta, A. Padalkar, A. Lee, A. Pooley, A. Gupta, A. Mandlekar, A. Jain et al. , “Open x-embodiment: Robotic learning datasets and rt-x models: Open x-embodiment collaboration 0,” in 2024 IEEE International Conference on Robotics and Automation (ICRA) . IEEE, 2024, pp. 6892–6903. [12] Z. Lei, L. Cao, X. Wang, T. Qian, J. Liu, and X. Li, “A kung fu athlete bot that can do it all day: Highly dynamic, balance-challenging motion dataset and autonomous fall-resilient tracking,” arXiv preprint arXiv:2602.13656 , 2026. [13] R. Shokri, M. Stronati, C. Song, and V. Shmatikov, “Membership inference attacks against machine learning models,” in 2017 IEEE Symposium on Security and Privacy (SP) . IEEE, 2017, pp. 3–18. [14] Z. Wang, C. Zhang, Y. Chen, N. Baracaldo, S. R. Kadhe, and L. Yu, “Membership inference attacks as privacy tools: Reliability, disparity and ensemble,” in Proceedings of the 2025 ACM SIGSAC Conference on Computer and Communications Security , 2025, pp. 1724–1738. [15] Y. Hu, Z. Li, Z. Liu, Y. Zhang, Z. Qin, K. Ren, and C. Chen, “Membership inference attacks against {Vision-Language } models,” in 34th USENIX Security Symposium (USENIX Security 25) , 2025. [16] P. Zaree, M. A. A. Mamun, Y. Dong, I. Alouani, and N. Abu-Ghazaleh, “Attenmia: Llm membership inference attack through at-tention signals,” in 2026 IEEE Symposium on Security and Privacy (SP) . IEEE, 2026. [17] J. Hayes, I. Shumailov, C. A. Choquette-Choo, M. Jagielski, G. Kaissis, M. Nasr, M. S. M. S. Annamalai, N. Mireshghallah, I. Shilov, M. Meeus et al. , “Exploring the limits of strong membership inference attacks on large language models,” Advances in Neural Information Processing Systems , 2025. [18] H. Liu, C. Li, Q. Wu, and Y. J. Lee, “Visual instruction tuning,” 
+
+Advances in Neural Information Processing Systems , vol. 36, pp. 34 892–34 916, 2023. [19] S. Haddadin, S. Parusel, L. Johannsmeier, S. Golz, S. Gabl, F. Walch, M. Sabaghian, C. J¨ ahne, L. Hausperger, and S. Haddadin, “The franka emika robot: A reference platform for robotics research and education,” IEEE Robotics & Automation Magazine , vol. 29, no. 2, pp. 46–64, 2022. [20] A. Dosovitskiy, L. Beyer, A. Kolesnikov, D. Weissenborn, X. Zhai, T. Unterthiner, M. Dehghani, M. Minderer, G. Heigold, S. Gelly et al. ,“An image is worth 16x16 words: Transformers for image recognition at scale,” arXiv preprint arXiv:2010.11929 , 2020. [21] A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N. Gomez, Ł. Kaiser, and I. Polosukhin, “Attention is all you need,” 
+
+Advances in Neural Information Processing Systems , vol. 30, 2017. [22] X. Luan, Y. Bi, K. Zhang, Z. Huang, Z. Su, T. H. Luan, and B. Hu, “Poisoning-assisted membership inference in federated learn-ing,” IEEE Transactions on Dependable and Secure Computing , pp. 1–17, 2026. [23] Z. Chen and K. Pattabiraman, “A method to facilitate membership in-ference attacks in deep learning models,” in Network and Distributed System Security (NDSS) Symposium , 2025. [24] Y. Du, Y. Chen, H. Xiao, B. Ribeiro, and N. Li, “Imitative member-ship inference attack,” in 35th USENIX Security Symposium (USENIX Security 26) , 2026. [25] Z. Wang, R. Zhu, Z. Zhang, H. Tang, and X. Wang, “Rigging the foundation: Manipulating pre-training for advanced membership inference attacks,” in 2025 IEEE Symposium on Security and Privacy (SP) . IEEE, 2025, pp. 2509–2526. [26] H. Wu and Y. Cao, “Membership inference attacks on large-scale models: A survey,” arXiv preprint arXiv:2503.19338 , 2025. [27] Y. He, B. Li, L. Liu, Z. Ba, W. Dong, Y. Li, Z. Qin, K. Ren, and C. Chen, “Towards {Label-Only } membership inference attack against pre-trained large language models,” in 34th USENIX Security Symposium (USENIX Security 25) , 2025. [28] J. Zhang, J. Sun, E. Yeats, Y. Ouyang, M. Kuo, J. Zhang, H. Yang, and H. Li, “Min-k%++: Improved baseline for pre-training data detection from large language models,” in International Conference on Learning Representations , vol. 2025, 2025, pp. 64 845–64 862. [29] W. Shi, A. Ajith, M. Xia, Y. Huang, D. Liu, T. Blevins, D. Chen, and L. Zettlemoyer, “Detecting pretraining data from large language models,” in International Conference on Learning Representations ,vol. 2024, 2024, pp. 51 826–51 843. [30] R. Arkhmammadova, H. M. Tamar, and M. E. Gursoy, “Win-k: Improved membership inference attacks on small language models,” in Computer Security. ESORICS 2025 International Workshops , 2025, pp. 66–78. [31] G. Deng, S. Chen, Y. Luo, Y. Liu, S. Wang, Z. Cai, L. Liu, X. Jia, and S. Fu, “Toward efficient membership inference attacks against federated large language models: A projection residual approach,” in 
+
+2026 IEEE Symposium on Security and Privacy (SP) . IEEE, 2026. [32] Z. Li, Y. Wu, Y. Chen, F. Tonin, E. Abad Rocamora, and V. Cevher, “Membership inference attacks against large vision-language mod-els,” Advances in Neural Information Processing Systems , vol. 37, pp. 98 645–98 674, 2024. [33] J. Yin, P. Yang, C. Yang, H. Wang, Z. Hu, S. Wang, Y. Huang, and T. Qi, “Black-box membership inference attack for lvlms via prior knowledge-calibrated memory probing,” Advances in Neural Information Processing Systems , vol. 38, pp. 99 554–99 578, 2026. [34] L. Wang, W. Chen, N. Yu, Z. Li, and S. Guo, “Vidleaks: Membership inference attacks against text-to-video models,” in 35th USENIX Security Symposium (USENIX Security 26) , 2026. [35] X. Wang, X. Huang, G. Luo, and J. Xu, “Inference attacks against graph generative diffusion models,” in 35th USENIX Security Sym-posium (USENIX Security 26) , 2026. [36] Y. Pang and T. Wang, “Black-box membership inference attacks against fine-tuned diffusion models,” in Network and Distributed System Security (NDSS) Symposium , 2025. [37] R. Hu, Y.-M. Shang, W. Luo, Y. Tao, and X. Zhang, “When reasoning leaks membership: Membership inference attack on black-box large reasoning models,” in Proceedings of the ACM Web Conference 2026 ,2026, pp. 3323–3334. [38] D. Qu, H. Song, Q. Chen, Y. Yao, X. Ye, Y. Ding, Z. Wang, J. Gu, B. Zhao, D. Wang et al. , “Spatialvla: Exploring spatial representations for visual-language-action model,” arXiv preprint arXiv:2501.15830 ,2025. [39] X. Zhou, G. Tie, G. Zhang, H. Wang, P. Zhou, and L. Sun, “Bad-vla: Towards backdoor attacks on vision-language-action models via objective-decoupled optimization,” Advances in Neural Information Processing Systems , vol. 38, pp. 127 496–127 523, 2026. [40] T. Wang, C. Han, J. Liang, W. Yang, D. Liu, L. X. Zhang, Q. Wang, J. Luo, and R. Tang, “Exploring the adversarial vulnerabilities of vision-language-action models in robotics,” in Proceedings of the IEEE/CVF International Conference on Computer Vision , 2025, pp. 6948–6958. [41] X. Li, P. Fu, W. Huang, N. Pan, S. Yang, K. Zhao, G. Wan, M. Li, J. Xuan, and M. Li, “When attention betrays: Erasing backdoor attacks in robotic policies by reconstructing visual tokens,” in 2026 IEEE International Conference on Robotics and Automation (ICRA) .IEEE, 2026. [42] B. Liu, Y. Zhu, C. Gao, Y. Feng, Q. Liu, Y. Zhu, and P. Stone, “Libero: Benchmarking knowledge transfer for lifelong robot learn-ing,” Advances in Neural Information Processing Systems , vol. 36, pp. 44 776–44 791, 2023. [43] H. Taud and J.-F. Mas, “Multilayer perceptron (mlp),” in Geomatic approaches for modeling land change scenarios . Springer, 2017, pp. 451–455. [44] L. Breiman, “Random forests,” Machine learning , vol. 45, no. 1, pp. 5–32, 2001. [45] M. J. Kim, C. Finn, and P. Liang, “Fine-tuning vision-language-action models: Optimizing speed and success,” arXiv preprint arXiv:2502.19645 , 2025. [46] S. Yeom, I. Giacomelli, M. Fredrikson, and S. Jha, “Privacy risk in machine learning: Analyzing the connection to overfitting,” in 2018 IEEE 31st Computer Security Foundations Symposium (CSF) . IEEE, 2018, pp. 268–282. [47] H. Abdi and L. J. Williams, “Principal component analysis,” Wiley interdisciplinary reviews: computational statistics , vol. 2, no. 4, pp. 433–459, 2010. [48] L. Van der Maaten and G. Hinton, “Visualizing data using t-sne.”      
+
+> Journal of Machine Learning Research , vol. 9, no. 11, 2008. [49] N. Kandpal, E. Wallace, and C. Raffel, “Deduplicating training data mitigates privacy risks in language models,” in International Confer-ence on Machine Learning .PMLR, 2022, pp. 10 697–10 707. [50] M. Abadi, A. Chu, I. Goodfellow, H. B. McMahan, I. Mironov, K. Talwar, and L. Zhang, “Deep learning with differential privacy,” in Proceedings of the 2016 ACM SIGSAC Conference on Computer and Communications Security , 2016, pp. 308–318.
+
+## Ethics Considerations 
+
+This paper investigates membership inference attacks on VLA models. All experiments were conducted using publicly available datasets and standard open-source model architectures, none of which involve direct ethical concerns. Our work reveals the substantial and previously underesti-mated privacy risks posed by VLALeaks, underscoring the critical importance of this emerging threat vector. We aim to stimulate both academia and industry to develop more robust defense mechanisms against these evolving threats. 
+
+## Appendix 
+
+1. Additional Experiment Results 
+
+To further validate the effectiveness of VLALeaks, we fine-tune VLA models on downstream real-world data and then perform MIAs. Specifically, we deploy π0 [4] on a mo-bile manipulation platform consisting of a single AIRBOT Play arm coupled with a Woosh wheeled base (Figure 10). This platform enables tasks that require the robot to navigate between locations and perform contact-rich manipulation upon arrival. 
+
+1.1. Task Definition and Data Collection. As illus-trated in Figure 11, we design four tasks encompassing both articulated-object interaction and long-horizon pick-transport-place behaviors. Each task requires tight coordina-tion between base locomotion and arm control, as opposed to manipulation from a fixed stance:  
+
+> •
+
+(aa) Close drawer. Each episode starts with the robot positioned away from the workstation. The base drives forward until the robot reaches the front of the table; then the arm extends to push the drawer shut. A trial is considered successful if the drawer is fully closed upon arm retraction.  
+
+> •
+
+(bb) Drop trash. The base advances to the table edge, and the arm reaches out to grasp a target sponge block. The robot then rotates leftward and drives toward the trash bin. Once at an appropriate standoff distance, the arm carries the sponge above the bin opening and releases the gripper to dispose of it.  
+
+> •
+
+(cc) Open drawer. The robot starts from a remote po-sition, navigates to the table front, and then clamps the arm onto the drawer handle to slowly pull it outward. Success is achieved if the drawer opens without the gripper slipping off the handle.  
+
+> •
+
+(dd) Pick and place the cola. The base moves to the table, and the arm grasps a bottle of cola. The robot then turns left and travels to a second table equipped with a receiving tray. Once in a suitable pose, the arm lowers the bottle onto the tray and releases it. All demonstrations are gathered through whole-body teleoperation, with the operator jointly commanding base motion and arm trajectories so that the recorded data re-flects naturally coupled locomotion–manipulation behavior. Demonstrations are logged at the same 10 Hz frequency used during autonomous execution to ensure temporal con-sistency between training and deployment. 
+
+1.2. Mobile Manipulation Platform. The platform inte-grates a 6-DOF AIRBOT Play arm onto a Woosh omnidi-rectional wheeled base. The arm operates in joint position control mode and is equipped with a parallel-jaw 1-DOF gripper (stroke: 0–60 mm). The Woosh base accepts linear and angular velocity commands. To maintain mechanical stability and safe operation when the arm is extended, we limit the base to a maximum linear speed of 0.2 m/s and Figure 10: Real-world mobile manipulation platform. The system comprises an AIRBOT Play arm mounted on a Woosh wheeled base, with head- and wrist-mounted RGB-D cameras providing visual observations. All onboard compu-tation is housed inside the base. a maximum angular speed of 0.3 rad/s during both data collection and policy rollout. For teleoperated data collection, an AIRBOT Replay arm serves as the leader device driving the AIRBOT Play follower arm, while base velocities are commanded con-currently through the same interface. The leader–follower arm pair is identical to that used in our fixed-base setup, enabling demonstration pipelines to be reused across plat-forms. Visual observations come from two RGB-D cameras mounted on the platform: one at the head, providing a broad forward-facing view for base navigation and coarse target localization, and one at the wrist, offering a close-up view of the end-effector workspace for fine manipulation. This head-plus-wrist arrangement supplies complementary global and local visual context throughout each task. 
+
+1.3. Policy Training. We train task-specific policies on the mobile platform using π0 [4]. The policy consumes synchronized RGB streams from the head and wrist cam-eras together with the robot’s proprioceptive state. At each control step, it predicts a 9-dimensional whole-body action vector composed of six arm joint targets, one gripper com-mand, and two base velocity terms (linear and angular). Because the deployed platform exposes neither torso-lift nor head articulation, the action space omits these degrees of freedom, yielding a compact command interface tailored to this hardware. Policies are executed in a receding-horizon manner at 10 Hz, matching the control rate used during demonstration logging. 
+
+1.4. Attack AUC. Table 6 presents the attack AUC for our proposed VLALeaks and Loss attack [46] across four real-world mobile manipulation tasks to validate its real-world effectiveness. Loss attack is close to random guessing. Both VLALeaks-RF and VLALeaks-MLP achieve robust and high AUC values above 0.81 across all physical robot 
+
+Figure 11: Four tasks for the mobile manipulation platform with the head camera (left) and the wrist camera (right). TABLE 6: Attack AUC on π0 across four real-world mobile manipulation tasks (aa-dd).                 
+
+> Method (aa) (bb) (cc) (dd)
+> Loss 0.52 0.47 0.50 0.49 VLALeaks-RF 0.89 0.83 0.85 0.90 VLALeaks-MLP 0.87 0.81 0.82 0.94
+
+tasks, which solidly demonstrates that both instantiations of our VLALeaks are effective at uncovering membership privacy in real-deployed VLA models. For the tasks (aa, bb, cc), VLALeaks-RF achieves strong performance with AUC ranging from 0.83 to 0.89, while VLALeaks-MLP maintains competitive AUC between 0.81 and 0.87. On the task (dd), both methods attain their peak performance: VLALeaks-RF reaches 0.90, and VLALeaks-MLP obtains an even higher AUC of 0.94. Regardless of task type and complexity, neither VLALeaks suffers dramatic performance drops, confirming that both attack classifiers successfully exploit the multimodal privacy features extracted by our VLALeaks. These real-world results further corroborate the reliability and practical efficacy of our VLALeaks.
