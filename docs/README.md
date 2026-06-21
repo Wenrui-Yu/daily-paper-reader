@@ -6,33 +6,34 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-20
-- 运行时间：2026-06-20 21:21:35 UTC
+- 最新运行日期：2026-06-21
+- 运行时间：2026-06-21 20:38:14 UTC
 - 运行状态：成功
 - 本次总论文数：4
-- 精读区：4
-- 速读区：0
+- 精读区：3
+- 速读区：1
 
 ### 今日简报（AI）
-今天精读4篇论文，聚焦两篇高分研究：DataGuard保障脉动阵列加速器隐私训练，以及跨孤岛去匿名化揭示局部差分隐私的威胁模型与相变现象。DataGuard在硬件层面实现隐私训练保证，而跨孤岛研究指出LDP下数据去匿名化的协调必要性。建议关注硬件隐私解决方案，并警惕匿名数据在分布式场景中的重新识别风险。
-- 详情：[/202606/20/README](/202606/20/README)
+1. 今日精读两篇聚焦大模型安全的高分论文：知识蜜罐诱捕窃取攻击（9.0）与任务完成及隐私抵抗基准（8.0），速读一篇相关基准（7.0）。  
+2. 最值得关注的是“Let Them Steal”提出的知识蜜罐机制，通过放置陷阱数据主动欺骗模型窃取者；以及TRAP基准，首次联合评估任务完成度与隐私抵抗能力。  
+3. 建议普通读者优先了解蜜罐在AI安全中的实战价值，并尝试用TRAP测试自家模型对隐私查询的防御效果。
+- 详情：[/202606/21/README](/202606/21/README)
 
 ### 精读区论文标签
-1. [DataGuard: Guaranteeing Private Training in Systolic-array Based Accelerators](/202606/20/2606.16809v1-dataguard-guaranteeing-private-training-in-systolic-array-based-accelerators)  
-   标签：评分：10.0/10、query:daily
-   evidence：在脉动阵列加速器上保证隐私训练的差分隐私与联邦学习实现
-2. [Cross-Silo De-Anonymization Under Local Differential Privacy: Threat Model, Phase Transition, and Coordination Necessity](/202606/20/2606.16763v1-cross-silo-de-anonymization-under-local-differential-privacy-threat-model-phase-transition-and-coordination-necessity)  
+1. [Let Them Steal: Trapping Large Language Model Extraction Attacks with Knowledge Honeypot](/202606/21/2606.15810v1-let-them-steal-trapping-large-language-model-extraction-attacks-with-knowledge-honeypot)  
    标签：评分：9.0/10、query:daily
-   evidence：跨孤岛去匿名化与局部差分隐私，涉及分布式机器学习隐私
-3. [PSyGenTAB: A Privacy-Preserving Framework for Synthetic Clinical Tabular Data Generation via Constrained Optimization](/202606/20/2606.18518v1-psygentab-a-privacy-preserving-framework-for-synthetic-clinical-tabular-data-generation-via-constrained-optimization)  
-   标签：评分：9.0/10、query:daily
-   evidence：医学AI的隐私保护合成数据，与分布式机器学习隐私相关
-4. [VLALeaks: Membership Inference Attacks against Vision-Language-Action Models](/202606/20/2606.15165v1-vlaleaks-membership-inference-attacks-against-vision-language-action-models)  
+   evidence：使用知识蜜罐防御大语言模型提取攻击
+2. [TRAP: Benchmark for Task-completion and Resistance to Active Privacy-extraction](/202606/21/2606.18996v2-trap-benchmark-for-task-completion-and-resistance-to-active-privacy-extraction)  
    标签：评分：8.0/10、query:daily
-   evidence：提出针对视觉-语言-动作模型的成员推断攻击，属于机器学习隐私威胁
+   evidence：评估智能体任务中隐私泄露的基准
+3. [Data-Driven Control from Poisoned Data: Fundamental Limitations and Secure DeePC](/202606/21/2606.20301v1-data-driven-control-from-poisoned-data-fundamental-limitations-and-secure-deepc)  
+   标签：评分：8.0/10、query:daily
+   evidence：针对中毒攻击的安全数据驱动控制
 
 ### 速读区论文标签
-- 本次无速读推荐。
+1. [TRAP: Benchmark for Task-completion and Resistance to Active Privacy-extraction](/202606/21/2606.18996v1-trap-benchmark-for-task-completion-and-resistance-to-active-privacy-extraction)  
+   标签：评分：7.0/10、query:daily
+   evidence：智能体任务中隐私提取基准
 
 
 <div class="dpr-home-promo-card">
