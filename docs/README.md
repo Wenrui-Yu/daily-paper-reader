@@ -6,34 +6,30 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-21
-- 运行时间：2026-06-21 20:38:14 UTC
+- 最新运行日期：2026-06-22
+- 运行时间：2026-06-22 21:38:42 UTC
 - 运行状态：成功
-- 本次总论文数：4
-- 精读区：3
+- 本次总论文数：2
+- 精读区：1
 - 速读区：1
 
 ### 今日简报（AI）
-1. 今日精读两篇聚焦大模型安全的高分论文：知识蜜罐诱捕窃取攻击（9.0）与任务完成及隐私抵抗基准（8.0），速读一篇相关基准（7.0）。  
-2. 最值得关注的是“Let Them Steal”提出的知识蜜罐机制，通过放置陷阱数据主动欺骗模型窃取者；以及TRAP基准，首次联合评估任务完成度与隐私抵抗能力。  
-3. 建议普通读者优先了解蜜罐在AI安全中的实战价值，并尝试用TRAP测试自家模型对隐私查询的防御效果。
-- 详情：[/202606/21/README](/202606/21/README)
+今天精读了一篇8.0高分的红队测评基准《RedactionBench》，并速读了一篇6.0分的各向异性向量检索研究。
+
+最值得关注的是《RedactionBench》，它聚焦大模型补救能力的评测框架；另一篇则探讨了全局门控在检索系统中的枢纽度控制。
+
+建议优先理解《RedactionBench》的方法，思考如何提升模型的安全性和错误修正能力。
+- 详情：[/202606/22/README](/202606/22/README)
 
 ### 精读区论文标签
-1. [Let Them Steal: Trapping Large Language Model Extraction Attacks with Knowledge Honeypot](/202606/21/2606.15810v1-let-them-steal-trapping-large-language-model-extraction-attacks-with-knowledge-honeypot)  
-   标签：评分：9.0/10、query:daily
-   evidence：使用知识蜜罐防御大语言模型提取攻击
-2. [TRAP: Benchmark for Task-completion and Resistance to Active Privacy-extraction](/202606/21/2606.18996v2-trap-benchmark-for-task-completion-and-resistance-to-active-privacy-extraction)  
+1. [RedactionBench](/202606/22/2606.18782v1-redactionbench)  
    标签：评分：8.0/10、query:daily
-   evidence：评估智能体任务中隐私泄露的基准
-3. [Data-Driven Control from Poisoned Data: Fundamental Limitations and Secure DeePC](/202606/21/2606.20301v1-data-driven-control-from-poisoned-data-fundamental-limitations-and-secure-deepc)  
-   标签：评分：8.0/10、query:daily
-   evidence：针对中毒攻击的安全数据驱动控制
+   evidence：基于上下文完整性的LLM应用PII编辑基准
 
 ### 速读区论文标签
-1. [TRAP: Benchmark for Task-completion and Resistance to Active Privacy-extraction](/202606/21/2606.18996v1-trap-benchmark-for-task-completion-and-resistance-to-active-privacy-extraction)  
-   标签：评分：7.0/10、query:daily
-   evidence：智能体任务中隐私提取基准
+1. [When Global Gating Is Enough: Admission-Time Hubness Control in Anisotropic Vector Retrieval Systems](/202606/22/2606.19692v1-when-global-gating-is-enough-admission-time-hubness-control-in-anisotropic-vector-retrieval-systems)  
+   标签：评分：6.0/10、query:daily
+   evidence：通过枢纽控制防止检索系统中的投毒攻击
 
 
 <div class="dpr-home-promo-card">
