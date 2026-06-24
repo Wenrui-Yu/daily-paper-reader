@@ -6,52 +6,54 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-23
-- 运行时间：2026-06-23 22:12:38 UTC
+- 最新运行日期：2026-06-24
+- 运行时间：2026-06-24 21:19:56 UTC
 - 运行状态：成功
 - 本次总论文数：10
 - 精读区：6
 - 速读区：4
 
 ### 今日简报（AI）
-今日日报聚焦隐私保护前沿，涵盖差分隐私增强、联邦学习与IoMT韧性、车辆网络隐私博弈及LLM多轮对话隐私等热点。
-最值得关注两篇9分精读：基于经验贝叶斯改进差分隐私机制，以及利用数字孪生和PPO驱动的蜜罐实现IoMT联邦时序防御。
-建议普通读者优先学习经验贝叶斯在差分隐私中的应用，并留意联邦学习与博弈论在真实场景中的部署挑战。
-- 详情：[/202606/23/README](/202606/23/README)
+今日日报精读6篇、速读4篇，重点聚焦差分隐私聚合的Cramér-Rao极限与格基后量子前向安全加密在物联网中的应用。
+
+最值得精读的是两篇9.0分论文：《Reconstruction Limits for Repeated Differentially Private Aggregates》从查询几何视角揭示重差分隐私聚合的重构理论边界；《A Post-Quantum Secure Lattice-Based Forward-Secure Identity Based Encryption》提供适用于物联网架构的后量子密码方案。
+
+建议优先啃下这两篇高分论文，理解差分隐私的理论瓶颈和格基密码的实用化路径；速读中《SelPE》对结构化文本隐私合成也有启发，可酌情拓展阅读。
+- 详情：[/202606/24/README](/202606/24/README)
 
 ### 精读区论文标签
-1. [Enhancing Differentially Private Mechanisms via Empirical Bayes](/202606/23/2606.21107v1-enhancing-differentially-private-mechanisms-via-empirical-bayes)  
+1. [Reconstruction Limits for Repeated Differentially Private Aggregates: A Cramer-Rao Perspective on Query Geometry](/202606/24/2606.19275v1-reconstruction-limits-for-repeated-differentially-private-aggregates-a-cramer-rao-perspective-on-query-geometry)  
    标签：评分：9.0/10、query:daily
-   evidence：通过经验贝叶斯改进差分隐私机制，直接提升分布式机器学习中的隐私效用
-2. [Federated Temporal Attention Intelligence for Cyber-Resilient IoMT: Lightweight Digital Twins and PPO-Driven Honeypot Deception](/202606/23/2606.21422v1-federated-temporal-attention-intelligence-for-cyber-resilient-iomt-lightweight-digital-twins-and-ppo-driven-honeypot-deception)  
+   evidence：差分隐私重构风险
+2. [A Post-Quantum Secure Lattice-Based Forward-Secure Identity Based Encryption with Applications to Internet of Things Architecture](/202606/24/2606.22340v1-a-post-quantum-secure-lattice-based-forward-secure-identity-based-encryption-with-applications-to-internet-of-things-architecture)  
    标签：评分：9.0/10、query:daily
-   evidence：面向隐私保护分布式医疗物联网的联邦学习框架
-3. [Privacy-Preserving Federated Temporal Graph Learning with Digital Twin--Guided Adaptive Deception for Cyber-Resilient IoMT](/202606/23/2606.21513v1-privacy-preserving-federated-temporal-graph-learning-with-digital-twin--guided-adaptive-deception-for-cyber-resilient-iomt)  
+   evidence：物联网加密密码学
+3. [Towards Federated Long-Tailed Graph Learning: An Energy-Guided Dual Decoupling Approach](/202606/24/2606.24237v1-towards-federated-long-tailed-graph-learning-an-energy-guided-dual-decoupling-approach)  
    标签：评分：9.0/10、query:daily
-   evidence：物联网医疗中的隐私保护联邦学习
-4. [Federated learning with heavy-tailed gradient noise and communication noise: a variance-reduction based algorithm](/202606/23/2606.22466v1-federated-learning-with-heavy-tailed-gradient-noise-and-communication-noise-a-variance-reduction-based-algorithm)  
-   标签：评分：9.0/10、query:daily
-   evidence：联邦学习中的重尾梯度与通信噪声及隐私保护
-5. [HADES: Privacy-Preserving Federated Learning via Selective Feature Encryption and Hybrid Model Fusion](/202606/23/2606.22928v1-hades-privacy-preserving-federated-learning-via-selective-feature-encryption-and-hybrid-model-fusion)  
-   标签：评分：9.0/10、query:daily
-   evidence：基于选择性特征加密的隐私保护联邦学习
-6. [AdaPrivate-TS: Private Thompson Sampling for Contextual Bandits with Privacy Amplification](/202606/23/2606.21757v1-adaprivate-ts-private-thompson-sampling-for-contextual-bandits-with-privacy-amplification)  
+   evidence：联邦图学习同时保护隐私
+4. [Agent-Assisted Side-Channel Attacks on Non-Prefix KV Cache in RAG](/202606/24/2606.21842v1-agent-assisted-side-channel-attacks-on-non-prefix-kv-cache-in-rag)  
    标签：评分：8.0/10、query:daily
-   evidence：上下文老虎机的差分隐私汤普森采样
+   evidence：KV缓存侧信道攻击泄露用户隐私
+5. [$π$-RAG: Oblivious Retrieval via Semantic Quantization and Transcendental Addressing for Large Language Models](/202606/24/2606.22153v1--rag-oblivious-retrieval-via-semantic-quantization-and-transcendental-addressing-for-large-language-models)  
+   标签：评分：8.0/10、query:daily
+   evidence：利用π基间接层的遗忘检索
+6. [Detecting and Understanding Vulnerabilities in Fully Homomorphic Encryption Frameworks](/202606/24/2606.22519v1-detecting-and-understanding-vulnerabilities-in-fully-homomorphic-encryption-frameworks)  
+   标签：评分：8.0/10、query:daily
+   evidence：密码学框架漏洞分析
 
 ### 速读区论文标签
-1. [Game-Theoretic Framework for Private Data Sharing in Vehicular Networks](/202606/23/2606.22115v1-game-theoretic-framework-for-private-data-sharing-in-vehicular-networks)  
+1. [SelPE: Progressive Selection for Private Structured Text Synthesis](/202606/24/2606.22817v1-selpe-progressive-selection-for-private-structured-text-synthesis)  
    标签：评分：8.0/10、query:daily
-   evidence：车联网中基于博弈论的私有数据共享框架
-2. [Private Information Retrieval from Joint Systematic MDS-Coded with Non-Colluding Servers: Bounds and Constructions](/202606/23/2606.22802v1-private-information-retrieval-from-joint-systematic-mds-coded-with-non-colluding-servers-bounds-and-constructions)  
+   evidence：差分隐私结构化文本合成
+2. [HelpBench: Assessing the Ability of LLMs to Provide Privacy, Safety, and Security Advice](/202606/24/2606.24819v1-helpbench-assessing-the-ability-of-llms-to-provide-privacy-safety-and-security-advice)  
+   标签：评分：8.0/10、query:daily
+   evidence：评估LLM提供隐私建议的基准
+3. [Privacy-Preserving RAG via Multi-Agent Semantic Rewriting: Achieving Confidentiality Without Compromising Contextual Fidelity](/202606/24/2606.24623v1-privacy-preserving-rag-via-multi-agent-semantic-rewriting-achieving-confidentiality-without-compromising-contextual-fidelity)  
    标签：评分：7.0/10、query:daily
-   evidence：分布式编码存储中的私有信息检索
-3. [MuPPET: A Benchmark for Contextual Privacy of LLM Assistants in Multi-Party Conversations](/202606/23/2606.23217v1-muppet-a-benchmark-for-contextual-privacy-of-llm-assistants-in-multi-party-conversations)  
-   标签：评分：7.0/10、query:daily
-   evidence：多方对话中LLM助手隐私的基准测试
-4. [SelPE: Progressive Selection for Private Structured Text Synthesis](/202606/23/2606.22817v1-selpe-progressive-selection-for-private-structured-text-synthesis)  
+   evidence：通过多智能体语义改写实现隐私保护的检索增强生成，直接相关于机器学习中的隐私保护。
+4. [Semantic Non-Assembly: Privacy by Architectural Inertness Under Component Exposure](/202606/24/2606.22311v1-semantic-non-assembly-privacy-by-architectural-inertness-under-component-exposure)  
    标签：评分：6.0/10、query:daily
-   evidence：私有结构化文本合成，采用差分隐私
+   evidence：提出一种基于暴露信息收益的互补隐私保证，与隐私要求相关。
 
 
 <div class="dpr-home-promo-card">
