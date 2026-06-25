@@ -1,0 +1,1857 @@
+Title: General Techniques for Reducing Key-Switching Overhead in Privacy-Preserving Two-Party Transformer Inference
+
+URL Source: https://arxiv.org/pdf/2606.25349v1
+
+Published Time: Thu, 25 Jun 2026 00:27:41 GMT
+
+Number of Pages: 13
+
+Markdown Content:
+> 1
+
+# General Techniques for Reducing Key-Switching Overhead in Privacy-Preserving Two-Party Transformer Inference 
+
+Wenshao Yang, Zhenhua Liu and Dongdong Yao 
+
+Abstract —In secure two-party Transformer inference, linear layers are typically evaluated using Fully Homomorphic Encryp-tion (FHE) through plaintext-ciphertext or ciphertext-ciphertext matrix multiplications, where key switching primarily occurs and dominates computational overhead in both FHE-based and hybrid FHE-MPC systems. Existing optimizations rely heavily on packing-specific algorithms, limiting their general applicability. Targeting this overhead from a packing-independent perspec-tive, we propose a preprocessing-assisted method for secure atten-tion computation. By decomposing attention into precomputable operations and online interactions, this method reduces online inference-phase key switching without modifying existing packing strategies. However, the first method shifting key switching offline in-troduces additional storage requirements. To address this, we propose storage-communication trade-off techniques that replace large precomputed ciphertexts with modest online communi-cation, enabling flexible deployment under varying resource constraints. While ciphertext-ciphertext matrix multiplication is offloaded to the preprocessing phase in hybrid schemes and the first layer of FHE-based schemes, these operations still persist in the offline stage and subsequent FHE layers. To further op-timize it, we propose a fused key-switch technique targeting the multiplication-followed-by-rotation pattern, which frequently arises in existing RNS-CKKS matrix multiplication schemes. By combining relinearization and rotation into a single procedure, this technique reduces the associated computation costs. Analytical evaluations demonstrate that our proposed tech-niques significantly reduce online key-switch overhead and provide flexible trade-offs between storage and communication without requiring modifications to existing packing strategies. 
+
+Index Terms —Secure transformer inference, Homomorphic encryption, Secure Multi-Party Computation, Key switch. 
+
+Note: This arXiv version focuses on analytical evalua-tion. An updated version including end-to-end implementation results and experimental evaluation will be released in a subsequent revision. 
+
+I. I NTRODUCTION 
+
+Privacy-preserving Transformer inference has become an important problem in the deployment of modern large lan-guage models (LLMs). In many practical settings, inference involves two mutually distrustful parties: the client holds sensitive input data, while the server owns proprietary model parameters. The client is unwilling to reveal plaintext inputs, and the server must protect model weights from leakage or extraction. Consequently, enabling efficient two-party Trans-former inference while preserving both input privacy and model confidentiality is a fundamental challenge. Existing secure Transformer inference systems are primar-ily built upon FHE or hybrid FHE–MPC techniques, where ciphertext matrix computations are typically executed using FHE. Since key switching dominates the latency of homo-morphic matrix multiplication [1]–[6], a common optimization strategy is to jointly design plaintext packing schemes and ciphertext matrix multiplication algorithms. As a result, key-switching complexity has become the primary metric for aring such as BLB [3], THOR [5], BOLT [4], MOAI [7], and ARION [2]. Consequently, many existing optimizations are closely tied to specific packing schemes, which determine how tokens and embedding dimensions are mapped to plaintext slots and thereby influence the structure of homomorphic matrix multiplication. This dependency often leads systems to be tailored for particular operating regimes. For instance, BLB and THOR are optimized for small token batches, whereas MOAI and ARION target large-batch inference. While these approaches achieve strong performance in their respective settings, their optimization techniques are difficult to transfer across alternative packing schemes, limiting their applicability and deployment flexibility. In this work, we address this limitation from a different perspective. Rather than proposing a new packing method, we introduce a packing-independent method for secure attention computation in two-party Transformer inference. The key idea is to reorganize ciphertext attention computation through preprocessing so that part of the ciphertext transformation workload is shifted from the online phase to preprocessing. Since the method operates at the attention-computation level rather than the packing-layout level, it is compatible with a range of plaintext packing strategies and can be incorpo-rated into both FHE-based and hybrid FHE–MPC inference systems. In FHE-based settings, the method reduces online key-switching operations for the first layer of multi-head self-attention. In hybrid FHE–MPC settings, it can further reduce key-switching overhead throughout all layers. The preprocessing-assisted method reduces online key switching, but it does not eliminate all key-switching costs. In particular, ciphertext multiplication followed by ciphertext rotation remains a common computation pattern in secure attention inference and appears in many existing systems, including BLB, THOR, BOLT, and ARION. To further reduce this recurring cost, we propose a fused RNS-CKKS key-switching technique that combines relinearization and rotation into a single procedure. 
+
+> arXiv:2606.25349v1 [cs.CR] 24 Jun 2026 2
+
+Overall, this paper makes the following contributions. First, we propose a packing-independent preprocessing-assisted method for secure attention computation, reducing online key-switching operations without modifying existing packing strategies. Second, we introduce storage-communication trade-off techniques that replace large precomputed ciphertexts with modest online communication, enabling flexible deployment under different resource constraints. Third, we propose a fused key-switching technique for the multiplication-followed-by-rotation pattern in RNS-CKKS matrix multiplication, reducing the overhead of relinearization and rotation. II. R ELATED WORK 
+
+Privacy-preserving machine learning (PPML) has been ex-tensively studied using cryptographic techniques such as Se-cure Multi-Party Computation (MPC) [8], Fully Homomorphic Encryption (FHE) [9], Differential Privacy (DP) [10], and Trusted Execution Environments (TEE) [11]. Among these approaches, MPC and FHE provide strong cryptographic guarantees and have become the foundation of secure neural network inference systems [12], [13]. Existing secure Trans-former inference (STI) systems can be broadly categorized according to their underlying cryptographic primitives into MPC-based [14], [15], FHE-based [1], [5], [7], [16], and hybrid FHE-MPC approaches [3], [6]. Early efforts on encrypted Transformer inference primar-ily focused on adapting Transformer architectures to the constraints imposed by FHE. Systems such as PolyTrans-former [17] and PowerSoftmax [18] replace nonlinear func-tions with low-degree polynomial approximations to reduce multiplicative depth and improve FHE efficiency. While ef-fective, these approaches require model retraining and may introduce accuracy degradation [2]. Subsequent FHE-based systems improve secure Trans-former inference through optimized plaintext packing, ci-phertext encoding, and preprocessing strategies. One line of work targets compact Transformer models or scenarios with relatively short input sequences. THOR [5] exploits diagonal matrix packing to reduce the cost of homomorphic attention computation. FHEBERTTiny [19] and Tricycle [20] further improve efficiency through optimized ciphertext encodings and offline preprocessing techniques. These systems demonstrate the feasibility of efficient encrypted Transformer inference in small-scale settings, but their designs and evaluations mainly focus on compact models or inputs with a limited number of tokens. Another line of FHE-based work focuses on improving throughput in large-batch inference settings. NEXUS [16] introduces client-side preprocessing to reduce online com-munication and accelerate attention projections. MOAI [7], Arion [2], and Euston [21] further optimize packing layouts, preprocessing procedures, and batching strategies to amor-tize homomorphic computation over many inputs. These ap-proaches are effective for high-throughput scenarios, but their optimizations are typically designed around specific packing layouts or batching assumptions. Hybrid FHE-MPC protocols have also been proposed for two-party secure Transformer inference. These systems typi-cally employ FHE for linear layers, such as matrix multiplica-tions in attention and feed-forward networks, while using MPC to evaluate nonlinear operations including activation functions, normalization layers, and Softmax. Representative systems include BOLT [4], BLB [3], and EncFormer [22]. More recent designs [3], [22] further extend FHE computation into linear subcomponents within nonlinear functions, reducing the num-ber of conversions between FHE ciphertexts and MPC shares and thereby lowering communication and truncation costs. Nevertheless, FHE-based linear layers continue to account for a substantial fraction of the overall inference cost. For example, EncFormer reports that under a WAN deployment setting with NVIDIA A100 GPUs, linear-layer computation contributes more than 75% of the total execution time [22]. A common characteristic of existing FHE-based and hybrid FHE-MPC Transformer inference systems is their reliance on specialized plaintext packing schemes. In small-model or short-sequence settings, packing layouts are often tailored to reduce the number of rotations in attention computation. In large-batch settings, packing and batching strategies are designed to amortize homomorphic operations across many inputs. Although effective in their respective settings, these optimizations are usually tightly coupled with the underlying plaintext layout, making them difficult to transfer across differ-ent secure inference frameworks. Consequently, improvements developed for one packing strategy often require substantial redesign before they can be applied to another system. In contrast, this work does not introduce a new plaintext packing scheme. Instead, we propose a packing-independent approach for secure attention computation that reorganizes encrypted attention evaluation through preprocessing. The proposed method can be integrated with existing packing strategies and reduces the number of online key-switching operations in both FHE-based and hybrid FHE-MPC Trans-former inference systems. Furthermore, we introduce a fused key-switching technique for the commonly occurring ci-phertext multiplication-followed-by-rotation pattern. Different from conventional approaches that perform relinearization and rotation independently, the proposed technique reduces the overall key-switching overhead associated with this compu-tation pattern. Both optimizations are orthogonal to existing packing methods and can be incorporated into current secure Transformer inference systems without modifying their under-lying plaintext packing strategies. III. P RELIMINARIES 
+
+A. Notations 
+
+Table I summarizes the notations used throughout the paper. We use bold lowercase letters (e.g., x) to denote vectors and bold uppercase letters (e.g., X) to denote matrices. The notation [[ ·]] denotes CKKS ciphertexts encrypted under the client’s public key. Depending on the underlying packing strategy, the encrypted representation of a matrix may consist of one or multiple ciphertexts. The symbols 〈·〉 c and 〈·〉 s
+
+denote additive secret shares held by the client and the server, respectively. Unless otherwise specified, all matrix operations are performed over the corresponding plaintext domain. 3                            
+
+> TABLE I CRYPTOGRAPHIC NOTATION
+> Notation Meaning
+> R,ZSets of real and integer numbers
+> ZqInteger residue space modulo qNPolynomial ring degree
+> qCiphertext modulus
+> RqPolynomial ring Zq[X]/(XN+ 1) Λplaintext polynomial space
+> [[ M]] encryption of matrix M
+> Enc encryption
+> σtl, σ trLeft and right slot rotations by tpositions
+> P, P ′, P ′′ Matrix encoding layouts
+> p(M)Encoded plaintext polynomial collection of M
+> ℓP(M)Number of plaintext polynomials generated by P
+
+B. Transformer Model 
+
+The Transformer architecture [23] is built upon the multi-head self-attention mechanism. Given an input token matrix 
+
+X ∈ Rm×d,
+
+the query, key, and value matrices are computed as 
+
+Q = XW q , K = XW k, V = XW v,
+
+where 
+
+Wq , Wk, Wv ∈ Rd×d
+
+are learnable projection matrices, m denotes the sequence length, and d denotes the hidden dimension. The matrices Q, K, and V are partitioned into H attention heads: 
+
+Q(h), K(h), V(h) ∈ Rm× d 
+
+> H
+
+, h ∈ { 1, . . . , H }.
+
+For each attention head, the attention output is computed as 
+
+Att h(X) = Softmax 
+
+(
+
+Q(h)K(h)⊤
+
+√d/H 
+
+)
+
+V(h).
+
+The outputs of all attention heads are concatenated and projected through the output projection matrix Wo:
+
+MHA( X) = Concat (Att 1(X), . . . , Att H (X)) Wo.
+
+The multi-head attention module is followed by residual connections, layer normalization, and a position-wise feed-forward network (FFN). These components together form a standard Transformer block. Since this work focuses on secure attention computation, we omit further details of these layers. 
+
+C. Threat Model 
+
+We consider the standard two-party secure inference setting consisting of a client and a server. The client holds a private input token matrix X, while the server possesses the parame-ters of a pretrained Transformer model, including the attention and feed-forward network weights. The goal of the protocol is to enable the server to evaluate the Transformer model on the client’s input without revealing the plaintext input to the server and without exposing the model parameters to the client. At the end of the protocol, the client obtains the inference result, while neither party learns any additional information beyond what can be inferred from its prescribed inputs and outputs. Following prior works [1]–[5], [7], [16], [21], on se-cure Transformer inference, we assume an honest-but-curious (semi-honest) adversarial model. Both parties correctly follow the protocol specification but may attempt to infer additional information from the intermediate messages and protocol transcripts. The communication channels between the client and the server are assumed to be secure. 
+
+D. Cryptographic Primitives 1) CKKS Homomorphic Encryption Scheme: We briefly review the CKKS approximate homomorphic encryption scheme, focusing on the implementation characteristics that are relevant to the following algorithms. Detailed descriptions of CKKS and its RNS variants can be found in [24], [25]. 
+
+a) Plaintexts and Ciphertexts: CKKS is an RLWE-based homomorphic encryption scheme designed for approximate arithmetic over real or complex numbers. Let 
+
+Rq = Zq [X]/(XN + 1) 
+
+be the polynomial ring with ring degree N and ciphertext modulus q. A plaintext vector is encoded into a polynomial in the CKKS plaintext space, which can represent up to N/ 2
+
+complex slots through SIMD-style packing. A scaling factor 
+
+∆ is used to control fixed-point precision. A ciphertext encrypting a plaintext message is represented as a tuple of polynomials over Rq. In the standard two-component form, a ciphertext is written as 
+
+ct = ( c0, c 1) ∈ R2 
+
+> q
+
+.
+
+Throughout this paper, the notation [[ M]] denotes the CKKS ciphertext representation of a matrix M. Depending on the underlying plaintext packing strategy, [[ M]] may consist of one ciphertext or a collection of ciphertexts. 
+
+b) Homomorphic Addition and Multiplication: CKKS supports homomorphic addition and multiplication. In this paper, the symbols + and × are used at an abstract level and may correspond to different concrete operations depending on whether the operands are plaintexts or ciphertexts. Specifically, they may denote ciphertext-ciphertext operations, ciphertext-plaintext operations, or plaintext operations that appear in a particular instantiation of the proposed algorithms. For example, a homomorphic matrix multiplication procedure may consist of ciphertext additions, ciphertext-plaintext multiplica-tions, ciphertext-ciphertext multiplications, and plaintext addi-tions or multiplications, depending on the adopted encoding layout and secure inference protocol. Homomorphic addition is relatively inexpensive and pre-serves the ciphertext size. Homomorphic multiplication is more costly. In particular, ciphertext-ciphertext multiplication increases the ciphertext size and is usually followed by relin-earization to reduce the ciphertext back to its standard form. In CKKS, multiplication also increases the scale, and rescaling is applied to control the scale and modulus chain. These auxiliary procedures introduce non-negligible computational overhead. 4
+
+c) Rotation and Relinearization: CKKS supports slot rotations, which cyclically shift the packed plaintext slots inside a ciphertext. Let m be a plaintext packed a vector 
+
+m. The left rotation operation ( σlt(m)) shifts the slots of m
+
+cyclically to the left by t positions, while the right rotation operation ( σrt (m)) shifts the slots to the right by t positions. Unless otherwise specified, rotations in this paper refer to left rotations. In RLWE-based homomorphic encryption schemes, cipher-text rotations are implemented by applying a ring automor-phism followed by a key-switching procedure. CKKS also employs relinearization after ciphertext-ciphertext multiplica-tion to transform an enlarged ciphertext back to its standard form. Similar to rotation, relinearization is realized through key switching using a public evaluation key. Therefore, both ciphertext rotations and relinearization require key-switching operations and constitute fundamental components of CKKS homomorphic computation. 
+
+2) Additive Secret Sharing: We also use 2-out-of-2 additive secret sharing as a standard primitive in hybrid FHE-MPC secure inference protocols. For an input matrix X, the client and the server hold shares 
+
+X = 〈X〉c + 〈X〉s ,
+
+where 〈X〉c is held by the client and 〈X〉s is held by the server. Individually, neither share reveals the plaintext input. Additive sharing is commonly used to switch between encrypted computation and secret-shared computation. Lin-ear operations can be evaluated with FHE, while nonlinear functions such as softmax, normalization, activation functions, and comparisons can be handled by MPC protocols. In our algorithms, the random matrix U serves as an additive mask for the client input. During online inference, the value X − U
+
+may be obtained by the server either directly or through an MPC-based procedure, depending on the underlying secure inference scheme. As long as U is sampled independently and remains hidden from the server, revealing X − U does not disclose the plaintext input X. This masked value enables the server to combine plaintext-side computation with precom-puted encrypted intermediate values, thereby reducing online ciphertext rotations and key-switching operations. IV. T WO -P ARTY SECURE INFERENCE ALGORITHM FOR 
+
+ATTENTION MECHANISMS 
+
+Existing two-party secure Transformer inference systems, such as NEXUS [16] and Euston [21], utilize preprocessing techniques based on column-packed matrix multiplication to compute encrypted linear projections using the following decomposition: 
+
+[[ XW ]] = [[ UW ]] + ( X − U)W,
+
+where U is a random masking matrix generated by client. This technique enables the first linear layer of the Trans-former attention module, responsible for computing Q, K,and V, to be evaluated with zero ciphertext rotations during online inference. In addition, the client only needs to transmit the masked input X−U in the online phase, rather than the ci-phertext [[ X]] . However, subsequent computations, especially ciphertext attention operations such as 
+
+[[ QK ⊤]] and softmax 
+
+( [[ QK ⊤]] 
+
+√d
+
+)
+
+[[ V]] ,
+
+still require a large number of ciphertext-ciphertext multi-plications and key-switching operations. In RLWE-based ho-momorphic encryption schemes, key switching is one of the dominant computational bottlenecks. To reduce the number of online key-switching operations, we introduce a preprocessing-assisted secure attention Algo-rithm 1. 
+
+A. Preprocessing-Based Attention Decomposition 
+
+To facilitate the decomposition of the attention computation, we define 
+
+Qu = UW q , Ku = UW k, Vu = UW v ,
+
+where Wq , Wk, and Wv denote the query, key, and value projection matrices of a single attention head. Using the additive decomposition 
+
+X = U + ( X − U),
+
+the attention score matrix can be expanded as follows: 
+
+[[ QK ⊤]] = [[ Qu]] × [[ K⊤ 
+
+> u
+
+]] + [[ Qu]] × (( X − U)Wk)⊤
+
++ ( X − U)Wq × [[ K⊤ 
+
+> u
+
+]] + ( X − U)Wq W⊤ 
+
+> k
+
+(X − U)⊤.
+
+(1) The key observation is that the expensive ciphertext-ciphertext multiplication [[ QK ⊤]] is decomposed into several ciphertext multiplications and offline precomputable cipher-text transformations. Consequently, a significant portion of the costly key-switching operations can be moved into the preprocessing stage. 
+
+B. Correctness and Generality 
+
+We clarify that the proposed attention decomposition in Eq. (1) is both correct and compatible with a broad range of RLWE-based secure attention computation schemes. 
+
+a) Abstract Encoding Model: To avoid reliance on any particular packing strategy, an encoding layout is modeled as a mapping from a matrix to a collection of plaintext polynomials: 
+
+P : M 7 −→ p(M), p(M) ∈ ΛℓP (M) 
+
+> N,q
+
+.
+
+The plaintext ring associated with the underlying RLWE scheme is defined as 
+
+ΛN,q = Zq [X]/(XN + 1) ,
+
+where ℓP (M) denotes the number of plaintext polynomials generated by the encoding layout P . Depending on the pack-ing strategy, ℓP (M) may vary and is not restricted by our algorithms. 5
+
+Algorithm 1 Two-Party Secure Inference for Attention Mech-anism 
+
+Require: Random masking matrix U ∈ Rm×d generated by the client, input token matrix X ∈ Rm×d, and server-side single-head attention weights W(h) 
+
+> q
+
+, W(h) 
+
+> k
+
+, W(h) 
+
+> v
+
+∈
+
+Rd× d 
+
+> H
+
+, where h ∈ { 1, 2, · · · , H }.
+
+Ensure: Encrypted attention output [[ S5]] . 
+
+> 1:
+
+Offline Preprocessing Phase  
+
+> 2:
+
+The client and server jointly compute the encrypted masked projections: 
+
+[[ Q(h) 
+
+> u
+
+]] = [[ UW (h) 
+
+> q
+
+]] [[ K(h) 
+
+> u
+
+]] = [[ UW (h) 
+
+> k
+
+]] 
+
+and 
+
+[[ V(h) 
+
+> u
+
+]] = [[ UW (h) 
+
+> v
+
+]] .
+
+The resulting ciphertexts are held by the server.  
+
+> 3:
+
+The server computes: 
+
+[[ S1]] = [[ Q(h) 
+
+> u
+
+]] × [[ K(h)⊤ 
+
+> u
+
+]] . 
+
+> 4:
+
+The server precomputes transformed ciphertext sets: 
+
+CQ, CK , CV . 
+
+> 5:
+
+Online Inference Phase  
+
+> 6:
+
+The client and server obtain 
+
+X − U
+
+either via joint computation (as in MPC-based inference) or by the client directly sending it to the server (as in FHE-based inference). The resulting value is held by the server.  
+
+> 7:
+
+Using ciphertexts in CQ and CK , the server computes: 
+
+[[ S2]] = [[ Q(h) 
+
+> u
+
+]] W(h)⊤ 
+
+> k
+
+(X − U)⊤,
+
+and 
+
+[[ S3]] = ( X − U)W(h) 
+
+> q
+
+[[ K(h)⊤ 
+
+> u
+
+]] . 
+
+> 8:
+
+The server computes: 
+
+[[ Q(h)K(h)⊤]] = [[ S1]] + [[ S2]] + [[ S3]] + S4. 
+
+> 9:
+
+Securely compute 
+
+[[ sf tmx ]] = softmax 
+
+( [[ Q(h)K(h)⊤]] 
+
+√d
+
+)
+
+. 
+
+> 10:
+
+Using ciphertexts in CV , the server computes: 
+
+[[ S5]] = [[ sf tmx ]] ×
+
+[[ 
+
+V(h) 
+
+> u
+
++ ( X − U)W(h)
+
+> v
+
+]] 
+
+. 
+
+> 11:
+
+return [[ S5]] 
+
+Different operands and outputs may adopt different encod-ing layouts: 
+
+P ′ : M 7 −→ p′(M), P ′′ : M 7 −→ p′′ (M).
+
+The encryption of the encoded plaintext collection p(M) is denoted by [[ p(M)]] .A homomorphic ciphertext-matrix multiplication algorithm is represented as 
+
+ϕ : [[ p(A)]] × [[ p′(B)]] −→ [[ p′′ (AB )]] .
+
+The output encoding layout P ′′ is assumed to preserve additive homomorphism: 
+
+p′′ (A + B) = p′′ (A) + p′′ (B), (2) which is satisfied by standard RLWE packing layouts used in secure inference systems. 
+
+b) Correctness: From 
+
+Q = UW q + ( X − U)Wq = Qu + ( X − U)Wq
+
+and 
+
+K = UW k + ( X − U)Wk = Ku + ( X − U)Wk,
+
+we obtain 
+
+QK ⊤ = (Qu + ( X − U)Wq
+
+)( Ku + ( X − U)Wk
+
+)⊤.
+
+Applying the distributive law of matrix multiplication yields 
+
+QK ⊤ = QuK⊤
+
+> u
+
++ Qu
+
+((X − U)Wk
+
+)⊤
+
++ ( X − U)Wq K⊤
+
+> u
+
++ ( X − U)Wq W⊤ 
+
+> k
+
+(X − U)⊤,
+
+(3) which is exactly Eq. (1). Therefore, the proposed decomposi-tion is algebraically correct. 
+
+c) Generality: Since Eq. (3) is a matrix-level identity, it is independent of the underlying ciphertext representation. Applying the encoding layout P ′′ to both sides and using the additive homomorphism of P ′′ and RLWE, we obtain 
+
+[[ p′′ (QK ⊤)]] = ϕ
+
+(
+
+[[ p(Qu)]] , [[ p′(K⊤ 
+
+> u
+
+)]] 
+
+)
+
++ ϕ
+
+(
+
+[[ p(Qu)]] , p ′(W⊤ 
+
+> k
+
+(X − U)⊤)
+
+)
+
++ ϕ
+
+(
+
+p(( X − U)Wq ), [[ p′(K⊤ 
+
+> u
+
+)]] 
+
+)
+
++ p′′ (
+
+(X − U)Wq W⊤ 
+
+> k
+
+(X − U)⊤)
+
+.
+
+(4) Therefore, due to the additive and multiplicative homomor-phism of RLWE-based ciphertexts, any RLWE-based secure attention computation scheme can directly incorporate the proposed decomposition, provided that the ciphertext encoding layout P ′′ preserves additive homomorphism. In particular, Algorithm 1 can be instantiated within existing CKKS-based secure Transformer inference systems such as NEXUS, EU-STON, Arion, and BLB. Since the purpose of introducing P ,
+
+P ′, and P ′′ are solely to establish the packing-independent correctness of the proposed decomposition, we will omit these encoding maps in the remainder of this paper for notational 6
+
+simplicity. Accordingly, unless otherwise specified, the nota-tion [[ M]] will denote the ciphertext representation of a matrix 
+
+M using any compatible plaintext encoding layout (including 
+
+P , P ′, or P ′′ ) that satisfies Eq.( 2). 
+
+C. Precomputed Ciphertext Transformation Sets 
+
+To further reduce online latency, the server precomputes and stores transformed ciphertext variants derived from 
+
+[[ Qu]] , [[ Ku]] , [[ Vu]] .
+
+Specifically, define: 
+
+CQ = {[[ Qu]] 1, [[ Qu]] 2, . . . , [[ Qu]] n},CK = {[[ Ku]] 1, [[ Ku]] 2, . . . , [[ Ku]] n′ },
+
+and 
+
+CV = {[[ Vu]] 1, [[ Vu]] 2, . . . , [[ Vu]] n′′ }.
+
+Each transformed ciphertext may involve preprocessing op-erations required by downstream inference, such as ciphertext rotations, plaintext masking, ciphertext additions, ciphertext multiplications, and other auxiliary transformations. These transformed ciphertexts are generated offline and reused during online inference, thereby significantly reducing the number of online key-switching operations. The parame-ters n, n′, and n′′ are not fixed and can be adjusted according to the packing strategy and system requirements. 
+
+D. Secure Attention Inference 
+
+We present the complete two-party secure inference protocol for Transformer attention in Algorithm 1. For clarity, the superscript (h) denotes the quantities associated with the h-th attention head throughout this section. Define: 
+
+S1 = Q(h) 
+
+> u
+
+K(h)⊤ 
+
+> u
+
+,
+
+S2 = Q(h)
+
+> u
+
+(
+
+(X − U)W(h)
+
+> k
+
+)⊤
+
+,
+
+S3 = ( X − U)W(h) 
+
+> q
+
+K(h)⊤ 
+
+> u
+
+,
+
+S4 = ( X − U)W(h) 
+
+> q
+
+W(h)⊤ 
+
+> k
+
+(X − U)⊤,
+
+and 
+
+S5 = softmax 
+
+( Q(h)K(h)⊤
+
+√d
+
+)
+
+V(h).
+
+These five terms correspond to the decomposed attention computation used in Algorithm 1. Among them, the terms involving only preprocessed or reusable encrypted operands can be prepared before the online phase, while the remaining terms are evaluated during secure inference. In particular, the computation in Line 2 of Algorithm 1 can be realized using the preprocessing techniques provided by NEXUS or EUSTON. Alternatively, with Beaver triples, the client and the server can first obtain secret shares of the target matrix. The client then encrypts its share under its public key and sends the ciphertext to the server, who completes the preprocessing step by locally adding its own share in ciphertext form. This preprocessing strategy reduces the online latency of ciphertext attention. Plaintext rotations incur negligible cost compared with ciphertext rotations, and expensive ciphertext multiplications requiring key-switching are completed during preprocessing. Moreover, many transformed ciphertexts de-rived from [[ Qu]] and [[ K⊤ 
+
+> u
+
+]] , which are required by down-stream operations, can be precomputed and stored in CQ and 
+
+CK . This further reduces the online key-switching overhead. The evaluation of the softmax function is abstracted in Al-gorithm 1. Depending on the underlying instantiation, softmax can be implemented either homomorphically in a fully FHE-based system or through a secure client-server protocol in a hybrid FHE-MPC system. V. S TORAGE -C OMMUNICATION TRADE -OFF STRATEGY 
+
+While the preprocessing strategy outlined in Section IV shifts the online key-switching computations to the prepro-cessing phase, it introduces substantial storage overhead in ciphertext sets CQ, CK , and CV . As the sequence length m
+
+or the number of attention heads H increases, the memory footprint of these ciphertext sets can become prohibitive, cre-ating a significant bottleneck for resource-constrained servers. In this section, building on the proposed attention-computation Algorithm 1, we introduce a storage– communication trade-off strategy that replaces a large portion of ciphertext storage with a small amount of online plaintext communication. Instead of precomputing and storing all rotated ciphertext variants, part of the required linear information is generated during online inference and protected by additive masks. This trade-off preserves the main benefit of the preprocessing method, namely reducing online key-switching operations, while lowering the storage cost of the precomputed ciphertext sets. We adapt this strategy to both FHE-based Transformer inference and hybrid MPC–FHE Transformer inference, as described in the following two subsections. 
+
+A. Adaptation of the Storage-Communication Trade-off Strat-egy to FHE-Based Transformer Inference 
+
+Under FHE-based transformer inference, we apply the storage–communication trade-off strategy introduced in Algo-rithm 2. Instead of storing all rotated ciphertexts in CQ and 
+
+CK , the client receives masked intermediate values 
+
+Q(h) 
+
+> u
+
+W(h)⊤ 
+
+> k
+
+− R(h) 
+
+> s
+
+and W(h) 
+
+> q
+
+K(h)⊤ 
+
+> u
+
+− R(h)
+
+> s′
+
+during preprocessing. When the input X is available, the client computes the plaintext matrices B1 and B2 and sends them to the server, which then reconstructs the ciphertext results [[ S2]] 
+
+and [[ S3]] using the encrypted masks. This strategy eliminates the need to store large ciphertext sets, replacing storage with a small amount of online plaintext communication per attention head. In non-interactive FHE-based inference, the Algorithm ( 1 or 2) are applied to the first Transformer layer. By removing online key switching in this layer, the method accelerates the most expensive homomorphic computations. For deep models such as GPT-2, GPT-3, or LLaMA, optimizing only the first 7
+
+layer provides limited overall speedup, whereas for shallow models like BERT-tiny, the reduction in key switching can yield a distinct improvement. The algorithm can also be extended to later layers if inter-action is allowed, for example when ciphertexts are refreshed or bootstrapping is avoided. In such cases, the same masking-based decomposition can be applied iteratively across layers, though the practical benefit depends on the trade-off between additional interaction latency and the cost of storage. 
+
+Algorithm 2 Trade-off Strategy for Computing [[ S2]] and 
+
+[[ S3]] under FHE 
+
+Require: [[ Qu]] , [[ Ku]] ,W(h) 
+
+> q
+
+, W(h) 
+
+> k
+
+and U in Algorithm 1. Random masking matrix R(h) 
+
+> s
+
+∈ Rm×d, R(h) 
+
+> s′
+
+∈
+
+Rd×m, R(h) 
+
+> c
+
+∈ Rm×m, R(h) 
+
+> c′
+
+∈ Rm×m. Input matrix 
+
+X ∈ Rm×d and server-side single-head attention weights 
+
+W(h) 
+
+> q
+
+, W(h) 
+
+> k
+
+, W(h) 
+
+> v
+
+∈ Rd× d 
+
+> H
+
+, where h ∈ { 1, 2, · · · , H }.
+
+Ensure: [[ S2]] and [[ S3]] . 
+
+> 1:
+
+Offline Preprocessing Phase  
+
+> 2:
+
+Server compute 
+
+[[ Q(h) 
+
+> u
+
+]] × W(h)⊤ 
+
+> k
+
+− R(h)
+
+> s
+
+and 
+
+W(h) 
+
+> q
+
+× [[ K(h)⊤ 
+
+> u
+
+]] − R(h) 
+
+> s′
+
+,
+
+then send them to client.  
+
+> 3:
+
+Client decrypt ciphertext 
+
+[[ Q(h) 
+
+> u
+
+× W(h)⊤ 
+
+> k
+
+− R(h) 
+
+> s
+
+]] 
+
+and 
+
+[[ W(h) 
+
+> q
+
+× K(h)⊤ 
+
+> u
+
+− R(h) 
+
+> s′
+
+]] ,
+
+then encrypt 
+
+R(h) 
+
+> c
+
+and R(h)
+
+> c′
+
+and send 
+
+[[ R(h) 
+
+> c
+
+]] and [[ R(h) 
+
+> c′
+
+]] 
+
+to server.  
+
+> 4:
+
+Online Inference Phase  
+
+> 5:
+
+The client send 
+
+X − U
+
+and 
+
+B1 = ( Q(h) 
+
+> u
+
+× W(h)⊤ 
+
+> k
+
+− R(h) 
+
+> s
+
+) × (X − U)⊤ − R(h)
+
+> c
+
+and 
+
+B2 = ( X − U) × (W(h) 
+
+> q
+
+× K(h)⊤ 
+
+> u
+
+− R(h) 
+
+> s′
+
+) − R(h)
+
+> c′
+
+to server  
+
+> 6:
+
+Server obtain 
+
+[[ S2]] = B1 + R(h) 
+
+> s
+
+× (X − U)⊤ + [[ R(h) 
+
+> c
+
+]] 
+
+and 
+
+[[ S3]] = B2 + ( X − U) × R(h) 
+
+> s′
+
++ [[ R(h) 
+
+> c′
+
+]]  
+
+> 7:
+
+return [[ S2]] and [[ S3]] 
+
+B. Adaptation of the Storage-Communication Trade-off Strat-egy to Hybrid FHE-MPC Transformer Inference 
+
+To adapt the trade-off strategy in Algorithm 2 to the hybrid FHE-MPC setting, we modify the preprocessing and online procedures while preserving the idea of replacing ciphertext transformation sets with online communication. Algorithm 3 extends the trade-off strategy of Algorithm 2. Instead of storing the ciphertext transformation sets CQ and 
+
+CK required by Algorithm 1, the approach introduces masked intermediate values and encrypted correction terms during preprocessing. In the online phase, the server reconstructs 
+
+[[ S2]] and [[ S3]] using the secret-sharing representation of X
+
+and the plaintext matrices E and F transmitted by the client. As a result, the storage overhead of CQ and CK is removed. A similar strategy applies to the computation of [[ S5]] . Let the output of the Softmax operation be represented by secret shares 〈X′〉c and 〈X′〉s, and let U′ be a random masking matrix generated during preprocessing. The ciphertext [[ S5]] 
+
+can be decomposed as 
+
+[[ S5]] = [[ U′]][[ V(h) 
+
+> u
+
+]] + [[ U′]]( X − U)W(h)
+
+> v
+
++ ( X′ − U′)[[ V(h) 
+
+> u
+
+]] + ( X′ − U′)( X − U)W(h) 
+
+> v
+
+.
+
+(5) Let 
+
+S′ 
+
+> 5
+
+= [[ U′]]( X − U)W(h) 
+
+> v
+
+,
+
+and 
+
+S′′  
+
+> 5
+
+= ( X′ − U′)[[ V(h) 
+
+> u
+
+]] .
+
+The mixed terms S′ 
+
+> 5
+
+and S′′  
+
+> 5
+
+require the ciphertext transfor-mation set CV in the original design. Algorithm 4 follows the same trade-off principle as Algorithm 3. With masking and correction terms generated during preprocessing, the server reconstructs S′ 
+
+> 5
+
+and S′′  
+
+> 5
+
+during online inference using the plaintext matrices J and P transmitted by the client. Thus, the storage overhead of CV is replaced by the communication of J and P.Overall, Algorithms 3 and 4 extend the strategy of Al-gorithm 2 to the hybrid FHE-MPC setting. The ciphertext transformation sets CQ, CK , and CV are no longer required. Their storage overhead is exchanged for additional online communication incurred by transmitting the plaintext matrices 
+
+E, F, J, and P, while Algorithms 3 and 4 preserve the same number of online key-switching operations. 
+
+C. Security Analysis 
+
+We analyze the privacy of the trade-off protocols in Algo-rithms 3 and 4 in the standard two-party semi-honest model using a real/ideal world simulation paradigm. The goal is to show that neither the client nor the server learns additional information beyond what is revealed by the protocol outputs. 
+
+1) Preliminaries and Notation: Let FHE denote a RLWE-based encryption scheme with IND-CPA security. Let the client’s input be X and U in the FHE-only case, or a secret share 〈X〉c in the hybrid MPC case. Let the server hold model 8
+
+Algorithm 3 Trade-off Strategy for Computing [[ S2]] and 
+
+[[ S3]] under hybrid FHE-MPC setting 
+
+Require: [[ Qu]] , [[ Ku]] ,W(h) 
+
+> q
+
+, W(h) 
+
+> k
+
+and U in Algorithm 1. Random masking matrix Rt ∈ Rm×d, R(h) 
+
+> s
+
+∈ Rm×d,
+
+R(h) 
+
+> s′
+
+∈ Rd×m, R(h) 
+
+> c
+
+∈ Rm×m, R(h) 
+
+> c′
+
+∈ Rm×m.Input matrix X ∈ Rm×d and server-side single-head attention weights W(h) 
+
+> q
+
+, W(h) 
+
+> k
+
+, W(h) 
+
+> v
+
+∈ Rd× d 
+
+> H
+
+, where 
+
+h ∈ { 1, 2, · · · , H }.
+
+Ensure: [[ S2]] and [[ S3]] . 
+
+> 1:
+
+Offline Preprocessing Phase  
+
+> 2:
+
+Server compute 
+
+[[ Q(h) 
+
+> u
+
+]] × W(h)⊤ 
+
+> k
+
+− R(h)
+
+> s
+
+and 
+
+W(h) 
+
+> q
+
+× [[ K(h)⊤ 
+
+> u
+
+]] − R(h) 
+
+> s′
+
+,
+
+then send them to client.  
+
+> 3:
+
+Client decrypt ciphertext 
+
+[[ Q(h) 
+
+> u
+
+× W(h)⊤ 
+
+> k
+
+− R(h) 
+
+> s
+
+]] 
+
+and 
+
+[[ W(h) 
+
+> q
+
+× K(h)⊤ 
+
+> u
+
+− R(h) 
+
+> s′
+
+]] ,
+
+then encrypt 
+
+R(h) 
+
+> c
+
+and R(h)
+
+> c′
+
+and send 
+
+[[ R(h) 
+
+> c
+
+]] and [[ R(h) 
+
+> c′
+
+]] 
+
+to server.  
+
+> 4:
+
+Server compute 
+
+[[ D]] = [[ Q(h) 
+
+> u
+
+× W(h)⊤ 
+
+> k
+
+− R(h) 
+
+> s
+
+]] × R⊤ 
+
+> t
+
++ [[ R(h) 
+
+> c
+
+]] 
+
+and 
+
+[[ D′]] = Rt × [[ W(h) 
+
+> q
+
+× K(h)⊤ 
+
+> u
+
+− R(h) 
+
+> s′
+
+]] + [[ R(h) 
+
+> c′
+
+]]  
+
+> 5:
+
+Online Inference Phase  
+
+> 6:
+
+The client adds the mask matrix −U to its secret share 
+
+〈X〉c, while the server adds the mask matrix −Rt to its secret share 〈X〉s . Both parties then simultaneously send their masked shares to each other.  
+
+> 7:
+
+Client computes and sends 
+
+E = ( Q(h) 
+
+> u
+
+× W(h)⊤ 
+
+> k
+
+− R(h) 
+
+> s
+
+) × (X − U − Rt)⊤ − R(h)
+
+> c
+
+and 
+
+F = ( X − U − Rt) × (W(h) 
+
+> q
+
+× K(h)⊤ 
+
+> u
+
+− R(h) 
+
+> s′
+
+) − R(h)
+
+> c′
+
+to server.  
+
+> 8:
+
+Server obtain 
+
+[[ S2]] = [[ D]] + E + R(h) 
+
+> s
+
+× (X − U)⊤
+
+and 
+
+[[ S3]] = [[ D′]] + F + ( X − U) × R(h) 
+
+> s′
+> 9:
+
+return [[ S2]] and [[ S3]] 
+
+Algorithm 4 Trade-off Strategy for Computing [[ S′
+
+> 5
+
+]] and 
+
+[[ S′′  
+
+> 5
+
+]] under hybrid FHE-MPC setting 
+
+Require: [[ V(h) 
+
+> u
+
+]] , (X − U − Rt), W(h) 
+
+> v
+
+and Rt in Algo-rithm 3 and Algorithm 1. Random masking matrix ˆR(h) 
+
+> c
+
+∈
+
+Rm×d, U′ ∈ Rm×m, ˆR(h) 
+
+> s
+
+∈ Rm×d, ˆRt ∈ Rm×m,
+
+ˆR(h) 
+
+> c′
+
+∈ Rm× d 
+
+> H
+
+. Attention mechanism input matrix X ∈
+
+Rm×d and the output X′ ∈ Rm×m of Softmax function. 
+
+Ensure: [[ S′
+
+> 5
+
+]] and [[ S′′  
+
+> 5
+
+]] . 
+
+> 1:
+
+Offline Preprocessing Phase  
+
+> 2:
+
+Client encrypt U′, ˆR(h) 
+
+> c
+
+and ˆR(h) 
+
+> c′
+
+, then send [[ U′]] ,
+
+[[ ˆR(h) 
+
+> c
+
+]] and [[ ˆR(h) 
+
+> c′
+
+]] to server.  
+
+> 3:
+
+Server computes 
+
+[[ G]] = [[ U′]] × (RtW(h) 
+
+> v
+
+) + [[ ˆR(h) 
+
+> c
+
+]] × W(h)
+
+> v
+
+and 
+
+[[ Z]] = ˆRt × [[ V(h) 
+
+> u
+
+]] + [[ ˆR(h) 
+
+> c′
+
+]]  
+
+> 4:
+
+Server computes and sends [[ V(h) 
+
+> u
+
+− ˆR(h) 
+
+> s
+
+]] to client, client decrypt it after reception.  
+
+> 5:
+
+Online Inference Phase  
+
+> 6:
+
+The client adds the mask matrix −U′ to its secret share 
+
+〈X′〉c, while the server adds the mask matrix − ˆRt to its secret share 〈X′〉s . Both parties then simultaneously send their masked shares to each other.  
+
+> 7:
+
+Client computes and sends 
+
+J = U′ × (X − U − Rt) − ˆR(h)
+
+> c
+
+and 
+
+P = ( X′ − U′ − ˆRt) × (V(h) 
+
+> u
+
+− ˆR(h) 
+
+> s
+
+) − ˆR(h)
+
+> c′
+
+to server.  
+
+> 8:
+
+Server obtain 
+
+[[ S′5]] = [[ G]] + J × W(h)
+
+> v
+
+and 
+
+[[ S′′ 5]] = [[ Z]] + P + ( X′ − U′ − ˆRt) × ˆR(h) 
+
+> s
+> 9:
+
+return [[ S′5]] and [[ S′′ 5]] 
+
+parameters Wq, Wk, Wv and RLWE-encrypted precomputed matrices [[ Qu]] , [[ Ku]] , [[ Vu]] encrypted by client’s public key. We define the view of a party as follows:  
+
+> •
+
+view C (client view): the client’s input, random masks, and all messages received from the server.  
+
+> •
+
+view S (server view): the server’s input, random masks, and all messages received from the client. 
+
+2) Ideal World Execution: In the ideal world, a trusted party 
+
+F computes the outputs: 
+
+[[ S2]] , [[ S3]] , [[ S′
+
+> 5
+
+]] , [[ S′′  
+
+> 5
+
+]] 
+
+and returns to each party only the authorized output. No other information is leaked. 
+
+3) Real World Execution: In the real world, the parties execute the protocols in Algorithms 2, 3 or 4. All sensitive 9
+
+matrices are either encrypted under RLWE ( [[ ·]] ) or masked by independent random matrices. Specifically:  
+
+> •
+
+In the FHE-only trade-off protocol (Algorithm 2), the server receives X − U, B1, and B2 in the online phase, where B1 and B2 are masked by R(h) 
+
+> c
+
+, R(h) 
+
+> c′
+
+and U. The client only decrypts masked intermediate values protected by R(h) 
+
+> s
+
+and R(h) 
+
+> s′
+
+, and therefore does not learn the unmasked server-side matrices.  
+
+> •
+
+In the hybrid MPC protocol (Algorithms 3), both par-ties exchange masked shares of secret inputs. Each share is masked by independently sampled matrices (Rt, Rs, Rc, . . . ).  
+
+> •
+
+In the softmax hybrid protocol (Algorithms 4), similar masked shares and RLWE-encrypted matrices are ex-changed. 
+
+4) Simulator Construction: We construct simulators for the semi-honest parties to show that the real-world views are computationally indistinguishable from ideal-world views. 
+
+a) Server Simulator Sim S : 
+
+> •
+
+Sample random RLWE ciphertexts with the same dimen-sions as the real encrypted matrices [[ Qu]] , [[ Ku]] , [[ Vu]] . 
+
+> •
+
+Sample random matrices with the same dimensions as all masked client messages (B1, B 2, E, F, J, P ) from uniform distributions over the appropriate domains.  
+
+> •
+
+Output these as the simulated server view view sim  
+
+> S
+
+.
+
+b) Client Simulator Sim C : 
+
+> •
+
+Sample random masked shares or RLWE ciphertexts of the same dimensions as those received from the server (e.g., [[ QuW⊤ 
+
+> k
+
+−Rs]] , [[ Wq K⊤ 
+
+> u
+
+−Rs′ ]] , and the softmax masked shares).  
+
+> •
+
+Output these as the simulated client view view sim  
+
+> C
+
+.
+
+5) Indistinguishability Argument:  
+
+> •
+
+By the IND-CPA security of RLWE encryption, any RLWE ciphertext in the real protocol is computationally indistinguishable from a ciphertext encrypting a random matrix.  
+
+> •
+
+By the statistical independence and uniform randomness of the additive masks, any masked linear combination of inputs or secret shares is statistically independent of the underlying private data. Therefore, for both the client and the server, the simulated view view sim is computationally indistinguishable from the real-world view view :
+
+view real  
+
+> C
+
+≈c view sim  
+
+> C
+
+, view real  
+
+> S
+
+≈c view sim  
+
+> S
+
+.
+
+6) Security: This simulation argument applies uniformly to all three algorithms: FHE-only for [[ S2]] and [[ S3]] , hybrid FHE-MPC for [[ S2]] and [[ S3]] , and softmax MPC-CKKS for 
+
+[[ S′
+
+> 5
+
+]] , [[ S′′  
+
+> 5
+
+]] . Hence, under the standard semi-honest model and the IND-CPA assumption of RLWE, the protocols securely compute the desired outputs without leaking any additional information about either party’s private inputs. VI. F USED RELINEARIZATION AND ROTATION 
+
+The previous two sections introduced preprocessing-based techniques that shift ciphertext matrix multiplications in Trans-former attention from the online phase to preprocessing, thereby reducing the online computation cost in two-party secure inference. These techniques can be applied to all Trans-former layers in hybrid FHE-MPC systems and to the first layer in fully FHE-based systems. However, ciphertext matrix multiplications remain unavoidable in two important cases: (i) the preprocessing phase itself, where these computations are performed in advance, and (ii) the subsequent layers of fully FHE-based systems, where the proposed preprocessing techniques are not directly applicable. This motivates a deeper optimization of the underlying ciphertext matrix multiplication primitive itself. In this section, we present a fused key-switching opti-mization that reduces the cost of ciphertext multiplication followed by rotation, a common computation pattern in secure Transformer inference systems such as BOLT [4], THOR [5], BLB [3], and ARION [2]. This optimization is independent of the proposed attention-computation algorithms and can be directly integrated into existing systems. When instantiated together with our preprocessing-based methods, it further accelerates ciphertext matrix multiplications in both prepro-cessing and online inference. 
+
+A. Key-Switching Overhead in Multiplication-Rotation Pipelines 
+
+In CKKS, ciphertext-ciphertext multiplication of 
+
+ct = ( c0, c 1) = Enc (m), ct ′ = ( c′
+
+> 0
+
+, c ′
+
+> 1
+
+) = Enc (m′)
+
+produces a degree-two ciphertext 
+
+(d0, d 1, d 2) = ( c0c′
+
+> 0
+
+, c 0c′ 
+
+> 1
+
++ c1c′
+
+> 0
+
+, c 1c′
+
+> 1
+
+),
+
+which decrypts as 
+
+d0 + d1s + d2s2.
+
+A conventional implementation first relinearizes this cipher-text: 
+
+d0 + d1s + d2s2 −→ ¯d0 + ¯d1s ≈ mm ′.
+
+If a rotation by t slots is then required, the implementation applies the automorphism σt (rotation left or right): 
+
+(σt( ¯d0), σ t( ¯d1)) .
+
+This ciphertext is encrypted under the rotated secret key 
+
+τ = σt(s).
+
+Therefore, another key-switching operation is required: 
+
+σt( ¯d0) + σt( ¯d1)τ −→ c′′  
+
+> 0
+
++ c′′  
+
+> 1
+
+s ≈ σt(mm ′).
+
+Thus, multiplication followed by rotation normally invokes two key-switching procedures: one for relinearization and one for rotation. Each key-switching operation consists of four main steps: ModUp, multiplication with the evaluation key (MulEvk), ModDown, and addition in RNS-CKKS [25]. Since poly-nomial multiplication is most efficiently performed in the NTT domain, ciphertext multiplications are typically main-tained in the NTT representation throughout the computation. Consequently, both ModUp and ModDown involve NTT and 10 
+
+inverse NTT (INTT) transformations. Furthermore, these two steps require basis conversion between different RNS bases, making them among the most expensive components of the key-switching procedure [26]. The key idea of our fused method is to postpone relin-earization until after the automorphism operation. Instead of performing separate key-switching procedures, we directly transform the ciphertext encrypted under the secret-key τ and 
+
+τ 2 back to the original secret key s through a single fused key-switching pipeline. 
+
+B. Formulation 
+
+After multiplication and rescaling, let 
+
+( ˜d0, ˜d1, ˜d2)
+
+be the degree-two ciphertext at the target scale and modulus level. Applying the automorphism σt gives 
+
+( ˆd0, ˆd1, ˆd2) = ( σt( ˜d0), σ t( ˜d1), σ t( ˜d2)) .
+
+This ciphertext decrypts under 
+
+(1 , τ, τ 2), τ = σt(s),
+
+because 
+
+σt( ˜d0 + ˜d1s + ˜d2s2) = ˆd0 + ˆd1τ + ˆd2τ 2.
+
+The goal is to produce a standard CKKS ciphertext under the original secret key s:
+
+ct out = ( c′′  
+
+> 0
+
+, c ′′  
+
+> 1
+
+), c′′  
+
+> 0
+
++ c′′  
+
+> 1
+
+s ≈ ˆd0 + ˆd1τ + ˆd2τ 2.
+
+This can be achieved if we have evaluation keys for both mappings: 
+
+τ → s, τ 2 → s. 
+
+Instead of applying two separate key switches, we define a fused evaluation key 
+
+evk (i)fused = {evk (i) 
+
+> τ→s
+
+, evk (i) 
+
+> τ2→s
+
+} i = 0 , 1, · · · , k + l − 1.
+
+The RNS (Residue Number System) decomposition [25] of ˆd1
+
+and ˆd2 is given by 
+
+RN S D( ˆd1) = { ˆd(0) 1 , ˆd(1) 1 , · · · , ˆd(k+l−1) 1 }D,RN S D( ˆd2) = { ˆd(0) 2 , ˆd(1) 2 , · · · , ˆd(k+l−1) 2 }D,
+
+where D is a basis consisting of k + l primes. Then, the ciphertext-evk (evaluation key) multiplication is given by: 
+
+ˇct (i) = ˆd(i)1 evk (i)  
+
+> τ→s
+
++ ˆd(i)2 evk (i) 
+
+> τ2→s
+
+.
+
+After one ModDown stage, ciphertext ˇct = ( ˇ ct 0, ˇct 1) satisfy-ing 
+
+ˇct 0 + ˇ ct 1s ≈ ˆd1τ + ˆd2τ 2.
+
+The final ciphertext is 
+
+ct out = ( ˆd0 + ˇ ct 0, ˇct 1),
+
+which decrypts to 
+
+ˆd0 + ˇ ct 0 + ˇ ct 1s ≈ ˆd0 + ˆd1τ + ˆd2τ 2.
+
+Algorithm 5 Fused Relinearization and Rotation 
+
+Require: ciphertexts RN S C (ct ) and RN S C (ct ′), C is a basis consisting of l + 1 primes. 
+
+Require: Rotation step t and fused evaluation key 
+
+evk (i)fused =
+
+(
+
+evk (i) 
+
+> τ→s
+
+, evk (i) 
+
+> τ2→s
+
+)
+
+, τ = σt(s)
+
+Ensure: Ciphertext encrypting Rot t(ct · ct ′) 
+
+> 1:
+
+Compute the degree-two product: 
+
+RN S C (d0, d 1, d 2) ← RN S C (c0c′
+
+> 0
+
+, c 0c′ 
+
+> 1
+
++ c1c′
+
+> 0
+
+, c 1c′
+
+> 1
+
+). 
+
+> 2:
+
+Rescale without NTT: 
+
+RN S C ( ˜d0, ˜d1, ˜d2) ← Rescale (d0, d 1, d 2)
+
+One prime is removed from C.  
+
+> 3:
+
+Apply automorphism: 
+
+RN S C (σt( ˜d0), σ t( ˜d1), σ t( ˜d2)) ← RN S C ( ˜d0, ˜d1, ˜d2). 
+
+> 4:
+
+ModUp: 
+
+RN S D( ˆd1) ← RN S C (σt( ˜d1)) .RN S D( ˆd2) ← RN S C (σt( ˜d2)) . 
+
+> 5:
+
+Initialize empty ciphertext RN S D( ˇ ct ). 
+
+> 6:
+
+for i = 0 , . . . , k + l − 1 do  
+
+> 7:
+
+MulEvk: 
+
+ˇct (i) = ˆd(i)1 evk (i)  
+
+> τ→s
+
++ ˆd(i)2 evk (i) 
+
+> τ2→s
+
+. 
+
+> 8:
+
+end for  
+
+> 9:
+
+Perform a single ModDown: 
+
+RN S C ( ˇ ct ) ← RN S D( ˇ ct ). 
+
+> 10:
+
+Output 
+
+RN S C (ct out ) = RN S C (σt( ˜d0), 0) + RN S C ( ˇ ct ). 
+
+> 11:
+
+return RN S C (ct out )
+
+Therefore, the fused procedure jointly performs ciphertext multiplication and rotation while requiring only a single Mod-Down stage. The complete procedure is summarized in Algo-rithm 5. It is worth noting that, in RNS-CKKS, ciphertexts are represented and manipulated in their RNS-decomposed form throughout the computation. 
+
+C. Correctness 
+
+We denote by KS a→s(x) the key-switching operation that transforms the ciphertext component x, associated with the secret-key a, into an equivalent component under the standard secret key s. In conventional CKKS, the multiplication-then-rotation operation is equivalent to 
+
+KS τ →s (σt (KS s2 →s(d2) + d0 + d1s)) .
+
+By contrast, the fused procedure computes 
+
+ˆd0 + KS τ →s( ˆd1) + KS τ 2→s( ˆd2).11 
+
+Since key switching is linear in the decomposed input component, we have 
+
+KS τ →s( ˆd1) + KS τ 2→s( ˆd2) = KS fused ( ˆd1, ˆd2).
+
+Thus, the fused procedure preserves the correctness of standard CKKS key switching. 
+
+D. Cost Advantage 
+
+A conventional multiplication followed by rotation requires approximately 
+
+2ModUp + 2 MulEvk + 2 ModDown ,
+
+ignoring low-cost automorphism and addition operations. The fused procedure requires 
+
+2ModUp + 2 MulEvk + ModDown .
+
+Therefore, one ModDown stage is eliminated. VII. E VALUATION 
+
+To demonstrate the effectiveness of the proposed algorithms, we compare existing secure Transformer inference schemes with their counterparts after incorporating our algorithms. Specifically, we consider two representative schemes: Arion, a FHE-based secure inference scheme, and BLB, a hybrid FHE-MPC secure inference scheme. For each scheme, we evaluate three variants. The original schemes are denoted by Arion and BLB. Arion(1) and BLB(1) denote the schemes after integrat-ing the secure attention computation in Algorithm 1. Arion(2) denotes the FHE-based storage–communication trade-off strat-egy in Algorithm 2, while BLB(2) denotes the hybrid FHE-MPC trade-off strategies in Algorithms 3 and 4. Table II summarizes the impact of the proposed algorithms on key-switching operations, preprocessing storage overhead, and online communication costs for the three major com-putations in the attention mechanism. For Arion, we apply Algorithm 1 only to the first Transformer layer during infer-ence and do not use the baby-step giant-step method adopted in the original Arion design. For BLB, before integrating our algorithms, we adjust the position of the MPC-to-CKKS conversion protocol so that the data representation matches the inputs required by our secure attention computation. For the Q/K/V projection stage, the online key-switching operations required by the original BLB scheme, are com-pletely eliminated. The projection matrices are instead gener-ated through the masked preprocessing procedure described in Algorithm 1. Since Arion already performs this computation without online key switching, the algorithm does not introduce additional overhead in this stage. The largest improvements are observed in the computation of attention scores. For the original Arion scheme, evaluating 
+
+Q(h)(K(h))⊤ requires 1536 key-switching operations. After applying Algorithm 1, all of these operations are removed by precomputing ciphertext transformation sets during pre-processing. However, this optimization introduces a storage overhead of 8384 ciphertexts. Algorithm 2 further reduces this storage requirement to only 384 ciphertexts by replacing transformed ciphertexts with the online transmission of the auxiliary values B1 and B2. A similar trend can be observed for BLB. The original scheme requires 346 key-switching operations, which are reduced to 256 by Algorithm 1 and completely eliminated by Algorithm 3. At the same time, the preprocessing storage overhead decreases from 50 ciphertexts to only 6 ciphertexts, with the additional communication of E
+
+and F during online inference. The value aggregation stage exhibits similar behavior. For Arion, the original implementation requires 2432 key-switching operations, while Algorithm 1 reduces this num-ber to 64. These remaining operations are associated with ciphertext transformations required for the value matrix. In the hybrid BLB scheme, the original 128 key-switching operations are completely removed. Furthermore, Algorithm 4 reduces the preprocessing storage requirement from 257 ciphertexts to only 3 ciphertexts by replacing the stored transformed ciphertexts with the online transmission of J and P.Overall, the results demonstrate two important advantages of the proposed algorithms. First, the algorithms significantly reduces or completely eliminates online key-switching oper-ations, which are among the most expensive operations in RLWE-based secure inference systems. Second, the proposed storage–communication trade-off strategies substantially re-duce the preprocessing storage overhead introduced by ci-phertext transformation sets. For both FHE and hybrid FHE-MPC schemes, large transformed ciphertext collections can be replaced with a modest amount of additional online commu-nication. Therefore, our method provides a flexible mecha-nism for balancing computation, storage, and communication costs according to different deployment requirements while preserving the low-latency characteristics of online secure Transformer inference. VIII. C ONCLUSION 
+
+This paper presented a preprocessing-assisted method for secure attention computation in two-party Transformer infer-ence. Unlike existing approaches that are tightly coupled with specific plaintext packing layouts, our method operates at the attention-computation level and is compatible with a broad range of RLWE-based packing strategies. By decomposing attention into precomputable ciphertext components and online ciphertext–plaintext operations, our method reduces the key switching overhead during online inference, which is one of the main bottlenecks in RLWE-based secure Transformer inference. We also proposed a fused relinearization-and-rotation algorithm for the multiplication-followed-by-rotation pattern commonly found in CKKS-based ciphertext matrix computations, further reducing the cost of this frequent operation without modifying existing packing strategies. The proposed method can be applied to both FHE-based and hybrid FHE–MPC secure Transformer inference. In non-interactive FHE-based inference, our algorithms can be incor-porated into the first Transformer layer, while in hybrid FHE– MPC inference, they can be extended to all layers. Although preprocessing may introduce additional storage requirements, the storage–communication trade-offs discussed in this paper provide practical mechanisms for mitigating this overhead. 12 
+
+TABLE II EFFECTS OF THE PROPOSED TECHNIQUES ON KEY -SWITCHING OPERATIONS , PREPROCESSING STORAGE , AND ONLINE COMMUNICATION IN BLB AND 
+
+ARION .
+
+Operation Scheme Slot Key Switch Ciphertext Storage in Preprocess Stage Data Traffic(online) 
+
+Q/K/V Projection 
+
+{XW ∗ }(h)
+
+> h∈[H]
+
+X ∈ Rm×n
+
+W∗ ∈ Rn× n
+
+> H
+
+∗ = Q, K, V 
+
+Arion 215 0 0 X − U
+
+Arion(1) 215 0 0 0Arion(2) 215 0 0 0BLB 214 192 0 [[ 〈X − U〉qc ]] 
+
+BLB(1) 214 0 0 0BLB(2) 214 0 0 0
+
+Attention Scores 
+
+{Q(h)(K(h))⊺}h∈[H]
+
+Q(h) ∈ Rm× n
+
+> H
+
+K(h) ∈ Rm× n
+
+> H
+
+Arion 215 1536 0 0Arion(1) 215 0 8384 X − U
+
+Arion(2) 215 0 384 X − U, B1, B2
+
+BLB 214 346 0 0BLB(1) 214 256 50 〈X〉c − U
+
+BLB(2) 214 0 6 〈X〉c − U, E, F
+
+Value Aggregation 
+
+σ = sof tmax 
+
+{σ(Q(h)(K(h))⊺)V (h)}h∈[H]
+
+σ(Q(h)(K(h))⊺) ∈
+
+Rm×m
+
+V (h) ∈ Rm× n
+
+> H
+
+Arion 215 2432 0 0Arion(1) 215 64 8192 0BLB 214 128 0 [[ 〈X′ − U′〉c]] 
+
+BLB(1) 214 0 257 〈X′〉c − U′
+
+BLB(2) 214 0 3 〈X′〉c − U′, J, P
+
+Overall, our method reduces latency-critical cryptographic operations while preserving compatibility with existing secure Transformer inference systems. This packing-independent re-duction of inference-phase key switching overhead provides a complementary direction for improving the practicality of privacy-preserving Transformer inference. REFERENCES [1] Dongjin Park, Eunsang Lee, and Joon-Woo Lee. Powerformer: Efficient and high-accuracy privacy-preserving language model with homomor-phic encryption. In Proceedings of the Annual Meeting of the Association for Computational Linguistics (ACL) , pages 11090–11111, 2025. [2] Linhan Yang, Jingwei Chen, Wangchen Dai, Shuai Wang, Wenyuan Wu, and Yong Feng. ARION: Attention-optimized transformer inference on encrypted data. Cryptology ePrint Archive, Paper 2025/2271, 2025. [3] Tianshi Xu, Wen-jie Lu, Jiangrui Yu, Yi Chen, Chenqi Lin, Runsheng Wang, and Meng Li. Breaking the layer barrier: remodeling private transformer inference with hybrid CKKS and MPC. In Proceedings of the USENIX Security Symposium , pages 1–12, 2025. [4] Qi Pang, Jinhao Zhu, Helen M¨ ollering, Wenting Zheng, and Thomas Schneider. BOLT: Privacy-preserving, accurate and efficient inference for transformers. In Proceedings of the IEEE Symposium on Security and Privacy (SP) , pages 4753–4771, 2024. [5] Jungho Moon, Dongwoo Yoo, Xiaoqian Jiang, and Miran Kim. THOR: Secure transformer inference with homomorphic encryption. In Proceed-ings of the ACM SIGSAC Conference on Computer and Communications Security (CCS) , pages 3765–3779. ACM, 2025. [6] Meng Hao, Hongwei Li, Hanxiao Chen, Pengzhi Xing, Guowen Xu, and Tianwei Zhang. Iron: Private inference on transformers. In Advances in Neural Information Processing Systems (NeurIPS) , pages 15718–15731, 2022. [7] Linru Zhang, Xiangning Wang, Jun Jie Sim, Zhicong Huang, Jiahao Zhong, Huaxiong Wang, Pu Duan, and Kwok-Yan Lam. MOAI: Module-optimizing architecture for non-interactive secure transformer inference. In The Fourteenth International Conference on Learning Representations , 2026. [8] Payman Mohassel and Yupeng Zhang. Secureml: A system for scalable privacy-preserving machine learning. In Proceedings of the IEEE Symposium on Security and Privacy (SP) , pages 19–38, 2017. [9] Ran Gilad-Bachrach, Nathan Dowlin, Kim Laine, Kristin Lauter, Michael Naehrig, and John Wernsing. Cryptonets: Applying neural networks to encrypted data with high throughput and accuracy. In 
+
+Proceedings of the International Conference on Machine Learning (ICML) , pages 201–210, 2016. [10] Martin Abadi, Andy Chu, Ian Goodfellow, H Brendan McMahan, Ilya Mironov, Kunal Talwar, and Li Zhang. Deep learning with differential privacy. In Proceedings of the ACM SIGSAC Conference on Computer and Communications Security (CCS) , pages 308–318, 2016. [11] Florian Tram` er and Dan Boneh. Slalom: Fast, verifiable and private execution of neural networks in trusted enclaves. In Proceedings of the International Conference on Learning Representations (ICLR) , pages 1–13, 2019. [12] Arpita Patra, Thomas Schneider, Ajith Suresh, and Hossein Yalame. ABY2.0: Improved mixed-protocol secure two-party computation. In 
+
+Proceedings of the USENIX Security Symposium , pages 2165–2182, 2021. [13] Craig Gentry. Fully homomorphic encryption using ideal lattices. In 
+
+Proceedings of the Annual ACM Symposium on Theory of Computing (STOC) , pages 169–178. ACM, 2009. [14] Dacheng Li, Hongyi Wang, Rulin Shao, Han Guo, Eric Xing, and Hao Zhang. MPCFORMER: Fast, performant and private transformer inference with MPC. In Proceedings of the International Conference on Learning Representations (ICLR) , pages 1–10, 2023. [15] Wenyuan Zeng, Meng Li, Wenjie Xiong, Wen Jie Lu, Jin Tan, Runsheng Wang, and Ru Huang. MPCViT: Searching for MPC-13 
+
+friendly vision transformer with heterogeneous attention. arXiv preprint arXiv:2211.13955 , pages 1–9, 2022. [16] Jiawen Zhang, Xinpeng Yang, Lipeng He, Kejia Chen, Wen jie Lu, Yinghao Wang, Xiaoyang Hou, Jian Liu, Kui Ren, and Xiaohu Yang. Secure transformer inference made non-interactive. In Proceedings of the Network and Distributed System Security Symposium (NDSS) , pages 1–16, 2024. [17] Itamar Zimerman, Moran Baruch, Nir Drucker, Gilad Ezov, Omri Soceanu, and Lior Wolf. Converting transformers to polynomial form for secure inference over homomorphic encryption. In Proceedings of the International Conference on Machine Learning (ICML) , pages 1–13, 2024. [18] Itamar Zimerman, Allon Adir, Ehud Aharoni, Matan Avitan, Moran Baruch, Nir Drucker, Jenny Lerner, Ramy Masalha, Reut Meiri, and Omri Soceanu. Power-softmax: Towards secure LLM inference over encrypted data. arXiv preprint arXiv:2410.09457 , pages 1–11, 2024. [19] Lorenzo Rovida and Alberto Leporati. Transformer-based language models and homomorphic encryption: An intersection with BERT-tiny. In Proceedings of the ACM International Workshop on Security and Privacy Analytics (IWSPA) , pages 3–13. ACM, 2024. [20] Lawrence Lim, Vikas Kalagi, Divyakant Agrawal, and Amr El Abbadi. Tricycle: Private transformer inference with tricyclic encodings. Cryp-tology ePrint Archive, Paper 2025/1200, 2025. [21] Xinwen Gao, Shaojing Fu, Lin Liu, Zhuotao Liu, Yuchuan Luo, and Yongjun Wang. Euston: Efficient and user-friendly secure transformer inference with non-interactivity. Cryptology ePrint Archive, Paper 2026/046, 2026. [22] Yufan Zhu, Chao Jin, Khin Mi Mi Aung, and Xiaokui Xiao. Encformer: Secure and efficient transformer inference over encrypted data, 2026. [23] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Łukasz Kaiser, and Illia Polosukhin. Attention is all you need. In Advances in Neural Information Processing Systems (NeurIPS) , pages 2–8, 2017. [24] Jung Hee Cheon, Andrey Kim, Miran Kim, and Yongsoo Song. Homo-morphic encryption for arithmetic of approximate numbers. In Advances in Cryptology – ASIACRYPT , pages 409–437. Springer, 2017. [25] Jung Hee Cheon, Kyoohyung Han, Andrey Kim, Miran Kim, and Yong-soo Song. A full RNS variant of approximate homomorphic encryption. In Carlos Cid and Michael J. Jacobson Jr., editors, Selected Areas in Cryptography – SAC 2018 , pages 347–368. Springer International Publishing, 2019. [26] Jean-Philippe Bossuat, Christian Mouchet, Juan Troncoso-Pastoriza, and Jean-Pierre Hubaux. Efficient bootstrapping for approximate homomor-phic encryption with non-sparse keys. In Annual International Con-ference on the Theory and Applications of Cryptographic Techniques ,pages 587–617. Springer, 2021.

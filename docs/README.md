@@ -6,54 +6,34 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-24
-- 运行时间：2026-06-24 21:19:56 UTC
+- 最新运行日期：2026-06-25
+- 运行时间：2026-06-25 20:47:53 UTC
 - 运行状态：成功
-- 本次总论文数：10
-- 精读区：6
-- 速读区：4
+- 本次总论文数：4
+- 精读区：2
+- 速读区：2
 
 ### 今日简报（AI）
-今日日报精读6篇、速读4篇，重点聚焦差分隐私聚合的Cramér-Rao极限与格基后量子前向安全加密在物联网中的应用。
-
-最值得精读的是两篇9.0分论文：《Reconstruction Limits for Repeated Differentially Private Aggregates》从查询几何视角揭示重差分隐私聚合的重构理论边界；《A Post-Quantum Secure Lattice-Based Forward-Secure Identity Based Encryption》提供适用于物联网架构的后量子密码方案。
-
-建议优先啃下这两篇高分论文，理解差分隐私的理论瓶颈和格基密码的实用化路径；速读中《SelPE》对结构化文本隐私合成也有启发，可酌情拓展阅读。
-- 详情：[/202606/24/README](/202606/24/README)
+1) 今日精选4篇论文，核心聚焦隐私保护Transformer推理与分布式遍历学习两大高影响力方向。  
+2) 最值得精读的两篇（均9.0分）：一类提出减少隐私保护两方Transformer中密钥交换开销的通用技术，另一类提出兼顾准确性与隐私的遍历学习框架TL++。  
+3) 建议优先精读上述9分论文，再速读离散数据合成与自主防御迁移性研究，以拓展隐私计算与分布式智能交叉领域的应用视野。
+- 详情：[/202606/25/README](/202606/25/README)
 
 ### 精读区论文标签
-1. [Reconstruction Limits for Repeated Differentially Private Aggregates: A Cramer-Rao Perspective on Query Geometry](/202606/24/2606.19275v1-reconstruction-limits-for-repeated-differentially-private-aggregates-a-cramer-rao-perspective-on-query-geometry)  
+1. [General Techniques for Reducing Key-Switching Overhead in Privacy-Preserving Two-Party Transformer Inference](/202606/25/2606.25349v1-general-techniques-for-reducing-key-switching-overhead-in-privacy-preserving-two-party-transformer-inference)  
    标签：评分：9.0/10、query:daily
-   evidence：差分隐私重构风险
-2. [A Post-Quantum Secure Lattice-Based Forward-Secure Identity Based Encryption with Applications to Internet of Things Architecture](/202606/24/2606.22340v1-a-post-quantum-secure-lattice-based-forward-secure-identity-based-encryption-with-applications-to-internet-of-things-architecture)  
+   evidence：降低两方隐私保护Transformer推理开销
+2. [TL++: Accuracy and Privacy Preserving Traversal Learning for Distributed Intelligent Systems](/202606/25/2606.25627v1-tl-accuracy-and-privacy-preserving-traversal-learning-for-distributed-intelligent-systems)  
    标签：评分：9.0/10、query:daily
-   evidence：物联网加密密码学
-3. [Towards Federated Long-Tailed Graph Learning: An Energy-Guided Dual Decoupling Approach](/202606/24/2606.24237v1-towards-federated-long-tailed-graph-learning-an-energy-guided-dual-decoupling-approach)  
-   标签：评分：9.0/10、query:daily
-   evidence：联邦图学习同时保护隐私
-4. [Agent-Assisted Side-Channel Attacks on Non-Prefix KV Cache in RAG](/202606/24/2606.21842v1-agent-assisted-side-channel-attacks-on-non-prefix-kv-cache-in-rag)  
-   标签：评分：8.0/10、query:daily
-   evidence：KV缓存侧信道攻击泄露用户隐私
-5. [$π$-RAG: Oblivious Retrieval via Semantic Quantization and Transcendental Addressing for Large Language Models](/202606/24/2606.22153v1--rag-oblivious-retrieval-via-semantic-quantization-and-transcendental-addressing-for-large-language-models)  
-   标签：评分：8.0/10、query:daily
-   evidence：利用π基间接层的遗忘检索
-6. [Detecting and Understanding Vulnerabilities in Fully Homomorphic Encryption Frameworks](/202606/24/2606.22519v1-detecting-and-understanding-vulnerabilities-in-fully-homomorphic-encryption-frameworks)  
-   标签：评分：8.0/10、query:daily
-   evidence：密码学框架漏洞分析
+   evidence：分布式系统中的隐私保护遍历学习
 
 ### 速读区论文标签
-1. [SelPE: Progressive Selection for Private Structured Text Synthesis](/202606/24/2606.22817v1-selpe-progressive-selection-for-private-structured-text-synthesis)  
-   标签：评分：8.0/10、query:daily
-   evidence：差分隐私结构化文本合成
-2. [HelpBench: Assessing the Ability of LLMs to Provide Privacy, Safety, and Security Advice](/202606/24/2606.24819v1-helpbench-assessing-the-ability-of-llms-to-provide-privacy-safety-and-security-advice)  
-   标签：评分：8.0/10、query:daily
-   evidence：评估LLM提供隐私建议的基准
-3. [Privacy-Preserving RAG via Multi-Agent Semantic Rewriting: Achieving Confidentiality Without Compromising Contextual Fidelity](/202606/24/2606.24623v1-privacy-preserving-rag-via-multi-agent-semantic-rewriting-achieving-confidentiality-without-compromising-contextual-fidelity)  
+1. [Bayesian Nonparametric Privacy-Preserving Synthetic Data Generation: I. Discrete Data](/202606/25/2606.26073v1-bayesian-nonparametric-privacy-preserving-synthetic-data-generation-i-discrete-data)  
    标签：评分：7.0/10、query:daily
-   evidence：通过多智能体语义改写实现隐私保护的检索增强生成，直接相关于机器学习中的隐私保护。
-4. [Semantic Non-Assembly: Privacy by Architectural Inertness Under Component Exposure](/202606/24/2606.22311v1-semantic-non-assembly-privacy-by-architectural-inertness-under-component-exposure)  
+   evidence：基于贝叶斯非参数的隐私保护合成数据生成
+2. [ARENA: An Architecture for Measuring the Transferability of Autonomous Cyber Defense](/202606/25/2606.21377v1-arena-an-architecture-for-measuring-the-transferability-of-autonomous-cyber-defense)  
    标签：评分：6.0/10、query:daily
-   evidence：提出一种基于暴露信息收益的互补隐私保证，与隐私要求相关。
+   evidence：生产遥测数据的隐私边界方法论
 
 
 <div class="dpr-home-promo-card">
