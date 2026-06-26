@@ -6,34 +6,28 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-25
-- 运行时间：2026-06-25 20:47:53 UTC
+- 最新运行日期：2026-06-26
+- 运行时间：2026-06-26 21:48:42 UTC
 - 运行状态：成功
-- 本次总论文数：4
-- 精读区：2
-- 速读区：2
+- 本次总论文数：2
+- 精读区：1
+- 速读区：1
 
 ### 今日简报（AI）
-1) 今日精选4篇论文，核心聚焦隐私保护Transformer推理与分布式遍历学习两大高影响力方向。  
-2) 最值得精读的两篇（均9.0分）：一类提出减少隐私保护两方Transformer中密钥交换开销的通用技术，另一类提出兼顾准确性与隐私的遍历学习框架TL++。  
-3) 建议优先精读上述9分论文，再速读离散数据合成与自主防御迁移性研究，以拓展隐私计算与分布式智能交叉领域的应用视野。
-- 详情：[/202606/25/README](/202606/25/README)
+1) 今日精读1篇RAG安全与隐私高分论文（9.0/10），速读1篇混合隐私语义搜索研究（7.0/10）。  
+2) 最值得关注RAG架构下的安全威胁与防御，以及基于SVD截断与CKKS加密的隐私保护搜索方案。  
+3) 普通读者可优先精读《Security and Privacy in RAG》，了解构建可信系统的最新框架与实践。
+- 详情：[/202606/26/README](/202606/26/README)
 
 ### 精读区论文标签
-1. [General Techniques for Reducing Key-Switching Overhead in Privacy-Preserving Two-Party Transformer Inference](/202606/25/2606.25349v1-general-techniques-for-reducing-key-switching-overhead-in-privacy-preserving-two-party-transformer-inference)  
+1. [Security and Privacy in Retrieval-Augmented Generation: Architectures, Threats, Defenses, and Future Directions for Building Trustworthy Systems](/202606/26/2606.25533v1-security-and-privacy-in-retrieval-augmented-generation-architectures-threats-defenses-and-future-directions-for-building-trustworthy-systems)  
    标签：评分：9.0/10、query:daily
-   evidence：降低两方隐私保护Transformer推理开销
-2. [TL++: Accuracy and Privacy Preserving Traversal Learning for Distributed Intelligent Systems](/202606/25/2606.25627v1-tl-accuracy-and-privacy-preserving-traversal-learning-for-distributed-intelligent-systems)  
-   标签：评分：9.0/10、query:daily
-   evidence：分布式系统中的隐私保护遍历学习
+   evidence：关于RAG系统安全隐私威胁的全面综述
 
 ### 速读区论文标签
-1. [Bayesian Nonparametric Privacy-Preserving Synthetic Data Generation: I. Discrete Data](/202606/25/2606.26073v1-bayesian-nonparametric-privacy-preserving-synthetic-data-generation-i-discrete-data)  
+1. [Hybrid privacy-aware semantic search: SVD-truncated document geometry and CKKS-encrypted query reranking under a restricted threat model](/202606/26/2606.26373v1-hybrid-privacy-aware-semantic-search-svd-truncated-document-geometry-and-ckks-encrypted-query-reranking-under-a-restricted-threat-model)  
    标签：评分：7.0/10、query:daily
-   evidence：基于贝叶斯非参数的隐私保护合成数据生成
-2. [ARENA: An Architecture for Measuring the Transferability of Autonomous Cyber Defense](/202606/25/2606.21377v1-arena-an-architecture-for-measuring-the-transferability-of-autonomous-cyber-defense)  
-   标签：评分：6.0/10、query:daily
-   evidence：生产遥测数据的隐私边界方法论
+   evidence：使用加密和几何扰动的隐私保护语义搜索
 
 
 <div class="dpr-home-promo-card">
