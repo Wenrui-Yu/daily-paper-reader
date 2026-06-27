@@ -6,28 +6,43 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-26
-- 运行时间：2026-06-26 21:48:42 UTC
+- 最新运行日期：2026-06-27
+- 运行时间：2026-06-27 20:59:42 UTC
 - 运行状态：成功
-- 本次总论文数：2
-- 精读区：1
-- 速读区：1
+- 本次总论文数：7
+- 精读区：2
+- 速读区：5
 
 ### 今日简报（AI）
-1) 今日精读1篇RAG安全与隐私高分论文（9.0/10），速读1篇混合隐私语义搜索研究（7.0/10）。  
-2) 最值得关注RAG架构下的安全威胁与防御，以及基于SVD截断与CKKS加密的隐私保护搜索方案。  
-3) 普通读者可优先精读《Security and Privacy in RAG》，了解构建可信系统的最新框架与实践。
-- 详情：[/202606/26/README](/202606/26/README)
+今日推荐7篇论文，精读聚焦本地差分隐私下的先知不等式与全同态加密库ComputeFHE。  
+最值得关注的方向是隐私保护优化算法与通用加密计算库，以及LLM Agent的数据隐私研究。  
+下一步可深入实践ComputeFHE库，并关注差分隐私在个性化对话系统中的应用。
+- 详情：[/202606/27/README](/202606/27/README)
 
 ### 精读区论文标签
-1. [Security and Privacy in Retrieval-Augmented Generation: Architectures, Threats, Defenses, and Future Directions for Building Trustworthy Systems](/202606/26/2606.25533v1-security-and-privacy-in-retrieval-augmented-generation-architectures-threats-defenses-and-future-directions-for-building-trustworthy-systems)  
-   标签：评分：9.0/10、query:daily
-   evidence：关于RAG系统安全隐私威胁的全面综述
+1. [Prophet Inequalities under Local Differential Privacy](/202606/27/2606.21524v1-prophet-inequalities-under-local-differential-privacy)  
+   标签：评分：8.0/10、query:daily
+   evidence：研究局部差分隐私下的先知不等式，直接针对分布式优化中的隐私问题
+2. [ComputeFHE: A Privacy-Preserving General-Purpose Computation Library](/202606/27/2606.24379v1-computefhe-a-privacy-preserving-general-purpose-computation-library)  
+   标签：评分：8.0/10、query:daily
+   evidence：面向隐私保护计算的全同态加密库
 
 ### 速读区论文标签
-1. [Hybrid privacy-aware semantic search: SVD-truncated document geometry and CKKS-encrypted query reranking under a restricted threat model](/202606/26/2606.26373v1-hybrid-privacy-aware-semantic-search-svd-truncated-document-geometry-and-ckks-encrypted-query-reranking-under-a-restricted-threat-model)  
+1. [Agents That Know Too Much: A Data-Centric Survey of Privacy in LLM Agents](/202606/27/2606.26627v1-agents-that-know-too-much-a-data-centric-survey-of-privacy-in-llm-agents)  
    标签：评分：7.0/10、query:daily
-   evidence：使用加密和几何扰动的隐私保护语义搜索
+   evidence：LLM智能体隐私综述
+2. [GRAG: Generic Response-Augmented Generation Framework for Personalized Conversational Systems](/202606/27/2606.21097v1-grag-generic-response-augmented-generation-framework-for-personalized-conversational-systems)  
+   标签：评分：6.0/10、query:daily
+   evidence：关注个性化对话系统中的隐私
+3. [GUI agent: Guided Exploration of User-Sensitive Screens](/202606/27/2606.25705v1-gui-agent-guided-exploration-of-user-sensitive-screens)  
+   标签：评分：6.0/10、query:daily
+   evidence：GUI代理中用户敏感屏幕的隐私处理
+4. [Query Cost Model Calibration in Confidential Virtual Machines](/202606/27/2606.26385v1-query-cost-model-calibration-in-confidential-virtual-machines)  
+   标签：评分：6.0/10、query:daily
+   evidence：机密虚拟机中的隐私保护查询优化
+5. [ProfileFoundry: A Synthetic Person-Object Substrate for Privacy, Memory, and Tool-Use Evaluation in LLM Agent](/202606/27/2606.26403v1-profilefoundry-a-synthetic-person-object-substrate-for-privacy-memory-and-tool-use-evaluation-in-llm-agent)  
+   标签：评分：6.0/10、query:daily
+   evidence：用于LLM智能体隐私评估的合成数据生成器
 
 
 <div class="dpr-home-promo-card">
