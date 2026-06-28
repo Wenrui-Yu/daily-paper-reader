@@ -6,43 +6,34 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-27
-- 运行时间：2026-06-27 20:59:42 UTC
+- 最新运行日期：2026-06-28
+- 运行时间：2026-06-28 21:18:55 UTC
 - 运行状态：成功
-- 本次总论文数：7
+- 本次总论文数：4
 - 精读区：2
-- 速读区：5
+- 速读区：2
 
 ### 今日简报（AI）
-今日推荐7篇论文，精读聚焦本地差分隐私下的先知不等式与全同态加密库ComputeFHE。  
-最值得关注的方向是隐私保护优化算法与通用加密计算库，以及LLM Agent的数据隐私研究。  
-下一步可深入实践ComputeFHE库，并关注差分隐私在个性化对话系统中的应用。
-- 详情：[/202606/27/README](/202606/27/README)
+1) 今日精读两篇8分论文，聚焦搜索评估悖论破解与赞助搜索成本优化，速读关注自适应重排序与查询成本校准。  
+2) 最值得看：《Breaking the Evaluation Paradox》提出计算不可归约约束评估高熵搜索；《AutoRelAnnotator》用校准模型级联降低赞助搜索评估成本。  
+3) 普通读者可从速读的《Adaptive Re-Ranking》入手，理解动态排序如何直接提升搜索体验。
+- 详情：[/202606/28/README](/202606/28/README)
 
 ### 精读区论文标签
-1. [Prophet Inequalities under Local Differential Privacy](/202606/27/2606.21524v1-prophet-inequalities-under-local-differential-privacy)  
+1. [Breaking the Evaluation Paradox: Evaluating High-Entropy Search with Computationally Irreducible Constraints](/202606/28/2606.22783v1-breaking-the-evaluation-paradox-evaluating-high-entropy-search-with-computationally-irreducible-constraints)  
    标签：评分：8.0/10、query:daily
-   evidence：研究局部差分隐私下的先知不等式，直接针对分布式优化中的隐私问题
-2. [ComputeFHE: A Privacy-Preserving General-Purpose Computation Library](/202606/27/2606.24379v1-computefhe-a-privacy-preserving-general-purpose-computation-library)  
+   evidence：LLM搜索评估悖论
+2. [AutoRelAnnotator: Calibrated Model Cascades for Cost-Efficient Relevance Evaluation in Sponsored Search](/202606/28/2606.25871v1-autorelannotator-calibrated-model-cascades-for-cost-efficient-relevance-evaluation-in-sponsored-search)  
    标签：评分：8.0/10、query:daily
-   evidence：面向隐私保护计算的全同态加密库
+   evidence：搜索中成本高效的相关性评估
 
 ### 速读区论文标签
-1. [Agents That Know Too Much: A Data-Centric Survey of Privacy in LLM Agents](/202606/27/2606.26627v1-agents-that-know-too-much-a-data-centric-survey-of-privacy-in-llm-agents)  
+1. [Adaptive Re-Ranking](/202606/28/2606.25249v1-adaptive-re-ranking)  
    标签：评分：7.0/10、query:daily
-   evidence：LLM智能体隐私综述
-2. [GRAG: Generic Response-Augmented Generation Framework for Personalized Conversational Systems](/202606/27/2606.21097v1-grag-generic-response-augmented-generation-framework-for-personalized-conversational-systems)  
+   evidence：自适应重排序用于成本感知查询路由
+2. [Query Cost Model Calibration in Confidential Virtual Machines](/202606/28/2606.26385v1-query-cost-model-calibration-in-confidential-virtual-machines)  
    标签：评分：6.0/10、query:daily
-   evidence：关注个性化对话系统中的隐私
-3. [GUI agent: Guided Exploration of User-Sensitive Screens](/202606/27/2606.25705v1-gui-agent-guided-exploration-of-user-sensitive-screens)  
-   标签：评分：6.0/10、query:daily
-   evidence：GUI代理中用户敏感屏幕的隐私处理
-4. [Query Cost Model Calibration in Confidential Virtual Machines](/202606/27/2606.26385v1-query-cost-model-calibration-in-confidential-virtual-machines)  
-   标签：评分：6.0/10、query:daily
-   evidence：机密虚拟机中的隐私保护查询优化
-5. [ProfileFoundry: A Synthetic Person-Object Substrate for Privacy, Memory, and Tool-Use Evaluation in LLM Agent](/202606/27/2606.26403v1-profilefoundry-a-synthetic-person-object-substrate-for-privacy-memory-and-tool-use-evaluation-in-llm-agent)  
-   标签：评分：6.0/10、query:daily
-   evidence：用于LLM智能体隐私评估的合成数据生成器
+   evidence：机密虚拟机中的查询成本模型校准
 
 
 <div class="dpr-home-promo-card">

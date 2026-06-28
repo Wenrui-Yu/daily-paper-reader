@@ -1,0 +1,797 @@
+Title: Breaking the Evaluation Paradox: Evaluating High-Entropy Search with Computationally Irreducible Constraints
+
+URL Source: https://arxiv.org/pdf/2606.22783v1
+
+Published Time: Tue, 23 Jun 2026 02:34:22 GMT
+
+Number of Pages: 25
+
+Markdown Content:
+# Breaking the Evaluation Paradox: Evaluating High-Entropy Search with Computationally Irreducible Constraints 
+
+Juntao Wu 1,2 *, Wei Wen 2, Xianting Huang 3, Shuai Pang 1, Ruizhi Qiao 2,Xing Sun 2, Ke Wang 1† 1Jinan University 2Tencent Youtu Lab 3The Chinese University of Hong Kong 
+
+{jtitor, wangke}@jnu.edu.cn ps2023104429@stu2023.jnu.edu.cn {jawnrwen, ruizhiqiao, winfredsun}@tencent.com alisonwww@link.cuhk.edu.hk 
+
+Abstract 
+
+Evaluating the exhaustive search capabilities of large language models (LLMs) is plagued by a fundamental paradox: verifying complete-ness requires complete ground truth, yet high-entropy enumeration tasks make such ground truth impossible for humans to create. This causes benchmarks to systematically penalize models for outperforming their human anno-tators. Despite rapid progress in web-search and deep research agents—which now issue hundreds of queries, traverse diverse sites, and synthesize long reports—evaluation still largely relies on partially annotated answer sets, LLM-based judges, or single-answer questions that avoid genuinely exhaustive search scenarios. We break this paradox by shifting the evalua-tion paradigm from simulating a messy real-ity to constructing computationally pure chal-lenges. We introduce VERITAS (Verifiable Traversal Assessment for Search), a framework built on the principle of computationally ir-reducible constraints . By introducing novel, non-optimizable constraints, we create verifi-able, sparse-answer search tasks that are com-putationally equivalent to exhaustive enumer-ation. These constraints are easy to verify but impossible for LLMs or search engines to opti-mize, forcing agents to genuinely traverse the entire search space. VERITAS can automati-cally generate a virtually infinite number of test cases with perfect ground truth and precise diffi-culty control, with marginal instance cost dom-inated by hash computations. This provides not only a robust benchmark for evaluating sys-tematic exploration under uncertainty but also a scalable method for generating training data to improve these crucial, yet underdeveloped, capabilities.   
+
+> *Equal contribution. Work done during internship at Ten-cent.
+> †Corresponding author.
+
+1 Introduction 
+
+Large language models (LLMs) achieve strong performance on factual question-answering benchmarks with single, deterministic tar-gets (Kwiatkowski et al., 2019; Joshi et al., 2017), but their behavior on high-entropy queries (HEQs)—tasks that require enumerating large open-ended answer sets—remains underexplored. Many real-world information needs resemble HEQs: success depends on recall over a broad can-didate space rather than on one “best” answer, and agents must decide when additional exploration is no longer worthwhile. Recent web-search and “deep research” agents push LLMs directly into this regime: commercial and open-source systems routinely issue hundreds of queries, traverse diverse sites, and synthesize long reports from heterogeneous evidence (Ope-nAI, 2025; Perplexity, 2025; Wei et al., 2025; Tao et al.; Li et al., 2025b). Benchmarks such as GAIA and BrowseComp (Mialon et al., 2023; Wei et al., 2025; Zhou et al., 2025; Wei et al.) evalu-ate multi-step browsing on “hard to find but easy to verify” questions, while WideSearch and Deep-WideSearch (Wong et al., 2025; Lan et al., 2025) target breadth and depth of coverage over thou-sands of entities. With the growing attention to complex information needs in real-world scenarios, however, the majority of these benchmarks rely on partially annotated answer pools, which not only incur considerable costs but also risk penalizing agents that discover valid items beyond the pool as hallucinating. We call this the evaluation paradox for high-entropy search: exhaustive search should be judged against a complete ground-truth set, yet for HEQs such ground truth is practically intractable to obtain. The same open-endedness that makes these tasks hard for models prevents annotators from certify-ing completeness, so annotated answer pools are al-
+
+> arXiv:2606.22783v1 [cs.IR] 22 Jun 2026
+
+most surely incomplete. Under standard evaluation protocols, any correct item outside the annotated set is indistinguishable from an error, and systems that discover more valid items can be penalized as hallucinating. As a result, measured performance is effectively bounded by annotation coverage rather than by an agent’s true search capability, even when wide-search benchmarks attempt to increase cover-age with large manually curated pools (Wong et al., 2025; Lan et al., 2025). In this work we take a complementary approach. Instead of approximating real-world HEQs with partially annotated answer sets, we construct syn-thetic objectives on top of real web-scale domains. Our VERITAS benchmark uses cryptographic hash constraints to turn high-entropy enumeration into sparse-answer search tasks that are easy to verify but impossible to optimize semantically . Agents still have to traverse genuine web content (e.g., artist discographies, model hubs) using the same kinds of search and browsing tools as in existing benchmarks, but success reduces to finding items whose identifiers satisfy a non-optimizable hash constraint, enabling exact labels and scalable in-stance generation. Our contributions are threefold: 1. We formalize the evaluation paradox for high-entropy search tasks and analyze why it is difficult to resolve within annotation-based paradigms. 2. We introduce VERITAS, a benchmark that uses computationally irreducible, hash-based constraints to construct scalable, automati-cally verifiable tests of exhaustive search capa-bilities without human labels or LLM judges. 3. We combine theoretical and empirical anal-yses to show that hash-constrained sparse search is computationally equivalent to ex-haustive enumeration, and we evaluate sev-eral state-of-the-art web agents on VERITAS to characterize their failure modes on high-entropy search tasks. 
+
+2 Related Work 
+
+Evaluation of information-seeking systems has evolved from static QA benchmarks such as Hot-potQA and related multi-hop datasets (Yang et al., 2018; Ho et al., 2020; Trivedi et al., 2022; Press et al., 2022) to dynamic, agent-centric web bench-marks that require navigation and tool use (Mialon et al., 2023; Wei et al., 2025; Zhou et al., 2025; Wei et al.; Wong et al., 2025; Lan et al., 2025). WebArena (Zhou et al., 2023) introduced self-hosted realistic web environments for autonomous agents, establishing foundational evaluation proto-cols. Subsequently, AgentBench (Liu et al., 2023) evaluates LLM agents in 8 environments, including web browsing. Specifically, GAIA and BrowseC-omp construct “hard to find but easy to verify” tasks that emphasize multi-step browsing under fuzzy, underspecified instructions, whereas WideSearch and DeepWideSearch explicitly target breadth and depth of search over thousands of entities. All of these benchmarks ultimately rely on large but still incomplete manually annotated answer pools, so coverage limitations remain a central bottleneck. Commercial “deep research” products such as those from OpenAI, Perplexity, Gemini, Kimi, Doubao, and Grok (OpenAI, 2025; Perplexity, 2025; Gemini, 2025; Kimi, 2025; Doubao, 2025; x.ai, 2025), together with open-source frame-works like WebShaper, WebSailor, WebThinker and WebDancer (Tao et al.; Li et al., 2025a,b; Wu et al., 2025), push LLM agents into long-horizon web settings and typically evaluate them on GAIA, BrowseComp, WideSearch, and related suites (Zhang et al., 2025; Xi et al., 2025). Along-side these explorations and the application of re-inforcement learning to search agents (Song et al., 2025; Jin et al., 2025), VERITAS’s potential as an important data source correspondingly emerges. Moreover, recent surveys on LLM-based agents and deep research (Guo et al., 2024; Wang et al., 2024; Zhang et al., 2025; Xi et al., 2025) likewise highlight that high-entropy, partially labeled condi-tions make it difficult to measure exhaustive search capability. VERITAS is complementary to these ef-forts: by introducing computationally irreducible constraints via cryptographic hash functions, it iso-lates the enumeration component of deep research and provides exact, automatically scalable super-vision rather than relying on manually constructed answer sets. 
+
+3 Method 
+
+3.1 Evaluation Paradox Exhaustive search tasks are fundamentally ill-posed for evaluation: verifying completeness re-quires the very ground truth that the task itself makes intractable to obtain. 
+
+The difficulty stems from two inherent properties Benchmark Wide Scalable Human Verification Core Issue Degree Depend Difficulty                                            
+
+> GAIA ⋆No Yes Easy Not Wide Low Hard Expert Single answer Human (Single ans) Easy verification dependent BrowseComp ⋆No Yes Easy Not Wide (OpenAI 2025) Low Hard Full Single answer Human (Single ans) Easy verification dependent WideSearch ⋆ ⋆ ⋆ No Yes Hard Human annotation Medium Hard Full Many entities May punish (Wide) LLM unstable better answers
+> VERITAS ⋆ ⋆ ⋆ ⋆ ⋆ Yes No Easy (Ours) Extreme Easy Zero Easy (Unlimited) verification
+> Table 1: Comparison of VERITAS with existing web-search benchmarks. “Wide degree” indicates breadth of search space (stars). VERITAS uniquely combines extreme breadth, exact automated verification, and no human dependence, whereas prior benchmarks trade off coverage against verification difficulty.
+
+of high-entropy queries. First, relevant information is severely fragmented across many loosely con-nected web sources, with no single canonical page from which to harvest complete answer sets. Sec-ond, such tasks provide no principled stopping rule : neither annotators nor agents can know when further search will yield additional items. This com-bination makes literal completeness unattainable at web scale, so any human-constructed ground truth is almost guaranteed to be incomplete—and evalu-ation protocols may inadvertently penalize models that exceed human coverage while rewarding those that simply reproduce human omissions. Consider the query: “Has the virtual singer KAF ever hosted a radio show, and if so, which show has the most episodes?” In a pilot analysis, one anno-tator concluded KAF has never hosted any show; another identified a short series with few episodes; a more systematic audit later found multiple se-ries with substantially more episodes. This dis-crepancy reflects not human error, but the inherent difficulty—annotators face the same fragmentation and stopping challenges that define the task itself. Addressing this paradox requires reformulating the evaluation problem, rather than attempting to obtain ever more exhaustive annotations. 
+
+3.2 Computational Equivalence The ill-posedness of “list all X” benchmarks stems from annotation limitations, not evalua-tion goals; any task that forces the same high-entropy search without exploitable shortcuts is computationally equivalent. 
+
+From an evaluation perspective, the intent is not literally to obtain exhaustive lists, but to probe two deeper capabilities. First, an effective agent should carry out wide and systematic search over a large, loosely structured space, so that, given sufficient budget, the probability of missing salient items is small. Second, it should maintain calibrated residual uncertainty , distinguishing between “the space is probably covered” and “further exploration is still warranted” when deciding whether to stop. In this view, “list all X” is merely one syntactic vehicle for these desiderata. Our goal is to decouple the underlying search-and-coverage challenge from the brittle requirement of exact enumeration. A simple analogy clarifies this equivalence: searching for the Ace of Spades in a well-shuffled deck. Whether we ask to “list all 52 cards” or to “find the Ace of Spades,” the worst-case search cost is the same—one must inspect cards sequentially until the target appears, requiring Θ( N ) operations over an unstructured space of size N . The iden-tity of the target provides no algorithmic shortcut; the difficulty arises from traversing an unstructured space. We apply the same idea to high-entropy web queries. Instead of “List all songs by artist X,” we ask “Find the unique song by artist X whose title satisfies property Y .” When property Y is non-optimizable —offering no usable signal to retrieval mechanisms—the agent must approximate the orig-inal O(N ) exhaustive search: gather candidates and check each against Y . By choosing Y to be 
+
+verifiable but unoptimizable , we force agents to engage with the same high-entropy search problem while allowing evaluation to depend on a single, Find all songs by     
+
+> Taylor Swift
+> Fearless (2009)
+> Lover (2019)
+> Red (2012)
+
+......     
+
+> Cruel Summer
+> London Boy
+> Love Story
+> Delicate
+> Output :
+
+❓Is this list complete?                     
+
+> Evaluation Paradox :Evaluating HEQs requires
+> complete ground truth, but their very nature means
+> no verifiable ground truth exists .
+> Find Taylor Swift's songs that were
+> released in 2012 and that were
+> collaborated with other artists.
+> New search query:
+> Taylor Swift 2012 collaboration
+> Both of Us -Wikipedia
+> Both of Us -Web Page
+> Bypasses internal filtering!
+
+❗
+
+> Bypasses internal filtering!
+
+❗ 
+
+> Output :
+> Both of Us
+
+✔                        
+
+> Failure Mode :The agent exploits the search engine to
+> bypass the exhaustive search process .The agent's own
+> verification capability is not tested .
+> Find the Taylor Swift song
+> released in 2012 where
+> MD5(Title) == 3a2...f (TargetHash )
+> New search query:
+> All songs by Taylor Swift in 2012
+
+Thinking             
+
+> A complete list of songs :
+> Eyes Open
+> Both of Us
+> Safe & Sound
+> Begin Again
+> Calculate MD5 :
+> MD5(“Song 1”) == 98e329a… ❌
+> ……
+> MD5(“Song k”) == 3a27c5e… ✅
+> Output :Song k
+> VERITAS 's Contribution: The irreducible constraint
+> forces the agent to perform a genuine, verifiable, and
+> exhaustive search -then -verify workflow , allowing for
+> rigorous evaluation of its core capabilities.
+> Panel A: The Paradox of “List All ”Panel B: Semantic Constraints (Shortcuts) Panel C: VERITAS (Computational Irreducibility)
+
+Figure 1: Evaluation paradox for high-entropy queries and our reformulation. (a) Exhaustive annotation is intractable. (b) Naively strengthening semantic constraints does not resolve the coverage problem. (c) Reformulating the task around automatically verifiable, non-optimizable constraints preserves exhaustive-search difficulty while enabling exact verification. 
+
+easily checked answer rather than a fragile exhaus-tive list. Concretely, our benchmark instantiates Y using automatically verifiable yet non-optimizable con-straints on item identifiers or derived attributes, so that success reduces to finding a small number of constraint-satisfying items in a large unstructured space. Figure 1 provides a high-level schematic of this shift from ill-posed exhaustive annotation to a constrained, verifiable search task. The next sub-section formalizes this abstract model and analyzes its scaling behavior. 
+
+3.3 Asymptotic Analysis 
+
+We now formalize why finding k sparse constraint-satisfying items under a non-optimizable condition is computationally comparable to full enumeration. This provides a tractable model for interpreting our benchmark results. 
+
+Problem setup : Given N items in an unstruc-tured search space, k ≤ N items satisfy a non-optimizable constraint. An agent with search bud-get T must find all k matching items. Success requires k correct items; partial matches count as failure. 
+
+Expected search cost : Assume the k target items are uniformly distributed among N posi-tions. Under systematic or random search without replacement, the expected position of the last (k-th) discovered target is: 
+
+E[Lk] = (N + 1) · kk + 1 . (1) This is the standard order-statistics result: if the 
+
+k targets occupy k random positions among N
+
+items, the expected position of the last one is (N +1) · k/ (k + 1) .
+
+Asymptotic behavior : For any fixed k ≥ 1,
+
+E[Lk] = Θ( N ). Moreover, Relative cost: E[Lk]
+
+N = kk + 1 
+
+k→∞ 
+
+−−−→ 1. (2) Even for small k, the expected search cost is substantial: E[L1] = ( N + 1) /2 ≈ N/ 2, E[L2] = 2( N + 1) /3 ≈ 2N/ 3, E[L4] = 4( N + 1) /5 ≈
+
+4N/ 5. Finding even a single sparse item therefore requires searching about half the space on average. 
+
+Success probability under budget constraints :Given finite search budget T < N , the probability of finding all k targets follows a hypergeometric distribution. If the agent searches exactly T items uniformly at random, 
+
+Psuccess (k, T, N ) = 
+
+ N −kT −k
+
+ NT
+
+ =
+
+k−1Y
+
+j=0 
+
+T − jN − j . (3) For large N with small k and T ≪ N , this probability can be approximated by 
+
+Psuccess (k, T, N ) ≈
+
+ TN
+
+k
+
+. (4) This expression highlights a sharp dependence on k: as k increases, success probability decreases roughly exponentially unless T is on the order of 
+
+N . Specifically: • k = 1 : P ≈ T /N (linear dependence) • k = 2 : P ≈ (T /N )2 (quadratic drop) • k = 4 : P ≈ (T /N )4 (quartic drop) • k = N : P = 1 iff T = N (deterministic threshold). 
+
+Controlling difficulty via search space size : The success probability formula 
+
+Psuccess (k, T, N ) ≈ (T /N )k reveals two in-dependent mechanisms for controlling task difficulty: adjusting k (number of targets) or N
+
+(search space size). While the previous analysis focused on varying k, our benchmark design also exploits N as a difficulty lever. Consider our Medium-tier tasks, which require searching across 7 independent sources (e.g., find-ing which of 7 artists has a song satisfying the tar-get constraint). If each artist has approximately n
+
+songs, the effective search space becomes N = 7 n,substantially larger than a single-artist search with 
+
+N = n. For fixed k = 1 and search budget T , the success probability scales as: 
+
+Psingle 
+
+Pmedium 
+
+= T /n T / (7 n) = 7 . (5) This 7× difficulty multiplier arises purely from increasing N , demonstrating that enlarging the search space (the denominator in (T /N )k) is as effective as increasing the numerator k for creating challenging tasks. The Hard and Extra Hard tiers further increase N through deep attribute extraction and nested task hierarchies, respectively, creating progressively larger search spaces while maintain-ing irreducibility under the chosen non-optimizable constraints. Taken together, these observations show that our transformation—from “enumerate all” to “find k
+
+constraint-satisfying items”—preserves the O(N )
+
+computational irreducibility of the task while enabling deterministic verification. The non-optimizable constraint removes optimization short-cuts without altering the fundamental search com-plexity. Moreover, the (T /N )k framework pro-vides principled control over difficulty through both 
+
+k and N , enabling fine-grained benchmark design. We now turn to how to construct constraints that realize this irreducible search behavior in practice. 
+
+3.4 Semantic Constraints Semantic constraints fail as non-optimizable barriers: modern systems can delegate them to search engines, collapsing the intended O(N )
+
+exhaustive search into O(1) lookup. 
+
+The most direct response to the evaluation para-dox is to introduce additional semantic constraints on target items. For instance, we might ask: “Find a Jay Chou song released in 2003, with a ballad style, lasting over four minutes, and featuring piano.” At face value, this appears to require enumerating can-didates and verifying each. In practice, however, in-dexing and filtering mechanisms explicitly exploit semantic information, so temporal, categorical, or relational constraints become signals for optimiza-tion rather than obstacles. The model can submit the entire constraint set as a query and retrieve a small candidate pool directly. More broadly, many “fuzzy” web tasks decom-pose into two stages: first enumerate a broad can-didate space, then filter using semantic conditions. The intrinsic difficulty lies in enumeration; once candidates are available, filtering is straightforward. Our benchmark therefore targets enumeration di-rectly. To recover computational equivalence with high-entropy queries while avoiding semantic short-cuts, we require constraints that are verifiable but unoptimizable : easily checked once a candidate is known, yet providing no useful guidance to search engines. 
+
+3.5 Cryptographic Hashes Cryptographic hash functions provide ideal non-optimizable constraints through two properties: one-way verification and semantic nullity. One-way verification : Pre-image resistance makes reversing the hash computationally infea-sible, yet verification is trivial—hash the candidate and compare. This is a lock that only opens when you already have the key. 
+
+Semantic nullity : Hash outputs bear no ex-ploitable relationship to the semantic content of their inputs. The avalanche effect ensures that small input changes produce seemingly unrelated out-puts, rendering the hash useless as a search query. Search engines cannot leverage it to narrow the search space. Under these conditions, solving the task requires approximate O(N ) exhaustive search. Models can-not use the hash value to guide retrieval; they must enumerate candidate items and verify each one. (b)Easy: Single -Source Enumeration                                
+
+> Hugging Face
+> author list page
+> Local verification
+> MD5( ItemID ) == TargetHash
+> Enumerating items from a single
+> source (e.g., Hugging Face author)
+> to match a hash.
+> (c) Medium: Composite Search
+> Parallel Sub -tasks
+> Local verification
+> Solving 7 independent enumeration
+> tasks (e.g., repos, papers, packages)
+> to find one matching result.
+> Subtask 1 Result,
+> Subtask 2 Result,
+> ……
+> MD5(Answer) == TargetHash
+> (d) Hard: Deep Attribute Extraction
+> Song1
+> Songs page
+> Repo Paper Package
+> ……
+> Song2
+> Song3
+> ……
+> Candidate list
+> Local verification
+> MD5(Derived Attribute) == TargetHash
+> Enumeration requires visiting each
+> item to extract hidden attributes (e.g.,
+> Git SHA, Lyrics) before hashing.
+> (a) Comparison: Traditional Multi -hop QA
+> Answer A:
+> Christopher Nolan
+> Answer B:
+> Tenet
+> Agent uses the new information
+> Task : Chained semantic query.
+> Trajectory : A sequential path
+> where each step depends on the
+> previous step's result.
+> N ≈ n (Small Space)
+> N ≈ 7n (Linear Scaling) N ≈ n (High Cost)
+> (e) Extra Hard: Nested Multi -Task
+> Visit Tool
+> ……
+> ……
+> (Deep Extraction ×7)
+> Formatted
+> Candidates
+> MD5(Formatted String) == TargetHash
+> N ≈ 7 ×𝟏𝟎 𝟐 …𝟏𝟎 𝟑 (High Entropy)
+> Solving a nested hierarchy of 7 high -
+> complexity tasks. Each sub -task
+> requires deep attribute extraction and
+> complex synthesis to verify the final
+> formatted string.
+
+Figure 2: Progressive difficulty tiers in VERITAS. Higher tiers enlarge the search space and computational burden while preserving hash-based irreducibility. 
+
+This transformation preserves the underlying com-putational challenge while enabling reliable, scal-able verification. A hash-constrained task with N
+
+implicit candidates and k true pre-images can be modeled as selecting k targets uniformly at random from an unstructured space of size N , matching the abstract setting analyzed previously. 
+
+3.6 VERITAS Tasks VERITAS implements four progressive diffi-culty tiers that systematically stress-test exhaus-tive search under increasing computational irre-ducibility (Figure 2). Each tier enlarges the effective search space N
+
+or increases task complexity while preserving hash-based irreducibility. This provides principled dif-ficulty control: per the (T /N )k framework, both expanding N and increasing structural complexity reduce success probability for budget-constrained agents. 
+
+Easy (Single Source) : Enumerate all items from a single source (e.g., “all models by author 
+
+google on HuggingFace”) and identify the item whose identifier’s MD5 hash matches the target. Assesses basic enumeration discipline. 
+
+Medium (Composite Search) : Seven indepen-dent enumeration subtasks; the agent must solve each, then determine which result produces the target MD5 hash. Evaluates coordination of multi-stage exhaustive search. 
+
+Hard (Deep Attribute Extraction) : Enumerate items from a source and identify which item’s de-rived attribute (e.g., a Git commit SHA) yields the target hash. Emphasizes deep attribute extraction from distributed sources. 
+
+Extra Hard (Nested Multi-Task) : Seven high-complexity enumeration tasks; construct complete formatted answers (e.g., “RepoName → SHA”) and determine which formatted string has the target hash. Probes sustained search across deeply nested task hierarchies. 
+
+4 Experiments 
+
+VERITAS reveals a clear capability hierarchy: frontier models (GPT-5, Gemini-3-Pro) substan-tially outperform others, yet even they struggle on Extra Hard, with success rates dropping by 
+
+2–5×. We evaluate nine models across Medium, Hard, and Extra Hard tiers to characterize both capability gaps and failure modes under computa-tionally irreducible constraints. 
+
+4.1 Agent Tools Agents are equipped with four tools—Search, Visit, Exec Python, and Answer—providing capabilities comparable to human web re-searchers. Search: Provides access to Google search, re-turning top-10 results (title, snippet, URL) for each query. Supports multiple simultaneous queries. 
+
+Visit: Accesses specific web pages with dedi-cated extraction goals. Following WebSailor’s ap-proach, we use Qwen3-235B-A22 to extract goal-relevant information from each page. 
+
+Exec Python: Executes Python code for compu-tations, including MD5 hash verification of candi-Table 2: Performance on VERITAS benchmark across difficulty tiers. We report Pass@4 success rate (%) and the average number of tool calls per attempt, split into Search and Visit. Best results are highlighted in bold .                                                                                                                                        
+
+> Model Medium Hard Ex-Hard Success Tool Calls Success Tool Calls Success Tool Calls Pass@4 Avg@4 Search Visit Pass@4 Avg@4 Search Visit Pass@4 Avg@4 Search Visit
+> Open-Source Models
+> GLM-4 17.9 5.7 23.4 10.1 12.2 5.6 14.9 8.8 3.3 2.5 23.2 12.2 MiniMax-M2 12.5 4.4 14.9 8.7 6.1 1.5 17.4 7.8 3.4 0.8 17.7 10.0 DeepSeek-v3.1 10.3 3.8 15.5 8.8 14.3 7.1 9.2 4.1 3.4 0.9 16.0 9.2 Qwen3-235B-A22 5.3 2.6 16.8 13.1 6.2 2.6 8.0 3.9 3.6 2.6 16.9 12.4 Kimi-K2 2.5 0.6 16.2 8.5 10.2 2.6 18.0 6.5 0.0 0.0 26.9 9.5
+> Closed-Source Models
+> GPT-4o 6.0 1.5 5.3 4.9 2.4 2.4 2.2 2.1 0.0 0.0 5.1 4.7 Gemini-2.5-Pro 12.5 6.2 14.8 9.9 8.2 3.6 9.6 4.4 3.3 1.7 14.4 10.8 Gemini-3-Pro 30.0 18.8 84.7 6.8 36.7 21.9 92.5 6.8 6.7 3.3 125.8 9.3 GPT-5 47.5 27.5 7.8 101.8 32.7 25.5 7.3 16.4 20.0 20.0 9.3 27.8 010 20 30 40 50 60
+> Tool calls per attempt (Search + Browse/Visit)
+> GPT-5
+> Gemini 2.5 Pro
+> Qwen3-235B
+> Kimi K2
+> 40 57
+> 921
+> 624
+> 13 29
+> Avg: 1.9× more calls
+
+WideSearch vs VERITAS: Tool Usage Comparison 
+
+> WideSearch
+> VERITAS
+
+Figure 3: Tool calls per attempt for models evaluated on both WideSearch and VERITAS. VERITAS consistently elicits 1.4×–4.2× more tool calls than WideSearch, yet success rates remain low (Table 2), confirming that VERITAS removes semantic shortcuts and forces genuine exhaustive enumeration. 
+
+date items. 
+
+Answer: Submits the final solution for evalua-tion. 
+
+4.2 Experimental Setup We evaluate across Medium/Hard/Extra Hard tiers on balanced multilingual queries, with strict all-or-nothing success criteria. 
+
+We deliberately exclude Easy tier to focus on re-alistic high-entropy challenges. The dataset main-tains balanced distribution across English, Chinese, and Japanese, ensuring robust cross-lingual evalua-tion. We evaluate nine models spanning diverse archi-tectures and capability levels: GLM-4 , MiniMax-M2 , DeepSeek-v3.1 , Qwen3-235B-A22 , Kimi-K2 , GPT-4o , Gemini-2.5-Pro , and the latest fron-tier models GPT-5 and Gemini-3-Pro . Success requires finding all items matching the target MD5 hash—partial matches count as failure. We report Pass@4 (success rate across 4 at-tempts) and track tool usage via average Search 
+
+and Visit calls per attempt. 4.3 Main Results VERITAS effectively discriminates model ca-pabilities: frontier models (GPT-5, Gemini-3-Pro) substantially outperform others, yet even they see dramatic performance collapse on Ex-tra Hard. 
+
+Table 2 reveals a clear capability hierarchy .GPT-5 achieves 47.5% Pass@4 on Medium and 32.7% on Hard—far surpassing other models. Gemini-3-Pro follows with 30.0% and 36.7% re-spectively. In contrast, the remaining seven mod-els cluster between 2.5–17.9% on Medium and 2.4–14.3% on Hard. This stark separation demon-strates that VERITAS provides meaningful signal for distinguishing frontier capabilities from current-generation models. Crucially, Extra Hard remains challenging even for frontier models . GPT-5 drops from 47.5% (Medium) to 20.0% (Extra Hard)—a 2.4×
+
+reduction. Gemini-3-Pro drops more sharply from 36.7% (Hard) to just 6.7% (Extra Hard). Mean-while, most other models collapse to 0–3.6% on Extra Hard, with GPT-4o and Kimi-K2 achieving exactly 0%. This pattern confirms that Extra Hard tier probes a genuine capability frontier: it sepa-rates GPT-5 (the only model maintaining double-digit performance) from all others, while still ex-posing substantial room for improvement. The difficulty gradient works as designed : suc-cess rates drop consistently from Medium to Hard to Extra Hard across all models. This validates our 
+
+(T /N )k theoretical framework—as the effective search space N expands through composite search, deep attribute extraction, and nested hierarchies, success probability decreases predictably. Finally, the gap between Pass@4 and Avg@4 reveals search strategy quality. GPT-5 shows no-tably higher consistency (Avg@4 of 27.5%, 25.5%, 20.0% across tiers) compared to other models where Avg@4 often falls far below Pass@4, in-dicating that weaker models occasionally stumble upon solutions but lack systematic search strate-gies. 
+
+4.4 Scaling under Hash Constraints Models invest substantial search effort (20–30+ tool calls per query) yet achieve <12% success, confirming that VERITAS forces genuine ex-haustive enumeration without semantic short-cuts. 
+
+Tool-usage statistics reveal a striking effort-outcome mismatch. GLM-4 issues on average 31.3 tool calls per query (19.8 Search, 10.0 Visit), Kimi-K2 28.5, and DeepSeek-v3.1 21.9—far exceed-ing typical single-answer QA benchmarks such as GAIA (average <10 calls). Despite examining dozens of web pages, success rates remain below 12%. Models recognize the need for exhaustive exploration but fail to achieve sufficient coverage. Figure 3 provides direct evidence: for the same underlying models, VERITAS elicits 1.4×–4.2×
+
+more tool calls than WideSearch, yet Pass@4 re-mains low. This gap underscores that VERITAS removes semantic shortcuts and forces agents into genuine enumeration regimes. This pattern precisely matches the (T /N )k scal-ing analysis: as effective search space N grows from Medium to Extra Hard while tool budgets remain fixed, success probability collapses across all models. VERITAS thus serves as a sharper stress test of exhaustive-search capability rather than surface-level browsing. 
+
+5 Conclusion 
+
+We argued that the core difficulty in modern web search and “deep research” is not the length of rea-soning chains, but the entropy of the search space: the need to enumerate large, weakly structured can-didate sets and to know when it is safe to stop. Through theoretical analysis, we showed that find-ing a few sparse, hash-constrained targets is com-putationally equivalent to exhaustive enumeration, providing a path to automatically verifiable evalua-tion of this capability. Building on this analysis, VERITAS instantiates cryptographic hash constraints over realistic, web-scale high-entropy queries to create tasks where any successful agent must effectively “list everything that could possibly match” before applying a cheap verification step. Experiments across strong web agents reveal that, despite heavy tool use, models still collapse on these tasks as search spaces grow, highlighting a fundamental gap between current systems and truly exhaustive search. Looking forward, the same properties that make VERITAS attractive as a benchmark—infinite automatic generation, exact labels, and tunable difficulty—also make it a promising source of train-ing data for future search agents, for example via reinforcement learning or RL-style post-training. We view our work as a first step towards systemati-cally teaching models not just to find good answers, but to approach the harder goal of finding all rele-vant answers under uncertainty. 
+
+Limitations 
+
+VERITAS currently serves purely as an evalua-tion benchmark. Although its automatic, verifi-able structure makes it well suited for reinforce-ment learning or other post-training methods, we have not yet applied such training to models using VERITAS-generated data; exploring this direction is an important target for future work. 
+
+Acknowledgements 
+
+This work was by National Key Program of National Natural Science of China (Grant No.82430108). 
+
+References 
+
+Doubao. 2025. Doubao deep research. Gemini. 2025. Gemini deep research. Taicheng Guo, Xiuying Chen, Yaqi Wang, Ruidi Chang, Shichao Pei, Nitesh V Chawla, Olaf Wiest, and Xi-angliang Zhang. 2024. Large language model based multi-agents: A survey of progress and challenges. 
+
+arXiv preprint arXiv:2402.01680 .Xanh Ho, Anh-Khoa Duong Nguyen, Saku Sugawara, and Akiko Aizawa. 2020. Constructing a multi-hop qa dataset for comprehensive evaluation of reasoning steps. arXiv preprint arXiv:2011.01060 .Bowen Jin, Hansi Zeng, Zhenrui Yue, Jinsung Yoon, Sercan Arik, Dong Wang, Hamed Zamani, and Jiawei Han. 2025. Search-r1: Training llms to reason and leverage search engines with reinforcement learning. 
+
+arXiv preprint arXiv:2503.09516 .Mandar Joshi, Eunsol Choi, Daniel S Weld, and Luke Zettlemoyer. 2017. Triviaqa: A large scale distantly supervised challenge dataset for reading comprehen-sion. arXiv preprint arXiv:1705.03551 .Kimi. 2025. Kimi deep research. Tom Kwiatkowski, Jennimaria Palomaki, Olivia Red-field, Michael Collins, Ankur Parikh, Chris Alberti, Danielle Epstein, Illia Polosukhin, Jacob Devlin, Ken-ton Lee, and 1 others. 2019. Natural questions: a benchmark for question answering research. Trans-actions of the Association for Computational Linguis-tics , 7:453–466. Tian Lan, Bin Zhu, Qianghuai Jia, Junyang Ren, Haijun Li, Longyue Wang, Zhao Xu, Weihua Luo, and Kaifu Zhang. 2025. Deepwidesearch: Benchmarking depth and width in agentic information seeking. arXiv preprint arXiv:2510.20168 .Kuan Li, Zhongwang Zhang, Huifeng Yin, Liwen Zhang, Litu Ou, Jialong Wu, Wenbiao Yin, Baix-uan Li, Zhengwei Tao, Xinyu Wang, Weizhou Shen, Junkai Zhang, Dingchu Zhang, Xixi Wu, Yong Jiang, Ming Yan, Pengjun Xie, Fei Huang, and Jin-gren Zhou. 2025a. Websailor: Navigating super-human reasoning for web agent. arXiv preprint arXiv:2507.02592 .Xiaoxi Li, Jiajie Jin, Guanting Dong, Hongjin Qian, Yongkang Wu, Ji-Rong Wen, Yutao Zhu, and Zhicheng Dou. 2025b. Webthinker: Empowering large reasoning models with deep research capability. 
+
+arXiv preprint arXiv:2504.21776 .Xiao Liu, Hao Yu, Hanchen Zhang, Yifan Xu, Xuanyu Lei, Hanyu Lai, Yu Gu, Hangliang Ding, Kaiwen Men, Kejuan Yang, and 1 others. 2023. Agent-bench: Evaluating llms as agents. arXiv preprint arXiv:2308.03688 .Grégoire Mialon, Clémentine Fourrier, Thomas Wolf, Yann LeCun, and Thomas Scialom. 2023. Gaia: a benchmark for general ai assistants. In The Twelfth International Conference on Learning Representa-tions .OpenAI. 2025. Deep research system card. Perplexity. 2025. Perplexity deep research. Ofir Press, Muru Zhang, Sewon Min, Ludwig Schmidt, Noah A Smith, and Mike Lewis. 2022. Measuring and narrowing the compositionality gap in language models. arXiv preprint arXiv:2210.03350 .Huatong Song, Jinhao Jiang, Yingqian Min, Jie Chen, Zhipeng Chen, Wayne Xin Zhao, Lei Fang, and Ji-Rong Wen. 2025. R1-searcher: Incentivizing the search capability in llms via reinforcement learning. 
+
+arXiv preprint arXiv:2503.05592 .Zhengwei Tao, Jialong Wu, Wenbiao Yin, Junkai Zhang, Baixuan Li, Haiyang Shen, Kuan Li, Li-wen Zhang, Xinyu Wang, Yong Jiang, and 1 oth-ers. Webshaper: Agentically data synthesizing via information-seeking formalization, 2025. URL https://arxiv. org/abs/2507.15061 .Harsh Trivedi, Niranjan Balasubramanian, Tushar Khot, and Ashish Sabharwal. 2022. Musique: Multi-hop questions via single-hop question composition. 
+
+Transactions of the Association for Computational Linguistics , 10:539–554. Lei Wang, Chen Ma, Xueyang Feng, Zeyu Zhang, Hao Yang, Jingsen Zhang, Zhiyuan Chen, Jiakai Tang, Xu Chen, Yankai Lin, and 1 others. 2024. A survey on large language model based autonomous agents. 
+
+Frontiers of Computer Science , 18(6):186345. J Wei, Z Sun, S Papay, S McKinney, J Han, I Fulford, HW Chung, AT Passos, W Fedus, and A Glaese. Browsecomp: A simple yet challenging benchmark for browsing agents, 2025a. URL https://arxiv. org/abs/2504.12516 .Jason Wei, Zhiqing Sun, Spencer Papay, Scott McK-inney, Jeffrey Han, Isa Fulford, Hyung Won Chung, Alex Tachard Passos, William Fedus, and Amelia Glaese. 2025. Browsecomp: A simple yet challeng-ing benchmark for browsing agents. arXiv preprint arXiv:2504.12516 .Ryan Wong, Jiawei Wang, Junjie Zhao, Li Chen, Yan Gao, Long Zhang, Xuan Zhou, Zuo Wang, Kai Xiang, Ge Zhang, and 1 others. 2025. Widesearch: Bench-marking agentic broad info-seeking. arXiv preprint arXiv:2508.07999 .Jialong Wu, Baixuan Li, Runnan Fang, Wenbiao Yin, Liwen Zhang, Zhengwei Tao, Dingchu Zhang, Zekun Xi, Gang Fu, Yong Jiang, and 1 others. 2025. Web-dancer: Towards autonomous information seeking agency. arXiv preprint arXiv:2505.22648 .x.ai. 2025. Grok 3 beta — the age of reasoning agents. Yunjia Xi, Jianghao Lin, Yongzhao Xiao, Zheli Zhou, Rong Shan, Te Gao, Jiachen Zhu, Weiwen Liu, Yong Yu, and Weinan Zhang. 2025. A survey of llm-based deep search agents: Paradigm, optimiza-tion, evaluation, and challenges. arXiv preprint arXiv:2508.05668 .Zhilin Yang, Peng Qi, Saizheng Zhang, Yoshua Ben-gio, William W Cohen, Ruslan Salakhutdinov, and Christopher D Manning. 2018. Hotpotqa: A dataset for diverse, explainable multi-hop question answer-ing. arXiv preprint arXiv:1809.09600 .Weizhi Zhang, Yangning Li, Yuanchen Bei, Junyu Luo, Guancheng Wan, Liangwei Yang, Chenxuan Xie, Yuyao Yang, Wei-Chieh Huang, Chunyu Miao, Henry Peng Zou, Xiao Luo, Yusheng Zhao, Yankai Chen, Chunkit Chan, Peilin Zhou, Xinyang Zhang, Chenwei Zhang, Jingbo Shang, and 4 others. 2025. From web search towards agentic deep research: Incentivizing search with reasoning agents. arXiv preprint arXiv:2506.18959 .Peilin Zhou, Bruce Leon, Xiang Ying, Can Zhang, Yifan Shao, Qichen Ye, Dading Chong, Zhiling Jin, Chenxuan Xie, Meng Cao, and 1 others. 2025. Browsecomp-zh: Benchmarking web browsing abil-ity of large language models in chinese. arXiv preprint arXiv:2504.19314 .Shuyan Zhou, Frank F Xu, Hao Zhu, Xuhui Zhou, Robert Lo, Abishek Sridhar, Xianyi Cheng, Tianyue Ou, Yonatan Bisk, Daniel Fried, and 1 others. 2023. Webarena: A realistic web environment for building autonomous agents. arXiv preprint arXiv:2307.13854 .A Theoretical Insights: The Epistemology of Search Difficulty 
+
+Due to space limitations in the main text, which focuses primarily on our methodology and experi-mental results, we were unable to fully detail our theoretical analysis of search difficulty. In this sec-tion, we share our deconstruction of “difficulty” in agent search tasks, distinguishing between logi-cal depth and search entropy, and explaining why existing benchmarks often fail to measure true ex-haustive search capabilities. 
+
+A.1 The Unreliability of Depth as a Proxy: Multi-hop ̸ = Difficulty Multi-hop structure is an unreliable proxy for difficulty because it conflates logical depth with search entropy; a 10-hop chain with branching factor 1 is computationally trivial, while a 2-hop query over an unbounded space may be intractable. 
+
+A long-standing view in the community is that “multi-hop questions” intrinsically represent high difficulty because agents must reason across multi-ple nodes. We argue that using multi-hop structure as a direct proxy for difficulty is unreliable because it confuses logical depth with search entropy . The distinction is critical: depth counts steps, but en-tropy measures the size of the search space at each step. A deep chain through narrow corridors is easy; a shallow query into an ocean of possibilities is hard. 
+
+A.1.1 Low Entropy in Deterministic Chains When relationships are deterministic, multi-hop merely increases operations linearly—the computational burden is O(k), not exponential. 
+
+Think of it as walking a straight hallway versus navigating a branching maze: the hallway may be long, but you never face a choice. Consider the following classic multi-hop ques-tion: “What is the profession of the grandfather of the husband of the first female Nobel Prize winner?” Although this problem has a structure of ≥ 4
+
+hops, it is not computationally difficult because the branching factor at each step is low (often one-to-one). The search path is deterministic: Find(Nobel_Women) 1:1 
+
+−−→ Marie Curie 
+
+> 1:1
+
+−−→ Pierre Curie 1:1 
+
+−−→ Grandfather When relationships are deterministic, multi-hop merely increases the number of operations k lin-early ( O(k)). Difficulty primarily arises when multi-hop is coupled with high branching factors 
+
+or open-world uncertainty (e.g., “Find a paper cit-ing X that disagrees with Y”), where the candidate space expands exponentially. 
+
+A.1.2 Multi-hop as an Error Amplifier Multi-hop primarily amplifies single-step errors (P N decay) rather than creating a fundamen-tally new search challenge. The difficulty is inher-ited, not intrinsic: if each step has 90% accuracy across 5 hops, success drops to 0.95 ≈ 59% ; across 10 hops, it plummets to 0.910 ≈ 35% .In many existing benchmarks, multi-hop struc-ture primarily serves to amplify the error proba-bility of single-step decisions rather than creating a fundamentally new type of search challenge. If the single-step accuracy is P < 1 due to ambiguity, and the number of hops is N , the system success rate ( P N ) drops geometrically. The root cause of failure in these cases is often the initial ambiguity that lowered P , not the depth N itself. 
+
+A.2 Ontology of Difficulty: Ambiguity and High-Recall Search For high-recall enumeration tasks, ambiguity is computationally equivalent to exhaustive selec-tion over an unbounded candidate space—the “needle in a haystack” becomes “find all needles in an infinite haystack.” 
+
+If depth is not the sole source of difficulty, what drives the complexity in browser environments? For the class of high-recall enumeration tasks 
+
+that VERITAS targets, we argue that ambiguity is computationally equivalent to a selection operation over a massive candidate space. 
+
+A.2.1 The Set-Theoretic Nature of Ambiguity Ambiguous queries decompose into two oper-ations: enumerate Σcandidate , then apply predi-cate f (x)—the computational cost lies entirely in the first step. Filtering is cheap once you have the list; building the list is the hard part. Ambiguous queries in high-recall contexts (e.g., “Find all ICLR 2024 papers where the first author graduated from MIT”) can be formalized as a two-step operation: 1. List All (Enumerate) : Construct a set 
+
+Σcandidate containing potential candidates. 2. Select Operation : Apply a predicate function 
+
+f (x) to filter the set. Answer = {x | x ∈ Σcandidate , f (x) = True }
+
+A.2.2 Candidate Set Size Determines Difficulty Difficulty scales with |Σcandidate |: when this set approaches infinity, enumeration—not filtering—becomes the insurmountable bottle-neck. At finite scales, enumeration is tedious; at web scale, it becomes computationally prohibitive. The physical essence of difficulty is determined by the size of |Σcandidate |. When |Σcandidate | → ∞ 
+
+(High Entropy), “List All” becomes the bottle-neck. While not all difficult search problems fit this model (e.g., aggregation or multi-source syn-thesis), this “List-and-Select” structure underpins the vast majority of information-seeking tasks used in current agent benchmarks. Ambiguity forces the agent to sample from an unknown, potentially huge 
+
+Σcandidate , often leading to incomplete recall. 
+
+A.3 Structural Flaws in Existing Benchmarks: The Role of Search Engines Current benchmarks inadvertently measure query engineering rather than exhaustive search: search engines act as heuristic compres-sion algorithms that collapse O(N ) enumeration into O(1) lookup. 
+
+Based on this theory, we analyze the structural limitations of benchmarks like BrowseComp and WideSearch. 
+
+A.3.1 Outsourcing Enumeration to Search Engines Agents can construct semantic queries that dele-gate the “List All + Select” operation entirely to search engine indices, bypassing systematic enu-meration. This is akin to asking a librarian to fetch all relevant books instead of walking through every shelf yourself—efficient, but it tests your ability to communicate with the librarian, not your ability to search. In many browser environments, agents do not perform a true “List All”. Instead, search engines act as heuristic compression algorithms . For a task like “Find papers by students of Professor A on topic B”, an agent can construct a query: ‘Pro-fessor A students paper topic B‘. Here, the search engine’s pre-built index effectively performs the “List All + Select” operation. Consequently, these benchmarks often measure an agent’s ability to 
+
+construct queries (Query Engineering) to lever-age external IR systems, rather than its ability to perform exhaustive coverage autonomously. 
+
+A.3.2 WideSearch vs. BrowseComp WideSearch is harder not because of deeper logic, but because its scale structurally in-hibits outsourcing—search engines rarely re-turn 10,000 results on a single page. 
+
+• BrowseComp : High accuracy is often achiev-able via precise queries (Shortcuts) because the target answers are indexed and rankable. • WideSearch : By scaling the search space to thousands of entities, WideSearch re-duces the effectiveness of simple query short-cuts—search engines rarely return 10,000 re-sults in a single page. This forces the agent closer to a true “List All” behavior, explaining the lower accuracy. • Conclusion : Both benchmarks fundamentally assess the ability to cover a search space. WideSearch is harder not because of deeper logic, but because it structurally inhibits the “outsourcing” of enumeration to the search en-gine. 
+
+A.4 The Dilemma of Construction and Verification Benchmarking “List All” faces an inherent para-dox: if a task is genuinely hard for AI, it is equally hard for human annotators to construct ground truth and verify completeness. 
+
+Why is it hard to benchmark “List All”? 
+
+A.4.1 Construction Difficulty Creating exhaustive benchmarks requires ei-ther expensive hand-crafting (BrowseComp) or omniscient knowledge of complete answer sets (WideSearch)—both approaches scale poorly. 
+
+• BrowseComp : Requires hand-crafting com-plex constraints to ensure a unique answer, which is expensive. • WideSearch : Attempts to test “List All” di-rectly, but this requires the benchmark creator to know the “full set” in advance. 
+
+A.4.2 Verification Difficulty and Human Unreliability Human cross-validation cannot escape system-atic bias: without domain expertise, annotators share the same blind spots, creating correlated errors that masquerade as consensus. If a task is hard for AI, it is also hard for human annotators. This creates a troubling evalu-ation paradox: a superior agent that discovers valid items missed by human annotators will be penal-ized for its thoroughness, while a mediocre agent that merely reproduces human omissions will be 
+
+rewarded for its conformity. • WideSearch (Hard to Verify) : WideSearch claims that cross-validation achieves near 100% success. We strongly question this. Without specific domain knowledge (e.g., all radio shows of a niche virtual singer), human annotators will likely share the same omis-sions (Systematic Error). • Evaluation Paradox : Relying on incomplete human ground truth leads to a paradox where a superior agent finding valid items missed by humans is penalized. 
+
+A.5 The VERITAS Solution: Computational Irreducibility VERITAS breaks these deadlocks through com-putational irreducibility: replacing semantic fil-ters with cryptographic constraints that physi-cally cannot be shortcut by any retrieval mecha-nism. 
+
+To resolve these deadlocks, VERITAS intro-duces a paradigm shift: from simulating real se-mantic search to constructing computationally ir-reducible search puzzles. 
+
+A.5.1 Physically Cutting Shortcuts Hash constraints are anti-semantic by design: the avalanche effect ensures no query like 
+
+site:github.com "hash_value" can lo-cate targets—forcing genuine O(N ) traversal. 
+
+Imagine searching an unlabeled archive where the only way to find a document is to open every folder and check its serial number against a target code. • Mechanism : Replace natural language filter 
+
+f (x) with cryptographic hash check H(x) = 
+
+target. • Anti-Semantic : Because hashes are one-way and exhibit the avalanche effect, no search query (e.g., ‘site:github.com "hash_value"‘) can directly find the target. • Forced O(N ) Traversal : The agent must physically perform “List All” and then “Hash Check”. 
+
+A.5.2 Mathematical Certainty Hash verification is both exact and O(1) : if 
+
+H(x) = target , correctness is guaranteed with zero false positives or negatives—no human an-notation required. 
+
+• Zero False Positives/Negatives : If H(x) = 
+
+target , x is correct. Verification is O(1) and does not rely on human annotation. • Solving the Evaluation Paradox : We do not need to worry about coverage in a space of 
+
+N = 10000 .
+
+A.5.3 Infinite Scalability Any structured data source (codebases, databases, APIs) becomes a limitless task gen-erator, with |Σcandidate | precisely controllable without expert annotation. 
+
+We can generate infinite tasks from structured data sources (codebases, databases) without ex-pert annotation, precisely controlling the size of 
+
+Σcandidate .
+
+A.6 Conclusion: Returning to the Origin of Difficulty The field must undergo a cognitive shift: aban-don the multi-hop myth, confront ambiguity as exhaustive enumeration, and embrace computa-tional irreducibility as the only rigorous founda-tion for evaluating systematic search. 
+
+The field needs a cognitive shift: 1. Abandon the Multi-hop Myth : Depth ̸ = Dif-ficulty. 2. Face the Ambiguity : Ambiguity = List All. 3. Embrace Irreducibility : Only by cutting shortcuts (as VERITAS does) can we mea-sure the true capability of “draining the ocean” (systematic exhaustion) rather than just “using sonar” (search engines). B Task Examples Across Difficulty Tiers 
+
+We present representative examples from each dif-ficulty tier to illustrate the progressive complexity of VERITAS tasks. Table 3 shows the complete prompts for each tier. 
+
+C Validating Computational Equivalence 
+
+We empirically validate the theoretical framework established in Section 3 through a comprehensive experimental study using Gemini 3 Pro. This sec-tion provides detailed analysis of the convergence behavior, mathematical interpretation, and implica-tions for benchmark design. 
+
+C.1 Experimental Setup 
+
+To rigorously test the computational equivalence hypothesis, we designed controlled task variants re-quiring the agent to find k ∈ { 1, 2, 4, 8, 16 } items whose identifiers match k distinct MD5 hashes. These tasks are structurally equivalent to the hash-constrained “Easy” setting described in Section 3: the agent must enumerate candidates under MD5 constraints and succeed only if it finds all k match-ing items within a fixed search budget. 
+
+Why Gemini 3 Pro? We selected Gemini 3 Pro for this validation study for several important reasons: 1. Strong Baseline Performance : Gemini 3 Pro demonstrated robust performance across all difficulty tiers in our main experiments, making it an ideal candidate for studying the fundamental scaling properties of hash-constrained search. 2. Consistent Behavior : The model exhibits sta-ble and reproducible behavior across repeated trials, essential for accurately measuring the convergence of success probabilities. 3. Sufficient Capability : Unlike weaker models that might fail due to basic reasoning errors, Gemini 3 Pro’s failures on higher-k tasks can be more confidently attributed to the inher-ent difficulty of exhaustive enumeration rather than incidental errors. 
+
+C.2 Experimental Results 
+
+We observed a clear monotonic decay in success rates as k increases: 
+
+k = 1 : 43 .0% 
+
+k = 2 : 32 .6% 
+
+k = 4 : 29 .1% 
+
+k = 8 : 26 .7% 
+
+k = 16 : 22 .1% 
+
+Full enumeration baseline : 22 .1% .
+
+The convergence to the full enumeration base-line at k = 16 is striking: the success rate of 22.1% matches the baseline exactly , providing strong em-pirical evidence for our theoretical framework. 
+
+C.3 Detailed Analysis of Convergence Dynamics C.3.1 The Initial Drop: From k = 1 to k = 2 
+
+The most dramatic decrease occurs between k = 1 
+
+(43.0%) and k = 2 (32.6%), representing a relative drop of approximately 24%. This steep initial de-cline is predicted by our theoretical model: when the agent’s coverage T is significantly smaller than the full search space N , the probability of finding 
+
+all k targets scales as (T /N )k. Even a modest coverage ratio (e.g., T /N = 0 .75 ) would predict a drop from P1 = 0 .75 to P2 = 0 .56 —a 25% relative decrease, closely matching our empirical observations. 
+
+C.3.2 The Gradual Plateau: From k = 4 to 
+
+k = 16 
+
+As k increases beyond 4, the success rate decreases more gradually: • k = 4 to k = 8 : 29.1% → 26.7% (8.2% relative drop) • k = 8 to k = 16 : 26.7% → 22.1% (17.2% relative drop) This gradual convergence reflects a fundamen-tal insight: once k is large enough, the only agents that succeed are those that achieve near-complete enumeration . Partial coverage strategies that might succeed for small k become increasingly ineffective as missing even a single target causes failure. The agent is thus “forced” into exhaustive search behavior. 
+
+C.3.3 Mathematical Interpretation of the Convergence 
+
+Let T denote the expected number of items the agent successfully enumerates, and N the total Tier Task Prompt Easy List all models by author ‘google’ on Hugging Face Hub. One item’s MD5 hash (using Python’s hash-lib.md5, UTF-8 encoding) is: f302f2cea508d9e64b5467c50c14308b . What is the original value? 
+
+Answer: google/multiberts-seed_17 
+
+Characteristics: Single-source enumeration with direct identifier verification. Search space N ≈ 50 –200 
+
+items. 
+
+Medium Complete the following 7 enumeration tasks: (1) List top 100 models with "pytorch" tag on Hugging Face (by likes); (2) List all publications by Andrew Ng (PID: 05/2373) after 2020 on DBLP; (3) List all Google GitHub repos with >1000 stars; (4) Find top 5 downloaded versions of numpy on conda-forge; (5) List all Google GitHub repos created after 2010; (6) Find Google’s most-starred repository; (7) List all pre-release versions of vercel/turbo. One result from these 7 tasks has MD5 hash: cc936184527507417a964f1ffbbe6c84 . What is it? 
+
+Answer: 1.19.5 (from task 4) 
+
+Characteristics: Multi-source aggregation requiring coordination across diverse APIs. Search space 
+
+N ≈ 7n.
+
+Hard Find all songs by artist “KAF”. One song’s first lyric line has MD5 hash: 
+
+50acc167e1b2296034ef447b86027f77 . Output as “SongName → FirstLine”. 
+
+Answer: Carpe Diem → [Japanese lyric text] 
+
+Characteristics: Deep attribute extraction requiring per-item queries to retrieve derived attributes. High query cost. 
+
+Extra Hard Complete 7 high-complexity enumeration tasks: (1) Find Billie Eilish singles; one’s Spotify URI has MD5: 4714...2fc . Output: “Name → URI”; (2) Find pandas 2.2.2 dependency where project_name MD5= e3bc...107 & specifier MD5= d41d...27e . Output: “DepString → Metadata”; (3) Find artist “Isekaijoucho” songs; one’s first lyric has MD5: 2218...7c . Output: “Song → FirstLine”; (4) Find syn 2.0.77 dependency where crate_id MD5= c8bd...319 & req MD5= a4ec...8ea . Output: 
+
+crate@req[kind] ; [...3 more similar tasks...]. One of the 7 formatted answers has MD5: dd3995f98fb48b42385613d42599c71a . What is it? 
+
+Answer: PyQt5>=5.15.9; extra == "all" → [metadata] (from task 2) 
+
+Characteristics: Nested multi-task hierarchy with deep-attribute subtasks. Search space N ≈ 7 × 10 2–10 3.
+
+Table 3: Representative task prompts across VERITAS difficulty tiers. Each tier progressively increases search space size and structural complexity while maintaining hash-based verifiability. 
+
+search space size. Under a uniform random cover-age model, the probability of successfully finding all k targets is: 
+
+P (k) = 
+
+N − kT − k
+
+
+
+/
+
+NT
+
+
+
+≈
+
+ TN
+
+k
+
+for T ≪ N
+
+As k → ∞ , this probability converges to: 
+
+lim  
+
+> k→∞
+
+P (k) = 
+
+(
+
+1 if T = N (complete enumeration) 
+
+0 if T < N (incomplete enumeration) However, our empirical observation of conver-gence to a non-zero baseline (22.1%) reveals some-thing more nuanced: a fraction of agent runs achieve complete or near-complete enumeration ,while others fall short. The 22.1% baseline repre-sents the proportion of runs where the agent suc-cessfully executes an exhaustive search strategy. 
+
+C.4 Connection to Medium-Difficulty Performance 
+
+A crucial validation of our framework comes from comparing these equivalence results with Gemini 3 Pro’s performance on Medium-difficulty tasks in the main experiment. In Section 4, we reported that Gemini 3 Pro achieved a success rate of approxi-mately 18.8% on Medium-tier tasks. This correspondence is not coincidental .Medium-difficulty tasks in VERITAS are designed to require aggregation across multiple sources (typ-ically 7 sub-tasks), effectively functioning as “List All from 7 sources” problems. The computational structure is equivalent to our k-target sparse search with large k: success requires comprehensive cov-erage across all sub-tasks. The comparable performance metrics—22.1% for k = 16 sparse search and 18.8% for Medium-tier tasks—provide cross-validation: 1. Internal Consistency : Our synthetic equiva-lence experiments and real benchmark tasks yield the same success rate ceiling. 2. Benchmark Validity : Medium-tier tasks gen-uinely measure exhaustive enumeration capa-bility, not query engineering or shortcut ex-ploitation. 3. Difficulty Calibration : The convergence to a common baseline confirms that our difficulty tiers are properly calibrated to the underlying computational structure. 
+
+C.5 Implications for Benchmark Design 
+
+These findings have profound implications for how we should design and interpret agent search bench-marks: 
+
+C.5.1 The Sufficiency of Sparse Targets 
+
+Our results demonstrate that sparse hash con-straints achieve the same discriminative power as full enumeration requirements , but with dra-matically reduced annotation cost. Instead of re-quiring human annotators to enumerate all N items (impractical for N > 100 ), we need only plant 
+
+k ≥ 16 hash-constrained targets to achieve equiva-lent evaluation fidelity. 
+
+C.5.2 The Futility of Partial Coverage Strategies 
+
+The rapid convergence reveals that partial cover-age strategies—which might exploit shortcuts or heuristics to find some targets—become ineffective as k increases. This is precisely the “anti-shortcut” property we desire: agents cannot game the bench-mark by finding a few easy targets while ignoring difficult ones. 
+
+C.5.3 Theoretical Lower Bound on Model Capability 
+
+The convergence baseline (22.1% for Gemini 3 Pro) establishes a theoretical ceiling for the model’s ex-haustive search capability under our experimental conditions. This metric is more informative than single-target success rates, which can be inflated by lucky guesses or effective query engineering. 
+
+C.6 Comparison with Theoretical Predictions 
+
+To quantify the fit between our empirical results and theoretical predictions, we performed a least-squares fit to the model P (k) = Pbaseline + ( P1 −
+
+Pbaseline ) · αk−1, where: • Pbaseline = 0 .221 (the asymptotic baseline) • P1 = 0 .430 (the k = 1 success rate) • α is the decay rate parameter The best-fit decay rate is α ≈ 0.73 , yielding predictions: 
+
+ˆP (1) = 43 .0% (observed: 43 .0%) ˆP (2) = 37 .4% (observed: 32 .6%) ˆP (4) = 33 .2% (observed: 29 .1%) ˆP (8) = 28 .8% (observed: 26 .7%) ˆP (16) = 24 .7% (observed: 22 .1%) 
+
+The slight over-prediction at higher k values sug-gests that real agent behavior exhibits slightly faster convergence than the idealized exponential model— likely due to correlated failures (if an agent misses one target, it is more likely to miss others in the same region of the search space). 
+
+C.7 Robustness Analysis 
+
+To ensure our findings are not artifacts of the spe-cific experimental setup, we conducted several ro-bustness checks: 
+
+1. Consistency Across Runs : We repeated each 
+
+k-value experiment multiple times. The standard deviation of success rates was below 3% across all conditions, confirming measurement stability. 
+
+2. Task Diversity : We varied the underlying search domains (different API sources, different candidate set sizes) while maintaining the hash-constraint structure. The convergence pattern re-mained consistent across all domain variants. 
+
+3. Prompt Sensitivity : We tested alternative prompt formulations (more explicit enumeration instructions, different output format requirements). While absolute success rates varied by ±5%, the 
+
+convergence pattern to a common baseline was preserved. 
+
+C.8 Conclusion: Validating Computational Irreducibility 
+
+Our comprehensive empirical study with Gemini 3 Pro validates the core theoretical claim of VER-ITAS: hash-constrained sparse search achieves computational equivalence with full enumera-tion for k ≥ 16 , preserving the O(N ) irreducibil-ity required for rigorous evaluation of exhaus-tive search capability .The key findings are: 1. Success rates decay exponentially from 43.0% (k = 1 ) to 22.1% ( k = 16 ), matching theoret-ical (T /N )k predictions. 2. The convergence baseline of 22.1% is compa-rable to Gemini 3 Pro’s 18.8% performance on Medium-tier tasks, cross-validating both the equivalence framework and benchmark calibration. 3. Sparse hash constraints provide the same dis-criminative power as full enumeration require-ments, enabling scalable benchmark construc-tion without exhaustive human annotation. These results firmly establish the theoretical foundation of VERITAS and demonstrate that our methodology genuinely measures systematic exhaustive search capability—the “draining the ocean” behavior—rather than query engineering or shortcut exploitation. 
+
+D The “Boosting” Effect of Hash Verification 
+
+We acknowledge a distinct characteristic of our hash-based evaluation method: the presence of a ground-truth oracle (the hash) during the inference process. This enables a form of self-verification 
+
+that is theoretically absent in standard “list all” enu-meration benchmarks. In a traditional exhaustive search task (e.g., “List all songs by artist X”), the agent outputs a list and terminates. It has no internal mechanism to confirm whether its list is complete or correct be-fore submission. In contrast, our VERITAS agent can theoretically generate a candidate, compute its hash, compare it to the target, and—if they do not match—reject the candidate and continue search-ing. This feedback loop acts effectively as a “boost-ing” mechanism or an internal Pass@k filter, allow-ing the model to catch and correct its own errors within a single episode. If unrestricted, an agent could loop indefinitely, using the hash as a hot/-cold signal to brute-force the answer, which would render comparisons with standard baselines unfair. To rigorous control for this effect and ensure fair alignment with standard enumeration tasks, we en-force a strict single-turn tool execution constraint .Our experimental setup involves two layers of en-forcement: 1. Prompt-Level Instruction : The agent is ex-plicitly instructed that it is allowed only one opportunity to execute Python code to com-pute the answer. It must gather all necessary data, perform the search, and verify the hash within a single, self-contained code block. 2. System-Level Interception : Since the agent environment is a custom-built sandbox, we implement a hard constraint at the infrastruc-ture level. If the agent attempts to call the 
+
+exec_python tool a second time, the sys-tem intercepts the request and returns a stan-dardized error message: “Tool execution limit reached. You must now provide your final answer based on the data you have already collected.” 
+
+This design forces the agent to perform the en-tire “enumerate-and-verify” logic internally within a single pass, mirroring the cognitive burden of a standard “list all” task where the agent must sub-mit its best attempt without external feedback. By stripping away the ability to iteratively probe the hash oracle, we ensure that the high performance metrics reported in our study reflect genuine search and planning capabilities rather than an artifact of unlimited self-correction. 
+
+E Commercial End-to-End System Limitations 
+
+Our evaluation focuses on open-weight models and API-based models integrated into our custom agent framework, rather than commercial end-to-end sys-tems (e.g., ChatGPT, Gemini Advanced). This de-cision is driven by two key factors that make such systems unsuitable for rigorous evaluation of high-entropy search tasks. 
+
+1. Systematic Limitations in Exhaustive Search : Prior research, such as the WideSearch 
+
+findings, indicates that commercial end-to-end sys-tems often show performance comparable to self-built agents in scenarios requiring exhaustive enu-meration. This is likely due to inherent cost-optimization mechanisms in commercial services, such as strict output token limits or aggressive con-text truncation, which prevent the model from pro-cessing the large volume of candidates required for our tasks. In contrast, our self-built agent frame-work imposes no such artificial constraints, allow-ing the model to utilize its full context window and compute resources to tackle the massive search spaces ( N ) characteristic of VERITAS. 
+
+2. Inability to Enforce Fairness Constraints :As detailed in Appendix D, our evaluation method-ology relies critically on a single-turn tool execu-tion constraint to prevent the "boosting" effect of the hash oracle. Commercial end-to-end systems operate as "black boxes" where the loop between reasoning, tool use, and observation is managed internally by the provider. We cannot intervene to intercept a second tool call or enforce a "one-shot" policy. Consequently, a commercial system might autonomously loop dozens of times, using the hash mismatch as feedback to eventually guess the correct answer. This would result in an unfair comparison against our controlled agents, which are strictly prohibited from such brute-force veri-fication. By using a custom agent framework, we ensure a level playing field where all models are subject to identical, rigorous constraints on infor-mation access and verification. 
+
+F Case Studies 
+
+We present two representative case studies to illus-trate the spectrum of agent performance on com-plex search tasks. Each case shows the complete agent execution trace, including system prompts, user queries, tool invocations, and responses. The first case demonstrates successful reasoning and systematic enumeration, while the second case re-veals common failure patterns where the agent’s approach diverges from the optimal solution path. ● System Prompt 
+
+# Role You are an expert in online search. You task is gathering relevant information using advanced online search tools based on the user’s query, and providing accurate answers according to the search results. You must use fetch summary at first. # Task Description Upon receiving the user’s query, you must thoroughly analyze and understand the user’s requirements. In order to effectively address the user’s query, you should make the best use of the provided tools to acquire comprehensive and reliable information and data. Below are the principles you should adhere to while performing this task: - Fully understand the user’s needs: Analyze the user’s query, if necessary, break it down into smaller components to ensure a clear understanding of the user’s primary intent. - Flexibly use tools: After fully comprehending the user’s needs, employ the provided tools to retrieve the necessary information.If the information retrieved previously is deemed incomplete or inaccurate and insufficient to answer the user’s query, reassess what additional information is required and invoke the tool again until all necessary data is obtained. You must call internal_answer tool to exit , do not explain. 
+
+Tools available: 
+
+• web_search(query) : Search the web and return top 10 results. • visit(goal,url) : Visit the specified web page and summarize its content. • exec_python(code) : Execute Python code for verification. • answer(result) : Submit your final answer. 
+
+Important: You must enumerate ALL candidates systematically. Do not rely solely on search engine rankings. 
+
+— Step 1 — 
+
+❖ User 
+
+List all models by the author ’google’ on the Hugging Face Hub.Among these entries, the MD5 hash result (generated using Python’s hashlib.md5 with UTF-8 encoding) of one entry is: 80ded97ed9df5a9ff069a74c7ca4cc35 .What is the original value of this entry? 
+
+★ Assistant 
+
+I’ll search for Google’s models on Hugging Face and compute MD5 hashes to find the matching one. Let me first get the list of models from Google on Hugging Face. 
+
+— Step 2 — 
+
+▲ Tool Call 
+
+web_search({"query":"Hugging Face Hub author google models list"}) 
+
+✓ Result 
+
+Results (Top 10): 
+
+1. {"title": "Models – Hugging Face", "url": "https://huggingface.co/models", "snippet": "Models · zai-org/GLM-4.7 · MiniMaxAI/MiniMax-M2.1 · Qwen/Qwen-Image-Edit-2511 · Qwen/Qwen-Image-Layered · google/functiongemma-270m-it · Tongyi-MAI/Z-Image-Turbo."} 2. {"title": "Hugging Face Hub API", "url": "https://huggingface.co/docs/huggingface_hub/v0.8.0/en/package_reference", "snippet": "ModelFilter. author ( str , optional) — A string that can be used to identify models on the Hub by the original uploader (author or organization), such as ..."} 3. {"title": "Models", "url": "https://huggingface.co/models?sort=downloads", "snippet": "Models · sentence-transformers/all-MiniLM-L6-v2 · Falconsai/nsfw_image_detection · google/electra-base-discriminator · google-bert/bert-base-uncased · dima806/ ..."} 4. {"title": "Search the Hub", "url": "https://huggingface.co/docs/huggingface_hub/main/en/guides/search", "snippet": "Search the Hub. In this tutorial, you will learn how to search models, datasets and spaces on the Hub using huggingface_hub . How to list repositories ?"} 5. ... (showing top 10 results) 
+
+— Step 3 — 
+
+▲ Tool Call 
+
+visit({"goal":"Fetch the list of models by author ’google’ from Hugging Face API","url":["https://huggingface.co/api/models?author=google&limit=2000"]}) ✓ Result 
+
+The useful information in https://huggingface.co/api/models?author=google&limit=2000 for user goal Fetch the list of models by author ’google’ from Hugging Face API as follows: Evidence in page: Each model entry in the JSON has an ’id’ field starting with ’google/’, such as ’google/functiongemma-270m-it’, ’google/medasr’, ’google/t5gemma-2-270m-270m’, etc., indicating they are published by Google. There are 100+ such entries, all following the same naming convention and belonging to the ’google’ author. No other authors are present in the dataset provided. Summary: The list of models authored by ’google’ includes: google/functiongemma-270m-it, google/medasr, google/t5gemma-2-270m-270m, google/t5gemma-2-4b-4b, google/embeddinggemma-300m, google/gemma-scope-2, google/t5gemma-2-1b-1b, google/gemma-3-27b-it, google/gemma-3-1b-it, google/gemma-3n-E2B-it-litert-lm, google/gemma-3-4b-it, google/gemma-3-270m-it, google/gemma-3n-E4B-it-litert-lm, google/medgemma-27b-it, google/gemma-3-12b-it, google/gemma-3-270m... 
+
+— Step 4 — 
+
+▲ Tool Call 
+
+exec_python("code": import hashlib target = "80ded97ed9df5a9ff069a74c7ca4cc35" # Data from summary models = [’google/functiongemma-270m-it’,’google/medasr’,’google/t5gemma-2-270m-270m’,...’google/electra-base-generator’,...] matches = [] for m in models: if hashlib.md5(m.encode("utf-8")).hexdigest() == target: matches.append(m) # Check without prefix if ’/’ in m: short = m.split(’/’, 1)[1] if hashlib.md5(short.encode("utf-8")).hexdigest() == target: matches.append(f"{short} (from {m})") print(f"Matches found: {matches}") 
+
+✓ Result 
+
+{’success’: True, ’stdout’: ¨Matches found: [’google/electra-base-generator’]", ’stderr’: ”, ’files’: [], ’workdir’: ’/tm-p/python_exec/20251229_153520_e6b08586’, ’message’: "Matches found: [’google/electra-base-generator’]"} 
+
+— Step 5 — 
+
+▲ Tool Call 
+
+internal_answer({"answer":"google/electra-base-generator"}) 
+
+✓ Result 
+
+Answer submitted: google/electra-base-generator 
+
+— Step 6 — 
+
+★ Assistant 
+
+The original value of the item is: **google/electra-base-generator**. This result is obtained by traversing the model list of the author ’google’ on Hugging Face Hub and calculating the MD5 hash (UTF-8 encoding) for each model ID. The hash value of ‘google/electra-base-generator‘ is exactly ‘80ded97ed9df5a9ff069a74c7ca4cc35‘. 
+
+Figure 4: Case Study 1: Successful Systematic Enumeration. The agent correctly identifies the target model 
+
+google/electra-base-generator by fetching the complete list via search, visit and computing MD5 hashes for all candidates. ● System Prompt 
+
+# Role You are an expert in online search. You task is gathering relevant information using advanced online search tools based on the user’s query, and providing accurate answers according to the search results. You must use fetch summary at first. # Task Description Upon receiving the user’s query, you must thoroughly analyze and understand the user’s requirements. In order to effectively address the user’s query, you should make the best use of the provided tools to acquire comprehensive and reliable information and data. Below are the principles you should adhere to while performing this task: - Fully understand the user’s needs: Analyze the user’s query, if necessary, break it down into smaller components to ensure a clear understanding of the user’s primary intent. - Flexibly use tools: After fully comprehending the user’s needs, employ the provided tools to retrieve the necessary information.If the information retrieved previously is deemed incomplete or inaccurate and insufficient to answer the user’s query, reassess what additional information is required and invoke the tool again until all necessary data is obtained. You must call internal_answer tool to exit , do not explain. 
+
+Tools available: 
+
+• web_search(query) : Search the web and return top 10 results. • visit(goal,url) : Visit the specified web page and summarize its content. • exec_python(code) : Execute Python code for verification. • answer(result) : Submit your final answer. 
+
+Important: You must enumerate ALL candidates systematically. Do not rely solely on search engine rankings. 
+
+— Step 1 — 
+
+❖ User 
+
+Find the most-starred repository among Google users.Four of these entries, after being converted via the MD5 hash algorithm (using Python’s hashlib.md5 with UTF-8 encoding), yield the re-sults: 5acebc4cb70ddbb074b0ac76aab176ae , 2c39bc19b761ac36dc046245d1d47fe6 ,
+
+b76e98af9aaa680979bf5a65b2d5a105 , 606eaf846c6579916354199b45953ee2 .What are the origi-nal values of these entries respectively? 
+
+★ Assistant 
+
+Let me help you find the most-starred repository among Google users and resolve the MD5 hash conversion issue. First, let me search for relevant information. 
+
+— Step 2 — 
+
+▲ Tool Call 
+
+web_search({"query": "Google GitHub most starred repositories"}) 
+
+✓ Result 
+
+Results (Top 10): 
+
+1. {"title": "EvanLi/Github-Ranking", "url": "https://github.com/EvanLi/Github-Ranking", "snippet": "Github stars and forks ranking list. Github Top100 stars list of different languages. Automatically update daily."} 2. {"title": "Trending repositories on GitHub today", "url": "https://github.com/trending", "snippet": "Trending · Flowseal / zapret-discord-youtube · TheAlgorithms / Python · Sergeydigl3 / zapret-discord-youtube-linux · BloopAI / vibe-kanban · RustPython / RustPython."} 3. {"title": "The most starred GitHub repos are learning resources", "url": "https://www.reddit.com/r/learnprogramming/comments/1gdezx8/the_most_starred_github_repos_are_learning/", "snippet": "The top 3 are: freeCodeCamp 405k, free-programming-books 337k, awesome 330k. The top 8 are learning resources like libraries, hands-on projects, and ..."} 4. ... (showing top 10 results) 
+
+— Step 3 — ▲ Tool Call 
+
+visit({"goal":"Retrieve the most popular repositories among Google users and their star counts. ","url":[ "https://github.com/google/material-design-icons", "https://gitstar-ranking.com/google", "https://github.com/google", "https://github.com/google/guava", "https://github.com/google/zx", "https://github.com/google/styleguide", "https://github.com/google/leveldb", https://github.com/google/googletest]}) ✓ Result 
+
+The useful information in https://github.com/google/material-design-icons for user goal Retrieve details and star counts of the most popular repositories under Google as follows: Evidence in page: The repository header clearly shows ’google/material-design-icons’ with ’52.7k stars’ and ’9.7k forks’. The description states ’Material Design icons by Google (Material Symbols)’ and includes license information (Apache-2.0), topics (android, ios, web, material, etc.), and indicates it’s a public repository with recent activity. Summary: The ’google/material-design-icons’ repository is a highly popular Google project with 52.7k stars and 9.7k forks. It provides Material Design icons (Material Symbols) for various platforms including Android, iOS, and web, licensed under Apache-2.0. While this is specific to one repository rather than a comprehensive list of Google’s most popular repositories, it demonstrates significant popularity within Google’s open-source portfolio. ======= The useful information in https://github.com/google/guava for user goal Retrieve details and star counts of the most popular repositories under Google as follows: Evidence in page: The repository header shows: ’Google core libraries for Java’, ’51.4k stars’, and ’11.1k forks’. The README section begins with: ’Guava is a set of core Java libraries from Google that includes new collection types (such as multimap and multiset), immutable collections, a graph library, and utilities for concurrency, I/O, hashing, primitives, strings, and more! It is widely used on most Java projects within Google, and widely used by many other companies as well.’ Summary: The Google Guava project is a highly popular repository under the Google organization on GitHub. It is a set of core Java libraries providing utilities for collections, concurrency, I/O, hashing, and more. As of the time of viewing, this repository has received 51.4k stars, indicating its significant popularity within the developer community. ======= The useful information in https://github.com/google/zx for user goal Retrieve details and star counts of the most popular repositories under Google as follows: Evidence in page: The repository header shows: ’google / zx’, ’A tool for writing better scripts’, and ’45k stars’. The README section further confirms the project’s purpose: ’Bash is great, but when it comes to writing more complex scripts, many people prefer a more convenient programming language... The ‘zx‘ package provides useful cross-platform wrappers around ‘child_process‘...’ Summary: The Google-owned repository ’zx’ is a highly popular project with 45,000 stars. It is a tool designed for writing better scripts, providing useful wrappers around Node.js’s child_process to make scripting in JavaScript more convenient, offering a compromise between the power of Bash and the convenience of a programming language like JavaScript. ======= The useful information in https://github.com/google/styleguide for user goal Retrieve details and star counts of the most popular repositories under Google as follows: Evidence in page: The page header shows: ’google/styleguide’ (repository name), ’Style guides for Google-originated open-source projects’ (description), and ’38.8k stars’ (star count). The repository has 13k forks and is actively maintained with recent commits. Summary: The Google styleguide repository (google/styleguide) is a popular open-source project with 38.8k stars and 13k forks. It contains style guides for Google-originated open-source projects across multiple programming languages including C++, Java, Python, JavaScript, Go, and others. The project is actively maintained and provides coding conventions used by Google’s open-source projects. ======= The useful information in https://github.com/google/leveldb for user goal Retrieve details and star counts of the most popular repositories under Google as follows: Evidence in page: The repository header shows: ’google / leveldb Public’. The description states: ’LevelDB is a fast key-value storage library written at Google that provides an ordered mapping from string keys to string values.’ The star count is clearly displayed as ’38.6k stars’. Summary: The Google repository in question is ’leveldb’, hosted under the ’google’ organization on GitHub. It is a fast key-value storage library developed by Google. This repository is highly popular, as indicated by its 38.6k stars. ======= The useful information in https://github.com/google/googletest for user goal Retrieve details and star counts of the most popular repositories under Google as follows: Evidence in page: The repository is identified as ’google/googletest’ with the description ’GoogleTest - Google Testing and Mocking Frame-work’. The star count is clearly shown as ’37.7k stars’ next to the repository title. Summary: The Google repository ’googletest’ (Google Testing and Mocking Framework) is highly popular, with a star count of 37.7k. 
+
+— Step 4 — ▲ Tool Call 
+
+exec_python({"code": "import hashlib # Google most starred repositories repositories = ["material-design-icons", "guava", "zx", "styleguide", "leveldb", "googletest" ]# Calculate the MD5 hash value for each warehouse name. print("The MD5 hash value of the repository with the most Google stars:") for repo in repositories: md5_hash = hashlib.md5(repo.encode(’utf-8’)).hexdigest() print(f"{repo}: {md5_hash}") target_hashes = ["03995b34caa5398007484d7c98208c92", "fbc75c88a010f49e6c8257702f8108a1", "2f179647bda614c36304fb17849ed459", "34bceeae55d826b8813aa54a25903102" ]print("\nMatching results:") for target_hash in target_hashes: for repo in repositories: if hashlib.md5(repo.encode(’utf-8’)).hexdigest() == target_hash: print(f"The repository corresponding to the hash {target_hash}: {repo}") break else: print(f"Hash value {target_hash} does not match any repository.") }) 
+
+✓ Result 
+
+"success": true, "stdout": "MD5 hashes of Google’s most popular repositories: material-design-icons: 35ccf8f8d66f9fe3a0c986bcaf3907ab guava: da046c3196159a5484b74c947acd4e90 zx: e6c760b3216a51c656c5861d72d5bf62 styleguide: f193869723629a9d568c3572eb0c7e95 leveldb: afc3fe90c1ca0125773c738df7d64d80 googletest: 7ce426278fca4afdd20c3e31d905622a Matching results: Hash value 03995b34caa5398007484d7c98208c92: No matching repository found Hash value fbc75c88a010f49e6c8257702f8108a1: No matching repository found Hash value 2f179647bda614c36304fb17849ed459: No matching repository found Hash value 34bceeae55d826b8813aa54a25903102: No matching repository found", "stderr": "", "files": [], "workdir": "/tmp/python_exec/20251229_101216_4b42c9c4", "message": "MD5 hashes of Google’s most popular repositories: material-design-icons: 35ccf8f8d66f9fe3a0c986bcaf3907ab guava: da046c3196159a5484b74c947acd4e90 zx: e6c760b3216a51c656c5861d72d5bf62 styleguide: f193869723629a9d568c3572eb0c7e95 leveldb: afc3fe90c1ca0125773c738df7d64d80 googletest: 7ce426278fca4afdd20c3e31d905622a Matching results: Hash value 03995b34caa5398007484d7c98208c92: No matching repository found Hash value fbc75c88a010f49e6c8257702f8108a1: No matching repository found Hash value 2f179647bda614c36304fb17849ed459: No matching repository found Hash value 34bceeae55d826b8813aa54a25903102: No matching repository found" 
+
+— Step 5 — ★ Assistant 
+
+I found several models, and compute the MD5 hash for each:     
+
+> md5("material-design-icons") =35c... md5("leveldb") =afc3fe... ...
+
+None of these match the target hash 03995... ... 
+
+✖ Premature termination 
+
+Based on my search, I couldn’t find a model matching the given hash. The answer might be a less popular model not in the top search results. 
+
+Final Answer: Unable to determine. 
+
+✖ Failure Analysis 
+
+Failure Mode: Incomplete Enumeration 
+
+The agent relied on web search results (top 10) instead of systematically enumerating all popular repositories via the Hugging Face API. The correct answer flutter/kubernetes... exists but was not in the search results because it does not have more popularity (than others). 
+
+Root Cause: The agent “outsourced” enumeration to the search engine, which returned only high-ranking results. A correct approach would use the HuggingFace API:      
+
+> from huggingface_hub import list_models models =list_models(author="google")
+
+Figure 5: Case Study 2: Incomplete Enumeration Failure. The agent fails to enumerate all candidates by relying solely on search engine results, missing the correct answer.
