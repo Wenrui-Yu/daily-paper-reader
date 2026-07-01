@@ -6,51 +6,35 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-30
-- 运行时间：2026-06-30 22:12:37 UTC
+- 最新运行日期：2026-07-01
+- 运行时间：2026-07-01 21:56:41 UTC
 - 运行状态：成功
-- 本次总论文数：9
-- 精读区：6
-- 速读区：3
+- 本次总论文数：5
+- 精读区：4
+- 速读区：1
 
 ### 今日简报（AI）
-今天共处理9篇文献，精读6篇、速读3篇，重点聚焦搜索与检索系统的优化及隐私保护。
-
-最值得关注的两篇高分精读：一是采用LLM标注数据并通过渐进式课程学习扩展电商密集检索，二是结合SVD截断与CKKS加密实现混合隐私感知语义搜索。
-
-建议读者后续可深入研究如何平衡检索效率与隐私安全，以及大型语言模型在训练数据自动标注中的实际效果与成本。
-- 详情：[/202606/30/README](/202606/30/README)
+今日推荐5篇论文，聚焦隐私保护与抵抗对齐的机器学习方法。重点关注《Escaping Iterative Parameter-Space Noise》提出的超网络差分隐私学习（9.0分），以及《SHARD》中基于单元格分裂的抵抗对齐私有稠密检索（9.0分）。对数据隐私有要求的读者，建议优先阅读这两篇技术方案。
+- 详情：[/202607/01/README](/202607/01/README)
 
 ### 精读区论文标签
-1. [Scaling Dense Retrieval with LLM-Annotated Training Data: Structured Mining and Progressive Curriculum for E-Commerce Sponsored Search](/202606/30/2606.23911v1-scaling-dense-retrieval-with-llm-annotated-training-data-structured-mining-and-progressive-curriculum-for-e-commerce-sponsored-search)  
+1. [Escaping Iterative Parameter-Space Noise: Differentially Private Learning with a Hypernetwork](/202607/01/2606.26772v1-escaping-iterative-parameter-space-noise-differentially-private-learning-with-a-hypernetwork)  
    标签：评分：9.0/10、query:daily
-   evidence：利用LLM标注数据训练密集检索模型用于赞助搜索
-2. [Hybrid privacy-aware semantic search: SVD-truncated document geometry and CKKS-encrypted query reranking under a restricted threat model](/202606/30/2606.26373v2-hybrid-privacy-aware-semantic-search-svd-truncated-document-geometry-and-ckks-encrypted-query-reranking-under-a-restricted-threat-model)  
+   evidence：提出差分隐私学习框架用于机器学习，直接匹配分布式机器学习隐私需求
+2. [SHARD: cell-keyed residual splitting for alignment-resistant private dense retrieval](/202607/01/2606.27976v2-shard-cell-keyed-residual-splitting-for-alignment-resistant-private-dense-retrieval)  
    标签：评分：9.0/10、query:daily
-   evidence：隐私感知语义搜索
-3. [SurrogateShield: Beyond Redaction for High-Utility, Privacy-Preserving LLM Interactions](/202606/30/2606.29567v1-surrogateshield-beyond-redaction-for-high-utility-privacy-preserving-llm-interactions)  
+   evidence：基于嵌入拆分的私有稠密检索
+3. [Privacy-Aware State Estimation: From Coarse to Precise Privacy Protection](/202607/01/2606.29412v1-privacy-aware-state-estimation-from-coarse-to-precise-privacy-protection)  
    标签：评分：9.0/10、query:daily
-   evidence：通过替换实现隐私保护的LLM交互
-4. [As We May Search](/202606/30/2606.29652v1-as-we-may-search)  
+   evidence：状态估计中的隐私保护，直接匹配分布式优化隐私需求
+4. [TabPATE: Differentially Private Tabular In-Context Learning Without Public Data](/202607/01/2606.31474v1-tabpate-differentially-private-tabular-in-context-learning-without-public-data)  
    标签：评分：9.0/10、query:daily
-   evidence：本地优先的信息检索以保护隐私
-5. [DialogPII: A multilingual dataset of synthetic dialog transcripts to detect personal information](/202606/30/2606.30312v1-dialogpii-a-multilingual-dataset-of-synthetic-dialog-transcripts-to-detect-personal-information)  
-   标签：评分：9.0/10、query:daily
-   evidence：用于隐私保护的个人信息检测数据集
-6. [R$^2$-Searcher: Calibrating Retrieval and Reasoning Boundaries for Agentic Search](/202606/30/2606.28566v1-r2-searcher-calibrating-retrieval-and-reasoning-boundaries-for-agentic-search)  
-   标签：评分：8.0/10、query:daily
-   evidence：搜索代理校准检索与推理边界
+   evidence：基于PATE风格的差分隐私表格上下文学习防御
 
 ### 速读区论文标签
-1. [Field Order Should Not Matter: Permutation-Invariant Embedding Model Fine-Tuning for Structured Metadata Retrieval](/202606/30/2606.30473v1-field-order-should-not-matter-permutation-invariant-embedding-model-fine-tuning-for-structured-metadata-retrieval)  
-   标签：评分：7.0/10、query:daily
-   evidence：面向结构化元数据检索的排列不变微调
-2. [GUI agent: Guided Exploration of User-Sensitive Screens](/202606/30/2606.25705v1-gui-agent-guided-exploration-of-user-sensitive-screens)  
+1. [A Sensitivity-Aware Test Collection for Search Among Personal Information](/202607/01/2606.27559v1-a-sensitivity-aware-test-collection-for-search-among-personal-information)  
    标签：评分：6.0/10、query:daily
-   evidence：GUI智能体处理敏感屏幕时的隐私问题
-3. [Ko-WideSearch: A Korean Breadth-Search Benchmark for Exhaustive Set Enumeration by Web Agents](/202606/30/2606.27595v1-ko-widesearch-a-korean-breadth-search-benchmark-for-exhaustive-set-enumeration-by-web-agents)  
-   标签：评分：6.0/10、query:daily
-   evidence：面向网络代理的广度搜索基准
+   evidence：提供隐私敏感搜索的测试集，通过评估资源支持分布式系统隐私
 
 
 <div class="dpr-home-promo-card">
