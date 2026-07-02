@@ -6,35 +6,45 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-01
-- 运行时间：2026-07-01 21:56:41 UTC
+- 最新运行日期：2026-07-02
+- 运行时间：2026-07-02 21:44:14 UTC
 - 运行状态：成功
-- 本次总论文数：5
-- 精读区：4
-- 速读区：1
+- 本次总论文数：7
+- 精读区：2
+- 速读区：5
 
 ### 今日简报（AI）
-今日推荐5篇论文，聚焦隐私保护与抵抗对齐的机器学习方法。重点关注《Escaping Iterative Parameter-Space Noise》提出的超网络差分隐私学习（9.0分），以及《SHARD》中基于单元格分裂的抵抗对齐私有稠密检索（9.0分）。对数据隐私有要求的读者，建议优先阅读这两篇技术方案。
-- 详情：[/202607/01/README](/202607/01/README)
+今日推荐7篇论文，聚焦隐私保护与差分隐私前沿进展。
+
+精读推荐《Privacy-Aware State Estimation》与《The Binary Tree Mechanism》，分别提出从粗到精的隐私保护框架及近似差分隐私连续计数的最优解法。
+
+普通读者可重点关注差分隐私在时序数据处理中的实用技巧，速读篇目如Bit-ViP图像隐私、CADENZA语义查询编译也值得一瞥。
+- 详情：[/202607/02/README](/202607/02/README)
 
 ### 精读区论文标签
-1. [Escaping Iterative Parameter-Space Noise: Differentially Private Learning with a Hypernetwork](/202607/01/2606.26772v1-escaping-iterative-parameter-space-noise-differentially-private-learning-with-a-hypernetwork)  
+1. [Privacy-Aware State Estimation: From Coarse to Precise Privacy Protection](/202607/02/2606.29412v2-privacy-aware-state-estimation-from-coarse-to-precise-privacy-protection)  
    标签：评分：9.0/10、query:daily
-   evidence：提出差分隐私学习框架用于机器学习，直接匹配分布式机器学习隐私需求
-2. [SHARD: cell-keyed residual splitting for alignment-resistant private dense retrieval](/202607/01/2606.27976v2-shard-cell-keyed-residual-splitting-for-alignment-resistant-private-dense-retrieval)  
+   evidence：分布式系统中的隐私状态估计
+2. [The Binary Tree Mechanism is Optimal for Approximate Differentially Private Continual Counting](/202607/02/2607.00876v1-the-binary-tree-mechanism-is-optimal-for-approximate-differentially-private-continual-counting)  
    标签：评分：9.0/10、query:daily
-   evidence：基于嵌入拆分的私有稠密检索
-3. [Privacy-Aware State Estimation: From Coarse to Precise Privacy Protection](/202607/01/2606.29412v1-privacy-aware-state-estimation-from-coarse-to-precise-privacy-protection)  
-   标签：评分：9.0/10、query:daily
-   evidence：状态估计中的隐私保护，直接匹配分布式优化隐私需求
-4. [TabPATE: Differentially Private Tabular In-Context Learning Without Public Data](/202607/01/2606.31474v1-tabpate-differentially-private-tabular-in-context-learning-without-public-data)  
-   标签：评分：9.0/10、query:daily
-   evidence：基于PATE风格的差分隐私表格上下文学习防御
+   evidence：解决了差分隐私连续计数的最优误差界，这是隐私保护分布式优化的核心问题
 
 ### 速读区论文标签
-1. [A Sensitivity-Aware Test Collection for Search Among Personal Information](/202607/01/2606.27559v1-a-sensitivity-aware-test-collection-for-search-among-personal-information)  
+1. [Bit-ViP: Leveraging Bit-planes to Preserve Visual Privacy in Images through Obfuscation](/202607/02/2606.29417v1-bit-vip-leveraging-bit-planes-to-preserve-visual-privacy-in-images-through-obfuscation)  
+   标签：评分：7.0/10、query:daily
+   evidence：基于位平面的图像模糊化方案以保护视觉隐私
+2. [CADENZA: Compiling Natural-Language Intent into Task-Specific Operator DAGs for Semantic Query Processing](/202607/02/2606.29151v1-cadenza-compiling-natural-language-intent-into-task-specific-operator-dags-for-semantic-query-processing)  
    标签：评分：6.0/10、query:daily
-   evidence：提供隐私敏感搜索的测试集，通过评估资源支持分布式系统隐私
+   evidence：语义查询处理与算子DAG编译
+3. [SP-CACW: Convergence-Aware Client Weighting for Selfish Personalized Learning](/202607/02/2606.29322v1-sp-cacw-convergence-aware-client-weighting-for-selfish-personalized-learning)  
+   标签：评分：6.0/10、query:daily
+   evidence：分布式学习中面向个性化优化的客户端权重分配
+4. [When LLMs Read Tables Carelessly: Measuring and Reducing Data Referencing Errors](/202607/02/2606.32029v1-when-llms-read-tables-carelessly-measuring-and-reducing-data-referencing-errors)  
+   标签：评分：6.0/10、query:daily
+   evidence：LLM中的表格数据引用错误
+5. [Generative Retrieval for Table Union Search](/202607/02/2607.00833v1-generative-retrieval-for-table-union-search)  
+   标签：评分：6.0/10、query:daily
+   evidence：使用生成式检索的表联合搜索
 
 
 <div class="dpr-home-promo-card">

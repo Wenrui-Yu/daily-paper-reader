@@ -1,0 +1,1356 @@
+Title: Generative Retrieval for Table Union Search
+
+URL Source: https://arxiv.org/pdf/2607.00833v1
+
+Published Time: Thu, 02 Jul 2026 01:13:41 GMT
+
+Number of Pages: 14
+
+Markdown Content:
+# Generative Retrieval for Table Union Search 
+
+# Shulun Zhang 
+
+The Chinese University of Hong Kong, Shenzhen Shenzhen, China shulunzhang@link.cuhk.edu.cn 
+
+# Linting Wang 
+
+Fudan University Shanghai, China lintingwang25@m.fudan.edu.cn 
+
+# Yuwei Xu 
+
+The Chinese University of Hong Kong, Shenzhen Shenzhen, China yuweixu@link.cuhk.edu.cn 
+
+# Yingli Zhou 
+
+The Chinese University of Hong Kong, Shenzhen Shenzhen, China yinglizhou@link.cuhk.edu.cn 
+
+# Chenhao Ma 
+
+The Chinese University of Hong Kong, Shenzhen Shenzhen, China machenhao@cuhk.edu.cn 
+
+## Abstract 
+
+Modern data lakes contain heterogeneous tables whose task-relevant information is often scattered across different schemas, sources, and naming conventions. Table union search (TUS) retrieves ta-bles that can be reliably unioned with a query table, supporting data discovery, enrichment, and downstream analytics. Although learning-based TUS methods improve table- or column-level rep-resentations, they still follow an encode–search–refine pipeline: candidate retrieval is followed by query–candidate matching or reranking, making quality dependent on candidate-pool recall and incurring growing latency and storage costs as the data lake scales. We propose GenTUS, a generative retrieval framework that refor-mulates TUS as constrained generation over discrete semantic table identifiers. Instead of searching and reranking an explicit candi-date pool, GenTUS assigns candidate tables compact unionability-aware identifiers and trains a generator to produce the identifiers of unionable tables directly from the query. At query time, con-strained decoding ensures that generated identifiers correspond to valid data-lake tables and returns them as ranked retrieval results. Experiments on seven public TUS benchmarks show that GenTUS achieves the best overall retrieval quality, with an average rank of 1.05 compared to 2.57 for the strongest baseline, while substantially reducing online latency, retrieval-artifact storage, and incremental update cost. 
+
+Reference Format: 
+
+Shulun Zhang, Linting Wang, Yuwei Xu, Yingli Zhou, and Chenhao Ma. Generative Retrieval for Table Union Search. 
+
+PVLDB Artifact Availability: 
+
+The source code, data, and/or other artifacts have been made available at https://github.com/alanzhang1001/GenTUS. 
+
+This work is licensed under the Creative Commons BY-NC-ND 4.0 International License. Visit https://creativecommons.org/licenses/by-nc-nd/4.0/ to view a copy of this license. For any use beyond those covered by this license, obtain permission by emailing info@vldb.org. Copyright is held by the owner/author(s). Publication rights licensed to the VLDB Endowment. Proceedings of the VLDB Endowment, Vol. XX, No. XX ISSN 2150-8097. doi:XX.XX/XXX.XX I want to analyze            
+
+> transit ridership
+> across more cities.
+> Query : City Transit Ridership
+> City Riders
+> (unique) Mode
+> Boston 218M subway
+> Chicago 336M rail
+> New York 2.0B subway
+> ... ... ...
+> !Limited coverage
+
+Heterogeneous tables in the data lake                                           
+
+> Unionable
+> City
+> (infer)
+> Riders
+> (how many)
+> Mode
+> (what system)
+> T1: Metro Area Annual Trips
+> T2: Rail Usage by Municipality
+> T3: Airport Passenger Traffic
+> ✦✦
+> Enriched table
+> City Riders
+> (unique) Mode
+> Boston 218M subway
+> Chicago 336M rail
+> New
+> York 2.0B subway
+> London 3.6B Underground
+> Paris 1.5B Metro
+> Berlin 1.2B U-Bahn
+> Madrid 657M Metro
+> ... ... ...
+> Metro
+> area
+> Passenger trips
+> (total) System
+> London 3.6B Underground
+> Paris 1.5B Metro
+> ………
+> Municipality Boardings (total) Transit type
+> Berlin 1.2B U-Bahn
+> Madrid 657M Metro
+> ………
+> Not unionable
+> Airport City Passengers
+> JFK NY 62M
+> LAX LA 75M
+> ………
+> ✦
+> ✦More cities,
+> Broader coverage,
+> Better analysis.
+> ✦
+
+Figure 1: An example of table union search. 
+
+## 1 Introduction 
+
+Modern data lakes contain large collections of heterogeneous tables published by different organizations and curated under different schemas, metadata conventions, and quality standards [ 1, 9 , 18 , 32 ,49 ]. To support downstream analysis, users often need to discover tables from a data lake that are relevant to a given analytical task. In many cases, the information needed to answer a given task is not always contained in a single table; instead, it is scattered across multiple tables with overlapping semantics but different schemas, naming conventions, and coverage [ 14 , 32 , 51 ]. To guide such dis-covery, a query table, which may come from an existing dataset, an intermediate analysis result, or a small seed table, provides a concrete specification of the desired attributes and semantics. As illustrated in Figure 1, the goal is then to retrieve data-lake tables that provide complementary, semantically compatible rows and can be reliably unioned with the query table. This need motivates table union search (TUS), which retrieves tables from a data lake that can be unioned with a given query table. TUS is a key primitive for data discovery, integration, enrich-ment, exploratory analysis, and downstream analytics or model training [ 8 , 11 , 25 , 33 ]. At its core, TUS is a semantic compatibility problem: it seeks tables whose columns can be aligned with the query table so that their rows can be appended. Unlike keyword-based table search or join-oriented discovery, unionability cannot be determined from keyword overlap or shared keys alone, because unionable tables may use different column names, have missing metadata, and share only sparse value overlap.                   
+
+> arXiv:2607.00833v1 [cs.DB] 1 Jul 2026 Prior TUS methods
+> encode-search-refine
+> 1. Query Table
+> ...
+> 2. Encode Query
+> Embeddings
+> (table/column) ANN index
+> 3. Candidate Retrieval
+> ...
+> C candidates ( C ≫ k )
+> !Large pool
+> Heavy storage
+> 4. Candidate Refinement
+> query q
+> T1q + T 1s1
+> T2q + T 2s2
+> T3q + T 3s3
+> TNq + T NsN
+> ... ...
+> Sort
+> candidates
+> T17 0.92
+> T03 0.89
+> T41 0.86
+> ...
+> Tk0.75
+> !Ccandidate scores / high latency
+> 5. Top-k
+> Tables
+> GenTUS
+> 2. Generate Semantic IDs
+> Encoder-Decoder
+> No ANN index, No per-candidate scoring
+> map IDs
+> to tables
+> +18%
+
+↑ 12.6 × faster ↓ 13 × smaller ↓    
+
+> ...
+> ...
+> Candidates
+> generative retrieval
+> 1. Query Table
+> ...
+> ID 17 ID 03 ID 41 ID k
+> ...
+> Generate semantic IDs
+> (one generation pass)
+> 3. Top-k Tables
+> ...
+> Accuracy Index storage Latency
+
+Figure 2: Prior TUS methods vs. GenTUS. Prior works. As summarized in Figure 2, existing TUS meth-ods largely follow an encode–search–refine pipeline. Specifically, they typically consist of three stages: (1) encoding , where tables or their components, such as columns, are encoded into dense rep-resentations; (2) index construction , where the resulting table or column embeddings are stored in a vector database to support ef-ficient retrieval; and (3) online search and refinement , where the encoded query retrieves candidate tables through table-level search or column-level matches. The retrieved candidates are then refined by a reranking model or a matching-based scoring procedure to produce the final top-𝑘 unionable tables. Generally, different TUS methods mainly differ in the encoding and refinement stages. For example, Starmie [ 17 ] and LIFTus [ 34 ] encode each table at the column level and aggregate column-level evidence during retrieval or refinement to score candidate tables. In contrast, table-centric methods such as TACTUS [ 38 ] learn table-level embeddings for table-first candidate retrieval, followed by reranking with column-level evidence. 
+
+Motivation. Although the above pipeline works well when the data lake is small and clean, its limitations become clear when the lake becomes large and heterogeneous. First, the final result is highly dependent on the recall of the first-stage retrieval. If a truly unionable table is not retrieved as a candidate, the later refinement step has no chance to recover it. This becomes more serious in large data lakes, where many tables may be semantically close to the query and are difficult to separate using dense representations alone. Second, the online cost increases with the size of the data lake. For every query table, existing methods need to search the index, retrieve a candidate set, and then compare or rerank these candidates with the query table. As the lake grows, this query-time search-and-refine process becomes increasingly expensive. Third, existing methods also introduce large storage overhead. They need to store table or column embeddings, maintain search indexes, and sometimes keep additional structures for refinement or matching. These costs can be substantial for large data lakes. These limitations motivate us to ask a different question: Can we improve TUS quality and efficiency without explicitly searching and refining a candidate pool from a growing data lake? 
+
+Our technical contributions. We propose GenTUS , a gen-erative table union search framework that, as shown in Figure 2, reformulates TUS as constrained generation over discrete semantic table identifiers. During retrieval, GenTUS generates target table identifiers directly via beam search over a prefix tree, eliminating the need for vector indexes, ANN search, or reranking models. This paradigm shift avoids explicit lake-wide ANN search and query– candidate reranking at inference time and eliminates the storage overhead of maintaining embeddings and retrieval indexes. The framework is built around two core designs. 
+
+The first design is unionability-aware semantic identifier construction. A content-only identifier construction approach minimizes reconstruction error and quantizes each table indepen-dently, leaving the codebook unaware of inter-table unionability relationships; since unionability is defined by pairwise annotations and cannot emerge from single-table content alone, the discrete identifier space lacks aggregated structure favorable for generating unionable tables. To address this, we incorporate a contrastive loss supervised by pairwise unionability annotations into training, ex-plicitly guiding unionable table pairs to receive identifiers that share coarse structure in the discrete space. As a result, beam search is in-clined to prioritize identifiers of unionable tables, without requiring a separate reranking stage. 
+
+The second design is SID-tree-based constrained decoding and online retrieval. Without structural constraints, the generator may spend beam capacity on identifiers that do not correspond to any candidate table. To address this, we organize all valid identifiers into a prefix tree and impose prefix constraints during decoding, ensuring that every generated identifier maps to an existing table in the data lake. Online retrieval then reduces to constrained beam search over the SID tree, with the decoding budget governed by beam width and identifier depth rather than explicit search over the data lake; inserting a new table requires only a local update to the SID tree without rebuilding any index. Extensive experiments on seven public TUS benchmarks demon-strate that GenTUS substantially outperforms existing methods in retrieval quality, achieving an average rank of 1.05 compared to 2.57 for the strongest baseline TACTUS, while also outperforming encode–search–refine methods across offline build time, online retrieval latency, and index storage. In summary, our main contributions are as follows. 
+
+• We propose GenTUS, the first generative retrieval framework for TUS, reformulating table union search as constrained generation over discrete semantic table identifiers. 
+
+• We design unionability-aware identifier construction that in-corporates pairwise unionability supervision, so that unionable tables receive generation-friendly identifiers with shared coarse structure. 
+
+• We propose prefix-tree-based constrained decoding that guar-antees valid identifier generation and avoids explicit lake-wide candidate search during online retrieval. 
+
+• We conduct experiments on seven public TUS benchmarks, demon-strating GenTUS’s advantages in retrieval quality and system efficiency over state-of-the-art methods. 
+
+Outline. We introduce the preliminaries in Section 2 and review related work in Section 3. We present an overview of GenTUS in Section 4, and detail the offline and online phases in Sections 5 and 6. Experimental results are reported in Section 7, and we conclude in Section 8. 
+
+> 2
+
+## 2 Preliminaries 2.1 Table Union Search 
+
+Let D = {𝑇 1, . . . ,𝑇 𝑁 } denote the candidate data lake, where each table 𝑇 𝑖 consists of a set of columns 𝐶 𝑖 and a collection of tuples defined over 𝐶 𝑖 . Given a query table 𝑞 , table union search aims to retrieve a ranked list of candidate tables from D that are unionable with 𝑞 . Following prior work [ 17 , 25 , 33 , 38 ], we treat unionability as a semantic relation between tables rather than a strict schema-matching problem: two tables may be unionable even when their column names, schemas, or metadata differ, as long as their columns can be aligned under compatible semantics. We write 𝜇 (𝑞,𝑇 ) for a unionability score between 𝑞 and a candidate 𝑇 , with larger values indicating stronger unionability. 
+
+Definition 2.1 (Top-𝑘 Table Union Search). Following the standard TUS formulation [ 25 , 33 ], given a data lake D, a query table 𝑞 , and a positive integer 𝑘 , top-𝑘 table union search returns a ranked list of 𝑘 
+
+distinct tables 𝜋 𝑘 (𝑞, D) = (𝑇 (1) , . . . ,𝑇 (𝑘 ) ) ordered by a unionability score 𝜇 : 𝜇 (𝑞,𝑇 ( 𝑗 ) ) ≥ 𝜇 (𝑞,𝑇 ( 𝑗 +1) ) for 𝑗 = 1, . . . , 𝑘 − 1.We partition the annotated pairs G ⊆ Q × D into a training split Gtrain ⊆ Q train × D and a test split Gtest ⊆ Q test × D , where 
+
+Qtrain ∩ Q test = ∅; all annotation-dependent offline training signals use only Gtrain .
+
+## 2.2 Generative Retrieval 
+
+In this paper we study a generative formulation of table union search. Each candidate table 𝑇 𝑖 ∈ D is assigned a discrete seman-tic identifier 𝑠 𝑖 = (𝑠 𝑖, 1, . . . , 𝑠 𝑖,ℓ 𝑖 ), with tokens drawn from a finite code vocabulary. In our implementation, 𝑠 𝑖 consists of an 𝐿 -token residual-quantized base code, optionally followed by a suffix token for collision resolution. Let SD = {𝑠 𝑖 | 𝑇 𝑖 ∈ D} be the set of valid identifiers under the current candidate data lake, and 𝜙 : SD → D 
+
+the bijective mapping from identifiers back to tables. 
+
+Definition 2.2 (Generative TUS Retriever). A generative TUS re-triever models the conditional probability 𝑝 𝜃 (𝑠 | 𝑞 ) of an identifier given the query table. At inference, it decodes identifiers from 
+
+SD and returns the corresponding tables through the mapping 𝜙 ,producing the top-𝑘 result of Definition 2.1 in generation order. 
+
+## 3 Related Work 3.1 Table Discovery and Table Union Search 
+
+Table discovery aims to find useful tables from large data lakes for downstream analysis, integration, and enrichment. Different discovery intents have led to keyword or dataset search [ 5], schema matching, joinable-table discovery [ 9, 51 ], and unionable-table dis-covery. Early table discovery systems often rely on metadata, col-umn headers, schemas, value overlap, semantic annotations, or hand-crafted similarity aggregation [ 4, 6 , 28 , 30 , 45 ], although these signals can be unreliable in open data lakes, where datasets may lack predefined schemas and published metadata is often incom-plete or inconsistent with the underlying data [ 8 , 30 , 32 ]. Recent benchmarks such as LakeBench [ 14 ] and end-to-end systems such as LakeCompass [10 ] have further advanced large-scale evaluation and deployment of table discovery systems. Among these tasks, table union search (TUS) focuses on retriev-ing tables that can extend a query table with additional rows under compatible column semantics [ 12 , 22 , 26 , 32 , 33 ]. Unlike keyword search, where relevance is largely determined by textual similar-ity, TUS requires reasoning about semantic compatibility between tables. It also differs from joinable-table discovery, which seeks tables connected through join keys, whereas TUS aims to identify tables describing compatible attributes even when schemas, column names, or metadata differ. 
+
+## 3.2 Embedding-Based Table Union Search 
+
+To retrieve unionable candidates under schema and metadata het-erogeneity, recent TUS methods increasingly rely on learned ta-ble or column embeddings. These methods build on broader ad-vances in table representation learning [ 2], including TaBERT [46 ], 
+
+TaPas [ 21 ], and TURL [13 ]. Beyond learned embeddings, prior work also exploits semantic type information [ 23 , 48 ], relationship se-mantics [ 25 ], and schema-, value-, embedding-, or matching-based signals [ 4 , 16 , 19 , 24 , 28 ] to estimate table relatedness and unionabil-ity. Column-centric systems such as Starmie [ 17 ] and LIFTus [ 34 ]represent tables through contextualized or multi-aspect column embeddings, and aggregate column-level evidence to score candi-date tables. More recent table-centric systems such as TACTUS [38 ]learn table-level embeddings for table-first candidate retrieval, fol-lowed by dual-evidence reranking with column-level signals. De-spite differences in representation design, these methods share an embedding-based encode–search–refine pipeline: they encode ta-bles or columns into dense representations, organize them in a search index, often an ANN index such as HNSW [31 ], retrieve can-didate tables through table-level search or column-level matches, and then score or refine the candidates through matching, aggre-gation, or reranking. Rather than retrieving candidates through nearest-neighbor search and refining them post hoc, GenTUS di-rectly generates identifiers of unionable tables under constrained decoding. 
+
+## 3.3 Generative Retrieval 
+
+Generative retrieval formulates retrieval as sequence generation over discrete candidate identifiers. Early differentiable search index and autoregressive retrieval methods show that entity retrieval can be cast as generating target identifiers conditioned on a query [ 3, 7,39 , 42 ]. This paradigm has been especially influential in recommen-dation, where systems such as TIGER construct residual-quantized item identifiers and train sequence models to generate relevant item IDs [ 37 , 40 ]. Subsequent work further improves item tok-enization, collaborative-semantic alignment, and ranking-oriented training [ 35 , 41 , 47 , 50 ]. In data management, Birdie [20 ] brings differentiable search indexes to natural-language-driven table dis-covery, showing that an encoder–decoder index can unify table indexing and search, strengthen query–table interaction, and sup-port continual table indexing. Together, these works position generative retrieval as a promis-ing interface for retrieving structured objects, including tables. However, applying this paradigm to TUS is non-trivial: generated identifiers and decoding scores must reflect table-pair unionability, rather than generic query–item relevance. GenTUS addresses this  
+
+> 31
+
+Table Preprocessing 
+
+> Candidate Tables
+> from Data Lake
+> Query Table
+
+Table -to -Sentence  Serialization 
+
+Query Table Sentence 
+
+Candidate Table  Sentences 
+
+Sampled Values               
+
+> 18 |9364 |7263 |9971 ...
+> Amy | Sam |Tom |Luka …
+> …
+> 2014 -05 -01 |2016 -03 -09 …
+
+Serialized Sentence                                                 
+
+> [COL] [VAL] 2014 -05 -01 ...
+> [COL] [VAL] 18 |9364 |7263 ...
+> …
+> [COL] [VAL] Amy | Sam |Tom ...
+> tbl_air_ schedule → [ COL] [VAL] 2014 -05 -01 ... [ COL] [VAL] 18 ...
+> tbl_ passenger _counts → [ COL] [VAL] 52... [ COL] [VAL] Ship ...
+> …
+> tbl_air_routes → [ COL] [VAL] Shanghai ... [ COL] [VAL] 10:00 ...
+> Processing format ：[COL] [VAL] values ... [COL] [VAL] values ...
+> query_table →[COL] [VAL] Boston | Chicago | New York ...
+> [COL] [VAL ]2180 |3361 |9932 |0687 |9501 ...
+> 2
+
+Offline Processing  
+
+> 2A
+
+Semantic ID Construction                        
+
+> candidate
+> Residual
+> Quantization <10 ,20 ,30 ,40 >
+> <10 ,20 ,31 ,41 >
+> <10,20,30,47>
+> <12, 26, 36, 46>
+> Decoder
+> Reconstructed
+> Embedding Semantic IDs
+> ...
+> ...
+> 2B
+> ✓<10 ,20 ,30 ,40 >
+> ✓<10 ,20 ,31 ,41 >query
+> T5Generator Positive Semantic IDs All Candidate
+> Semantic IDs
+> ...
+> Hard Negative Semantic IDs
+> Table Embedding Space
+> = unionable with query
+> = non -unionable close candidate
+> = other tables
+
+ℒrec 
+
+ℒunion 
+
+ℒrq 
+
+Offline  Generative  Training 
+
+✗ <10 , 20 , 30 , 47> 
+
+> log P(pos | q)
+> log P(hard_neg | q)
+> 3
+
+query 
+
+T5 Generator 
+
+Top -k selected  tables 
+
+<10 , 20 , 30 , 40 > tbl_air_routes  P1 = 0. 93✓ correct 
+
+<10 , 20 , 31 , 41 > tbl_air_schedule  P2 = 0. 88 ✓ correct 
+
+<10 , 20 , 30 , 47 > tbl_passenger_counts  P3 = 0.38 ✗ wrong 
+
+<72 , 5, 88 , 12> tbl_city_banks  P4 = 0.21 – not selected 
+
+= correct unionable  = wrong non -unionable  = not selected / other 
+
+Trie -constrained Beam Search 
+
+10 
+
+20 
+
+40 
+
+31 
+
+41 
+
+25 
+
+35 
+
+45 
+
+12 
+
+36 
+
+88 47 
+
+67  39 
+
+26 
+
+72 
+
+88 
+
+12
+
+5
+
+11 
+
+30       
+
+> Encoder
+> ++++...
+> e≈b1+b2+b3+b4+…
+
+ℒce 
+
+ℒpairwise 
+
+Online  Retrieval Figure 3: Overview of GenTUS. 
+
+requirement through unionability-aware semantic identifiers and ranking-calibrated constrained generation. 
+
+## 4 Overview 
+
+Figure 3 illustrates the overall framework of GenTUS. GenTUS reformulates table union search as constrained generation over semantic table identifiers. Instead of maintaining a dense vector index and retrieving candidates by nearest-neighbor lookup, Gen-TUS makes each candidate table addressable by a discrete semantic identifier. Given a query table, an encoder–decoder generator di-rectly produces identifiers of candidate tables that are likely to be unionable with the query, and the generated identifiers are mapped back to data-lake tables as retrieval results. 
+
+Table preprocessing. GenTUS serializes both candidate and query tables into table sentences that compactly capture sampled cell values and column-level structure, without using column names. This shared format feeds the offline table representation step in Section 5.1 and is reused for generator inputs during training and online retrieval. 
+
+Offline processing. Given a data lake D, GenTUS constructs the generative search space in two parts. The first part defines the discrete identifier space for candidate tables, and the second part trains a generator to search this space from a query table. First, GenTUS encodes candidate tables into table-level represen-tations and performs unionability-aware semantic ID construction, as detailed in Section 5.1 and Section 5.2. For each candidate table 
+
+𝑇 ∈ D , GenTUS feeds its serialized table sentence into a table encoder to obtain a table-level embedding, and then converts the embedding into a compact semantic identifier using a unionability-aware residual quantizer with learnable codebooks. The quantizer is trained to preserve table content while shaping the discrete iden-tifier space according to table-pair unionability, so that unionable tables are encouraged to share coarse codes and occupy nearby re-gions of the identifier space. This step produces the valid identifier set SD , an identifier–table mapping 𝜙 , and a prefix tree Trie D built over SD for constrained decoding. Second, GenTUS builds query-to-identifier training records and performs offline generative training, as detailed in Section 5.3 and Section 5.4. It trains an encoder–decoder generator 𝐺 𝜃 over query-to-identifier records derived from Gtrain . Each record takes a serial-ized training query table as input and uses the semantic identifier of an annotated unionable candidate as the target output sequence. Besides the sequence generation objective, GenTUS further uses mined hard-negative identifiers and a pairwise ranking objective to calibrate the relative scores of positive and negative identifiers. 
+
+Online retrieval. Given a query table 𝑞 , GenTUS serializes 𝑞 
+
+using the same generator preprocessing procedure and feeds it into the trained generator, as described in Section 6.1. The decoder generates semantic identifiers token by token. At each decoding step, the prefix tree Trie D restricts the next token to prefixes that can still lead to an existing table identifier in SD . This trie constraint prevents invalid identifiers from consuming beam-search capacity. Completed identifiers are scored by the generator, mapped back to 
+
+> 4
+
+tables through 𝜙 , deduplicated, and returned as the top-𝑘 unionable tables. 
+
+## 5 Offline Processing 
+
+The offline stage builds the generative candidate space used by Gen-TUS and trains the retrieval generator. It consists of two conceptual steps: Sections 5.1–5.2 construct semantic identifiers for candidate tables, while Sections 5.3–5.4 train a generator that maps query tables to identifiers of unionable candidates. 
+
+## 5.1 Table Representation 
+
+Following the metadata-agnostic table-centric design of TACTUS [ 38 ], GenTUS first derives contextualized column representations from serialized cell values and then attention-pools them into a table embedding. Under a bounded serialization budget, GenTUS retains all columns of each table and controls the input length by bounding the number of serialized values per column. For a table 𝑇 with ordered columns 
+
+𝐶 𝑇 = (𝑐 1, . . . , 𝑐 |𝐶 𝑇 | ), let 𝑉 𝑗 = (𝑣 𝑗, 1, . . . , 𝑣 𝑗,𝑟 𝑗 ) be a bounded sequence of distinct non-empty values from column 𝑐 𝑗 . The column and table serializations are 
+
+𝜎 𝑗 = [COL ] ◦ [ VAL ] ◦ tok (𝑣 𝑗, 1) ◦ · · · ◦ tok (𝑣 𝑗,𝑟 𝑗 ).𝑥 𝑇 = [CLS ] ◦ 𝜎 1 ◦ · · · ◦ 𝜎 |𝐶 𝑇 | , H𝑇 = LM 𝜂 (𝑥 𝑇 ),
+
+where |𝐶 𝑇 | is the number of columns in table 𝑇 , tok (·) denotes tokenization, ◦ denotes concatenation, and LM 𝜂 is a pretrained encoder. Let 𝑝 𝑗 denote the position of the [COL ] token for column 
+
+𝑐 𝑗 in 𝑥 𝑇 . We use the encoder hidden state at 𝑝 𝑗 as the representation of column 𝑐 𝑗 : hcol  
+
+> 𝑇 ,𝑗
+
+= H𝑇 [𝑝 𝑗 ]. Stacking all column representations gives Hcol  
+
+> 𝑇
+
+= [hcol 
+
+> 𝑇 , 1
+
+; . . . ; hcol   
+
+> 𝑇 , |𝐶 𝑇 |
+
+]. A global query q𝜂 attention-pools the column representations into a table-level representation: 
+
+htab  
+
+> 𝑇
+
+= MultiHeadAttn 𝜂 (q𝜂 , Hcol  
+
+> 𝑇
+
+, Hcol  
+
+> 𝑇
+
+).
+
+The table-level representation is then projected and normalized as the table embedding: 
+
+e𝑇 = 𝑔 𝜂 (htab  
+
+> 𝑇
+
+)∥𝑔 𝜂 (htab  
+
+> 𝑇
+
+)∥ 2
+
+.
+
+This continuous table embedding e𝑇 is then quantized into a discrete semantic identifier in the next step. 
+
+## 5.2 Semantic Identifier Construction 
+
+Design goals. GenTUS represents each candidate table with a semantic identifier so that table retrieval can be formulated as sequence generation over a finite identifier space. A useful identifier should satisfy two requirements: it should be compact enough to be generated reliably by an autoregressive decoder , and it should preserve the semantic structure needed for TUS so that unionable tables are placed close together in the identifier space .To this end, GenTUS constructs identifiers with residual quanti-zation. Given the table embedding from Section 5.1, the quantizer maps each candidate table to a discrete sequence of code indices. Because residual quantization represents a vector through multiple codebooks, the resulting identifier provides a compact coarse-to-fine code sequence that can be generated by the retrieval generator. However, this quantization process by itself does not explicitly optimize identifiers for unionability. GenTUS therefore augments residual quantization with a unionability-aware contrastive ob-jective, which pulls annotated unionable tables together in the quantizer latent space before discretization. As illustrated in Fig-ure 4, this objective and the residual quantizer jointly encourage unionable tables to share coarse codes while still allowing finer codes to distinguish individual tables. 
+
+Residual quantization. Let Qtrain and Gtrain be the training queries and training annotations defined in Section 2.1. The quan-tizer is fitted over candidate tables in D, and its unionability term is supervised by Gtrain . For each table 𝑇 𝑖 ∈ D , we write e𝑖 as shorthand for its table embedding e𝑇 𝑖 from Section 5.1. The quantizer first maps this table embedding into a separate latent space used for code selection. An MLP encoder 𝑓 𝜔 produces the normalized quantizer latent vector 
+
+z𝑖 = 𝑓 𝜔 (e𝑖 )∥𝑓 𝜔 (e𝑖 )∥ 2
+
+.
+
+The latent vector is quantized by 𝐿 residual codebooks {B ℓ }𝐿 ℓ=1,where Bℓ = {bℓ, 1, . . . , bℓ,𝐾 }. Starting from r(0) 
+
+> 𝑖
+
+= z𝑖 , the ℓ-th code index is selected by nearest-neighbor lookup: 
+
+𝑎 𝑖,ℓ = arg min  
+
+> 𝑘
+
+r(ℓ −1) 
+
+> 𝑖
+
+− bℓ,𝑘  
+
+> 22
+
+,
+
+and the residual is updated as r(ℓ ) 
+
+> 𝑖
+
+= r(ℓ −1) 
+
+> 𝑖
+
+− bℓ,𝑎 𝑖,ℓ . The selected codewords are summed to form the quantized latent vector 
+
+bz𝑖 =
+
+> 𝐿
+
+∑︁ 
+
+> ℓ=1
+
+bℓ,𝑎 𝑖,ℓ .
+
+The corresponding code indices form the base semantic identifier 
+
+¯𝑠 𝑖 = (𝑎 𝑖, 1, . . . , 𝑎 𝑖,𝐿 ) of candidate table 𝑇 𝑖 .
+
+Unionability-aware training and collision resolution. The quantizer is trained with three complementary objectives: a recon-struction loss, a residual quantization loss, and a unionability-aware contrastive loss. For reconstruction, a decoder 𝑔 ′ 
+
+> 𝜔
+
+maps the quan-tized latent vector back to the table-embedding space as be𝑖 = 𝑔 ′ 
+
+> 𝜔
+
+(bz𝑖 ).The reconstruction loss compares this reconstructed table embed-ding with the original table embedding: 
+
+Lrec = 1
+
+|D| ∑︁ 𝑇 𝑖 ∈ D 
+
+∥e𝑖 − be𝑖 ∥22 .
+
+The residual quantization loss Lrq trains the codebooks to rep-resent the residual inputs at each level. Since nearest-neighbor codeword selection is non-differentiable, we follow the standard straight-through training of [ 29 , 40 ] with a codebook term and a commitment term: 
+
+Lrq = 1
+
+|D| ∑︁ 𝑇 𝑖 ∈ D 
+
+> 𝐿
+
+∑︁ 
+
+> ℓ=1
+
+
+
+L (ℓ ) 
+
+> codebook
+
+(𝑖 ) + 𝛽 L (ℓ ) 
+
+> commit
+
+(𝑖 )
+
+
+
+.
+
+GenTUS further adds the unionability-aware contrastive objec-tive over the latent vectors that pulls annotated unionable pairs together and contrasts them against other in-batch tables, align-ing the identifier space with TUS semantics [ 27 ]. Let Gtrain denote the unionability annotations available in the training split, where 
+
+(𝑞,𝑇 +) ∈ G train indicates that candidate table 𝑇 + is unionable with query table 𝑞 . For contrastive training, we use only observed train-ing query–candidate annotations whose query anchor is available     
+
+> 51Semantically related tables 2Latent space
+> (after training)
+> 3Semantic IDs
+> (coarse-to-fine codes)
+
+q   
+
+> City Pop.
+> Paris 2.1M
+> Berlin 3.6M
+
+T1  
+
+> Town Pop.
+> London 8.9M
+> Madrid 3.3M
+
+T2               
+
+> Title Year
+> Movie A 2020
+> Movie B 2019
+> Unionable
+> Pair
+> Lunion
+> Pulls unionable tables together
+> qT1
+> T2
+> Residual quantization (coarse to fine)
+> Codebook 1
+> (coarsest)
+> 12
+> Codebook 2
+> (middle)
+> 07
+> Codebook 3
+> (fine)
+> 31
+> 88
+> same cell
+> same code same cell
+> same code different cells
+> different codes
+> q
+> T1
+> 02
+> 45 19
+> 12 07 31
+> 12 07 88
+> T2 45 02 19
+> Non-unionable
+> Pair
+
+Figure 4: Unionability-aware semantic identifier construc-tion. Lunion pulls unionable tables closer in the latent space, and residual quantization maps nearby tables to shared coarse codes with fine-grained distinctions. 
+
+in the benchmark corpus, and symmetrize these query–candidate pairs without inferring additional positive relations. Let P be the resulting symmetrized set of positive pairs. For a mini-batch 𝐵 , let P𝐵 𝑖 = { 𝑗 ∈ 𝐵 \ { 𝑖 } : (𝑖, 𝑗 ) ∈ P} be the positives of table 𝑇 𝑖 within the batch. Mini-batches are sampled with positive-pair awareness so that annotated positive pairs are likely to appear in the same batch. The unionability objective is 
+
+Lunion = − 1
+
+|I 𝐵 |∑︁ 𝑖 ∈ I 𝐵 
+
+1
+
+|P 𝐵 𝑖 |∑︁ 𝑗 ∈ P 𝐵 𝑖 
+
+log exp (z⊤ 
+
+> 𝑖
+
+z𝑗 /𝜏 )
+
+Í𝑎 ∈𝐵 \{ 𝑖 } exp (z⊤ 
+
+> 𝑖
+
+z𝑎 /𝜏 ) ,
+
+where I𝐵 = {𝑖 : P𝐵 𝑖 ≠ ∅} and 𝜏 is a temperature. The full semantic-identifier training objective is 
+
+LSID = Lrec + L rq + 𝜆 𝑢 Lunion ,
+
+where Lrec and Lrq preserve the table-to-latent reconstruction and quantization behavior, while Lunion shapes the latent space so that unionable tables receive identifiers with shared coarse codes. Since residual quantization maps a continuous space to a finite code space, multiple candidate tables may receive the same base identifier. GenTUS resolves such collisions by defining the final semantic identifier as 
+
+sid (𝑇 𝑖 ) =
+
+(
+
+¯𝑠 𝑖 , if ¯𝑠 𝑖 is unique ,
+
+¯𝑠 𝑖 ◦ [ SUF ℎ𝑖 ], if ¯𝑠 𝑖 belongs to a collision group ,
+
+where ℎ𝑖 is a unique suffix index assigned to 𝑇 𝑖 within its collision group. This makes each final identifier unique while preserving the shared base identifier for collided tables. The valid identifier set is then SD = {sid (𝑇 ) : 𝑇 ∈ D} , with bijection 𝜙 : SD → D used for generator training and online decoding. 
+
+## 5.3 Training Instance Construction 
+
+After semantic identifiers are assigned, GenTUS converts annotated query–candidate unionability pairs into identifier-level supervision for the retrieval generator. This subsection constructs positive gen-eration records and augments them with structure-preserving query views, so the generator learns to output identifiers of annotated unionable candidates under incidental layout variations. It also builds indexing records that ground table contents to identifiers and hard-negative ranking records that provide pairwise ranking supervision. Here, ser (·) denotes the table-to-sentence serializer used to con-struct generator inputs. Let Qtrain be the training queries and let 
+
+Gtrain ⊆ Q train × D be the training annotations, where (𝑞,𝑇 +) ∈ Gtrain means that candidate table 𝑇 + is unionable with training query 𝑞 . We write Gtrain (𝑞 ) = {𝑇 ∈ D : (𝑞,𝑇 ) ∈ G train } for the annotated positives of 𝑞 .
+
+Positive generation records. For each annotated pair (𝑞,𝑇 +) ∈ Gtrain , GenTUS serializes 𝑞 as the generator input and uses the final identifier of 𝑇 + as the target output sequence: 
+
+(𝑥 𝑞 , 𝑦 +) = (ser (𝑞 ), tok (sid (𝑇 +))) .
+
+Thus, each unionability annotation is rewritten as a sequence-to-sequence record from a query table to the identifier of a unionable candidate. 
+
+Structural augmentation. GenTUS constructs additional query views by sampling rows and varying column orders. If Aug (𝑞 )
+
+denotes the set of augmented views of 𝑞 , each view e𝑞 ∈ Aug (𝑞 ) ∪ {𝑞 } keeps the same target identifier, yielding (ser (e𝑞 ), 𝑦 +), where 
+
+𝑦 + = tok (sid (𝑇 +)) . We use bounded augmentations so that each view preserves the main table semantics while varying incidental structure. The resulting original and augmented positive records form Rpos .
+
+Indexing records. GenTUS also constructs self-mapping records that map a table’s own content to its identifier: 
+
+ ser (𝑇 ), tok (sid (𝑇 )) .
+
+These records are created for candidate tables that appear as an-notated positives in Gtrain . They ground semantic identifiers in table content, so the generator learns not only query-to-candidate supervision but also the basic content-to-identifier mapping. The resulting records form the indexing set Ridx .
+
+Hard-negative ranking records. Finally, GenTUS constructs hard-negative records for the pairwise ranking objective. For each training query 𝑞 , it computes a lightweight table profile from sam-pled non-empty cell-value tokens. Candidate tables in D\(G train (𝑞 )∪ {𝑞 }) are ranked by Jaccard similarity to 𝑞 , and the top-𝑛 neg tables are used as mined hard negatives [ 44 ]. For e𝑞 ∈ Aug (𝑞 ) ∪ { 𝑞 }, a ranking record has the form 
+
+(ser (e𝑞 ), 𝑦 +, 𝑦 − ) =  ser (e𝑞 ), tok (sid (𝑇 +)) , tok (sid (𝑇 − ))  ,
+
+where 𝑇 + ∈ G train (𝑞 ) and 𝑇 − ∈ D \ (G train (𝑞 ) ∪ { 𝑞 }) . These mined negatives share surface features with the query but are not anno-tated as positives, making them useful for calibrating generator scores in the ranking objective. The resulting triples form Rpairwise .
+
+## 5.4 Generator Training 
+
+Given the identifier-level records constructed in Section 5.3, Gen-TUS trains a retrieval generator to map serialized query tables to semantic identifiers of unionable candidate tables. The training records provide two complementary supervision signals. Records in Rpos ∪ R idx are used with a token-level cross-entropy objective, which teaches the generator to produce valid target identifiers. Records in Rpairwise are used with a pairwise ranking objective, which encourages annotated positive identifiers to receive higher sequence scores than mined hard-negative identifiers [ 43 ]. This ranking objective operates over discrete identifier sequences and is 
+
+> 6
+
+distinct from Lunion in semantic identifier construction (Section 5.2), which shapes the continuous latent space before quantization. 
+
+Generator parameterization. GenTUS instantiates the gen-erator as a T5 encoder–decoder. Since the decoder must generate semantic identifiers rather than only natural-language tokens, Gen-TUS extends the tokenizer with identifier-specific tokens. Specifi-cally, the tokenizer is extended with 𝐾 code-index tokens shared across residual-code positions; the position of a token in the identi-fier sequence determines the corresponding residual codebook. This lets the same code-index vocabulary represent each residual-code level while preserving the ordered structure of the identifier. The tokenizer is also extended with suffix tokens for collision resolution and structural markers [COL ] and [VAL ] used by the generator serializer. All other tokens are inherited from the base T5 tokenizer. 
+
+Cross-entropy training. Given an input serialization 𝑥 and an identifier sequence 𝑦 , where 𝑦 = tok (sid (𝑇 )) for some candidate table 𝑇 , the generator defines 
+
+𝑃 𝜃 (𝑦 | 𝑥 ) = 
+
+> |𝑦 |
+
+Ö
+
+> 𝑡 =1
+
+𝑃 𝜃 (𝑦 𝑡 | 𝑦 <𝑡 , 𝑥 ).
+
+For a positive target identifier 𝑦 +, the token-level cross-entropy loss is 
+
+Lce = − 1
+
+|𝑦 + | 
+
+> |𝑦 +|
+
+∑︁ 
+
+> 𝑡 =1
+
+log 𝑃 𝜃 (𝑦 + 
+
+> 𝑡
+
+| 𝑦 + 
+
+> <𝑡
+
+, 𝑥 ).
+
+This loss is applied to positive generation records in Rpos and table-to-identifier indexing records in Ridx .
+
+Pairwise ranking training. For ranking, GenTUS scores an identifier sequence by its average conditional log-likelihood under the generator 
+
+𝑠 𝜃 (𝑦 | 𝑥 ) = 1
+
+|𝑦 | 
+
+> |𝑦 |
+
+∑︁ 
+
+> 𝑡 =1
+
+log 𝑃 𝜃 (𝑦 𝑡 | 𝑦 <𝑡 , 𝑥 ).
+
+Given a ranking triple (𝑥, 𝑦 +, 𝑦 − ), where 𝑦 + is the identifier of an annotated positive candidate and 𝑦 − is the identifier of a mined hard-negative candidate, the pairwise ranking loss is 
+
+Lpairwise = max  0, 𝛾 − 𝑠 𝜃 (𝑦 + | 𝑥 ) + 𝑠 𝜃 (𝑦 − | 𝑥 ) ,
+
+where 𝛾 is the margin. This loss is applied to hard-negative ranking records in Rpairwise and calibrates the generator so that positive identifiers receive higher average sequence log-likelihood than hard-negative identifiers. The full generator objective is 
+
+Lgen = Lce + 𝜆 𝑟 Lpairwise .
+
+The cross-entropy term trains the generator to produce target iden-tifiers, while the ranking term improves the relative ordering of positive and mined hard-negative identifiers under the model likeli-hood. During online retrieval, GenTUS does not perform a separate post-hoc query–candidate scoring step. Valid identifiers returned by prefix-constrained beam search are ranked by the beam-search order induced by the generator scores. 
+
+Offline pipeline summary. Algorithm 1 summarizes how the preceding components form the complete offline pipeline. Given the candidate lake, training queries, and unionability annotations, Gen-TUS first encodes candidate tables and constructs valid semantic identifiers, then rewrites training annotations into identifier-level 
+
+Algorithm 1 GenTUS Offline Training 
+
+Require: Candidate lake D, training queries Qtrain , annotations Gtrain ,base generator 𝐺 (0)
+
+> 𝜃
+
+Ensure: Table encoder 𝐹 𝜂 , quantizer 𝑄 𝜔 , trained generator 𝐺 𝜃 , valid IDs 
+
+SD , mappings 𝜙, 𝜙 −1, prefix tree Trie D 
+
+> 1:
+
+𝐸 ← { e𝑇 𝑖 = 𝐹 𝜂 (𝑇 𝑖 ) | 𝑇 𝑖 ∈ D }  
+
+> 2:
+
+Ptrain ← Symmetrize ( { ( 𝑞,𝑇 + ) ∈ G train | 𝑞 ∈ D } )  
+
+> 3:
+
+LSID ← L rec + L rq + 𝜆 𝑢 Lunion  
+
+> 4:
+
+𝑄 𝜔 ← TrainUnionableAwareRQ (𝐸, Ptrain ; LSID ) 
+
+> 5:
+
+Initialize ID ← ∅  
+
+> 6:
+
+for each candidate table 𝑇 𝑖 ∈ D do  
+
+> 7:
+
+¯𝑠 𝑖 ← Quantize (𝑄 𝜔 , e𝑇 𝑖 ) 
+
+> 8:
+
+ID ← I D ∪ { ( 𝑇 𝑖 , ¯𝑠 𝑖 ) }  
+
+> 9:
+
+ID ← ResolveCollisions ( I D , 𝐸 ) 
+
+> 10:
+
+SD ← { sid (𝑇 𝑖 ) | 𝑇 𝑖 ∈ D }  
+
+> 11:
+
+𝜙, 𝜙 −1 ← BuildMapping ( I D ) 
+
+> 12:
+
+N ← MineHardNegatives ( Q train , D, Gtrain ) 
+
+> 13:
+
+( R pos , Ridx , Rpairwise ) ← 
+
+BuildTrainingRecords ( Q train , Gtrain , D, 𝜙 −1, N)  
+
+> 14:
+
+Rce ← R pos ∪ R idx  
+
+> 15:
+
+Lgen ← L ce + 𝜆 𝑟 Lpairwise  
+
+> 16:
+
+𝐺 𝜃 ← TrainGenerator (𝐺 (0) 
+
+> 𝜃
+
+, Rce , Rpairwise ; Lgen ) 
+
+> 17:
+
+Trie D ← BuildPrefixTree ( { tok (𝑠 ) : 𝑠 ∈ S D } )  
+
+> 18:
+
+return 𝐹 𝜂 , 𝑄 𝜔 , 𝐺 𝜃 , SD , 𝜙, 𝜙 −1, Trie D
+
+records and trains the retrieval generator. The offline stage also produces the identifier mappings and prefix tree used by online constrained decoding. 
+
+## 6 Online Retrieval 
+
+The online stage uses the generator and identifier structures pro-duced offline to retrieve unionable tables through generation. Given a query table, GenTUS serializes it as the generator input, performs prefix-constrained decoding over valid semantic identifiers, and maps the completed identifiers back to candidate tables (Section 6.1). Thus, online retrieval is formulated as constrained identifier gener-ation rather than dense-index lookup followed by explicit query– candidate reranking. Section 6.2 describes how the valid identifier space is updated for newly added candidate tables without retrain-ing the generator. 
+
+## 6.1 Constrained Identifier Generation and Ranking 
+
+Given a query table 𝑞 , GenTUS applies the same serializer used during offline training, 𝑥 𝑞 = ser (𝑞 ). The serialized query is fed into the trained encoder–decoder generator. For an identifier se-quence 𝑠 = (𝑠 1, . . . , 𝑠 |𝑠 | ), the generator defines the autoregressive probability 
+
+𝑃 𝜃 (𝑠 | 𝑥 𝑞 ) = 
+
+> |𝑠 |
+
+Ö
+
+> 𝑡 =1
+
+𝑃 𝜃 (𝑠 𝑡 | 𝑠 <𝑡 , 𝑥 𝑞 ).
+
+Validity is enforced by the prefix-constrained decoding rule below. 
+
+Prefix-constrained decoding. The prefix tree Trie D is the on-line validity structure of GenTUS. It stores the finite language of valid semantic identifiers under the current data lake, and con-strains the decoder so that every completed sequence corresponds to an existing candidate table. This prevents beam search from 
+
+> 7
+
+Algorithm 2 GenTUS Online Generation and Retrieval                                                
+
+> Require: Query table 𝑞 , generator 𝐺 𝜃 , mapping 𝜙 , prefix tree Trie D, result size 𝑘
+> Ensure: Top-𝑘 unionable tables 𝜋 𝑘 (𝑞, D )
+> 1: 𝑥 𝑞 ←ser (𝑞 )
+> 2: Y𝑞 ←PrefixConstrainedBeamSearch (𝐺 𝜃 , 𝑥 𝑞 ,Trie D)
+> 3: Initialize R𝑞 ← [ ]
+> 4: for each 𝑠 ∈ Y 𝑞 do
+> 5: 𝑇 ←𝜙 (𝑠 )
+> 6: if 𝑇 ∉R𝑞 then append 𝑇 to R𝑞
+> 7: return FirstK 𝑘 ( R 𝑞 )
+
+spending capacity on invalid identifier sequences and makes the generated candidate space directly updatable when new identifiers are inserted. It is constructed over the tokenized final identifier set {tok (𝑠 ) :
+
+𝑠 ∈ S D }. For a decoded prefix 𝑦 1: 𝑡 = (𝑦 1, . . . , 𝑦 𝑡 ), GenTUS defines the valid next-token set as 
+
+A ( 𝑦 1: 𝑡 ) = {𝑣 | 𝑦 1: 𝑡 ◦ 𝑣 is a prefix in Trie D }∪ { EOS | 𝑦 1: 𝑡 = tok (𝑠 ), 𝑠 ∈ S D }.
+
+Continuation tokens are allowed only if they keep the decoded sequence on a valid identifier prefix, and EOS is allowed whenever the current prefix already forms a complete valid identifier, even if that prefix also has valid suffix continuations. At each decoding step, GenTUS masks invalid next tokens before the beam update. If ℓ𝜃 (𝑣 | 𝑦 1: 𝑡 , 𝑥 𝑞 ) denotes the generator logit (i.e., pre-softmax score) for token 𝑣 , the constrained logit is 
+
+ℓvalid  
+
+> 𝜃
+
+(𝑣 | 𝑦 1: 𝑡 , 𝑥 𝑞 ) =
+
+(
+
+ℓ𝜃 (𝑣 | 𝑦 1: 𝑡 , 𝑥 𝑞 ), 𝑣 ∈ A ( 𝑦 1: 𝑡 ),
+
+−∞ , 𝑣 ∉ A ( 𝑦 1: 𝑡 ).
+
+Beam search then expands only prefixes that remain valid under 
+
+Trie D . The decoder returns a list of completed valid identifiers 
+
+Y𝑞 = [𝑠 (1) , . . . , 𝑠 (𝑀 ) ],
+
+where each 𝑠 (𝑚 ) ∈ S D . GenTUS preserves the beam-search or-der induced by the constrained generator scores as the identifier ranking. 
+
+Table mapping and ranking. Prefix-constrained decoding re-turns an ordered list of valid identifiers Y𝑞 = [𝑠 (1) , . . . , 𝑠 (𝑀 ) ], where each 𝑠 (𝑚 ) ∈ S D . GenTUS maps these identifiers to candidate tables using 𝜙 : SD → D :
+
+eR𝑞 = [𝜙 (𝑠 (1) ), . . . , 𝜙 (𝑠 (𝑀 ) )] .
+
+If duplicate tables appear after mapping, GenTUS keeps the ear-liest occurrence and removes later duplicates. Let R𝑞 denote the resulting deduplicated ordered list. The final top-𝑘 result is 
+
+𝜋 𝑘 (𝑞, D) = FirstK 𝑘 (R 𝑞 ).
+
+The order of R𝑞 is inherited from the constrained beam search, so GenTUS uses it directly as the retrieval ranking without post-hoc query–candidate alignment scoring over an ANN-retrieved candi-date pool. Algorithm 2 summarizes the online retrieval pipeline. 
+
+## 6.2 Updating the Candidate Space 
+
+Data lakes are often dynamic, with new tables added after offline training. In GenTUS, such updates only require adding new valid identifiers to the generative candidate space, rather than retraining the generator or rebuilding a dense index. When a new table 𝑇 ′
+
+is added, GenTUS encodes it with the existing table encoder and quantizes its embedding with the trained quantizer to obtain a base identifier. If this base identifier collides with an existing one, GenTUS appends a suffix token as in Section 5.2. The resulting final identifier is inserted into the valid identifier set SD , the identifier mapping 𝜙 , and the prefix tree Trie D , while all existing identifiers remain unchanged. If the latent dimension is 𝑑 𝑧 , the update cost for identifier assign-ment and trie insertion is 𝑂 (𝐿𝐾𝑑 𝑧 + | sid (𝑇 ′)|) , excluding the cost of table encoding. The first term comes from nearest-neighbor lookup over 𝐿 residual codebooks of size 𝐾 in the 𝑑 𝑧 -dimensional latent space, and the second term comes from inserting the tokenized identifier into the prefix tree. The generator parameters, quantizer encoder, and residual codebooks are kept fixed. After the update, subsequent queries decode over the expanded valid identifier set, so the new table becomes reachable through prefix-constrained decoding. Thus, candidate-space updates are handled by updating the identifier mapping and decoding constraint structure, without re-encoding existing lake tables, retraining the generator, or rebuilding an ANN index. 
+
+## 7 Experiments 
+
+Table 1: Dataset statistics over data lake tables.                                    
+
+> Statistic TUS-S TUS-L SAN-S SAN-L Wiki LB-1K LB-30K #Tables 1,530 5,043 550 11,090 40,752 7,970 7,970 #Cols 14,810 54,923 6,322 123,477 106,744 151,572 151,572 Avg. #Cols 9.7 10.9 11.5 11.1 2.6 19.0 19.0 Avg. #Rows 4,466 1,915 6,921 7,675 51 936 19,138
+
+We evaluate GenTUS through five research questions. 
+
+• RQ1 (Retrieval quality). Does GenTUS match or outperform state-of-the-art table union search methods on standard TUS benchmarks (Section 7.2)? 
+
+• RQ2 (Efficiency and storage). Does GenTUS lower offline build time, online retrieval time, and index storage (Section 7.3)? 
+
+• RQ3 (Incremental indexing). When new tables arrive, can GenTUS index them more efficiently while maintaining retrieval quality (Section 7.4)? 
+
+• RQ4 (Robustness to candidate-space size). Does GenTUS maintain retrieval quality as the candidate pool scales to the full lake (Section 7.5)? 
+
+• RQ5 (Ablation and analysis). Which components contribute most to GenTUS’s performance, and how does decoding affect the accuracy–latency trade-off (Section 7.6)? 
+
+## 7.1 Experimental Setup 
+
+Datasets. We evaluate on seven TUS datasets, summarized in Table 1: TUS_small , TUS_large , SANTOS_small , SANTOS_large ,
+
+wiki_union , and two LakeBench-derived OpenData row-cap vari-ants [ 14 ]. The two LakeBench variants share the same tables, queries, 
+
+> 8
+
+Table 2: Retrieval quality at each dataset’s standard 𝑘 , reporting MAP@k, P@k, R@k, and Avg. Rank over all dataset–metric pairs. GenTUS reports mean/std over three runs; best results are in bold, and second-best results are underlined.                                                                                                                   
+
+> Method TUS_small TUS_large SANTOS_small SANTOS_large wiki_union LakeBench_1k LakeBench_30k Avg. MAP@k P@k R@k MAP@k P@k R@k MAP@k P@k R@k MAP@k P@k R@k MAP@k P@k R@k MAP@k P@k R@k MAP@k P@k R@k Rank Sherlock 0.970 0.974 0.333 0.736 0.741 0.167 0.874 0.884 0.713 0.301 0.304 0.414 0.105 0.187 0.157 0.368 0.164 0.595 0.364 0.161 0.588 5.00 LIFTus 0.972 0.977 0.334 0.989 0.992 0.237 0.962 0.941 0.702 0.453 0.357 0.467 0.347 0.254 0.209 0.107 0.054 0.193 0.109 0.053 0.191 4.38 SATO 0.976 0.979 0.335 0.929 0.942 0.224 0.850 0.870 0.701 0.331 0.339 0.449 0.160 0.224 0.192 0.364 0.165 0.596 0.373 0.163 0.591 4.12 Starmie 0.977 0.983 0.335 0.913 0.923 0.215 0.967 0.968 0.784 0.393 0.396 0.510 0.284 0.429 0.348 0.304 0.090 0.337 0.296 0.083 0.323 3.88 TACTUS 0.994 0.988 0.330 0.984 0.973 0.252 0.986 0.972 0.729 0.468 0.439 0.575 0.654 0.624 0.507 0.434 0.160 0.559 0.437 0.164 0.570 2.57 GenTUS 0.997 0.9970.342 0.997 0.998 0.238 0.988 0.9890.804 0.532 0.5580.666 0.704 0.7730.638 0.602 0.2380.766 0.613 0.2400.765 1.05
+> ±.0032 ±.0027 ±.0008 ±.0007 ±.0004 ±.0001 ±.0087 ±.0077 ±.0073 ±.0268 ±.0115 ±.0129 ±.0427 ±.0387 ±.0243 ±.0228 ±.0031 ±.0222 ±.0229 ±.0050 ±.0044
+
+and ground truth, but cap each CSV table at 1,000 and 30 ,000 rows, respectively [ 14 ]. Together, the datasets cover a range of sizes, do-mains, and table-content scales. Each dataset is evaluated at its standard 𝑘 : 60 for TUS and LakeBench, 10 for SANTOS_small , 20 for SANTOS_large , and 40 for wiki_union .
+
+Protocol. All training objectives (i.e., semantic identifier con-struction ( Lunion ), generator training, and hard-negative mining) use only Gtrain , following the partition in Section 2.1. At inference, each test query is decoded against SD ; if the query table itself appears in the candidate pool, it is excluded from its own ranked list following standard TUS evaluation practice. For GenTUS, we repeat the main retrieval-quality experiment three times with dif-ferent random seeds and report the mean and standard deviation in Table 2. 
+
+Baselines. We compare against two groups of baselines. The first is semantic-type-based: Sherlock [ 23 ] and SATO [ 48 ]. The second learns table or column representations for TUS. Starmie [17 ] and 
+
+LIFTus [34] are column-centric, and TACTUS [38] is table-centric. We apply the same reproduction policy to all baselines: we use public implementations when available, or faithful reimplementa-tions otherwise, and keep each method’s recommended or best-reported configuration. For retrieval baselines, this includes the pub-lished candidate-space size, ANN/HNSW parameters, and reranking budget when applicable. 
+
+Metrics. Following prior TUS work [ 17 , 25 , 26 , 33 ], we report Mean Average Precision at 𝑘 (MAP@ 𝑘 ), Precision at 𝑘 (P@ 𝑘 ), and Recall at 𝑘 (R@ 𝑘 ). For a query table 𝑞 , let G( 𝑞 ) be its truly unionable tables and R𝑘 (𝑞 ) the ranked top-𝑘 tables returned by a method. We define P@ 𝑘 = | R 𝑘 (𝑞 )∩G ( 𝑞 ) |  
+
+> 𝑘
+
+and R@ 𝑘 = | R 𝑘 (𝑞 )∩G ( 𝑞 ) | | G ( 𝑞 ) | . For MAP@ 𝑘 ,we follow the standard TUS protocol: each ground-truth table 𝑔 ∈G( 𝑞 ) contributes P@ 𝑟 𝑞 (𝑔 ) if 𝑔 appears in R𝑘 (𝑞 ) at rank 𝑟 𝑞 (𝑔 ), and contributes 0 otherwise; AP@ 𝑘 averages these contributions over 
+
+G( 𝑞 ), and MAP@ 𝑘 averages AP@ 𝑘 over all queries. P@ 𝑘 measures the fraction of returned tables that are truly unionable, R@ 𝑘 measures the fraction of all ground-truth union-able tables retrieved within top-𝑘 , and MAP@ 𝑘 measures whether ground-truth unionable tables are ranked early. We also report each method’s average rank across all metrics and datasets. For system cost, the offline build time is the one-time cost to prepare reusable retrieval artifacts for a fixed candidate lake, including GenTUS identifiers and generator artifacts, and each baseline’s representations, indexes, caches, or features. Online time is the end-to-end time to answer all test queries; all methods run on the same hardware. 
+
+Implementation. The table encoder is BERT-base [15 ]. To align with prior TUS work that treats column names as missing or unre-liable metadata in open data lakes, each table is serialized without column names, using all columns and up to 24 sampled values per column under a 512-token budget. Multi-head attention then pools the resulting column representations into one table vector. The semantic identifier uses a residual quantizer with 𝐿 =6 codebooks of size 𝐾 =256 , with suffix tokens used only to disambiguate dupli-cate base codes. The quantizer is trained with a unionability-aware contrastive term of weight 𝜆 𝑢 =0.1 and temperature 𝜏 =0.1. The gen-erator is a T5-base [ 36 ] encoder–decoder. We train it with cross-entropy and the pairwise ranking objective, using margin 𝛾 =0.2
+
+and weight 𝜆 𝑟 =0.2. Training runs for 30 epochs with batch size 32 and learning rate 3×10 −4. Online decoding uses prefix-constrained beam search with beam width max (2𝑘, 100 ). All experiments run on 8 NVIDIA A100-80GB GPUs. 
+
+## 7.2 Retrieval Quality 
+
+Table 2 reports MAP, P, and R at each dataset’s standard 𝑘 , along with the average rank across all metrics and datasets. For GenTUS, we additionally report the mean and standard deviation over three independent runs. GenTUS achieves the best mean result on almost every dataset and metric, with an average rank of 1.05 —1.5 rank positions ahead of the runner-up TACTUS (2.57 ). 
+
+Near-ceiling benchmarks. On TUS_small , TUS_large , and 
+
+SANTOS_small , most methods are already close to the ceiling, so the margins are small. On TUS_small , GenTUS reaches MAP 99 .7% ,P 99 .7% , and R 34 .2% , exceeding the strongest overall baseline TAC-TUS by 0.3, 0.9, and 1.2 percentage points. On TUS_large , GenTUS leads in MAP ( 99 .7% ) and P ( 99 .8% ), while TACTUS attains the high-est R ( 25 .2% versus GenTUS’s 23 .8% ). These lakes are semantically clean and small enough that all methods do well, and GenTUS still leads in average rank across all three benchmarks. 
+
+Larger and more diverse benchmarks. The advantage widens on SANTOS_large , wiki_union , and the two LakeBench splits, where larger scale and greater semantic diversity make retrieval more chal-lenging. On SANTOS_large , GenTUS reaches P 55 .8% and R 66 .6% ,surpassing TACTUS by 11 .9 and 9.1 percentage points; MAP also improves from 46 .8% to 53 .2% . On wiki_union , GenTUS attains P 
+
+77 .3% and R 63 .8% , exceeding TACTUS by 14 .9 and 13 .1 percentage points, with MAP rising from 65 .4% to 70 .4% . On LakeBench_1k 
+
+and LakeBench_30k , GenTUS attains about 60% MAP and about      
+
+> 9520 40 60 100
+> 0.60
+> 0.80
+> 1.00
+
+TUS Small      
+
+> 520 40 60 100
+> 0.60
+> 0.80
+> 1.00
+
+TUS Large      
+
+> 520 40 60 100
+> 0.25
+> 0.50
+> 0.75
+> 1.00
+
+SANTOS Small     
+
+> 520 40 60 100
+> 0.25
+> 0.50
+> 0.75
+
+SANTOS Large     
+
+> 520 40 60 100
+> 0.25
+> 0.50
+> 0.75
+
+Wiki Union     
+
+> 520 40 60 100
+> 0.00
+> 0.20
+> 0.40
+> 0.60
+
+LakeBench 1K     
+
+> 520 40 60 100
+> 0.00
+> 0.20
+> 0.40
+> 0.60
+
+LakeBench 30K                             
+
+> 520 40 60 100
+> 0.00
+> 0.20
+> 0.40
+> 0.60
+> 520 40 60 100
+> 0.00
+> 0.20
+> 0.40
+> 520 40 60 100
+> 0.40
+> 0.60
+> 0.80
+> 1.00
+> 520 40 60 100
+> 0.20
+> 0.40
+> 0.60
+> 0.80
+> 520 40 60 100
+> 0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00
+> 520 40 60 100
+> 0.25
+> 0.50
+> 0.75
+> 520 40 60 100
+> 0.25
+> 0.50
+> 0.75
+> Precision@K Recall@K
+
+K     
+
+> GenTUS TACTUS Starmie LIFTus Sherlock SATO
+
+Figure 5: Precision@ 𝐾 and Recall@ 𝐾 as 𝐾 increases on the seven datasets. GenTUS maintains stronger precision–recall trade-offs across different 𝐾 values. TUS      
+
+> Small
+> TUS
+> Large
+> SANTOS
+> Small
+> SANTOS
+> Large
+> Wiki
+> Union
+> LakeBench
+> 1K
+> LakeBench
+> 30K
+> 100
+> 1k
+> 10k
+> 100k
+> Offline time (s, log scale)  GenTUS TACTUS Starmie LIFTus Sherlock SATO
+
+Figure 6: Offline build time (seconds, log scale), including the construction of retrieval artifacts. 
+
+77% R, while TACTUS reaches only about 43% MAP and 56% R— gaps of more than 17 percentage points in MAP and more than 20 
+
+percentage points in R. On the larger and more diverse lakes, the baselines are more affected by their respective retrieval bottlenecks: type-based meth-ods rely on coarse column categories, column-aggregation methods search over a much larger column space, and table-vector pipelines compress table evidence before retrieving a bounded candidate pool. GenTUS instead directly generates unionability-supervised seman-tic identifiers, preserving unionability signals through retrieval. 
+
+Varying 𝑘 . Figure 5 reports Precision@ 𝐾 and Recall@ 𝐾 as 𝐾 
+
+grows. As expected, precision decreases for all methods as 𝐾 grows. At every 𝐾 , GenTUS keeps the highest precision and recall, and its lead grows at larger 𝐾 . On TUS_small and TUS_large , its pre-cision stays near 0.99 through 𝐾 =100 , while the baselines drop to about 0.6. On larger and more diverse lakes such as wiki_union and 
+
+LakeBench , GenTUS keeps improving recall toward near-complete coverage as 𝐾 grows, whereas the baselines plateau early. These results show that the advantage of GenTUS holds across the full range of 𝐾 rather than at any single operating point. 
+
+## 7.3 Efficiency and Storage 
+
+We report three system costs: offline build time (Figure 6), online end-to-end time (Figure 7), and retrieval-artifact storage (Figure 8). Across these measurements, GenTUS is consistently the most effi-cient method. 
+
+Offline. GenTUS has the lowest offline build time on every dataset. Compared with the fastest competing method on each dataset, GenTUS reduces offline build time by 1.1× to 6.5×: on TUS      
+
+> Small
+> TUS
+> Large
+> SANTOS
+> Small
+> SANTOS
+> Large
+> Wiki
+> Union
+> LakeBench
+> 1K
+> LakeBench
+> 30K
+> 100
+> 1k
+> 10k
+> 100k
+> Online time (s, log scale)  GenTUS TACTUS Starmie LIFTus Sherlock SATO
+
+Figure 7: Online end-to-end retrieval time (seconds, log scale). TUS      
+
+> Small
+> TUS
+> Large
+> SANTOS
+> Small
+> SANTOS
+> Large
+> Wiki
+> Union
+> LakeBench
+> 1K
+> LakeBench
+> 30K
+> 1
+> 10
+> 100
+> 1k
+> 10k
+> 100k
+> Storage (MB, log scale)  GenTUS TACTUS Starmie LIFTus Sherlock SATO
+
+Figure 8: Retrieval-artifact storage (log scale, MB): semantic identifiers and prefix tree for GenTUS, and embeddings, in-dexes or other retrieval artifacts for baselines. 
+
+TUS_small it takes 71 seconds versus 463 for the next fastest base-line ( 6.5×), and on SANTOS_large it takes 1410 seconds versus 1534 
+
+seconds. The gap is larger against some individual baselines: on the two LakeBench splits, TACTUS takes 66204 and 36741 seconds, while GenTUS finishes in about 1060 to 1085 seconds. This advan-tage comes from the compact retrieval artifacts used by GenTUS: after candidate tables are assigned discrete identifiers, online re-trieval relies on the identifier mapping and prefix tree rather than dense vector indexes and per-candidate reranking artifacts. 
+
+Online. Figure 7 compares online end-to-end time on a log scale, where the GenTUS bars sit well below the others. Gen-TUS is fastest online on every dataset, between 1.3× and 220 ×
+
+faster than the fastest competing method on each dataset. On SAN-TOS_large it takes 72 .6 seconds versus 4434 for TACTUS (61 ×), and on LakeBench_1k it takes 1, 849 seconds versus 66 , 692 seconds. This follows from replacing candidate lookup and per-candidate reranking with constrained identifier generation. 
+
+> 10
+
+Storage. Figure 8 reports the storage size of retrieval artifacts maintained for each candidate lake, excluding fixed model weights. For GenTUS, these artifacts include the semantic identifiers, the identifier–table mapping , and the prefix tree used for constrained decoding. For embedding-based baselines, they include the stored embeddings, indexes, or other retrieval artifacts required for online search. GenTUS requires the least retrieval-artifact storage on every dataset. On SANTOS_large , these artifacts take 12 .6 MB for GenTUS and 746 .6 MB for Starmie , about 59 × smaller. The gap is larger against LIFTus , whose retrieval artifacts reach tens of GB on the larger datasets. 
+
+Table 3: Serving-time storage footprint on wiki_union , in-cluding retrieval artifacts and inference-time model weights. 
+
+Method GenTUS TACTUS Starmie Sherlock SATO LIFTus 
+
+Storage cost (MB) 866 642 1,076 1,405 1,793 > 60 ,000 
+
+To make the serving-time storage comparison explicit, Table 3 reports the total deployment footprint on wiki_union , including both the retrieval artifacts in Figure 8 and the model weights loaded at inference time. As a result, GenTUS requires 866 MB in total— below Starmie , Sherlock , SATO , and LIFTus , and only moderately above TACTUS (642 MB). 
+
+## 7.4 Incremental Indexing 
+
+Data lakes grow continuously as new tables arrive, so a practical method should admit new tables at low update cost. This experiment studies how each method indexes incoming tables, in terms of both the resulting retrieval quality and the cost of admitting new tables. 
+
+Protocol. We follow a strict 𝐷 0–𝐷 5 incremental protocol: all method-specific training and retrieval artifacts are built from 𝐷 0
+
+only, with 𝐷 1, . . . , 𝐷 5 introduced only at their update steps. 𝐷 0
+
+contains the initial 50% of tables, and each later split adds 10%. After every step, all queries are evaluated against the current active pool, in which the newly added tables are ranked together with the existing ones. GenTUS ingests a new table by assigning it a semantic identifier and inserting it into the prefix tree, with the generator kept frozen. The dense-retrieval baselines update incrementally as well: each new table is encoded with the pre-trained encoder and inserted into the existing index. 
+
+Effectiveness. Figure 9(a) reports MAP over the update steps D1–D5. GenTUS attains the highest MAP on every dataset and at every step. At the final step D5 it reaches 0.965 on TUS_large 
+
+against 0.741 for the next best method, 0.511 on wiki_union against 
+
+0.318 , and about 0.48 on the two LakeBench splits against about 
+
+0.42 . This shows that GenTUS with a frozen generator matches or outperforms baselines that encode and insert the newly added tables. 
+
+Update cost. Figure 9(b) reports the time from updating the index to answering the first query. GenTUS is the fastest on ev-ery dataset, by one to two orders of magnitude over the baselines. Adding a table requires encoding the new table, residual quantiza-tion, and a single prefix-tree insertion, but does not re-encode exist-ing tables or rebuild a dense index. For instance, on LakeBench_30k 
+
+GenTUS answers in 49 seconds versus 191 seconds for TACTUS D1 D2 D3 D4 D5                 
+
+> Update step
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> TUS Large
+> D1 D2 D3 D4 D5
+> Update step
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Wiki Union
+> D1 D2 D3 D4 D5
+> Update step
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> LakeBench 1K
+> D1 D2 D3 D4 D5
+> Update step
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> LakeBench 30K
+> TUS
+> Large
+> Wiki
+> Union
+> LakeBench
+> 1K
+> LakeBench
+> 30K
+> 10
+> 100
+> 1k
+> 10k
+> MAP@k
+> (a) MAP@k
+> Update cost (s, log scale)
+> (b) Update cost (s)
+> GenTUS TACTUS Starmie Sherlock SATO
+
+Figure 9: Incremental indexing. (a) MAP over D1–D5 with joint ranking after each update. (b) Update-to-first-query cost at D5 (seconds, log scale). Table 4: Robustness to candidate-space size on LakeBench 
+
+(MAP; best per row in bold). 
+
+Dataset #Tables GenTUS TACTUS Starmie Sherlock SATO LB-1K 1,000 0.627 0.426 0.270 0.394 0.405 2,500 0.634 0.432 0.291 0.411 0.412 5,000 0.627 0.432 0.303 0.391 0.385 7,970 0.602 0.429 0.304 0.368 0.364 LB-30K 1,000 0.651 0.417 0.272 0.415 0.422 2,500 0.637 0.429 0.282 0.398 0.415 5,000 0.632 0.427 0.299 0.388 0.399 7,970 0.613 0.430 0.296 0.364 0.373 
+
+and about four hours for Starmie . Overall, GenTUS indexes new tables at substantially lower cost and consistently outperforms the incrementally updated baselines in retrieval quality. 
+
+## 7.5 Robustness to Candidate-Space Size 
+
+We next isolate the effect of candidate-space size on retrieval qual-ity. Unlike the incremental-indexing experiment, this experiment follows the main full-data training setting and varies only the can-didate pool used during evaluation. On the two LakeBench splits, we enlarge the pool from a small subset of 1,000 tables up to the full lake (Table 4). The largest pool is the full lake and matches the 
+
+LakeBench setting in the main results (Table 2). 
+
+Robust across pool sizes. At every pool size, GenTUS attains the best MAP. As the candidate lake grows from 1,000 tables to the full lake, its MAP remains in a narrow range from 0.602 to 0.651 .The baselines remain far behind at every pool size: about 0.42 to 
+
+0.43 for TACTUS , 0.36 to 0.42 for Sherlock and SATO , and 0.27 to 
+
+0.30 for Starmie . A smaller pool contains fewer distractor tables, while a larger pool adds many non-unionable tables that the truly unionable ones must be ranked above, which raises the pressure on top-𝑘 discrimination. Across this range, from a small pool to the full lake, GenTUS remains stable and preserves a clear margin over the strongest baseline. 
+
+> 11
+
+## 7.6 Ablation and Analysis 
+
+The previous sections show that GenTUS works well as a whole. We now isolate how much each core design contributes, and how its main decoding hyperparameter behaves. We ablate two core designs, the construction of the semantic identifier and prefix-constrained decoding, and then analyze how beam width trades off accuracy against latency. These experiments explain where the effectiveness of GenTUS comes from, not just that it is effective. 
+
+Table 5: Semantic ID ablation. Values are MAP gains of unionability-aware SID over each variant. 
+
+Variant TUS-S TUS-L SAN-S SAN-L Wiki LB-1K LB-30K Ordinary RQ +0.266 +0.031 −0.002 +0.225 +0.177 +0.108 +0.110 Random +0.518 +0.911 +0.424 +0.486 +0.073 +0.237 +0.243 Atomic +0.394 +0.814 +0.213 +0.745 +0.688 +0.288 +0.247 No-Suffix +0.118 +0.167 +0.058 +0.238 +0.246 +0.299 +0.342 
+
+Semantic identifier. We first ablate how the semantic identifier is constructed (Table 5). We report MAP gains over four variants: ordinary RQ without the unionability objective, random identi-fiers, atomic identifiers, and No-Suffix. Atomic identifiers use one unique token per table; No-Suffix drops collision suffixes and se-lects one table uniformly at random when a base identifier maps to multiple tables. The improvement over random and atomic iden-tifiers remains substantial on most datasets, reaching +0.911 over random identifiers and +0.814 over atomic identifiers, confirm-ing that the identifier should encode table semantics rather than be assigned arbitrarily. The improvement over No-Suffix is con-sistently positive across all datasets ( +0.058 to +0.342 ), showing that collision suffixes help keep tables uniquely addressable. The gain over ordinary RQ is more dataset-dependent: it is large on 
+
+TUS_small , SANTOS_large and wiki_union (+0.266 , +0.225 and 
+
++0.177 ), clear on two LakeBench splits, but small on TUS_large and essentially tied on SANTOS_small . This pattern does not reduce to a simple split between easy and difficult benchmarks; rather, it suggests that the extra unionability objective is a refinement whose benefit depends on how much ordinary RQ already captures the neighborhood structure of tables in a corpus. Overall, the ablation shows that semantic IDs should be both semantically meaningful and uniquely addressable, while the unionability-aware objective provides additional gains. 
+
+Table 6: Prefix-constrained decoding on all datasets. We re-port the invalid top-𝑘 slot rate before constraint and the additional relevant tables recovered per query. 
+
+Metric TUS-S TUS-L SAN-S SAN-L Wiki LB-1K LB-30K Inv. Rate 0.005 0.004 0.128 0.604 0.242 0.379 0.395 Added Rel./Q 0.000 0.033 0.580 6.257 7.480 0.533 0.588 
+
+ΔMAP 0.000 0.001 0.057 0.403 0.198 0.021 0.022 
+
+ΔRecall 0.000 0.000 0.049 0.406 0.154 0.039 0.034 
+
+Prefix-constrained decoding. We next analyze prefix-constrained decoding (Table 6). The decoder uses a prefix tree over the table identifiers, so each decoding step only expands prefixes that can 10 20 40 80 120 160 200       
+
+> Beam width
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> MAP
+> MAP vs. beam width
+> 10 20 40 80 120 160 200
+> Beam width
+> 0.1
+> 0.3
+> 0.5
+> 0.7
+> 0.9
+> 1.1
+> Mean query latency (s)  Latency vs. beam width
+> TUS Small
+> TUS Large
+> SANTOS Small
+> SANTOS Large
+> Wiki Union
+> LakeBench 1K
+> LakeBench 30K
+
+Figure 10: Beam-width trade-off between MAP and mean query latency. 
+
+lead to an existing table. Unconstrained decoding can spend top-𝑘 
+
+outputs on invalid identifiers, whereas prefix constraints keep the output list within valid table candidates. Across all seven datasets, prefix constraints never reduce MAP or Recall. They have little effect on the two TUS datasets, where unconstrained decoding is already almost always valid. On SANTOS_large and wiki_union ,however, constraints recover many relevant tables and raise MAP by 0.403 and 0.198 , respectively. The two LakeBench splits also contain many invalid unconstrained outputs, but each query recov-ers fewer additional relevant tables; their MAP gains are therefore modest while still positive. Thus prefix-constrained decoding guar-antees valid table identifiers and improves retrieval quality when those additional valid candidates include relevant tables. 
+
+Beam width. Finally, we study how beam width trades off re-trieval quality against online decoding cost (Figure 10), using the same checkpoints and query splits as the main effectiveness table. The quality curve rises sharply at small beams and then quickly saturates: SANTOS_large is already close to its best MAP by beam 
+
+20 , while wiki_union and the two LakeBench splits reach their plateau around beam 40 –80 . Increasing the beam beyond this point brings little accuracy gain on the LakeBench splits, where MAP has already saturated. Latency generally increases with beam width because the decoder explores more identifier prefixes. Overall, the figure shows that a moderate beam is sufficient in practice: it re-covers almost all of the attainable MAP while avoiding the much higher latency of the largest beams. 
+
+## 8 Conclusion 
+
+We presented GenTUS, a generative framework that reformulates table union search as constrained generation over discrete semantic table identifiers. Offline, GenTUS assigns each candidate table a residual-quantized identifier shaped by table-pair unionability an-notations, and trains an encoder–decoder generator with a pairwise ranking objective. Online, a single prefix-constrained generation pass produces the top-𝑘 result, with no dense vector index and no per-candidate reranking. Across seven benchmarks, GenTUS improves retrieval quality while reducing offline build time, online retrieval time, and index storage. It also remains effective as the candidate pool grows and supports low-cost table insertion. These results show that generative retrieval is a viable and prac-tical alternative to encode–search–refine pipelines for TUS. Future work includes extending the formulation to joint unionable-table and joinable-table discovery, refreshing the identifier space and the generator incrementally under substantial distribution shift, and scaling the approach to even larger data lakes. 
+
+> 12
+
+## References 
+
+[1] Ziawasch Abedjan, Mahdi Esmailoghli, and Sainyam Galhotra. 2025. Data Dis-covery in Data Lakes: Operations, Indexes, Systems. Proc. VLDB Endow. 18, 12 (Aug. 2025), 5455–5459. doi:10.14778/3750601.3750694 [2] Gilbert Badaro, Mohammed Saeed, and Paolo Papotti. 2023. A Survey on Table Representation Learning. ACM/IMS J. Data Sci. 1, 1 (2023), 2:1–2:55. doi:10.1145/ 3589777 [3] Michele Bevilacqua, Giuseppe Ottaviano, Patrick Lewis, Wen-tau Yih, Sebastian Riedel, and Fabio Petroni. 2022. Autoregressive search engines: generating sub-strings as document identifiers. In Proceedings of the 36th International Conference on Neural Information Processing Systems (New Orleans, LA, USA) (NIPS ’22) .Curran Associates Inc., Red Hook, NY, USA, Article 2296, 16 pages. [4] Alex Bogatu, Alvaro A. A. Fernandes, Norman W. Paton, and Nikolaos Konstanti-nou. 2020. Dataset Discovery in Data Lakes. In 36th IEEE International Conference on Data Engineering, ICDE 2020, Dallas, TX, USA, April 20-24, 2020 . IEEE, 709–720. doi:10.1109/ICDE48307.2020.00067 [5] Dan Brickley, Matthew Burgess, and Natasha F. Noy. 2019. Google Dataset Search: Building a Search Engine for Datasets in an Open Web Ecosystem. In 
+
+The World Wide Web Conference, WWW 2019, San Francisco, CA, USA, May 13-17, 2019 . ACM, 1365–1375. doi:10.1145/3308558.3313685 [6] Michael J. Cafarella, Alon Halevy, Daisy Zhe Wang, Eugene Wu, and Yang Zhang. 2008. WebTables: exploring the power of tables on the web. Proc. VLDB Endow. 
+
+1, 1 (Aug. 2008), 538–549. doi:10.14778/1453856.1453916 [7] Nicola De Cao, Gautier Izacard, Sebastian Riedel, and Fabio Petroni. 2021. Au-toregressive Entity Retrieval. In 9th International Conference on Learning Rep-resentations, ICLR 2021, Virtual Event, Austria, May 3-7, 2021 . OpenReview.net. https://openreview.net/forum?id=5k8F6UU39V [8] Sonia Castelo, Rémi Rampin, Aécio S. R. Santos, Aline Bessa, Fernando Chirigati, and Juliana Freire. 2021. Auctus: A Dataset Search Engine for Data Discovery and Augmentation. Proc. VLDB Endow. 14, 12 (2021), 2791–2794. doi:10.14778/ 3476311.3476346 [9] Raul Castro Fernandez, Ziawasch Abedjan, Famien Koko, Gina Yuan, Samuel Madden, and Michael Stonebraker. 2018. Aurum: A Data Discovery System. In 
+
+2018 IEEE 34th International Conference on Data Engineering (ICDE) . 1001–1012. doi:10.1109/ICDE.2018.00094 [10] Chengliang Chai, Yuhao Deng, Yutong Zhan, Ziqi Cao, Yuanfang Zhang, Lei Cao, Yu-Ping Wang, Zhiwei Zhang, Ye Yuan, Guoren Wang, and Nan Tang. 2024. LakeCompass: An End-to-End System for Table Maintenance, Search and Analysis in Data Lakes. Proc. VLDB Endow. 17, 12 (2024), 4381–4384. doi:10. 14778/3685800.3685880 [11] Nadiia Chepurko, Ryan Marcus, Emanuel Zgraggen, Raul Castro Fernandez, Tim Kraska, and David Karger. 2020. ARDA: automatic relational data augmentation for machine learning. Proc. VLDB Endow. 13, 9 (May 2020), 1373–1387. doi:10. 14778/3397230.3397235 [12] Tianji Cong, Fatemeh Nargesian, and H. V. Jagadish. 2023. Pylon: Semantic Table Union Search in Data Lakes. CoRR abs/2301.04901 (2023). [13] Xiang Deng, Huan Sun, Alyssa Lees, You Wu, and Cong Yu. 2020. TURL: table understanding through representation learning. Proc. VLDB Endow. 14, 3 (Nov. 2020), 307–319. doi:10.14778/3430915.3430921 [14] Yuhao Deng, Chengliang Chai, Lei Cao, Qin Yuan, Siyuan Chen, Yanrui Yu, Zhaoze Sun, Junyi Wang, Jiajun Li, Ziqi Cao, Kaisen Jin, Chi Zhang, Yuqing Jiang, Yuanfang Zhang, Yuping Wang, Ye Yuan, Guoren Wang, and Nan Tang. 2024. LakeBench: A Benchmark for Discovering Joinable and Unionable Tables in Data Lakes. Proc. VLDB Endow. 17, 8 (2024), 1925–1938. doi:10.14778/3659437.3659448 [15] Jacob Devlin, Ming-Wei Chang, Kenton Lee, and Kristina Toutanova. 2019. BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding. arXiv:1810.04805 [cs.CL] https://arxiv.org/abs/1810.04805 [16] Yuyang Dong, Chuan Xiao, Takuma Nozawa, Masafumi Enomoto, and Masafumi Oyamada. 2023. DeepJoin: Joinable Table Discovery with Pre-Trained Language Models. Proc. VLDB Endow. 16, 10 (June 2023), 2458–2470. doi:10.14778/3603581. 3603587 [17] Grace Fan, Jin Wang, Yuliang Li, Dan Zhang, and Renée J. Miller. 2023. Semantics-aware Dataset Discovery from Data Lakes with Contextualized Column-based Representation Learning. Proc. VLDB Endow. 16, 7 (2023), 1726–1739. doi:10. 14778/3587136.3587146 [18] Raul Castro Fernandez, Ziawasch Abedjan, Samuel Madden, and Michael Stone-braker. 2016. Towards large-scale data discovery: position paper. In Proceedings of the Third International Workshop on Exploratory Search in Databases and the Web (San Francisco, California) (ExploreDB ’16) . Association for Computing Machinery, New York, NY, USA, 3–5. doi:10.1145/2948674.2948675 [19] Raul Castro Fernandez, Jisoo Min, Demitri Nava, and Samuel Madden. 2019. Lazo: A Cardinality-Based Method for Coupled Estimation of Jaccard Similarity and Containment. In 35th IEEE International Conference on Data Engineering, ICDE 2019, Macao, China, April 8-11, 2019 . IEEE, 1190–1201. doi:10.1109/ICDE.2019. 00109 [20] Yuxiang Guo, Zhonghao Hu, Yuren Mao, Baihua Zheng, Yunjun Gao, and Mingwei Zhou. 2025. BIRDIE: Natural Language-Driven Table Discovery Us-ing Differentiable Search Index. Proc. VLDB Endow. 18, 7 (2025), 2070–2083. doi:10.14778/3734839.3734845 [21] Jonathan Herzig, Pawel Krzysztof Nowak, Thomas Müller, Francesco Piccinno, and Julian Martin Eisenschlos. 2020. TaPas: Weakly Supervised Table Parsing via Pre-training. In Proceedings of the 58th Annual Meeting of the Association for Computational Linguistics, ACL 2020, Online, July 5-10, 2020 , Dan Jurafsky, Joyce Chai, Natalie Schluter, and Joel R. Tetreault (Eds.). Association for Computational Linguistics, 4320–4333. doi:10.18653/V1/2020.ACL-MAIN.398 [22] Xuming Hu, Shen Wang, Xiao Qin, Chuan Lei, Zhengyuan Shen, Christos Falout-sos, Asterios Katsifodimos, George Karypis, Lijie Wen, and Philip S. Yu. 2023. Automatic Table Union Search with Tabular Representation Learning. In Find-ings of the Association for Computational Linguistics: ACL 2023 , Anna Rogers, Jordan Boyd-Graber, and Naoaki Okazaki (Eds.). Association for Computational Linguistics, Toronto, Canada, 3786–3800. doi:10.18653/v1/2023.findings-acl.233 [23] Madelon Hulsebos, Kevin Hu, Michiel Bakker, Emanuel Zgraggen, Arvind Satya-narayan, Tim Kraska, Çagatay Demiralp, and César Hidalgo. 2019. Sherlock: A Deep Learning Approach to Semantic Data Type Detection. In Proceedings of the 25th ACM SIGKDD International Conference on Knowledge Discovery & Data Mining (Anchorage, AK, USA) (KDD ’19) . Association for Computing Machinery, New York, NY, USA, 1500–1508. doi:10.1145/3292500.3330993 [24] Moe Kayali, Anton Lykov, Ilias Fountalis, Nikolaos Vasiloglou, Dan Olteanu, and Dan Suciu. 2024. CHORUS: Foundation Models for Unified Data Discovery and Exploration. Proc. VLDB Endow. 17, 8 (2024), 2104–2114. doi:10.14778/3659437. 3659461 [25] Aamod Khatiwada, Grace Fan, Roee Shraga, Zixuan Chen, Wolfgang Gatter-bauer, Renée J. Miller, and Mirek Riedewald. 2023. SANTOS: Relationship-based Semantic Table Union Search. Proc. ACM Manag. Data 1, 1 (2023), 9:1–9:25. doi:10.1145/3588689 [26] Aamod Khatiwada, Roee Shraga, Wolfgang Gatterbauer, and Renée J. Miller. 2022. Integrating Data Lake Tables. Proc. VLDB Endow. 16, 4 (2022), 932–945. doi:10.14778/3574245.3574274 [27] Prannay Khosla, Piotr Teterwak, Chen Wang, Aaron Sarna, Yonglong Tian, Phillip Isola, Aaron Maschinot, Ce Liu, and Dilip Krishnan. 2020. Supervised Contrastive Learning. In Advances in Neural Information Processing Systems 33: Annual Conference on Neural Information Processing Systems 2020, NeurIPS 2020, December 6-12, 2020, virtual , Hugo Larochelle, Marc’Aurelio Ranzato, Raia Hadsell, Maria-Florina Balcan, and Hsuan-Tien Lin (Eds.). https://proceedings.neurips. cc/paper/2020/hash/d89a66c7c80a29b1bdbab0f2a1a94af8-Abstract.html [28] Christos Koutras, Kyriakos Psarakis, George Siachamis, Andra Ionescu, Marios Fragkoulis, Angela Bonifati, and Asterios Katsifodimos. 2021. Valentine in action: matching tabular data at scale. Proc. VLDB Endow. 14, 12, 2871–2874. doi:10.14778/3476311.3476366 [29] Doyup Lee, Chiheon Kim, Saehoon Kim, Minsu Cho, and Wook-Shin Han. 2022. Autoregressive Image Generation using Residual Quantization. In IEEE/CVF Conference on Computer Vision and Pattern Recognition, CVPR 2022, New Orleans, LA, USA, June 18-24, 2022 . IEEE, 11513–11522. doi:10.1109/CVPR52688.2022.01123 [30] Girija Limaye, Sunita Sarawagi, and Soumen Chakrabarti. 2010. Annotating and searching web tables using entities, types and relationships. Proc. VLDB Endow. 
+
+3, 1–2 (Sept. 2010), 1338–1347. doi:10.14778/1920841.1921005 [31] Yury A. Malkov and Dmitry A. Yashunin. 2020. Efficient and Robust Approximate Nearest Neighbor Search Using Hierarchical Navigable Small World Graphs. IEEE Trans. Pattern Anal. Mach. Intell. 42, 4 (2020), 824–836. doi:10.1109/TPAMI.2018. 2889473 [32] Fatemeh Nargesian, Erkang Zhu, Renée J. Miller, Ken Q. Pu, and Patricia C. Arocena. 2019. Data Lake Management: Challenges and Opportunities. Proc. VLDB Endow. 12, 12 (2019), 1986–1989. doi:10.14778/3352063.3352116 [33] Fatemeh Nargesian, Erkang Zhu, Ken Q. Pu, and Renée J. Miller. 2018. Table Union Search on Open Data. Proc. VLDB Endow. 11, 7 (2018), 813–825. doi:10. 14778/3192965.3192973 [34] Ermu Qiu, Jun Gao, Yaofeng Tu, and Jingru Yang. 2025. LIFTus: An Adaptive Multi-Aspect Column Representation Learning for Table Union Search. In 41st IEEE International Conference on Data Engineering, ICDE 2025, Hong Kong, May 19-23, 2025 . IEEE, 2174–2187. doi:10.1109/ICDE65448.2025.00165 [35] Haohao Qu, Wenqi Fan, Zihuai Zhao, and Qing Li. 2025. TokenRec: Learning to Tokenize ID for LLM-Based Generative Recommendations. IEEE Trans. Knowl. Data Eng. 37, 10 (2025), 6216–6231. doi:10.1109/TKDE.2025.3599265 [36] Colin Raffel, Noam Shazeer, Adam Roberts, Katherine Lee, Sharan Narang, Michael Matena, Yanqi Zhou, Wei Li, and Peter J. Liu. 2020. Exploring the limits of transfer learning with a unified text-to-text transformer. J. Mach. Learn. Res. 21, 1, Article 140 (Jan. 2020), 67 pages. [37] Shashank Rajput, Nikhil Mehta, Anima Singh, Raghunandan Hulikal Kesha-van, Trung Vu, Lukasz Heldt, Lichan Hong, Yi Tay, Vinh Q. Tran, Jonah Samost, Maciej Kula, Ed H. Chi, and Mahesh Sathiamoorthy. 2023. Rec-ommender Systems with Generative Retrieval. In Advances in Neural Infor-mation Processing Systems 36: Annual Conference on Neural Information Pro-cessing Systems 2023, NeurIPS 2023, New Orleans, LA, USA, December 10 - 16, 
+
+> 13
+
+2023 , Alice Oh, Tristan Naumann, Amir Globerson, Kate Saenko, Moritz Hardt, and Sergey Levine (Eds.). http://papers.nips.cc/paper_files/paper/2023/hash/ 20dcab0f14046a5c6b02b61da9f13229-Abstract-Conference.html [38] Yongkang Sun, Zhihao Ding, Huiqiang Wang, Reynold Cheng, and Jieming Shi. 2026. Efficient and Effective Table-Centric Table Union Search in Data Lakes. 
+
+arXiv preprint arXiv:2603.17298 (2026). [39] Yi Tay, Vinh Tran, Mostafa Dehghani, Jianmo Ni, Dara Bahri, Harsh Mehta, Zhen Qin, Kai Hui, Zhe Zhao, Jai Prakash Gupta, Tal Schuster, William W. Cohen, and Donald Metzler. 2022. Transformer Memory as a Differentiable Search Index. In Advances in Neural Information Processing Systems 35: Annual Conference on Neural Information Processing Systems 2022, NeurIPS 2022, New Orleans, LA, USA, November 28 - December 9, 2022 , Sanmi Koyejo, S. Mohamed, A. Agarwal, Danielle Belgrave, K. Cho, and A. Oh (Eds.). http://papers.nips.cc/paper_files/paper/2022/ hash/892840a6123b5ec99ebaab8be1530fba-Abstract-Conference.html [40] Aäron van den Oord, Oriol Vinyals, and Koray Kavukcuoglu. 2017. Neural Discrete Representation Learning. In Advances in Neural Information Processing Systems 30: Annual Conference on Neural Information Processing Systems 2017, December 4-9, 2017, Long Beach, CA, USA . 6306–6315. https://proceedings.neurips. cc/paper/2017/hash/7a98af17e63a0ac09ce2e96d03992fbc-Abstract.html [41] Wenjie Wang, Honghui Bao, Xinyu Lin, Jizhi Zhang, Yongqi Li, Fuli Feng, See-Kiong Ng, and Tat-Seng Chua. 2024. Learnable Item Tokenization for Generative Recommendation. In Proceedings of the 33rd ACM International Conference on Information and Knowledge Management, CIKM 2024, Boise, ID, USA, October 21-25, 2024 , Edoardo Serra and Francesca Spezzano (Eds.). ACM, 2400–2409. doi:10.1145/3627673.3679569 [42] Yujing Wang, Yingyan Hou, Haonan Wang, Ziming Miao, Shibin Wu, Qi Chen, Yuqing Xia, Chengmin Chi, Guoshuai Zhao, Zheng Liu, Xing Xie, Hao Sun, Weiwei Deng, Qi Zhang, and Mao Yang. 2022. A Neural Cor-pus Indexer for Document Retrieval. In Advances in Neural Information Processing Systems 35: Annual Conference on Neural Information Processing Systems 2022, NeurIPS 2022, New Orleans, LA, USA, November 28 - Decem-ber 9, 2022 , Sanmi Koyejo, S. Mohamed, A. Agarwal, Danielle Belgrave, K. Cho, and A. Oh (Eds.). http://papers.nips.cc/paper_files/paper/2022/hash/ a46156bd3579c3b268108ea6aca71d13-Abstract-Conference.html [43] Sam Wiseman and Alexander M. Rush. 2016. Sequence-to-Sequence Learn-ing as Beam-Search Optimization. In Proceedings of the 2016 Conference on Empirical Methods in Natural Language Processing, EMNLP 2016, Austin, Texas, USA, November 1-4, 2016 . Association for Computational Linguistics, 1296–1306. doi:10.18653/v1/d16-1137 [44] Lee Xiong, Chenyan Xiong, Ye Li, Kwok-Fung Tang, Jialin Liu, Paul Bennett, Junaid Ahmed, and Arnold Overwijk. 2020. Approximate nearest neighbor nega-tive contrastive learning for dense text retrieval. arXiv preprint arXiv:2007.00808 
+
+(2020). [45] Mohamed Yakout, Kris Ganjam, Kaushik Chakrabarti, and Surajit Chaudhuri. 2012. InfoGather: entity augmentation and attribute discovery by holistic match-ing with web tables. In Proceedings of the ACM SIGMOD International Conference on Management of Data, SIGMOD 2012, Scottsdale, AZ, USA, May 20-24, 2012 ,K. Selçuk Candan, Yi Chen, Richard T. Snodgrass, Luis Gravano, and Ariel Fux-man (Eds.). ACM, 97–108. doi:10.1145/2213836.2213848 [46] Pengcheng Yin, Graham Neubig, Wen-tau Yih, and Sebastian Riedel. 2020. TaBERT: Pretraining for Joint Understanding of Textual and Tabular Data. In 
+
+Proceedings of the 58th Annual Meeting of the Association for Computational Lin-guistics, ACL 2020, Online, July 5-10, 2020 , Dan Jurafsky, Joyce Chai, Natalie Schluter, and Joel R. Tetreault (Eds.). Association for Computational Linguistics, 8413–8426. doi:10.18653/V1/2020.ACL-MAIN.745 [47] Jiaqi Zhai, Lucy Liao, Xing Liu, Yueming Wang, Rui Li, Xuan Cao, Leon Gao, Zhaojie Gong, Fangda Gu, Jiayuan He, Yinghai Lu, and Yu Shi. 2024. Actions speak louder than words: trillion-parameter sequential transducers for generative recommendations. 26 pages. [48] Dan Zhang, Madelon Hulsebos, Yoshihiko Suhara, Çağatay Demiralp, Jinfeng Li, and Wang-Chiew Tan. 2020. Sato: contextual semantic type detection in tables. 
+
+Proc. VLDB Endow. 13, 12 (July 2020), 1835–1848. doi:10.14778/3407790.3407793 [49] Yi Zhang and Zachary G. Ives. 2020. Finding Related Tables in Data Lakes for Interactive Data Science. In Proceedings of the 2020 International Conference on Management of Data, SIGMOD Conference 2020, online conference [Portland, OR, USA], June 14-19, 2020 , David Maier, Rachel Pottinger, AnHai Doan, Wang-Chiew Tan, Abdussalam Alawini, and Hung Q. Ngo (Eds.). ACM, 1951–1966. doi:10.1145/3318464.3389726 [50] Bowen Zheng, Yupeng Hou, Hongyu Lu, Yu Chen, Wayne Xin Zhao, Ming Chen, and Ji-Rong Wen. 2024. Adapting Large Language Models by Integrating Collab-orative Semantics for Recommendation. In 40th IEEE International Conference on Data Engineering, ICDE 2024, Utrecht, The Netherlands, May 13-16, 2024 . IEEE, 1435–1448. doi:10.1109/ICDE60146.2024.00118 [51] Erkang Zhu, Dong Deng, Fatemeh Nargesian, and Renée J. Miller. 2019. JOSIE: Overlap Set Similarity Search for Finding Joinable Tables in Data Lakes. In Pro-ceedings of the 2019 International Conference on Management of Data (Amsterdam, Netherlands) (SIGMOD ’19) . Association for Computing Machinery, New York, NY, USA, 847–864. doi:10.1145/3299869.3300065
