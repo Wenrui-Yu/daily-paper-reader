@@ -6,34 +6,35 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-04
-- 运行时间：2026-07-04 21:04:38 UTC
+- 最新运行日期：2026-07-05
+- 运行时间：2026-07-05 20:37:49 UTC
 - 运行状态：成功
-- 本次总论文数：4
-- 精读区：1
+- 本次总论文数：5
+- 精读区：2
 - 速读区：3
 
 ### 今日简报（AI）
-1) 今日精读1篇自私个性化学习加权论文，速读3篇涉及LLM合规路由与用户权限管理。  
-2) 最值得关注个性化学习中收敛感知的客户端权重调整，以及监管行业LLM多级路由的实用设计。  
-3) 建议优先深入理解SP-CACW的权重机制，并关注合规路由与权限管理在系统落地中的权衡。
-- 详情：[/202607/04/README](/202607/04/README)
+今日阅读5篇论文，精读聚焦联邦类增量学习与智能体记忆评估。最值得关注的是《Fisher-Routed Mixture of Experts》（9.0分）提出的新型路由机制，以及《MemDelta》（8.0分）对记忆评估中隐藏混淆因素的揭示。建议跟进联邦学习与增量学习的交叉方向，同时注意智能体记忆实验设计的标准化。
+- 详情：[/202607/05/README](/202607/05/README)
 
 ### 精读区论文标签
-1. [SP-CACW: Convergence-Aware Client Weighting for Selfish Personalized Learning](/202607/04/2606.29322v1-sp-cacw-convergence-aware-client-weighting-for-selfish-personalized-learning)  
+1. [Fisher-Routed Mixture of Experts for Federated Class-Incremental Learning](/202607/05/2606.28835v1-fisher-routed-mixture-of-experts-for-federated-class-incremental-learning)  
+   标签：评分：9.0/10、query:daily
+   evidence：联邦类增量学习，直接涉及分布式机器学习中的隐私
+2. [MemDelta: Controlled Baselines and Hidden Confounds in Agent Memory Evaluation](/202607/05/2606.29914v1-memdelta-controlled-baselines-and-hidden-confounds-in-agent-memory-evaluation)  
    标签：评分：8.0/10、query:daily
-   evidence：针对个性化联邦学习的收敛感知客户端加权
+   evidence：代理记忆评估协议
 
 ### 速读区论文标签
-1. [ComplianceGate: Classifier-Gated Multi-Tier LLM Routing for Inference in Regulated Industries](/202607/04/2606.31163v1-compliancegate-classifier-gated-multi-tier-llm-routing-for-inference-in-regulated-industries)  
-   标签：评分：6.0/10、query:daily
-   evidence：受监管行业的隐私保护LLM路由
-2. [ComplianceGate: Classifier-Gated Multi-Tier LLM Routing for Inference in Regulated Industries](/202607/04/2606.31163v2-compliancegate-classifier-gated-multi-tier-llm-routing-for-inference-in-regulated-industries)  
-   标签：评分：6.0/10、query:daily
-   evidence：合规场景下考虑隐私的大模型路由
-3. [Janus: a Playground for User-Involved Agentic Permission Management](/202607/04/2607.01510v1-janus-a-playground-for-user-involved-agentic-permission-management)  
-   标签：评分：6.0/10、query:daily
-   evidence：用户参与的代理权限管理
+1. [Memory as an Attack Surface in LLM Agents: A Study on Multiple-Choice Question Answering](/202607/05/2606.29030v1-memory-as-an-attack-surface-in-llm-agents-a-study-on-multiple-choice-question-answering)  
+   标签：评分：7.0/10、query:daily
+   evidence：LLM代理中的记忆操纵
+2. [Covering the Unseen: Information Demand Coverage Optimization for Retrieval-Augmented Generation](/202607/05/2606.29328v1-covering-the-unseen-information-demand-coverage-optimization-for-retrieval-augmented-generation)  
+   标签：评分：7.0/10、query:daily
+   evidence：检索增强生成的上下文选择优化
+3. [ComplianceGate: Classifier-Gated Multi-Tier LLM Routing for Inference in Regulated Industries](/202607/05/2606.31163v2-compliancegate-classifier-gated-multi-tier-llm-routing-for-inference-in-regulated-industries)  
+   标签：评分：7.0/10、query:daily
+   evidence：LLM路由中的PII隐私保护
 
 
 <div class="dpr-home-promo-card">
