@@ -1,0 +1,1678 @@
+Title: Privacy-Preserving Robustness Verification for Neural Networks
+
+URL Source: https://arxiv.org/pdf/2607.05251v1
+
+Published Time: Tue, 07 Jul 2026 03:02:11 GMT
+
+Number of Pages: 20
+
+Markdown Content:
+# Privacy-Preserving Robustness Verification for Neural Networks 
+
+Nianyun Song 1,2 Xiaokun Luan 3 Yu Guo 1 Rongfang Bie 1 Meng Sun 3 Xiyue Zhang *2 1School of Artificial Intelligence, Beijing Key Laboratory of Artificial Intelligence for Education, Engineering Research Center of Intelligent Technology and Educational Application (Ministry of Education), Beijing Normal University, Beijing, China 
+
+> 2
+
+School of Computer Science, University of Bristol, Bristol, UK 
+
+> 3
+
+School of Mathematical Sciences, Peking University, Beijing, China 
+
+## Abstract 
+
+Neural network verification and data privacy are inherently in tension: verification demands full ac-cess to model parameters and input data, yet both are increasingly restricted by privacy regulations and intellectual property constraints . This ten-sion has left robustness verification impractical in privacy-sensitive domains. In this work, we address this gap with S ECURE CROWN, the first frame-work for privacy-preserving neural network robust-ness verification. Built upon secure two-party com-putation (2PC), our framework enables a model owner and a data owner to jointly compute certi-fied robustness bounds—revealing only the final re-sult while provably protecting both parties’ private data under the semi-honest security model. A key challenge is securely computing the conditional operations in Linear Bound Propagation, where the data-dependent branching is incompatible with standard secure computation protocols. We elimi-nate branching by formulating conditional logic as continuous arithmetic operations. Additionally, we introduce a Newton–Raphson refinement method to improve numerical stability. Extensive analy-sis and experiments show that S ECURE CROWN strictly matches plaintext verification results, while completing in 0.1–200s across varied model sizes and communication settings (LAN/WAN), demon-strating the feasibility of privacy-preserving neural network verification. 
+
+## 1 INTRODUCTION 
+
+The field of deep learning (DL) has experienced enormous growth recently, with deep neural networks (DNNs) now deployed in a variety of safety-critical applications, includ-
+
+> *Correspondence to XZ (xiyue.zhang@bristol.ac.uk)
+
+ing medical diagnosis [Litjens et al., 2017, Esteva et al., 2017] and healthcare [Esteva et al., 2019, Davenport and Kalakota, 2019]. In these domains, safety and robustness of DNNs are essential. However, DNNs are susceptible to perturbations in their inputs [Szegedy et al., 2014], such as noise and illumination variations [Goodfellow et al., 2015, Hendrycks and Dietterich, 2019]. To ensure DNN robust-ness with worst-case guarantees, significant progress in ver-ification approaches [Wu et al., 2024, Wang et al., 2021, Singh et al., 2019] has been made, which can certify that a model’s prediction remains stable regardless of data noise or environmental changes. Despite these advances, existing verification techniques as-sume centralized access to both model parameters and input data in plaintext. This assumption is often unrealistic in privacy-sensitive deployments. In practice, user data may be subject to strict privacy regulations, such as the General Data Protection Regulation (GDPR) [Voigt and Von dem Bussche, 2017]. Meanwhile, proprietary model parameters constitute valuable intellectual property and may not be disclosed to third parties. Thus, the standard verification setting, where both model and data are fully accessible, is incompatible with many privacy-regulated collaborative scenarios. We consider a two-party verification setting in which a model owner P0 holds a proprietary DNN, while a data owner P1 holds sensitive input data. We aim to verify the robustness of the model on the given input such that only the verification result is revealed, while both the model pa-rameters and the input data remain private. Achieving this requires jointly performing robustness verification without exposing either party’s confidential information. Secure multi-party computation (MPC) [Evans et al., 2018] provides a principled cryptographic approach that enables multiple parties to jointly evaluate functions on their private inputs without revealing their data to one another. While MPC has been successfully applied to privacy-preserving inference and training [Knott et al., 2021, Tan et al., 2021, Wagh et al., 2021, Kumar et al., 2020, Gupta et al., 2025, 
+
+> arXiv:2607.05251v1 [cs.CR] 6 Jul 2026
+
+Zhang et al., 2021], extending it to robustness verifica-tion faces two fundamental challenges: (i) Data-dependent branching: Convex relaxation of ReLU activations requires distinct parameters depending on secret-shared activation states. In MPC, resolving these conditionals requires a se-cure comparison for every neuron, scaling linearly with the total number of neurons and rendering naïve implementa-tions computationally prohibitive. (ii) Precision sensitivity in deep recursion: Unlike MPC-based inference, which tol-erates minor numerical errors during a single forward pass, verification computes certified bounds via deep backward recursion that amplifies numerical errors. Because safety guarantees depend strictly on the sign of the final margin, these compounded errors can invert near-zero bounds, com-promising verification soundness. To bridge this gap, we propose S ECURE CROWN, the first privacy-preserving framework for neural network robustness verification built on secure two-party computation (2PC). It enables verification of DNNs while ensuring that sensi-tive input data remains confidential and proprietary model parameters are not disclosed. Specifically, we develop (i) asecure implementation of Linear Bound Propagation (LBP) that computes certified robustness bounds under privacy constraints; (ii) a unified branch-free reformulation of the conditional logic in ReLU relaxation and bound propaga-tion, efficiently realized via function secret sharing (FSS); and (iii) a Newton–Raphson-based refinement method for reciprocal computation to improve numerical precision and stability. Furthermore, we provide formal security guaran-tees in the semi-honest adversary model and conduct ex-tensive experiments validating that our protocol achieves verification precision comparable to the plaintext verifier while incurring moderate cryptographic overhead. 
+
+## 2 RELATED WORK 
+
+Modern neural network verification methods primarily address robustness analysis in a plaintext setting, where both model parameters and user inputs are assumed to be fully accessible. Representative verifiers include α, β -CROWN [Zhang et al., 2018, Xu et al., 2020, 2021, Wang et al., 2021], CORA [Althoff, 2015], Marabou [Wu et al., 2024, Katz et al., 2019], and NeuralSAT [Duong et al., 2024, 2025]. These approaches rely on techniques such as con-vex relaxation [Salman et al., 2019], abstract interpreta-tion [Singh et al., 2019], and constraint-solving [Duong et al., 2023] to compute certified robustness bounds or to solve verification queries exactly. Meanwhile, substantial progress has been made in privacy-preserving machine learning through cryptographic proto-cols. A prominent line of work employs MPC to enable secure inference. CrypTen [Knott et al., 2021] supports private inference over secret-shared inputs and models in a two-party setting, assuming a semi-honest threat model. CryptGPU [Tan et al., 2021] extends this framework to a three-party system with optimized GPU-based protocols under semi-honest security. Falcon [Wagh et al., 2021] im-plements strengthened malicious security in a three-party setting and combines SecureNN [Wagh et al., 2019] and ABY 3 [Mohassel and Rindal, 2018] to improve protocol efficiency. ObliviGate [Song et al., 2026] further achieves maliciously secure inference while concealing the model ar-chitecture. CrypTFlow [Kumar et al., 2020] proposes an end-to-end toolchain that compiles predefined TensorFlow infer-ence code into MPC protocols, supporting both semi-honest and malicious adversaries. Beyond MPC, zero-knowledge proof systems have been leveraged to provide verifiable in-ference without revealing model parameters or inputs [Lee et al., 2024, Maheri et al., 2025], while homomorphic en-cryption (HE) enables neural network inference directly over encrypted data [Lee et al., 2022, Lou and Jiang, 2021]. However, these cryptographic methods focus exclusively on secure or verifiable inference. They do not address robust-ness verification, which requires computing and propagating symbolic bounds beyond forward inference alone. In con-trast, we establish a privacy-preserving framework for neural network robustness verification. To the best of our knowl-edge, our work is the first to integrate formal robustness verification with cryptographic privacy guarantees. 
+
+## 3 PRELIMINARIES 
+
+3.1 LOCAL ROBUSTNESS VERIFICATION 
+
+Consider an L-layer feedforward neural network classifier 
+
+f : Rd0 → RK , where d0 is the input dimension and K
+
+is the number of classes. The network is parameterized by weight matrices W(l) ∈ Rdl×dl−1 and bias vectors b(l) ∈
+
+Rdl for layers l ∈ { 1, . . . , L }, with dL = K. The pre-activation at each layer is defined as z(1) = W(1) x + b(1) 
+
+for l = 1 , and z(l) = W(l)σ(z(l−1) )+ b(l) for l ≥ 2. In this work, we consider the ReLU activation σ(·) = max(0 , ·).The network output is f (x) = z(L), with predicted class 
+
+y = argmax k fk(x). Given an input x0 correctly classified as class y, the network is locally robust within an ℓp-ball of radius ϵ if: 
+
+fy,j ≜ min 
+
+> x∈B p(x0,ϵ )
+
+ fy (x) − fj (x) > 0, ∀ j̸ = y, (1) where Bp(x0, ϵ ) = {x : ∥x − x0∥p ≤ ϵ}. Since exactly verifying Eq. (1) is NP-hard for ReLU networks [Katz et al., 2017], verification methods typically compute a certified lower bound f y,j via linear relaxation [Salman et al., 2019]. 
+
+Linear Relaxation. Consider robustness verification un-der ℓp input perturbations x ∈ B p(x0, ϵ ). Let z, z ∈ R be the pre-activation lower and upper bounds for a neuron z,i.e., z ≤ z ≤ z. To handle the nonlinearity of the activa-tion function, linear relaxation constructs a pair of linear bounding functions—a lower bound αz + β and an upper bound αz + β—satisfying αz + β ≤ σ(z) ≤ αz + β for all 
+
+z ∈ [z, z ]. A commonly used bounding strategy for ReLU in CROWN [Zhang et al., 2018] sets the upper-bound pa-rameters (α, β ) as: 
+
+(α, β ) = 
+
+
+
+(1 , 0) , if z ≥ 0,
+
+(0 , 0) , if z ≤ 0,
+
+(α∗, −α∗z) , otherwise ,
+
+where α∗ = zz−z ,
+
+(2) and the lower bound shares the same slope with zero inter-cept: (α, β ) = ( α, 0) .
+
+Linear Bound Propagation. LBP in CROWN-series ver-ifiers computes certified bounds by propagating backward linear relaxations through the network. To bound z(l) for any layer l ∈ { 1, . . . , L }, LBP constructs linear functions such that 
+
+A(0) x+c(0) ≤ z(l) ≤ A(0) x+¯ c(0) , ∀x ∈ B p(x0, ϵ ), (3) where A(0) ∈ Rdl×d0 and c(0) , ¯c(0) ∈ Rdl . Since our re-laxation uses identical slopes α = ¯ α, the coefficient matrix 
+
+A(0) is shared for both bounds, while distinct intercepts 
+
+β̸ = ¯β yield separate constants c(0) and ¯c(0) .For l = 1 , since z(1) = W(1) x + b(1) is purely an affine transformation of x, we directly obtain A(0) = W(1) and 
+
+c(0) = ¯ c(0) = b(1) . For l ≥ 2, the backward recursion requires relaxation parameters (α(t), β(t), ¯β(t)) for each intermediate layer t ∈ { 1, . . . , l − 1}, where α(t) ∈ Rdt
+
+denotes slopes and β(t), ¯β(t) ∈ Rdt intercepts; these are determined by the pre-activation bounds via Eq. (2) . The recursion maintains A(t) ∈ Rdl×dt and c(t), ¯c(t) ∈ Rdl
+
+such that A(t)z(t) + c(t) ≤ z(l) ≤ A(t)z(t) + ¯ c(t). Starting with A(l) = Idl and c(l) = ¯ c(l) = 0, the backward updates for t = l, . . . , 2 are given by: 
+
+ˆA(t) = A(t)W(t), (4) 
+
+A(t−1) = ˆA(t) diag( α(t−1) ), (5) 
+
+c(t−1) = c(t) + A(t)b(t) + δ(t−1) , (6) 
+
+¯c(t−1) = ¯ c(t) + A(t)b(t) + ¯δ(t−1) , (7) where the i-th element (for i ∈ { 1, . . . , d l}) of the in-tercept contribution is δ(t−1)  
+
+> i
+
+= P  
+
+> j: ˆA(t)
+> ij >0
+
+ˆA(t) 
+
+> ij
+
+β(t−1)  
+
+> j
+
++
+
+P  
+
+> j: ˆA(t)
+> ij ≤0
+
+ˆA(t) 
+
+> ij
+
+¯β(t−1)  
+
+> j
+
+, and ¯δ(t−1) is defined analogously with β and ¯β swapped. The recursion terminates at the input layer yielding A(0) = A(1) W(1) , c(0) = c(1) + A(1) b(1) ,and ¯c(0) = ¯ c(1) + A(1) b(1) . By applying Hölder’s inequal-ity over the ℓp-ball Bp(x0, ϵ ) (where 1/p + 1 /q = 1 ), the symbolic bounds in Eq. (3) are converted into concrete element-wise bounds: 
+
+z(l) 
+
+> i
+
+= A(0)  
+
+> i, :
+
+x0 + c(0)  
+
+> i
+
+− ϵ∥A(0)  
+
+> i, :
+
+∥q , (8) 
+
+¯z(l) 
+
+> i
+
+= A(0)  
+
+> i, :
+
+x0 + ¯ c(0)  
+
+> i
+
++ ϵ∥A(0)  
+
+> i, :
+
+∥q . (9) 
+
+Margin verification. For margin verification between classes 
+
+y and j, we apply LBP to the output layer ( l = L) by setting W(L) ← W(L) 
+
+> y, :
+
+− W(L) 
+
+> j, :
+
+∈ R1×dL−1 and b(L) ←
+
+b(L) 
+
+> y
+
+− b(L) 
+
+> j
+
+∈ R. With dL = 1 , the coefficient matrix A(t)
+
+reduces to a row vector and c(t) to a scalar. The certified lower bound is: 
+
+f y,j = A(0) x0 + c(0) − ϵ∥A(0) ∥q . (10) Local robustness is verified if f y,j > 0.
+
+3.2 SECURE COMPUTATION PRIMITIVES 
+
+In the standard 2PC setting [Yao, 1982, Goldreich et al., 1987], two parties ( P0 and P1) jointly compute a function over their private inputs, revealing nothing beyond the pre-scribed output. Computations are performed in the ring Z2k
+
+of bit-length k (modulo 2k is omitted for brevity). A real value v ∈ R is encoded in two’s complement fixed-point format with nf fractional bits as ˜v = ⌊v · 2nf ⌋ ∈ Z2k .
+
+Additive Secret Sharing (ASS). A value x ∈ Z2k is additively shared as ⟨x⟩ = {⟨ x⟩0, ⟨x⟩1} such that x =
+
+⟨x⟩0 + ⟨x⟩1. To generate shares, P0 samples ⟨x⟩0 ∈ Z2k
+
+uniformly at random and sets ⟨x⟩1 = x−⟨ x⟩0; each individ-ual share is information-theoretically independent of x. ASS supports linear operations locally. Given shares ⟨x⟩, ⟨y⟩ and a public value c ∈ Z2k , party Pi (i ∈ { 0, 1}) computes 
+
+⟨x + y⟩i = ⟨x⟩i + ⟨y⟩i, ⟨c · x⟩i = c · ⟨ x⟩i.
+
+For adding a public constant, one party (e.g., P0) absorbs it locally: ⟨x + c⟩0 = ⟨x⟩0 + c and ⟨x + c⟩1 = ⟨x⟩1.
+
+Secure Multiplication via Beaver Triples. Nonlinear op-erations require interaction. A standard technique uses a Beaver triple (⟨a⟩, ⟨b⟩, ⟨c⟩) with c = a · b. Given ⟨x⟩, ⟨y⟩,parties compute masked differences e = x−a and d = y−b
+
+by locally forming ⟨e⟩ = ⟨x⟩−⟨ a⟩ and ⟨d⟩ = ⟨y⟩−⟨ b⟩, then opening e and d (i.e., exchanging shares and reconstructing the public values). They then output product shares 
+
+⟨x · y⟩i = ⟨c⟩i + d · ⟨ a⟩i + e · ⟨ b⟩i + (1 − i) · e · d, 
+
+where i ∈ { 0, 1}. This yields ⟨x · y⟩0 + ⟨x · y⟩1 = xy ,followed by a truncation procedure to restore the fixed-point scale, i.e., ⟨fxy ⟩ = ⟨⌊ ˜x · ˜y/ 2nf ⌋⟩ .
+
+Function Secret Sharing. FSS generalizes secret sharing from values to functions [Boyle et al., 2015]. A two-party FSS scheme for a function family G consists of: • Gen (1 λ, g ) → (k0, k 1): a randomized key generation al-gorithm that, given a security parameter λ and a function 
+
+g ∈ G , outputs two correlated keys (k0, k 1).• Eval (i, k i, x ) → yi: a deterministic evaluation algo-rithm run by Pi on input x (typically a public masked value in MPC), producing an output share yi such that 
+
+y0 + y1 = g(x) (over an appropriate output ring). Intuitively, each key ki hides the function g, yet the two evaluations add up to the correct value. A key instantiation is the Distributed Comparison Function (DCF), computing 
+
+g<θ,ρ (x) = ρ · I{x < θ } for threshold θ and payload ρ,where I is the indicator function. DCF is a basic primitive for secure comparison and is commonly used to build higher-level operators such as ReLU and fixed-point truncation. 
+
+FSS-Based Secure Evaluation on Masked Values. Many FSS-based 2PC protocols maintain a masking invariant on intermediate values. Consequently, for a private value x ∈
+
+Z2k , the parties hold a public masked value ˆx = x + rin ,where rin is a preprocessed random mask unknown to either party. To evaluate y = g(x) while preserving the invariant, the parties generate FSS keys for a shifted function: 
+
+grin ,r out (ˆ x) = g(ˆ x − rin ) + rout ,
+
+where rout is a fresh output mask. Each party evaluates its key on ˆx to obtain shares of grin ,r out (ˆ x), which reconstruct to ˆy = g(x) + rout . Thus the output remains masked in the same form, enabling secure composition of function evaluations without revealing intermediate plaintexts. 
+
+## 4 PROBLEM FORMULATION 
+
+System Setup. We study privacy-preserving robustness ver-ification in a 2PC setting with a model owner (P0) and a data owner (P1). The network architecture (number of layers L and layer dimensions {dl}Ll=0 ) is assumed to be public. The model owner P0 holds a trained neural network 
+
+f with private parameters {W(l), b(l)}Ll=1 , which repre-sent proprietary intellectual property. The data owner P1
+
+holds a verification query consisting of input x0 ∈ Rd0 ,robustness perturbation radius ϵ > 0 (the magnitude of worst-case perturbations to certify against), and the clas-sification target pair (true label y, target label j). Dur-ing setup, P0 secret-shares the model parameters, retains 
+
+{⟨ W(l)⟩0, ⟨b(l)⟩0}Ll=1 , and sends {⟨ W(l)⟩1, ⟨b(l)⟩1}Ll=1 to 
+
+P1. To avoid the O(K) overhead associated with secure array indexing, P1 encodes the verification target as a dif-ference vector d = ey − ej ∈ {− 1, 0, 1}K (where ey
+
+and ej are one-hot vectors). P1 then secret-shares these encoded inputs, retaining (⟨x0⟩1, ⟨ϵ⟩1, ⟨d⟩1) and sending 
+
+(⟨x0⟩0, ⟨ϵ⟩0, ⟨d⟩0) to P0.
+
+Threat Model. We consider the semi-honest (honest-but-curious) adversarial model, where both parties follow the protocol specification but may attempt to infer the other party’s private input from their view. The protocol operates in a preprocessing model with a trusted dealer D that dis-tributes correlated randomness (Beaver triples, FSS keys) during an offline phase. The preprocessing depends only on public parameters, so D learns nothing about private inputs. We assume D does not collude with either party. In practice, 
+
+D can be instantiated via trusted hardware or replaced by a two-party preprocessing protocol. 
+
+Problem Statement. Given secret shares of a neural net-work f and a verification query (x0, ϵ, d) held by the two parties (where y and j are encoded in the difference vec-tor d), design a 2PC protocol that enables P1 to determine whether the network is certifiably ℓ∞-robust at (x0, ϵ ) for the margin between classes y and j. The parties jointly compute secret shares of the certified lower bound f y,j 
+
+(Eq. (10) ). Upon completion, P0 sends ⟨f y,j ⟩0 to P1, who reconstructs f y,j = ⟨f y,j ⟩0 + ⟨f y,j ⟩1 and concludes robust if f y,j > 0, or unknown otherwise. While the problem formulation above is general, our cur-rent protocol instantiates it for fully connected ReLU net-works; extensions to other architectures are discussed in Appendix D. 
+
+Design Goals. SECURE CROWN targets two objectives: 
+
+(1) Input and Model Privacy: The protocol satisfies semi-honest security. P0 learns nothing about (x0, ϵ, d) beyond public parameters, and P1 learns only f y,j . All intermedi-ate quantities remain secret-shared throughout. (2) Faithful Verification Semantics: The protocol preserves the deci-sion behavior of the plaintext verifier (Section 3.1). Any numerical error introduced by fixed-point arithmetic must be bounded to prevent unsound certifications. 
+
+Security Definition. We formalize semi-honest security in the real/ideal paradigm. Let inp 0 = {W(l), b(l)}Ll=1 
+
+and inp 1 = (x0, ϵ, d) denote the private inputs of P0
+
+and P1, respectively. The ideal functionality is defined as 
+
+F(inp 0, inp 1) = ( ⊥, f y,j ), where P0 receives no output ( ⊥)and P1 receives the certified lower bound. 
+
+Definition 1 (Semi-Honest Security) . Protocol Π securely computes F if for each i ∈ { 0, 1}, there exists a probabilis-tic polynomial-time (PPT) simulator Sim i such that: 
+
+Sim i(1 λ, inp i, Fi(inp 0, inp 1)) c
+
+≡
+
+n
+
+View Π 
+
+> i
+
+(1 λ, inp 0, inp 1)
+
+o
+
+(11) 
+
+where View Π 
+
+> i
+
+denotes the view of Pi (input, randomness, received messages), Fi denotes the output to Pi, and c
+
+≡
+
+denotes computational indistinguishability. 
+
+## 5 METHODOLOGY 
+
+5.1 OVERVIEW Challenges. Implementing the robustness verification (Sec-tion 3.1) in MPC presents two fundamental challenges. (1) Data-dependent branching: The relaxation slope α depends on neuron activation state—inactive ( ¯z ≤ 0), active ( z ≥ 0), or unstable—each requiring distinct computation (Eq. (2) ). Similarly, intercept terms δ and ¯δ (Eqs. (6) – (7) ) depend on coefficient signs. In MPC, such data-dependent branch-ing requires costly secure comparison, preventing efficient batching across neurons. (2) Precision sensitivity in deep re-cursion: The backward recursion in Eq. (5) updates the coef-ficient matrix A(t) across layers, with relaxation slopes α(t)
+
+computed via division (Eq. (2) ). In fixed-point MPC, divi-sion has limited precision, and truncation errors accumulate through the propagation chain, potentially compromising verification accuracy in deep networks. 
+
+Our Approach. We address these challenges through two key techniques. (1) Branch Elimination via ReLU: We ob-serve that all branching conditions in the verifier are fun-damentally sign tests. Since ReLU inherently encodes sign information, we reformulate conditional logic into unified arithmetic expressions where ReLU outputs naturally select the correct terms. This eliminates branching entirely, en-abling identical computation paths for all neurons and facil-itating efficient vectorized execution in MPC. These ReLU operations are efficiently realized via FSS-based protocols with constant-round communication. (2) Newton–Raphson Refinement: To address precision loss in secure division, we apply Newton–Raphson iterations to refine reciprocal estimates, approximately doubling the precision bits per iteration at minimal additional cost. 
+
+Protocol Overview. The protocol operates in the preprocess-ing model: correlated randomness is generated offline based on the public network architecture, reducing the online phase to local computations and share exchanges. Specif-ically, in the offline phase , the trusted dealer D generates correlated randomness based on the network architecture 
+
+{d0, . . . , d L}, including Beaver triples for multiplication, FSS keys with associated input masks for function eval-uations, and other correlated randomness required by the sub-protocols. This phase is data-independent, so D learns nothing about private inputs. The online phase begins with 
+
+input sharing , where the parties secret-share their private in-puts as described in Section 4. Next, in the secure computa-tion phase, the parties jointly execute ΠVerify (Algorithm 2): for each hidden layer l ∈ { 1, . . . , L − 1}, compute pre-activation bounds ⟨z(l)⟩, ⟨¯z(l)⟩ via ΠBackward (Algorithm 1) and derive relaxation slopes ⟨α(l)⟩ via Πα; then execute a final backward pass using ⟨d⟩ to compute ⟨f y,j ⟩ (Eq. (10) ). Finally, in the output phase, P0 sends ⟨f y,j ⟩0 to P1, who reconstructs the certified lower bound f y,j and concludes local robustness if f y,j > 0.
+
+5.2 SECURE BUILDING BLOCKS Secure Multiplication (SecMul , SecMatMul ). Secure scalar multiplication SecMul (⟨x⟩, ⟨y⟩) → ⟨ xy ⟩ follows the standard Beaver triple protocol (Section 3.2). For matrix multiplication, given inputs X ∈ Zm×n 
+
+> 2k
+
+and Y ∈ Zn×p 
+
+> 2k
+
+,the protocol computes SecMatMul (⟨X⟩, ⟨Y⟩) → ⟨ XY ⟩ by consuming matrix-level Beaver triples (⟨A⟩, ⟨B⟩, ⟨AB ⟩),thereby avoiding the overhead of scalar-wise decomposition. 
+
+Secure Arithmetic Right Shift ( SecARS ). To realign the radix point after fixed-point multiplications—which inher-ently yield 2nf fractional bits—we must restore the standard 
+
+nf -bit precision. We achieve this via SecARS (⟨x⟩, n f ) →⟨⌊ x/ 2nf ⌋⟩ , efficiently instantiated using the DCF-based pro-tocol of Gupta et al. [2025]. 
+
+Secure ReLU and Absolute Value ( SecReLU , SecAbs ). 
+
+Both primitives are built on securely computing the sign indicator μ = I[x < 0] via DCF. Parties evaluate prepro-cessed DCF keys to obtain the secret-shared bit ⟨μ⟩, and sub-sequently compute SecReLU (⟨x⟩) → SecMul (⟨1 − μ⟩, ⟨x⟩)
+
+and SecAbs (⟨x⟩) → SecMul (⟨1 − 2μ⟩, ⟨x⟩). Each primi-tive strictly requires one DCF evaluation followed by one 
+
+SecMul operation. 
+
+Secure Reciprocal ( SecRecip ). We implement the recipro-cal protocol SecRecip (⟨x⟩) → ⟨ 1/x ⟩ in two stages. First, we adapt the FSS-based approach from Gupta et al. [2025] to generate an initial approximation. The input magni-tude is decomposed as |x| ≈ (1 + m 
+
+> 2ℓm
+
+) · 2e, and a seed 
+
+w0 ≈ 1/|x| is computed via w0 = 2 −e · 2ℓm   
+
+> 2ℓm +m
+
+, where the terms are retrieved via spline and lookup tables. Sec-ond, since the lookup-based initialization provides limited precision, we perform niter Newton–Raphson iterations 
+
+wi+1 = wi · (2 − | x| · wi) to refine the result to the tar-get precision. Each iteration roughly doubles the number of accurate bits, ensuring sufficient numerical stability for subsequent verification steps. 
+
+5.3 SECURE SLOPE COMPUTATION Πα
+
+The relaxation slope vector α(l) in Eq. (2) is essential for constructing the linear propagation matrices in LBP. Al-though the definition is simple, securely evaluating the piecewise logic in Eq. (2) is costly in MPC, as it requires se-cure comparisons and data-dependent branching per neuron to distinguish active, inactive, and unstable states. To cir-cumvent these overheads and enable efficient execution, we reformulate the piecewise logic into a unified, data-independent arithmetic expression applied element-wise across all neurons in the layer: 
+
+α = ReLU (¯ z)
+
+ReLU (¯ z) + ReLU (−z) + ϵs
+
+. (12) This formulation naturally encapsulates the three theoreti-cal cases within a single data-independent execution path: for inactive neurons where ¯z ≤ 0, the vanishing numerator ReLU (¯ z) = 0 yields a slope of α = 0 ; for active neurons where z ≥ 0, the term ReLU (−z) = 0 results in α ≈ 1; and for unstable neurons, the expression simplifies to the opti-mal chord slope ¯z/ (¯ z − z). To ensure numerical robustness during the MPC execution, we introduce a small public sta-bility constant ϵs into the denominator of Eq. (12) . This safe-guard prevents potential division-by-zero errors that may arise when pre-activation bounds [z, z ] vanish near zero—a common phenomenon in deep neural networks due to the accumulation of conservative bounds during propagation. A theoretical analysis of its impact on the certified bounds is provided in Appendix B.3. The detailed vectorized proto-col Πα, which achieves branching-free computation using 
+
+SecReLU , SecRecip , and SecMul primitives, is presented in Algorithm 3 in Appendix A. 
+
+5.4 SECURE INTERCEPT ACCUMULATION Πδ
+
+As established in Eqs. (6) – (7) , the intercept contribution vec-tors δ(t−1) , ¯δ(t−1) ∈ Rdl depend on the element-wise signs of the intermediate coefficient matrix ˆA(t) ∈ Rdl×dt−1 .From Eq. (2) , the lower relaxation intercept is β(t−1)  
+
+> j
+
+= 0 
+
+for all neurons, while the upper intercept is ¯β(t−1)  
+
+> j
+
+=
+
+−α(t−1)  
+
+> j
+
+z(t−1)  
+
+> j
+
+for unstable neurons (and zero otherwise). Since β(t−1)  
+
+> j
+
+= 0 , the accumulations simplify significantly: only terms involving ¯β contribute. By substituting A(t−1)  
+
+> ij
+
+=ˆA(t) 
+
+> ij
+
+α(t−1)  
+
+> j
+
+(Eq. (5) ) and noting that α(t−1)  
+
+> j
+
+≥ 0 preserves signs, the i-th elements of the lower and upper contribu-tions reduce to δ(t−1)  
+
+> i
+
+= P   
+
+> j:A(t−1)
+> ij ≤0
+
+A(t−1)  
+
+> ij
+
+(−z(t−1)  
+
+> j
+
+) and 
+
+¯δ(t−1)  
+
+> i
+
+= P   
+
+> j:A(t−1)
+> ij >0
+
+A(t−1)  
+
+> ij
+
+(−z(t−1)  
+
+> j
+
+), respectively. To avoid expensive secure comparisons in MPC, these condi-tional summations can be elegantly reformulated into unified matrix-vector multiplications using ReLU operations: 
+
+δ(t−1) = −ReLU (−A(t−1) )ReLU (−z(t−1) ), (13) 
+
+¯δ(t−1) = ReLU (A(t−1) )ReLU (−z(t−1) ), (14) The protocol Πδ is given in Algorithm 4 (Appendix A). 
+
+5.5 SECURE VERIFICATION PROTOCOL 
+
+Building on the sub-protocols Πα and Πδ , we now present the complete secure verification protocol. Algorithm 1 (ΠBackward ) securely implements the backward recursion (Eqs. (4) – (7) ) for a target layer l. Starting with ⟨A⟩ = ⟨Idl ⟩
+
+and ⟨c⟩ = ⟨¯c⟩ = ⟨0⟩, the protocol iterates for t = l, . . . , 2,performing coefficient propagation ( SecMatMul ), slope multiplication ( SecMul ), intercept accumulation ( Πδ ), and bias addition. Final bounds follow from Hölder’s inequality (Eqs. (8) –(9) ), with the ℓ1-norm computed via SecAbs and local summation (for ℓ∞-perturbations). 
+
+Iterative Bound and Slope Computation. As described in Section 3.1, computing bounds at layer l requires slopes from all preceding layers, so the parties compute bounds and slopes iteratively from l = 1 to L − 1. For l = 1 ,bounds are computed directly: the linear term ⟨W(1) x0⟩
+
+via SecMatMul and the row-wise norm via SecAbs ; slopes 
+
+⟨α(1) ⟩ then follow from Πα. For l ≥ 2, the parties invoke 
+
+ΠBackward with previously computed slope shares to obtain 
+
+⟨z(l)⟩, ⟨¯z(l)⟩, and then derive ⟨α(l)⟩ via Πα.
+
+Algorithm 1 ΠBackward : Secure Linear Bound Propagation 
+
+Require: Target layer l; {⟨ α(t)⟩, ⟨z(t)⟩} l−1
+
+> t=1
+
+; ⟨x0⟩; ⟨ϵ⟩
+
+Ensure: Concrete bounds ⟨z(l)⟩, ⟨¯z(l)⟩
+
+1: ⟨A⟩ ← ⟨ Idl ⟩; ⟨c⟩ ← ⟨ 0⟩; ⟨¯c⟩ ← ⟨ 0⟩
+
+2: for t = l, . . . , 2 do 
+
+3: ⟨ ˆA⟩ ← SecMatMul (⟨A⟩, ⟨W(t)⟩) ▷ Eq. (4) 
+
+4: ⟨A⟩ ← SecMatMul (⟨ ˆA⟩, ⟨diag( α(t−1) )⟩)
+
+▷ Eq. (5) 
+
+5: ⟨δ⟩, ⟨¯δ⟩ ← Πδ (⟨A⟩, ⟨z(t−1) ⟩) ▷ Eqs. (13)–(14) 
+
+6: ⟨c⟩ ← ⟨ c⟩ + SecMatMul (⟨A⟩, ⟨b(t)⟩) + ⟨δ⟩
+
+▷ Eq. (6) 
+
+7: ⟨¯c⟩ ← ⟨ ¯c⟩ + SecMatMul (⟨A⟩, ⟨b(t)⟩) + ⟨¯δ⟩
+
+▷ Eq. (7) 
+
+8: ⟨A(0) ⟩ ← SecMatMul (⟨A⟩, ⟨W(1) ⟩)
+
+9: ⟨c(0) ⟩ ← ⟨ c⟩ + SecMatMul (⟨A⟩, ⟨b(1) ⟩)
+
+10: ⟨¯c(0) ⟩ ← ⟨ ¯c⟩ + SecMatMul (⟨A⟩, ⟨b(1) ⟩)
+
+11: ⟨r⟩ ← RowSum( SecAbs (⟨A(0) ⟩)) 
+
+▷ Row-wise ℓ1-norm 
+
+12: ⟨m⟩ ← SecMatMul (⟨A(0) ⟩, ⟨x0⟩);
+
+⟨s⟩ ← SecMul (⟨ϵ⟩, ⟨r⟩)
+
+13: ⟨z(l)⟩ ← ⟨ m⟩ + ⟨c(0) ⟩ − ⟨ s⟩;
+
+⟨¯z(l)⟩ ← ⟨ m⟩ + ⟨¯c(0) ⟩ + ⟨s⟩
+
+14: return ⟨z(l)⟩, ⟨¯z(l)⟩
+
+Algorithm 2 ΠVerify : Secure Robustness Verification 
+
+Require: Shares ⟨W(l)⟩, ⟨b(l)⟩ for l ∈ [L]; ⟨x0⟩; ⟨ϵ⟩; ⟨d⟩
+
+Ensure: Certified lower bound ⟨f y,j ⟩
+
+/* Iterative Bound and Slope Computation */ 
+
+1: ⟨z(1) ⟩ ← SecMatMul (⟨W(1) ⟩, ⟨x0⟩) + ⟨b(1) ⟩
+
+2: ⟨r(1) ⟩ ← RowSum( SecAbs (⟨W(1) ⟩)) ▷ Row-wise 
+
+ℓ1-norm 
+
+3: ⟨¯z(1) ⟩ ← ⟨ z(1) ⟩ + SecMul (⟨ϵ⟩, ⟨r(1) ⟩)
+
+4: ⟨z(1) ⟩ ← ⟨ z(1) ⟩ − SecMul (⟨ϵ⟩, ⟨r(1) ⟩)
+
+5: ⟨α(1) ⟩ ← Πα(⟨¯z(1) ⟩, ⟨z(1) ⟩)
+
+6: for l = 2 , . . . , L − 1 do 
+
+7: ⟨z(l)⟩, ⟨¯z(l)⟩ ← ΠBackward (l, {⟨ α(t)⟩, ⟨z(t)⟩} l−1
+
+> t=1
+
+)
+
+8: ⟨α(l)⟩ ← Πα(⟨¯z(l)⟩, ⟨z(l)⟩)
+
+/* Margin Certification */ 
+
+9: ⟨W(L)⟩ ← SecMatMul (⟨d⟩⊤, ⟨W(L)⟩)
+
+10: ⟨b(L)⟩ ← SecMatMul (⟨d⟩⊤, ⟨b(L)⟩)
+
+11: ⟨f y,j ⟩, _ ← ΠBackward (L, {⟨ α(t)⟩, ⟨z(t)⟩} L−1 
+
+> t=1
+
+)
+
+12: return ⟨f y,j ⟩
+
+Margin Certification. After obtaining all slope shares 
+
+⟨α(1) ⟩, . . . , ⟨α(L−1) ⟩, the parties compute the certified margin ⟨f y,j ⟩ via a final backward pass. To avoid 
+
+O(K) overhead from secure array indexing, P1 pro-vides a difference vector ⟨d⟩ where d = ey − ej ∈{− 1, 0, 1}K . The backward pass initializes ⟨W(L)⟩ ←
+
+SecMatMul (⟨d⟩⊤, ⟨W(L)⟩) ∈ R1×dL−1 and ⟨b(L)⟩ ←
+
+SecMul (⟨d⟩⊤, ⟨b(L)⟩) ∈ R. This reduces the coefficient 
+
+A(t) to a row vector in R1×dt , lowering per-layer com-munication from O(d2) to O(d). The parties then invoke 
+
+ΠBackward with target layer L to obtain ⟨A(0) ⟩ and ⟨c(0) ⟩,from which the certified margin ⟨f y,j ⟩ follows via Eq. (10) .
+
+## 6 THEORETICAL ANALYSIS 
+
+Security. The security of S ECURE CROWN is analyzed under the semi-honest adversary model (Definition 1). The proof constructs a simulator via a hybrid argument over L
+
+layers, reducing security to the underlying FSS and ASS primitives. The complete proof of Theorem 6.1 is provided in Appendix B.1. A pathway for upgrading to malicious se-curity, together with an empirical cost estimate, is discussed in Appendix C. 
+
+Theorem 6.1 (Security) . Protocol Πverify securely com-putes Fverify in the FD -hybrid model against semi-honest adversaries. 
+
+Complexity. For an L-layer network with maximum width 
+
+d, S ECURE CROWN requires O(L2) rounds, O(L2d2k)
+
+communication, and O(L2d3) computation (Appendix B.2). 
+
+Error Analysis. Fixed-point arithmetic introduces error in 
+
+f y,j bounded by a network-depth-dependent multiple of the per-operation rounding unit εq = 2 −nf (Appendix B.3). With maximum weight norm ρ = max i ∥W(i)∥∞, the ab-solute error in each output bound entry scales as O(L) εq ,
+
+O(L2) εq , and O(ρL) εq for the stable ( ρ < 1), unit-norm (ρ = 1 ), and unstable ( ρ > 1) regimes, respectively. 
+
+## 7 EXPERIMENTAL EVALUATION 
+
+7.1 EXPERIMENTAL SETUP Implementation. We implement S ECURE CROWN in C++, with k = 64 -bit fixed-point representation, nf = 26 frac-tional bits, stability constant ϵs = 10 −4, and niter = 1 
+
+Newton–Raphson refinement iteration in SecRecip (the FSS-based seed provides approximately ⌈nf /2⌉ accurate bits, and one iteration doubles this to ≥ nf bits). Exper-iments are run on a machine with an Intel Xeon w7-3445 CPU and 64 GB of RAM, using four CPU threads. We simulate network conditions via Linux tc : LAN (10 Gbps bandwidth, 0.05ms round-trip time (RTT)) and WAN (370/600 Mbps, 40/60 ms RTT). Results are aver-aged over 10 trials. Our replication package is available at https://github.com/songzhibo1/SecureCROWN. 
+
+Baseline. As no prior work addresses privacy-preserving robustness verification, we compare against the plaintext CROWN algorithm (Section 3.1), implemented in Python and executed single-threaded. This serves as the correctness oracle for validating numerical fidelity. 
+
+Models and Datasets. We evaluate on MNIST [LeCun Table 1: Fidelity analysis of S ECURE CROWN. m × [n]: m
+
+layers, n neurons each. R: Robust ( f y,j > 0); U: Unknown (f y,j ≤ 0). 
+
+Avg. Data Model Rob. ϵ Result MRE Cons. 
+
+> MNIST
+> 2 × [20]
+> 0.0448
+
+0.015 All R (99) 4.45 × 10 −7 100 %0.045 R (43) 9.52 × 10 −7 100 %
+
+U (56) 8.70 × 10 −7 100 %0.1 All U (99) 3.27 × 10 −7 100 %3 × [20] 
+
+> 0.0304
+
+0.015 R (93) 1.41 × 10 −6 100 %
+
+U (1) 1.08 × 10 −4 100 %0.030 R (44) 7.18 × 10 −6 100 %
+
+U (50) 3.68 × 10 −6 100 %0.1 All U (94) 6.85 × 10 −7 100 %3 × [256] 
+
+> 0.0159
+
+0.015 R (49) 6.20 × 10 −6 100 %
+
+U (51) 1.14 × 10 −5 100 %0.1 All U (100) 9.29 × 10 −7 100 %5 × [256] 
+
+> 0.0149
+
+0.015 R (50) 7.78 × 10 −6 100 %
+
+U (50) 1.21 × 10 −5 100 %0.1 All U (100) 6.16 × 10 −5 100 %7 × [256] 
+
+> 0.0132
+
+0.015 R (30) 2.66 × 10 −5 100 %
+
+U (69) 1.32 × 10 −2 100 %0.1 All U (99) 9.18 × 10 −2 100 %
+
+> CIFAR-10
+> 5 × [100]
+> 0.0021
+
+0.002 R (24) 5.23 × 10 −5 100 %
+
+U (21) 7.78 × 10 −5 100 %0.0078 All U (45) 5.65 × 10 −5 100 %7×[100] 
+
+> 0.0013
+
+0.001 R (32) 2.82 × 10 −4 100 %
+
+U (14) 1.50 × 10 −4 100 %10 ×[200] 
+
+> 0.0010
+
+0.001 R (28) 1.73 × 10 −3 100 %
+
+U (24) 1.67 × 10 −4 100 %
+
+et al., 1998] and CIFAR-10 [Krizhevsky, 2009] using fully-connected ReLU networks. MNIST models ( 2 × [20] 
+
+to 7 × [256] ) are from [Zhang et al., 2018] and VNN-COMP [Brix et al., 2023]; CIFAR-10 models ( 5 × [100] 
+
+to 10 × [200] ) are from ERAN [Singh et al., 2019]. For each configuration, we randomly sample 100 test images, verify those that are correctly classified, and test multiple ϵ
+
+values under ℓ∞ perturbations—including values near the robustness boundary (mixed Robust/Unknown outcomes) and extreme values (all Robust or all Unknown). 
+
+7.2 RESULTS RQ1: Fidelity. We validate S ECURE CROWN’s correctness by measuring numerical fidelity against the plaintext base-0  
+
+> 7
+> 14
+> LAN
+> 0.05ms
+> 10 Gbps
+> 0.0
+> 0.1
+> 0.1
+> 0.0
+> 0.1
+> 0.1
+> 0.0
+> 1.3
+> 1.3
+> 0.0
+> 4.3
+> 4.3
+> 0.0
+> 8.9
+> 8.9
+> 0.0
+> 3.4
+> 3.4
+> 0.0
+> 5.5
+> 5.5
+> 0
+> 120
+> 240
+> 0.0
+> 151.1
+> 151.1
+> 0
+> 25
+> 50 WAN
+> 40 ms
+> 370 Mbps
+> 0.0
+> 2.4
+> 2.6
+> 0.0
+> 4.9
+> 5.0
+> 0.1
+> 6.5
+> 6.8
+> 0.2
+> 16.9
+> 17.2
+> 0.2
+> 31.7
+> 32.1
+> 0.2
+> 16.2
+> 16.6
+> 0.2
+> 28.3
+> 28.7
+> 0
+> 200
+> 400
+> 0.2
+> 194.2
+> 194.7
+> 0
+> 25
+> 50 WAN
+> 40 ms
+> 600 Mbps
+> Time (s)
+> 0.0
+> 2.4
+> 2.5
+> 0.0
+> 4.9
+> 5.0
+> 0.1
+> 6.3
+> 6.6
+> 0.2
+> 16.2
+> 16.6
+> 0.2
+> 30.4
+> 30.8
+> 0.2
+> 15.6
+> 16.0
+> 0.1
+> 26.9
+> 27.3
+> 0
+> 200
+> 400
+> Time (s)
+> 0.2
+> 191.2
+> 191.6
+> MNIST2x[20]
+> 0
+> 30
+> 60 WAN
+> 60 ms
+> 600 Mbps
+> 0.1
+> 3.6
+> 3.8
+> MNIST3x[20]
+> 0.1
+> 7.2
+> 7.4
+> MNIST3x[256]
+> 0.2
+> 9.4
+> 9.9
+> MNIST5x[256]
+> 0.2
+> 23.5
+> 24.0
+> MNIST7x[256]
+> 0.2
+> 41.5
+> 42.0
+> CIFAR5x[100]
+> 0.2
+> 21.0
+> 21.4
+> CIFAR7x[100]
+> 0.2
+> 37.2
+> 37.7
+> CIFAR10x[200]
+> 0
+> 200
+> 400
+> 0.3
+> 199.9
+> 200.5
+> Input Computation End-to-end
+
+Figure 1: Online latency breakdown across network conditions and model architectures. Table 2: Online communication volume breakdown (MB). 
+
+Dataset Model Communication (MB) Input Comp. E2E 
+
+MNIST 
+
+2 × [20] 0.13 0.64 0.77 3 × [20] 0.14 1.78 1.92 3 × [256] 2.07 30 .16 32 .23 5 × [256] 3.07 109 .95 113 .02 7 × [256] 4.07 234 .80 238 .88 
+
+CIFAR-10 
+
+5 × [100] 2.63 83 .76 86 .39 7 × [100] 2.78 140 .92 143 .71 10 × [200] 7.20 596 .97 604 .17 
+
+line using two metrics. The first is Mean Relative Error 
+
+(MRE): MRE = 1
+
+> N
+
+PNi=1 |(f sec ,(i) 
+
+> y,j
+
+− f plain ,(i) 
+
+> y,j
+
+)/f plain ,(i) 
+
+> y,j
+
+|,where f sec  
+
+> y,j
+
+and f plain  
+
+> y,j
+
+denote the S ECURE CROWN and plaintext certified lower bounds, respectively. The second is Verification Consistency , the percentage of samples with identical verification outcomes. As shown in Table 1, S ECURE CROWN achieves high nu-merical fidelity, with MRE scaling predictably with net-work depth. Our evaluation specifically examines challeng-ing cases near the robustness boundary, as reflected by the mixed Robust/Unknown outcomes in Table 1. For shallow networks (MNIST 2 × [20] ), MRE remains at ≈ 10 −7. As depth increases, cumulative rounding errors in recursive bound propagation lead to higher MRE—from 6.20 × 10 −6
+
+(MNIST 3 × [256] ) to 1.73 × 10 −3 for CIFAR-10 10 × [200] .Despite this, S ECURE CROWN maintains 100% verifica-tion consistency with the plaintext baseline across all 8 architectures and multiple ϵ configurations, confirming that our approach faithfully preserves the decision behavior of the plaintext verifier. 
+
+RQ2: Online Efficiency. We evaluate online efficiency by analyzing runtime latency and communication volume across network conditions and model architectures. We break down the end-to-end (E2E) execution into two phases: (1) Input Processing , encompassing secure input sharing and constraint setup; (2) Computation , the secure backward bound propagation with FSS-based nonlinear primitives. Figure 1 and Table 2 summarize the results. 
+
+Latency. As shown in Figure 1, E2E latency ranges from 0.1s to 200.5s across network conditions and model archi-tectures. Smaller models (MNIST 2 × [20] to 3 × [256] )complete within 0.1–9.9s, while CIFAR-10 10 × [200] re-quires 151.1–200.5s. The computation phase dominates total latency, with input processing contributing only 0.0–0.3s. Bandwidth variation at fixed RTT (370 vs 600 Mbps, 40ms) yields <2% difference, whereas increasing RTT from 40ms to 60ms incurs ∼5% overhead. This indicates that round-trip latency accumulates over O(L2) communication rounds, making RTT the dominant network factor. FSS evaluations are embarrassingly parallel across neurons, so exploiting more cores would further reduce latency for larger models. 
+
+Communication. Table 2 details communication volume. E2E communication scales linearly with network complex-ity: from 0.77 MB (MNIST 2 × [20] ) to 604.17 MB (CIFAR-10 10 × [200] ). The computation phase dominates, account-ing for ≈98.8% of total volume in the largest model. Input processing remains negligible ( ≤7.20 MB even for CIFAR-10), confirming that communication overhead scales with secure operations rather than input dimensions , ensuring scalability to higher-dimensional data. 
+
+RQ3: Offline Preprocessing Overhead. As shown in Ta-ble 3, both time and storage scale with network complexity, ranging from 0.17 s / 39 MB (MNIST 2 × [20] ) to 71.16 s / 31 GB (CIFAR-10 10 × [200] ). While storage costs are substantial for deep networks, the preprocessing phase is 
+
+one-time and data-independent —generated offline without access to private inputs. In practical deployment, preprocess-ing material can be prepared as a batch for multiple planned verification queries; each query consumes a fresh portion of the batch during execution, amortizing the generation cost across those queries. Table 3: Offline preprocessing overhead (one-time, data-independent). 
+
+Dataset Model Time (s) Data (MB) 
+
+MNIST 
+
+2 × [20] 0.17 39 3 × [20] 0.41 100 3 × [256] 4.20 1644 5 × [256] 13 .93 5677 7 × [256] 29 .21 11 898 
+
+CIFAR-10 
+
+5 × [100] 12 .03 4547 7 × [100] 19 .25 7541 10 × [200] 71 .16 31 060 
+
+Table 4: Sensitivity to the stability constant ϵs on MNIST 
+
+5×[256] (ϵ = 0 .015 ). 
+
+ϵs Cons. Avg. MRE R (50) U (50) 
+
+10 −1 100% 5.86 × 10 −2 1.40 × 10 −1
+
+10 −2 100% 6.47 × 10 −3 1.50 × 10 −2
+
+10 −3 100% 6.49 × 10 −4 1.52 × 10 −3
+
+10 −4 100% 7.05 × 10 −5 1.62 × 10 −4
+
+RQ4: Sensitivity to the Stability Constant. We vary the stability constant ϵs (Eq. (12)) to examine its impact on ver-ification outcomes. Specifically, ϵs is varied from 10 −4 (our default) to 10 −1 on MNIST 5×[256] (ϵ = 0 .015 ). As shown in Table 4, verification consistency remains 100% across all tested values. At the same time, the reported MREs increase approximately linearly with ϵs, indicating that larger stabil-ity constants introduce larger numerical deviations from the plaintext bounds. On this benchmark, verification decisions remain unchanged even when ϵs is increased to 1000 × the default value. 
+
+## 8 CONCLUSION 
+
+We propose S ECURE CROWN, the first privacy-preserving framework for neural network robustness verification in a 2PC setting. Our protocol addresses the key challenges of performing linear relaxation and backward bound com-putation on protected model parameters and inputs. We provided formal privacy guarantees in the semi-honest ad-versary model and analyzed the protocol’s computational complexity. Experiments on standard benchmarks validate that our method achieves verification fidelity comparable to plaintext verification with moderate cryptographic over-head, representing a promising step toward efficient privacy-preserving verification. 
+
+Acknowledgements 
+
+This work was supported by the National Science and Tech-nology Major Project (Grant 2022ZD0115901), the Univer-sity of Bristol Engineering and Physical Sciences Research Council Impact Acceleration Account, and the National Nat-ural Science Foundation of China (Grant Nos. 92582102, 62572013, and 62172019). Nianyun Song is supported by the China Scholarship Council (Grant 202506040106). We thank the anonymous reviewers for their constructive feed-back. 
+
+References 
+
+Matthias Althoff. An introduction to CORA 2015. In 1st and 2nd International Workshop on Applied Verification for Continuous and Hybrid Systems , volume 34 of EPiC Series in Computing , pages 120–151. EasyChair, 2015. Elette Boyle, Niv Gilboa, and Yuval Ishai. Function se-cret sharing. In Advances in Cryptology, EUROCRYPT 2015 , volume 9057 of Lecture Notes in Computer Science ,pages 337–367. Springer, 2015. Christopher Brix, Mark Niklas Müller, Stanley Bak, Tay-lor T. Johnson, and Changliu Liu. First three years of the international verification of neural networks competition (VNN-COMP). Int. J. Softw. Tools Technol. Transf. , 25 (3):329–339, 2023. Thomas Davenport and Ravi Kalakota. The potential for artificial intelligence in healthcare. Future Healthcare Journal , 6(2):94–98, 2019. Hai Duong, Linhan Li, ThanhVu Nguyen, and Matthew B. Dwyer. A DPLL(T) framework for verifying deep neural networks. CoRR , abs/2307.10266, 2023. Hai Duong, Dong Xu, ThanhVu Nguyen, and Matthew B. Dwyer. Harnessing neuron stability to improve DNN verification. Proc. ACM Softw. Eng. , 1(FSE):859–881, 2024. Hai Duong, ThanhVu Nguyen, and Matthew B. Dwyer. Neu-ralSAT: A high-performance verification tool for deep neural networks. In Computer Aided Verification, CAV 2025 , volume 15932 of Lecture Notes in Computer Sci-ence , pages 409–423. Springer, 2025. Andre Esteva, Brett Kuprel, Roberto A Novoa, Justin Ko, Susan M Swetter, Helen M Blau, and Sebastian Thrun. Dermatologist-level classification of skin cancer with deep neural networks. Nature , 542(7639):115–118, 2017. Andre Esteva, Alexandre Robicquet, Bharath Ramsundar, Volodymyr Kuleshov, Mark DePristo, Katherine Chou, Claire Cui, Greg Corrado, Sebastian Thrun, and Jeff Dean. A guide to deep learning in healthcare. Nature Medicine ,25(1):24–29, 2019. David Evans, Vladimir Kolesnikov, and Mike Rosulek. A pragmatic introduction to secure multi-party computation. 
+
+Found. Trends Priv. Secur. , 2(2-3):70–246, 2018. O. Goldreich, S. Micali, and A. Wigderson. How to play ANY mental game. In Proceedings of the Annual ACM Symposium on Theory of Computing, STOC 1987 , pages 218–229. ACM, 1987. Ian J. Goodfellow, Jonathon Shlens, and Christian Szegedy. Explaining and harnessing adversarial examples. In Inter-national Conference on Learning Representations, ICLR 2015 , 2015. Kanav Gupta, Nishanth Chandran, Divya Gupta, Jonathan Katz, and Rahul Sharma. SHARK: actively secure in-ference using function secret sharing. In IEEE Sympo-sium on Security and Privacy, SP 2025 , pages 2472–2490. IEEE, 2025. Dan Hendrycks and Thomas G. Dietterich. Benchmarking neural network robustness to common corruptions and perturbations. In International Conference on Learning Representations, ICLR 2019 , 2019. Guy Katz, Clark Barrett, David L. Dill, Kyle Julian, and Mykel J. Kochenderfer. Reluplex: An efficient SMT solver for verifying deep neural networks. In Computer Aided Verification, CAV 2017 , volume 10426 of Lec-ture Notes in Computer Science , pages 97–117. Springer, 2017. Guy Katz, Derek A. Huang, Duligur Ibeling, Kyle Julian, Christopher Lazarus, Rachel Lim, Parth Shah, Shan-tanu Thakoor, Haoze Wu, Aleksandar Zeljic, David L. Dill, Mykel J. Kochenderfer, and Clark W. Barrett. The Marabou framework for verification and analysis of deep neural networks. In Computer Aided Verification, CAV 2019 , volume 11561 of Lecture Notes in Computer Sci-ence , pages 443–452. Springer, 2019. Brian Knott, Shobha Venkataraman, Awni Y. Hannun, Shubho Sengupta, Mark Ibrahim, and Laurens van der Maaten. CrypTen: Secure multi-party computation meets machine learning. Advances in Neural Information Pro-cessing Systems , 34:4961–4973, 2021. Alex Krizhevsky. Learning multiple layers of features from tiny images. Technical Report TR-2009, Department of Computer Science, University of Toronto, 2009. Nishant Kumar, Mayank Rathee, Nishanth Chandran, Divya Gupta, Aseem Rastogi, and Rahul Sharma. CrypTFlow: Secure TensorFlow inference. In IEEE Symposium on Security and Privacy, SP 2020 , pages 336–353. IEEE, 2020. Yann LeCun, Léon Bottou, Yoshua Bengio, and Patrick Haffner. Gradient-based learning applied to document recognition. Proceedings of the IEEE , 86(11):2278–2324, 1998. Eunsang Lee, Joon-Woo Lee, Junghyun Lee, Young-Sik Kim, Yongjune Kim, Jong-Seon No, and Woosuk Choi. Low-complexity deep convolutional neural networks on fully homomorphic encryption using multiplexed parallel convolutions. In International Conference on Machine Learning, ICML 2022 , volume 162 of Proceedings of Machine Learning Research , pages 12403–12422. PMLR, 2022. Seunghwa Lee, Hankyung Ko, Jihye Kim, and Hyunok Oh. vCNN: Verifiable convolutional neural network based on zk-SNARKs. IEEE Trans. Dependable Secur. Comput. ,21(4):4254–4270, 2024. Geert Litjens, Thijs Kooi, Babak Ehteshami Bejnordi, Ar-naud Arindra Adiyoso Setio, Francesco Ciompi, Mohsen Ghafoorian, Jeroen Awm Van Der Laak, Bram Van Gin-neken, and Clara I Sánchez. A survey on deep learning in medical image analysis. Medical Image Analysis , 42: 60–88, 2017. Qian Lou and Lei Jiang. HEMET: A homomorphic-encryption-friendly privacy-preserving mobile neural net-work architecture. In International Conference on Ma-chine Learning, ICML 2021 , volume 139 of Proceedings of Machine Learning Research , pages 7102–7110. PMLR, 2021. Mohammad Mahdi Maheri, Hamed Haddadi, and Alex Davidson. TeleSparse: Practical privacy-preserving veri-fication of deep neural networks. Proc. Priv. Enhancing Technol. , 2025(4):861–880, 2025. Payman Mohassel and Peter Rindal. ABY3: A mixed pro-tocol framework for machine learning. In Proceedings of the ACM SIGSAC Conference on Computer and Com-munications Security, CCS 2018 , pages 35–52. ACM, 2018. Hadi Salman, Greg Yang, Huan Zhang, Cho-Jui Hsieh, and Pengchuan Zhang. A convex relaxation barrier to tight robustness verification of neural networks. Advances in Neural Information Processing Systems , 32:9835–9846, 2019. Zhouxing Shi, Qirui Jin, Zico Kolter, Suman Jana, Cho-Jui Hsieh, and Huan Zhang. Neural network verification with branch-and-bound for general nonlinearities. In 
+
+Tools and Algorithms for the Construction and Analysis of Systems, TACAS 2025 , volume 15696 of Lecture Notes in Computer Science , pages 315–335. Springer, 2025. Gagandeep Singh, Timon Gehr, Markus Püschel, and Mar-tin Vechev. An abstract domain for certifying neural networks. Proc. ACM Program. Lang. , 3(POPL):1–30, 2019. Nianyun Song, Fuyi Wang, Rongfang Bie, Yu Guo, Leo Yu Zhang, and Xiaohua Jia. ObliviGate: Towards architecture-oblivious privacy-preserving inference for malicious security. IEEE Transactions on Services Com-puting , 2026. Christian Szegedy, Wojciech Zaremba, Ilya Sutskever, Joan Bruna, Dumitru Erhan, Ian J. Goodfellow, and Rob Fer-gus. Intriguing properties of neural networks. In Inter-national Conference on Learning Representations, ICLR 2014 , 2014. Sijun Tan, Brian Knott, Yuan Tian, and David J. Wu. Crypt-GPU: Fast privacy-preserving machine learning on the GPU. In IEEE Symposium on Security and Privacy, SP 2021 , pages 1021–1038. IEEE, 2021. Paul Voigt and Axel Von dem Bussche. The EU General Data Protection Regulation (GDPR): A Practical Guide .Springer International Publishing, 2017. Sameer Wagh, Divya Gupta, and Nishanth Chandran. Se-cureNN: 3-party secure computation for neural network training. Proc. Priv. Enhancing Technol. , 2019(3):26–49, 2019. Sameer Wagh, Shruti Tople, Fabrice Benhamouda, Eyal Kushilevitz, Prateek Mittal, and Tal Rabin. Falcon: Honest-majority maliciously secure framework for pri-vate deep learning. Proc. Priv. Enhancing Technol. , 2021 (1):188–208, 2021. Shiqi Wang, Huan Zhang, Kaidi Xu, Xue Lin, Suman Jana, Cho-Jui Hsieh, and J Zico Kolter. Beta-CROWN: Effi-cient bound propagation with per-neuron split constraints for complete and incomplete neural network verification. 
+
+Advances in Neural Information Processing Systems , 34: 29909–29921, 2021. Haoze Wu, Omri Isac, Aleksandar Zeljic, Teruhiro Tago-mori, Matthew L. Daggitt, Wen Kokke, Idan Refaeli, Guy Amir, Kyle Julian, Shahaf Bassan, Pei Huang, Ori Lahav, Min Wu, Min Zhang, Ekaterina Komendantskaya, Guy Katz, and Clark W. Barrett. Marabou 2.0: A versatile formal analyzer of neural networks. In Computer Aided Verification, CAV 2024 , volume 14682 of Lecture Notes in Computer Science , pages 249–264. Springer, 2024. Kaidi Xu, Zhouxing Shi, Huan Zhang, Yihan Wang, Kai-Wei Chang, Minlie Huang, Bhavya Kailkhura, Xue Lin, and Cho-Jui Hsieh. Automatic perturbation analysis for scalable certified robustness and beyond. Advances in Neural Information Processing Systems , 33:1129–1141, 2020. Kaidi Xu, Huan Zhang, Shiqi Wang, Yihan Wang, Suman Jana, Xue Lin, and Cho-Jui Hsieh. Fast and Complete: Enabling complete neural network verification with rapid and massively parallel incomplete verifiers. In Interna-tional Conference on Learning Representations, ICLR 2021 , 2021. Andrew C Yao. Protocols for secure computations. In 
+
+Proceedings of the Annual Symposium on Foundations of Computer Science, FOCS 1982 , pages 160–164. IEEE, 1982. Huan Zhang, Tsui-Wei Weng, Pin-Yu Chen, Cho-Jui Hsieh, and Luca Daniel. Efficient neural network robustness cer-tification with general activation functions. Advances in Neural Information Processing Systems , 31:4939–4948, 2018. Qiao Zhang, Chunsheng Xin, and Hongyi Wu. Privacy-preserving deep learning based on multiparty secure com-putation: A survey. IEEE Internet Things J. , 8(13):10412– 10429, 2021. Appendix 
+
+Nianyun Song 1,2 Xiaokun Luan 3 Yu Guo 1 Rongfang Bie 1 Meng Sun 3 Xiyue Zhang *2 1School of Artificial Intelligence, Beijing Key Laboratory of Artificial Intelligence for Education, Engineering Research Center of Intelligent Technology and Educational Application (Ministry of Education), Beijing Normal University, Beijing, China 
+
+> 2
+
+School of Computer Science, University of Bristol, Bristol, UK 
+
+> 3
+
+School of Mathematical Sciences, Peking University, Beijing, China 
+
+## A DETAILED PROTOCOLS 
+
+A.1 SECURE RELAXATION SLOPE COMPUTATION 
+
+Algorithm 3 details the secure protocol Πα for computing the relaxation slope vector α(l), directly implementing the unified arithmetic expression derived in Eq. (12) of the main text. As discussed in Section 5.3, securely evaluating the piecewise conditions of the standard ReLU relaxation introduces prohibitive communication overhead due to data-dependent branching and secure comparisons. By formulating the slope computation as a continuous, data-independent function, our protocol evaluates all neurons uniformly. The protocol first extracts the required positive bounds and the magnitudes of the negative bounds using standard SecReLU operations. After locally incorporating the public stability constant ϵs to prevent numerical instability, the division is securely resolved by computing the reciprocal of the denominator via SecRecip , followed by an element-wise SecMul . This branching-free design ensures deterministic execution time and minimizes the use of heavy cryptographic primitives. 
+
+Algorithm 3 Πα: Secure Slope Computation 
+
+Require: Secret shares of pre-activation lower bounds ⟨z(l)⟩ ∈ Zdl 
+
+> 2k
+
+, upper bounds ⟨¯z(l)⟩ ∈ Zdl 
+
+> 2k
+
+, and public stability constant ϵs ∈ R+
+
+Ensure: Secret shares of the relaxation slope vector ⟨α(l)⟩ ∈ Zdl 
+
+> 2k
+> 1:
+
+⟨n⟩ ← SecReLU (⟨¯z(l)⟩) ▷ Numerator: ReLU(¯ z(l)) 
+
+> 2:
+
+⟨dsub ⟩ ← SecReLU (−⟨ z(l)⟩) ▷ Partial denominator: ReLU( −z(l)) 
+
+> 3:
+
+⟨d⟩ ← ⟨ n⟩ + ⟨dsub ⟩ + ϵs ▷ Full denominator via local addition (zero communication)  
+
+> 4:
+
+⟨r⟩ ← SecRecip (⟨d⟩) ▷ Element-wise secure reciprocal: 1/d 
+
+> 5:
+
+⟨α(l)⟩ ← SecMul (⟨n⟩, ⟨r⟩) ▷ Element-wise secure multiplication for division  
+
+> 6:
+
+return ⟨α(l)⟩
+
+A.2 SECURE INTERCEPT ACCUMULATION 
+
+Algorithm 4 details the secure protocol Πδ for computing the intercept contribution vectors δ(t−1) and ¯δ(t−1) , implementing the reformulated expressions in Eqs. (13) – (14) . As discussed in Section 5.4, directly evaluating the conditional summations would necessitate expensive secure comparison protocols. By leveraging the property that the relaxation slopes satisfy 
+
+α(t−1) ≥ 0, the updated coefficients A(t−1) preserve the necessary sign information. The protocol efficiently isolates the positive and negative components of the coefficient matrix ⟨A(t−1) ⟩ and the negative components of the pre-activation bounds ⟨z(t−1) ⟩ using three parallel SecReLU evaluations. The final vectors ⟨δ(t−1) ⟩ and ⟨¯δ(t−1) ⟩ are then obtained via 
+
+SecMatMul .
+
+> *Correspondence to XZ (xiyue.zhang@bristol.ac.uk)
+
+Algorithm 4 Πδ : Secure Intercept Accumulation 
+
+Require: Secret shares of coefficients ⟨A(t−1) ⟩ ∈ Zdl×dt−1 
+
+> 2k
+
+and pre-activation lower bounds ⟨z(t−1) ⟩ ∈ Zdt−1
+
+> 2k
+
+Ensure: Secret shares of intercept contributions ⟨δ(t−1) ⟩, ⟨¯δ(t−1) ⟩ ∈ Zdl 
+
+> 2k
+> 1:
+
+⟨R− 
+
+> A
+
+⟩ ← SecReLU (−⟨ A(t−1) ⟩) ▷ ReLU( −A(t−1) ), element-wise  
+
+> 2:
+
+⟨R+
+
+> A
+
+⟩ ← SecReLU (⟨A(t−1) ⟩) ▷ ReLU( A(t−1) ), element-wise  
+
+> 3:
+
+⟨rz ⟩ ← SecReLU (−⟨ z(t−1) ⟩) ▷ ReLU( −z(t−1) ) 
+
+> 4:
+
+⟨δ(t−1) ⟩ ← − SecMatMul (⟨R− 
+
+> A
+
+⟩, ⟨rz ⟩) ▷ Eq. (13)  
+
+> 5:
+
+⟨¯δ(t−1) ⟩ ← SecMatMul (⟨R+
+
+> A
+
+⟩, ⟨rz ⟩) ▷ Eq. (14)  
+
+> 6:
+
+return ⟨δ(t−1) ⟩, ⟨¯δ(t−1) ⟩
+
+## B DETAILED ANALYSIS 
+
+B.1 SECURITY PROOF 
+
+Proof. We prove security via a hybrid argument. Let the verification circuit consist of L layers corresponding to the neural network’s bound propagation. For each layer l, let Fl denote the FSS scheme used (either for SecReLU , SecMul , or 
+
+SecRecip ), with associated simulator Sim l.We construct simulator Sim 0 for corrupted model owner P0; the case for data owner P1 is symmetric. 
+
+Hybrid Definitions. 
+
+• H0: The simulator knows all inputs and executes the real protocol honestly. This is identical to the real execution. • Hl (for l ∈ { 1, . . . , L }): Execute the real protocol for layers 1, . . . , L − l. For layers L − l + 1 , . . . , L , use the FSS simulator Sim l to generate keys and simulate protocol messages. • HL+1 : Same as HL, but additionally replace P1’s inputs with dummy values. This is the ideal-world execution. 
+
+Indistinguishability of Adjacent Hybrids. Hl ≈c Hl+1 for l ∈ { 0, . . . , L − 1}: These hybrids differ only in layer 
+
+j = L − l. Suppose a distinguisher D distinguishes Hl from Hl+1 with non-negligible advantage. We construct an adversary 
+
+A that breaks the security of FSS scheme Fj :1. A runs the protocol for layers 1, . . . , j − 1 honestly. 2. A receives an FSS key kb from the FSS challenger (either real or simulated). 3. A uses kb to execute layer j and simulates layers j + 1 , . . . , L .4. A outputs D’s guess. If D distinguishes, then A breaks FSS security—a contradiction. 
+
+HL ≈s HL+1 : In both hybrids, P1’s inputs are masked by uniform random shares. Since additive secret sharing is information-theoretically secure, replacing real inputs with dummy inputs produces an identical distribution of shares. Thus these hybrids are statistically indistinguishable. 
+
+Conclusion. By the hybrid argument, H0 ≈c HL+1 , which establishes that the real and ideal executions are computation-ally indistinguishable. 
+
+B.2 COMPLEXITY ANALYSIS 
+
+We analyze the theoretical complexity of S ECURE CROWN for an L-layer network with maximum width d. Table 5 summarizes the costs of the underlying building blocks. Table 5: Complexity of secure building blocks. Rounds and Comm. denote online costs; Preproc. denotes offline costs. Parameters: bit-width k = 64 , fractional bits nf = 26 , security parameter λ = 128 , Newton–Raphson iterations niter = 1 .
+
+Primitive Rounds Comm. (bits) Preproc. (bits) 
+
+SecMul 1 2k (128) 3k (192) SecMatMul m×n×p 1 2( mn +np )k (mn +np +mp )k
+
+SecARS 2 k + 2 (66) (k+nf )λ + O(k)
+
+SecReLU 2 k + 1 (65) kλ + O(k)
+
+SecAbs 2 k + 1 (65) kλ + O(k)
+
+SecRecip 6 O(k) O(kλ )
+
+Sub-protocol Complexity. The complexity of our specialized sub-protocols is derived as follows: • Protocol Πα (Algorithm 3): This involves two parallel SecReLU operations (2 rounds), one SecRecip (4 + 2 niter 
+
+rounds, including niter Newton–Raphson iterations), and a final multiplication (1 round). The total is 7 + 2 niter rounds, with communication O(dk ).• Protocol Πδ (Algorithm 4): This protocol executes three parallel SecReLU evaluations (2 rounds) followed by two parallel SecMatMul operations (1 round). The total is 3 rounds with O(d2k) communication. 
+
+End-to-End Complexity. The complete S ECURE CROWN protocol (Algorithm 2) proceeds layer-by-layer. For a target layer l, Algorithm 1 iterates l−1 times. Each iteration involves: SecMatMul (1 round) → slope multiplication (1 round) → Πδ
+
+(3 rounds), yielding 5 rounds per iteration. The bias accumulation in Lines 6-7 overlaps with Πδ : the SecMatMul (⟨A⟩, ⟨b⟩)
+
+executes in parallel with the SecReLU operations, and the final addition of δ is a local operation. Summing over all layers, the total complexity is: • Rounds: O(L2). The iterative bound computation contributes PL−1 
+
+> l=2
+
+5( l − 1) = 5( L−2)( L−1) 2 ≈ 52 L2 rounds. The final margin certification adds 5( L − 1) = O(L) rounds. Additionally, Πα is invoked L − 1 times, contributing 
+
+(L − 1)(7 + 2 niter ) rounds. • Communication: O(L2d2k). This is dominated by the dense matrix multiplications in the iterative backward pass. • Computation: O(L2d3), dominated by O(L2) matrix multiplications of size d × d.• Preprocessing: O(L2d2k) bits for matrix Beaver triples and O(Ldkλ ) bits for FSS keys. 
+
+B.3 ERROR ANALYSIS 
+
+We analyze the LBP bound computation, which constructs an affine form bound by backward propagation of a coefficient matrix A and a bias vector c, accumulating constants and relaxation terms layer by layer, and then forms the final upper/lower bound of the target quantity as a function of the input. The final step is to maximize/minimize this affine form over the input perturbation set X , which yields closed-form expressions for the bounds. We denote by r(M) the vector of row-wise sums of absolute values of a matrix M , i.e., r(M)i = P 
+
+> j
+
+|Mij |. We denote by 
+
+∥M∥∞ = max i r(M)i the induced infinity norm of a matrix M, and by ∥v∥1 = P 
+
+> i
+
+|vi| the ℓ1 norm of a vector v. Let 
+
+Qnf : R → R denote the fixed-point quantization function that maps a real number to its fixed-point representation with nf
+
+fractional bits, i.e., Qnf (y) = 2 −nf ⌊2nf y⌋.For each layer i, the algorithm uses a diagonal matrix of slopes diag( α(i)) with entries α(i) 
+
+> k
+
+∈ [0 , 1] to relax the ReLU activation, applied during backward propagation. For a fixed fractional precision parameter nf , let ARS nf (·) denote the arithmetic-right-shift scaling operation that divides its input by 2nf and rounds towards −∞ (i.e., takes the floor). We model each call to ARS nf as introducing an additive element-wise rounding error bounded by a constant εq in real units , where typically εq = 2 −nf .
+
+Assumptions Our analysis makes the following assumptions: • Assumption 1 (Range safety) : During execution, every intermediate integer value remains within the representable range of the fixed-point format, i.e., no overflow occurs. Equivalently, the fixed-point computation is a faithful representation of the corresponding real arithmetic plus truncation errors. • Assumption 2 (Quantization error model) : Each call to ARS nf corresponds to applying Qnf to the intended real-valued quantity, and thus introduces an additive error bounded by εq in real units: 
+
+Qnf (y) = y + η(y) with |η(y)| ≤ εq .
+
+F
+
+Backward propagation operator For the target bound computation, define the ideal backward propagation of coefficient matrices {A(i)} by 
+
+A(i−1) = A(i)W(i)diag( α(i−1) ), i = 1 , . . . , m, 
+
+where m is the number of backward steps performed by the algorithm (e.g., m = L − 1 for the full backward propagation from the last layer). The starting coefficient A(m) is initialized as the weight matrix of the current layer. Let {Λ(i)} be the corresponding coefficients computed by the fixed-point implementation, which applies the ARS nf
+
+operation at each multiplication step. The coefficient error at layer i is defined as E(i) = Λ(i) − A(i).
+
+Theorem B.1. Under assumptions 1 and 2, given the slopes α(i) ∈ [0 , 1] element-wise, the coefficient error satisfies the recurrence 
+
+∥E(i−1) ∥∞ ≤ ∥ W(i)∥∞∥E(i)∥∞ + ∆ i, i = 1 , . . . , m, (15) 
+
+where ∆i is an upper bound on the ℓ∞ norm of the local rounding injection at step i, induced by the truncations performed at that step. In particular, if step i produces a matrix with qi columns before truncation, then one may take the conservative bound ∆i ≤ qiεq . Consequently, if the initial coefficient is computed exactly (i.e., E(m) = 0), then the final coefficient error after m steps is bounded by 
+
+∥E(0) ∥∞ ≤
+
+> m
+
+X
+
+> i=1
+
+
+
+> i−1
+
+Y
+
+> j=1
+
+∥W(j)∥∞
+
+ ∆i. (16) 
+
+If, furthermore, ∥W(i)∥∞ ≤ ρ for all relevant layers, then the error bound simplifies to 
+
+∥E(0) ∥∞ ≤
+
+> m−1
+
+X
+
+> k=0
+
+ρk
+
+!
+
+max  
+
+> i
+
+∆i =
+
+
+
+O(m) · max i ∆i, if ρ = 1 ,O(ρm) · max i ∆i, if ρ > 1,O(1) · max i ∆i, if ρ < 1.
+
+(17) 
+
+Proof. Fix i ∈ { 1, . . . , m }. The ideal update is A(i−1) = A(i)W(i)diag( α(i−1) ), while the actual update is 
+
+Λ(i−1) = Qnf (Λ(i)W(i)diag( α(i−1) )) , (18) where we have used the fact that α(i−1)  
+
+> k
+
+is computed to lie in [0 , 1] and treated it as the same slope vector used in both the ideal and actual computations. If one wishes to include quantized α(i−1)  
+
+> k
+
+in the error analysis, it appears as an additional additive term. By Assumption 2, we have 
+
+Λ(i−1) = Λ(i)W(i)diag( α(i−1) ) + Ξ(i), (19) where Ξ(i) is the rounding error matrix injected by the ARS nf operation, with |Ξ(i)
+
+> j,k
+
+| ≤ εq for all entries. Therefore, 
+
+E(i−1) = Λ(i−1) − A(i−1) = ( Λ(i) − A(i))W(i)diag( α(i−1) ) + Ξ(i) = E(i)W(i)diag( α(i−1) ) + Ξ(i). (20) Taking ∥ · ∥ ∞ on both sides and using the sub-multiplicative property gives 
+
+∥E(i−1) ∥∞ ≤ ∥ E(i)∥∞∥W(i)∥∞∥diag( α(i−1) )∥∞ + ∥Ξ(i)∥∞. (21) Since α(i−1)  
+
+> k
+
+∈ [0 , 1] for all k, we have ∥diag( α(i−1) )∥∞ = max k α(i−1)  
+
+> k
+
+≤ 1, hence 
+
+∥E(i−1) ∥∞ ≤ ∥ W(i)∥∞∥E(i)∥∞ + ∥Ξ(i)∥∞. (22) Define ∆i = ∥Ξ(i)∥∞ to be the local error bound at step i, yielding the stated recurrence. To bound ∆i, note that ∥Ξ(i)∥∞ = max j
+
+P 
+
+> k
+
+|Ξ(i)
+
+> j,k
+
+| ≤ max j
+
+P 
+
+> k
+
+εq = qiεq , where qi is the number of columns of the matrix. Finally, unrolling the recurrence with E(m) = 0 gives the stated bound on E(0) :
+
+∥E(0) ∥∞ ≤ ∥ W(1) ∥∞∥E(1) ∥∞ + ∆ 1
+
+≤ ∥ W(1) ∥∞(∥W(2) ∥∞∥E(2) ∥∞ + ∆ 2) + ∆ 1
+
+= ∥W(1) ∥∞∥W(2) ∥∞∥E(2) ∥∞ + ∥W(1) ∥∞∆2 + ∆ 1
+
+· · · ≤
+
+> m
+
+X
+
+> i=1
+
+
+
+> i−1
+
+Y
+
+> j=1
+
+∥W(j)∥∞
+
+ ∆i.
+
+The ρ-based bound follows directly from the above by substituting ∥W(j)∥∞ ≤ ρ for all j.Based on Theorem B.1, we now derive the error bound for the final upper/lower bound vectors. Write the ideal final bounds over X as 
+
+U B = A(0) x0 + c(0) + ϵ · r(A(0) ), LB = A(0) x0 + c(0) − ϵ · r(A(0) ),
+
+where r(A(0) ) is the row-wise ℓ1-norm vector of A(0) .During backward propagation, the ideal update is 
+
+c(i−1) = c(i) + A(i)b(i) + δ(i−1) , (23) 
+
+c(i−1) = c(i) + A(i)b(i) + δ(i−1) , (24) where δ(i−1) and δ(i−1) are the ReLU relaxation intercept contribution terms. Define u(i−1)  
+
+> k
+
+= ( −z(i−1)  
+
+> k
+
+)+ ≥ 0 for all k,where (x)+ = max(0 , x ) denotes the positive part, with the convention u(0)  
+
+> k
+
+= 0 since layer 0 is the input layer with no ReLU. Then the intercept contributions are: 
+
+δ(i−1)  
+
+> j
+
+= X
+
+> k
+
+(A(i−1)  
+
+> j,k
+
+)+u(i−1)  
+
+> k
+
+, (25) 
+
+δ(i−1)  
+
+> j
+
+= X
+
+> k
+
+(−A(i−1)  
+
+> j,k
+
+)+u(i−1)  
+
+> k
+
+. (26) The actual update performed by the fixed-point implementation is 
+
+γ(i−1) = Qnf (γ(i) + Λ(i)b(i) + ˆδ(i−1) 
+
+), (27) 
+
+γ(i−1) = Qnf (γ(i) + Λ(i)b(i) + ˆδ(i−1) 
+
+), (28) where ˆδ(i−1) 
+
+and ˆδ(i−1) 
+
+are computed using the actual coefficient matrix Λ(i−1) :
+
+ˆδ(i−1)  
+
+> j
+
+= X
+
+> k
+
+(Λ(i−1)  
+
+> j,k
+
+)+u(i−1)  
+
+> k
+
+, (29) 
+
+ˆδ(i−1)  
+
+> j
+
+= X
+
+> k
+
+(−Λ(i−1)  
+
+> j,k
+
+)+u(i−1)  
+
+> k
+
+. (30) Therefore, the error in the bias term at layer i−1, denoted as ν(i−1) := γ(i−1) −c(i−1) , can be decomposed component-wise (for index j) as 
+
+ν(i−1)  
+
+> j
+
+= γ(i) 
+
+> j
+
++ [ Λ(i)b(i)]j + ˆδ(i−1)  
+
+> j
+
++ Θ (i) 
+
+> j
+
+−
+
+
+
+c(i) 
+
+> j
+
++ [ A(i)b(i)]j + δ(i−1) 
+
+> j
+
+
+
+= ν(i) 
+
+> j
+
++ [ E(i)b(i)]j + X
+
+> k
+
+h
+
+(Λ(i−1)  
+
+> j,k
+
+)+ − (A(i−1)  
+
+> j,k
+
+)+
+
+i
+
+u(i−1)  
+
+> k
+
++ Θ (i) 
+
+> j
+
+, (31) where Θ(i) is the rounding error injected by the ARS nf operation, with ∥Θ(i)∥∞ ≤ εq . Using the 1-Lipschitz property of 
+
+(·)+, we can bound the error in the intercept contribution: 
+
+|ˆδ(i−1)  
+
+> j
+
+− δ(i−1)  
+
+> j
+
+| ≤ X
+
+> k
+
+|(Λ(i−1)  
+
+> j,k
+
+)+ − (A(i−1)  
+
+> j,k
+
+)+|u(i−1)  
+
+> k
+
+≤ X
+
+> k
+
+|E(i−1)  
+
+> j,k
+
+|u(i−1)  
+
+> k
+
+≤ ∥ E(i−1)  
+
+> j, :
+
+∥1∥u(i−1) ∥∞. (32) Taking the infinity norm over j, we get: 
+
+∥ˆδ(i−1) 
+
+− δ(i−1) ∥∞ ≤ ∥ E(i−1) ∥∞∥u(i−1) ∥∞. (33) Unrolling the recurrence for ν(0) (with ν(m) = 0) gives 
+
+∥ν(0) ∥∞ = ∥γ(0) − c(0) ∥∞ ≤
+
+> m
+
+X
+
+> i=1
+
+
+
+∥E(i)∥∞∥b(i)∥∞ + ∥E(i−1) ∥∞∥u(i−1) ∥∞
+
+
+
++ mε q . (34) A symmetric bound holds for the lower bound bias error ∥ν(0) ∥∞ = ∥γ(0) − c(0) ∥∞ (replacing (·)+ by (−· )+ throughout). 
+
+Theorem B.2. Let dU B, dLB be the fixed-point outputs, and define E(0) = Λ(0) − A(0) . Under Assumptions 1 and 2, the absolute errors of the final bounds are bounded by: 
+
+∥dU B − U B ∥∞ ≤ (∥x0∥∞ + ϵ)∥E(0) ∥∞ +
+
+> m
+
+X
+
+> i=1
+
+
+
+∥E(i)∥∞∥b(i)∥∞ + ∥E(i−1) ∥∞∥u(i−1) ∥∞
+
+
+
++ ζu, (35) 
+
+∥dLB − LB ∥∞ ≤ (∥x0∥∞ + ϵ)∥E(0) ∥∞ +
+
+> m
+
+X
+
+> i=1
+
+
+
+∥E(i)∥∞∥b(i)∥∞ + ∥E(i−1) ∥∞∥u(i−1) ∥∞
+
+
+
++ ζl, (36) 
+
+where u(i−1) = ( −z(i−1) )+ ≥ 0 with u(0) = 0 (no ReLU at the input layer), and ζu, ζ l are assembly-level quantization residuals bounded by (m + 1) εq . Therefore, by substituting Theorem B.1 bounds for ∥E(i)∥∞, one obtains an explicit depth-dependent absolute error bound for both dU B and dLB .Proof. We prove the upper-bound case; the lower-bound case is identical. The ideal final upper bound is given by 
+
+U B = A(0) x0 + c(0) + ϵ · r(A(0) ).
+
+The fixed-point implementation computes the final bound as 
+
+dU B = Λ(0) x0 + γ(0) + ϵ · r(Λ(0) ) + ξu,
+
+where ξu represents the rounding error introduced during the final assembly operations (e.g., dot products and additions), with ∥ξu∥∞ ≤ εq . Decomposing the difference yields 
+
+dU B − U B = E(0) x0 + ϵ r(Λ(0) ) − r(A(0) ) + ν(0) + ξu.
+
+Taking the infinity norm and applying the triangle inequality gives 
+
+∥dU B − U B ∥∞ ≤ ∥ E(0) x0∥∞ + ϵ∥r(Λ(0) ) − r(A(0) )∥∞ + ∥ν(0) ∥∞ + ∥ξu∥∞.
+
+By norm inequalities, we have 
+
+∥E(0) x0∥∞ ≤ ∥ E(0) ∥∞∥x0∥∞, ∥r(Λ(0) ) − r(A(0) )∥∞ ≤ ∥ E(0) ∥∞.
+
+Substituting the bound for ∥ν(0) ∥∞ derived earlier, we obtain 
+
+∥dU B − U B ∥∞ ≤ (∥x0∥∞ + ϵ)∥E(0) ∥∞ +
+
+> m
+
+X
+
+> i=1
+
+
+
+∥E(i)∥∞∥b(i)∥∞ + ∥E(i−1) ∥∞∥u(i−1) ∥∞
+
+
+
++ mε q + εq
+
+= ( ∥x0∥∞ + ϵ)∥E(0) ∥∞ +
+
+> m
+
+X
+
+> i=1
+
+
+
+∥E(i)∥∞∥b(i)∥∞ + ∥E(i−1) ∥∞∥u(i−1) ∥∞
+
+
+
++ ζu,
+
+where ζu ≤ (m + 1) εq .Remark 1. The stability constant ϵs in Eq. (12) perturbs each relaxation slope from its ideal value, and hence the relaxation bounding functions. For every neuron k, the sup-norm deviation of the perturbed bounding functions over [zk, ¯zk] is at most 
+
+ϵs: for unstable neurons this follows from max( |zk|, ¯zk) ≤ ¯zk − zk; the active case gives deviation ϵs ¯zk/(¯ zk + ϵs) ≤ ϵs,and the inactive case is exact. Substituting the perturbed relaxations in the backward recursion therefore injects, at each step i, an additional deviation of at most ∥ ˆA(i)∥∞ ϵs into the accumulated bound values, where ˆA(i) is the intermediate coefficient matrix in Eq. (4) and, as in the proof of Theorem B.1, the relaxation parameters at the remaining layers are treated as fixed. The effect on the final bounds thus follows the same depth-dependent structure as Theorem B.2, with the per-step injection scale εq replaced by ∥ ˆA(i)∥∞ ϵs. Since the perturbed relaxation deviates from the ideal one, a verification outcome could in principle change when the certified margin lies within O(ϵs) of zero; empirically, no such change is observed even at 1000 × the default ϵs (Table 4). A slope–intercept co-adjustment that restores provable soundness of the perturbed relaxation is left for future work. 
+
+Corollary B.3 (Asymptotic error bound) . Under the hypotheses of Theorems B.1 and B.2, assume E(m) = 0, ∥W(i)∥∞ ≤ ρ
+
+and ∆i ≤ ∆ for all i. Let 
+
+X = ∥x0∥∞ + ϵ, B = max  
+
+> i
+
+∥b(i)∥∞, U = max  
+
+> i
+
+∥u(i−1) ∥∞,
+
+and let Sn = Pn−1 
+
+> k=0
+
+ρk, so that the layer-t coefficient error satisfies ∥E(t)∥∞ ≤ Sm−t ∆. Then, as m → ∞ , the error in 
+
+dU B (and identically in dLB ) satisfies 
+
+∥dU B − U B ∥∞ ≤
+
+h
+
+X · Sm + B
+
+> m
+
+X
+
+> i=1
+
+Sm−i + U
+
+> m
+
+X
+
+> i=1
+
+Sm−i+1 
+
+i
+
+∆ + O(m) εq , (37) 
+
+where the three asymptotic regimes of the leading term (as a function of m) are: 
+
+∥dU B − U B ∥∞ =
+
+
+
+O(m) · (B + U )∆ + O(1) · X∆ + O(m) εq , if ρ < 1,O(m2) · (B + U )∆ + O(m) · X∆ + O(m) εq , if ρ = 1 ,O(ρm) · (X + B + U )∆ + O(m) εq , if ρ > 1.
+
+(38) 
+
+In particular, the ζ residuals are O(m) εq in all cases. 
+
+Interpretation of the unstable regime. The ρ > 1 branch in the asymptotic corollary should be read as a conservative worst-case envelope rather than as the typical numerical behavior of S ECURE CROWN. It is obtained by replacing every layer-dependent amplification factor with the same uniform upper bound ρ and every local rounding injection with the same upper bound ∆. The non-asymptotic analysis above is sharper and remains layer-wise. Indeed, before the conservative inequality ∥diag( α(i−1) )∥∞ ≤ 1 is applied, the proof of Theorem B.1 gives 
+
+∥E(i−1) ∥∞ ≤ κi∥E(i)∥∞ + ∆ i, κi := ∥W(i)diag( α(i−1) )∥∞. (39) Thus, when E(m) = 0,
+
+∥E(0) ∥∞ ≤
+
+> m
+
+X
+
+> i=1
+
+
+
+> i−1
+
+Y
+
+> j=1
+
+κj
+
+ ∆i. (40) This expression propagates each local error through the actual product of effective layer norms. Consequently, the simplified 
+
+O(ρm) term arises only when these heterogeneous products are upper-bounded by the same worst-case factor at every layer; factors κj < 1 can attenuate errors produced at other layers with κj > 1. The diagonal relaxation matrices further reduce the effective amplification: since α(i−1)  
+
+> k
+
+∈ [0 , 1] , the factor κi is a row-wise weighted sum of |W(i)| with weights α(i−1) ,and is always at most ∥W(i)∥∞. When many slopes are strictly below one, as for inactive or unstable ReLU neurons, κi can be substantially smaller than the raw weight norm of the layer and can even fall below one when ∥W(i)∥∞ > 1.We do not rule out the vulnerability captured by this worst-case bound: if a network has consistently large effective layer norms, fixed-point rounding errors can be amplified and the numerical precision of the certified bounds can deteriorate. In standard modern training pipelines, however, small initialization, weight decay, and related regularization or normalization techniques typically limit uncontrolled growth of weight norms. Consistent with this interpretation, our experiments do not exhibit the exponential-growth regime: S ECURE CROWN maintains 100% verification consistency with plaintext CROWN across all evaluated architectures and perturbation settings, including near-boundary instances (Table 1). C DISCUSSION ON MALICIOUS SECURITY 
+
+SECURECROWN currently targets the semi-honest model, which is standard for initial 2PC-based protocol designs. A malicious-secure upgrade could replace unauthenticated Beaver triples with authenticated triples and add MAC-based consistency checks, following SPDZ-style protocols. The trusted-dealer assumption can also be removed by using two-party preprocessing, such as OT-based triple generation, without changing the online verifier logic. These changes preserve the branch-free reformulation of CROWN, but increase both online communication and offline preprocessing costs. To estimate this overhead, we implemented the same verification algorithm in MP-SPDZ. On MNIST 5×[256] , replacing 
+
+semi2k with spdz2k increases online time by about 3.2× (183 s to 586 s) and communication by about 8.7× (1.26 TB to 10 .88 TB). In comparison, our FSS-based semi-honest implementation completes the same task in 4.3s with 113 MB communication. This suggests that a specialized malicious-secure variant of SECURECROWN could be substantially more efficient than directly using a generic malicious 2PC backend, although designing and benchmarking such a variant is left for future work. 
+
+## D EXTENSION TO OTHER NETWORK ARCHITECTURES 
+
+The current implementation targets CROWN-style LBP for fully connected ReLU networks. We discuss extensions to other network components according to the type of additional support required. 
+
+D.1 COMPONENTS REQUIRING MINIMAL CRYPTOGRAPHIC CHANGES Batch normalization. Batch normalization (BN) can be folded into the preceding affine layer by P0 before secret sharing, since all BN parameters are fixed after training. This requires no change to the secure verification protocol. 
+
+Residual connections. Residual connections compute y = F (x) + x, where F (x) denotes the residual branch. From the secure-computation perspective, this addition is local under additive secret sharing and incurs no communication. Therefore, residual connections require no new cryptographic primitives, although the verifier implementation would need to handle skip connections and merge the propagated bounds from multiple graph branches. 
+
+D.2 LINEAR COMPONENTS WITH SCALABILITY BOTTLENECKS Convolutional layers. Convolutions can be represented as matrix multiplications y = Wtoep x + b, where x and y denote vectorized input and output feature maps, and Wtoep is the sparse Toeplitz matrix induced by the convolutional kernels. Therefore, convolutions are compatible with our SecMatMul interface in principle. However, a naive dense unfolding loses the sparsity of the convolutional kernel. For input and output channel counts cin and cout , input and output spatial sizes s and 
+
+s′, and kernel size κ, the unfolded matrix has dimension (cout s′2)×(cin s2), whereas the convolution itself has only cout cin κ2
+
+independent kernel parameters. Since our Beaver-based SecMatMul treats the unfolded matrix as dense, communication scales with the full matrix dimensions rather than with the number of independent kernel parameters. Practical support for CNNs would therefore require secure convolution protocols that exploit kernel sparsity or tiled/sliding-window structure. 
+
+Cost projection for ResNet-18. For a CIFAR-10-scale ResNet-18, a naive Toeplitz unfolding of a 64 -channel 32 × 32 
+
+convolution can yield matrices up to 65 ,536 × 65 ,536 . Repeated dense secure matrix multiplications inside LBP would therefore lead to communication on the order of terabytes over the full verification procedure. Exploiting the sparse Toeplitz structure, as done in optimized secure-inference systems such as CryptGPU [Tan et al., 2021] and CrypTFlow [Kumar et al., 2020], is a promising direction for reducing this cost. 
+
+D.3 COMPONENTS REQUIRING NEW VERIFICATION RELAXATIONS Non-ReLU activations. Non-ReLU activations, such as sigmoid or tanh, require activation-specific linear relaxations. Extending SecureCROWN to these activations would therefore require new branch-free reformulations of the corresponding relaxation logic. This does not necessarily require new cryptographic primitives: the underlying FSS primitives already support operations such as spline and exponential evaluations [Gupta et al., 2025], providing a cryptographic foundation for these extensions. The main challenge is deriving secure-computation-friendly bound propagation rules that minimize secure comparisons and communication overhead. Attention layers. Attention layers compute softmax( QK ⊤/√dk)V , where Q, K, and V denote the query, key, and value matrices, respectively, and dk is the key dimension. This operation involves bilinear terms in QK ⊤ and the softmax nonlinearity. Unlike ReLU, which is a univariate piecewise-linear function, attention introduces nonlinearities whose tight and scalable verification remains substantially more complex even in plaintext verification [Shi et al., 2025]. Extending SECURECROWN to attention-based architectures would therefore first require mature CROWN-style relaxations for these operations.

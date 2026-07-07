@@ -1,0 +1,870 @@
+Title: PromptPET: Privacy-Utility Optimized Prompt Obfuscation
+
+URL Source: https://arxiv.org/pdf/2607.02932v1
+
+Published Time: Tue, 07 Jul 2026 00:26:43 GMT
+
+Number of Pages: 16
+
+Markdown Content:
+# PromptPET : Privacy-Utility Optimized Prompt Obfuscation 
+
+# Ke Yang 
+
+University of California, Irvine Irvine, CA, USA ke.yang@uci.edu 
+
+# Olivia Figueira 
+
+University of California, Irvine Irvine, CA, USA olivia.f@uci.edu 
+
+# Umar Iqbal 
+
+Washington University in St. Louis St. Louis, MO, USA umar.iqbal@wustl.edu 
+
+# Athina Markopoulou 
+
+University of California, Irvine Irvine, CA, USA athina@uci.edu 
+
+## Abstract 
+
+Privacy is an important challenge when users interact with AI chatbots, since users may share sensitive information, explicitly or implicitly, and AI chatbots can use this information for user profiling. In this paper, we aim to protect users’ privacy via a user-side mechanism that transforms sensitive information in a user’s prompt, while preserving enough information to elicit a useful re-sponse from the chatbot. This approach faces an inherent tradeoff between protecting privacy ( i.e., avoiding profiling) and preserv-ing utility ( i.e., getting personalized and task-specific responses). To that end, we consider, evaluate, and compare four different ob-fuscation actions, namely redaction, abstraction, replacement, and a novel noising/denoising scheme that we introduce. Additional novel insights include: utilizing a data type taxonomy to both iden-tify and obfuscate sensitive information and explicitly taking into account the utility of chat responses in making the obfuscation decision. First, we systematically optimize and evaluate each obfus-cation action independently in terms of the privacy-utility tradeoff it achieves. Second, we propose PromptPET , an LLM-based agent that selects the best obfuscation action for each sensitive part of the prompt, using a reinforcement-learning inspired rule optimizer, applied for the first time in this context. Using a real-world chat dataset, we show that PromptPET matches the best privacy-utility tradeoff attainable by any single obfuscation action and significantly outperforms prior state-of-the-art approaches. 
+
+## 1 Introduction 
+
+AI agents are rapidly becoming an everyday computing interface, with platforms such as ChatGPT [ 49 ], Gemini [ 21 ], and Claude [ 4]collectively serving over one billion users [ 64 ]. Users interact with these systems for both personal and professional tasks, such as drafting work documents, planning travel, managing finances, and even seeking medical [ 75 ] or legal advice [ 37 ]. Unlike conventional computing systems, users interface with AI agents through open-ended natural language, often describing their goals, constraints, preferences, and circumstances in detail. LLM-based agents, in turn, produce personalized, context-aware responses that are explicitly shaped by the information users provide [ 41 ]. This shift in the in-teraction paradigm encourages users to disclose richer and more sensitive information than they would in a search box, including de-tails about their employment, health, relationships, financial status [41, 66], etc. 
+
+Figure 1: PromptPET Overview. A user interacts with an AI agent through a conversational interface. PromptPET 
+
+sits between the user and the online AI agent, obfuscating sensitive parts of the user prompt (query) so that it subverts user profiling by the provider. See Figure 2 for details. 
+
+Unfortunately, this paradigm shift also introduces substantial and still poorly understood privacy and security risks. As AI agents rely on rich contextual input to provide useful responses, users may disclose sensitive personal information without fully understanding how that information is collected, retained, reused, or shared [ 27 ,66 ]. In addition to the usual data collection and tracking practices in interactions with all online services, there are unique challenges for user privacy in interactions specifically with AI agents. First, the sensitivity of personal information that users reveal directly to AI agents, is way higher than identifiers or personally-identifiable information (PII) traditionally used for tracking and advertising in online services [ 57 ]. Second, AI agents are equipped with strong capabilities to indirectly infer additional sensitive attributes [ 62 ]. Third, profiling is intertwined with personalization and often neces-sary to achieve better utility from AI agents. These issues combined with the scale of adoption in numbers ( i.e., over a billion users) and scope (the all-in-one role these platforms increasingly play across different contexts), and the emergence of stateful agents that re-tain memory, further exacerbate the privacy risks. Although agent providers often offer some data transparency and control mecha-nisms, these remain limited in general and particularly inadequate in protecting users’ privacy from AI agents. We argue that controlling data shared in a prompt at the point of disclosure ( i.e., on the user side, before the data ever leaves the user’s device and reaches the AI agent), is the most powerful privacy-enhancing technology (PET), as it does not rely on the provider and prevents downstream inferences. This approach is depicted on Figure 1. To that end, a growing body of work attempts to protect user prompt privacy at disclosure fall broadly into three 
+
+> arXiv:2607.02932v1 [cs.CR] 3 Jul 2026
+
+areas: PII redaction [ 13 ], data minimization [42 , 80 , 81 ], and obfusca-tion , operating on tokens and/or on embeddings [ 65 , 70 ]. Prior work focused primarily on protecting sensitive identifiers [ 13 , 81 ] and sensitive topics [ 12 ]. It has not sufficiently considered profiling of user interests (content that is sensitive yet required to receive a use-ful response), more generally profiling into fine-grained attribute taxonomies (such as the IAB taxonomy used for advertising [30]). In this paper, we focus on protecting the privacy of a user in-teracting with an AI agent, who profiles the user based on sen-sitive information present in the user prompt. To protect against that threat, we propose PromptPET , a principled and unifying privacy-utility optimized prompt obfuscation framework, which obfuscates user prompts, so as to subvert profiling attempted by the AI agent but also to preserve utility. The idea is to optimize which 
+
+sensitive units of information and how to modify them, so as to control the privacy-utility tradeoff in principled way. Our design of 
+
+PromptPET proceeds in two stages, making several methodological contributions along the way. First, we consider, evaluate and compare four candidate obfus-cation actions to apply to sensitive units of information within a prompt: redaction, abstraction , replacement , as well as a novel 
+
+noising/denoising scheme that we propose for the first time. While 
+
+noise injection has been used to enhance privacy in other domains, such as location privacy, anti-fingerprinting, obfuscating browsing data [ 2, 34 , 61 , 76 ], we design a scheme specifically to noise a user prompt to protect its privacy, and de-noise the LLM response to perfectly preserve its utility. For each obfuscation strategy, we ap-ply two novel insights that improve utility by: (i) considering the importance for utility to select which sensitive units to obfuscate or not, and (ii) using a user-defined taxonomy of sensitive attributes to decide how to obfuscate information units. We systematically compare the four obfuscation strategies in terms of their privacy-utility tradeoff and we show that our proposed noising/denoising scheme outperforms previously proposed ones: it achieves 45.3% higher privacy than removal- and generalization-based actions. Then, after having evaluated the privacy-utility tradeoff of each single-action obfuscation strategy, we propose a selective obfus-cation strategy that achieves the best of all worlds. PromptPET 
+
+employs an obfuscation action decider to select the best obfuscation action for each sensitive unit of information in a prompt, according to an LLM-based rule optimizer . We design a novel rule optimizer using a reinforcement learning-inspired approach [ 73 ] for the first time in this context: an LLM proposes rules for selecting the best obfuscation actions and iteratively refines them based on their per-formance on an optimization prompts set. Our evaluation shows that the learned selective obfuscation rule set outperforms hand-crafted and prompting-based baselines by delivering 3.3 × more privacy per unit of utility cost and reaching 1.4 × higher privacy overall, evaluated on real user–AI agent queries ( i.e., WildChat-1M dataset [ 78 ]) against a production AI agent service. In summary, 
+
+PromptPET with rule optimization achieves (i) the frontier privacy-utility tradeoff among all single-action obfuscation strategies, and (ii) significantly outperforms prior state-of-the-art prompt obfusca-tion baselines [42, 80]. The outline of the rest of the paper is structured as follows. Sec-tion 2 discusses background information, related work, and the scope of our work. Section 3 discusses our threat model. Section 4 details the PromptPET methodology. Section 5 presents our evalua-tion. Section 6 concludes this paper and provides future directions. 
+
+## 2 Background and Related Work 2.1 Emergence of Stateful AI Agents 
+
+AI agents are increasingly stateful , retaining information from prior interactions in a persistent store, commonly referred to as memory. This shift is now pervasive across a broad range of deployed systems, from general-purpose chatbots such as ChatGPT [ 49 ], Claude [ 4], and Gemini [ 21 ], to agentic browsers such as Atlas [ 48 ] and Dia [ 15 ], and general-purpose agents such as OpenClaw [ 53 ]. At a high level, these systems retain information from past interactions and distill it into representations that may be useful in future ones [ 11 , 54 , 56 ]. Implementations vary in both what they retain and how they re-tain it. Some summarize prior conversations [ 54 , 79 ], others extract salient entities and relationships [ 11 , 72 ], while others selectively retrieve historical interactions relevant to the current query [ 77 ]. These mechanisms are already deployed at scale. ChatGPT [ 49 ], for instance, persistently accumulates user information across ses-sions—both references to prior conversations and explicitly stored facts —to build an evolving profile of each user [ 52 ]. The key value provided by memory is that it enhances the utility of AI agents, allowing them to carry information across turns and sessions rather than being constrained by the context window of the underlying LLM. AI agents are also now increasingly transforming this accu-mulated state into an inferred profile of the user—their interests, preferences, goals, and beliefs—and leverage it to personalize fu-ture interactions [ 25 , 47 , 79 ]. Importantly, memory is becoming a first-class feature of AI platforms. Recent systems increasingly allow users to import, export, and transfer memory across appli-cations [ 6, 24 ], effectively turning accumulated user state into a portable asset rather than one confined to a single provider. 
+
+## 2.2 Privacy Risks 
+
+While statefulness makes AI agents more useful, it also exposes users to significant privacy risks, both manufactured by the incen-tives of the platforms that operate the agents, and those intrinsic 
+
+to the agentic paradigm itself. The manufactured risks stem from the fact that the personalization enabled by memory rests on con-tinuous profiling of the user, and, as has repeatedly been the case in prior computing systems, such profiles are readily repurposed beyond improving the user’s immediate experience [ 18 , 28 , 31 ]. Recent measurement studies show that user interactions are al-ready routinely exposed to third-party services [ 68 , 71 ], and that this exposure occurs even when the LLM is merely mediating a user’s interaction with a third party and has no functional need for the data itself [ 71 ]. Agents are also beginning to incorporate advertising and tracking services whose explicit purpose is to pro-file users [ 32 , 64 , 71 ], mirroring the surveillance-driven business models of earlier platforms—and, in some cases, drawing lawsuits over deceptive data practices [ 19 ]. Compounding this, providers exercise limited diligence over the privacy practices of their ecosys-tems, with some failing to implement even well-established privacy norms [71]. The intrinsic risk is more fundamental, i.e., to produce a useful response, the underlying LLM must receive the user’s prompt in 
+
+> 2
+
+the clear. Unlike prior computing platforms—for example, a web browser, whose vendor is not a party to what the user does on a page absent malicious behavior—in an AI agent disclosure is a precondition for utility, as the more a user reveals, the better the agent performs [ 41 ]. Users thus have little choice but to trust the provider to be a faithful custodian of their data, yet they have no visibility into whether it honors its stated practices—and, as substantial prior work shows, vendors frequently do not [ 3 , 19 ,31 , 38 , 71 ]. Taken together, AI agents appear to be following the same profiling trajectory as prior platforms, but over a far richer, longitudinal data source and with no practical option for users to opt out —motivating a defense that protects the user before their data ever reaches the provider .Once a query reaches the provider, its handling is largely beyond the user’s control. Privacy disclosures may be incomplete or difficult for users to interpret, user data may be used for model training[ 22 ,45 ], retained through human-review or safety pipelines even after user-initiated deletion [ 5 ], or shared with third-party services in the agent ecosystem [ 32 , 35 , 71 ]. In some cases, user data may also be preserved under external legal or regulatory obligations that fall outside the user’s or provider’s direct control [46]. 
+
+## 2.3 Protecting Privacy in Agentic Interactions 
+
+Protecting user privacy in the agentic paradigm is subject to two non-trivial constraints. First, a solution must strike a reasonable privacy-utility tradeoff, i.e., it must sufficiently protect the user’s sensitive information without degrading the usefulness of the agent’s response. Second, it must operate without the cooperation of the AI vendor, which is often the very party against whom protection is needed. 
+
+User Prompt Privacy. Most closely related to our work is the growing body of work on prompt privacy, which falls broadly into the following five categories: PII removal substitutes named entities with placeholders before the prompt is shared with AI agents [ 12 , 13 ], but cannot protect non-PII sensitive information that cannot be redacted. 1 Consider the prompt “I am 35 years old, I was recently diagnosed with depression, and I live in Mountain View. Can you recommend a good therapist near me?” . While, the PII removal masks the age and location, it leaves the diagnosis and the request for a therapist untouched, which is revealing the user’s mental-health status. Data minimization suppresses task-irrelevant context [ 42 , 80 , 81 ], yet any information the user must disclose to obtain a useful response remains exposed by design. In our running example, the therapist request cannot be removed with-out degrading utility. Data anonymization rewrites text to obscure privacy-sensitive content[ 63 , 74 ], but these methods optimize static text against an external reader, and their effect on the quality of an AI agent’ responses —as opposed to text readability or a fixed classi-fication label— is not evaluated. Differential privacy applied so far to tokens or embeddings offers formal guarantees [ 65 , 70 ], but do not extend to the sentence-level profile inference that AI agent providers exploit for user profiling. Finally, private computation removes the provider’s access to user prompt plaintext, through cryptographic       
+
+> 1We characterize, for the first time, the privacy threat of AI-agent-side profiling using non-PII information, such as interests. Using the IAB Audience Taxonomy [ 30 ], we show that a profiler attacking PII-redacted prompts still recovers 1.93 profile labels per query on average, showing that PII redaction is insufficient by design.
+
+or trusted-execution techniques [ 29 ], but it presumes some degree of trust in the vendor, which is precisely the assumption we cannot make when the vendor is the adversary. 
+
+Other Privacy Issues. Some research also considers models where the concerned parties are not the user. System prompt pro-tection guards the provider’s or developer’s instructions—often treated as intellectual property—against extraction, e.g., via prompt obfuscation [ 55 ]. Training data protection defends the model’s train-ing corpus against memorization, extraction, and membership-inference attacks[ 9, 10 , 60 ], whether through training-time differ-ential privacy[ 1 ] or post-hoc perturbation of model outputs[ 33 ]. These problems are orthogonal to our goal of shielding the user’s prompt from the provider that serves it. 
+
+Approach and Rationale We propose PromptPET , a solution that comprehensively protects user privacy without cooperation from the vendor while preserving utility. Our key idea is to treat the prompt as a set of malleable representations that can be trans-formed to convey the meaning needed for a useful response without leaking private information. Prior work either hand-crafts a fixed set of obfuscation rules or delegates the decision entirely to an LLM. We argue that both are unsystematic and overlook the nuances of the prompt’s underlying knowledge representation. In particular, neither operates on—nor specifically evaluates—the implicit infor-mation a prompt leaks. In the example above, even if the explicit term “depression” were removed, the surrounding request (i.e., re-cently diagnosed and seeking a therapist) still lets the provider infer the user’s mental-health status. Instead of manually authoring a rule set or ceding control to an LLM, our key insight is to design a reinforcement learning-inspired framework that learns the rule set for prompt obfuscation, using the privacy-utility tradeoff as the reward signal so that the rules are derived systematically. Our intuition is rooted in how LLMs represent language: the representation space is highly redundant, with semantically related inputs leading to similar responses, while exposing markedly less sensitive information. Identifying such inputs is a search problem best solved by learning, not fixed rules. For the obfuscation actions themselves, we consider redaction, replacement, and abstraction, as well as a novel noising/denoising strategy that we design specifically for interactions with AI agents. Our goal is not to provide a fixed solution to the privacy problem but to understand the limits and tradeoffs of prompt obfuscation strategies, across multiple dimensions of the problem. In this pa-per, we focus on single prompts, comprehensively analyze each obfuscation action in isolation, and gaining insights into optimizing each single-action obfuscation as well as selecting the best action; 
+
+e.g., when noise is preferable to redaction, and vice versa. Our work provides a foundation and a unifying framework for future prompt obfuscation research. Expanding PromptPET to handle multi-turn conversations is a future direction. 
+
+## 3 Setup and Threat Model 
+
+System Model. Our setup is depicted in Figure 1. We consider a user who interacts with an AI agent through natural language conversation. Examples include general-purpose chatbots such as ChatGPT [ 49 ] and Claude [ 4], as well as LLM-backed search engines such as Google Search [ 23 ] and Bing [ 40 ]. A central part of the 
+
+> 3
+
+agent is an LLM that consumes the user’s prompt and generates a response. In practice, AI agents are typically capable of storing and processing the user’s interaction history, typically in order to improve and personalize future responses. 
+
+Adversary Capabilities and Goals. We assume the AI agent’s provider to be an “honest but curious” adversary. It sees and pro-cesses the user’s prompts in plain text, provides the correct re-sponses, but also passively learns information in the process. The adversary’s goal is to profile the user, i.e., to infer and accumulate the user’s interests and attributes from their prompts over time. In practice, such inferred profiles may be put to uses beyond delivering the requested functionality, such as targeted advertising or sharing with third parties. We further assume the adversary organizes the profile according to a taxonomy of the kind used in practice. In this paper, we adopt the IAB Audience Taxonomy [ 30 ], as a representa-tive example, which comprehensively captures user interests and is widely used for audience profiling in the advertising industry. 
+
+Defense Goal and Scope. The goal of the defense is to obfuscate the prompt such that the adversary cannot reconstruct the user’s sensitive attributes (in a given taxonomy), while preserving the utility of the response, i.e., the user receives an answer as useful as if they had shared the full, un-obfuscated prompt. In this paper, we are interested in user-side approaches that do not rely on cooperation from the AI agent/adversary. The approach intercepts the user’s prompt, applies the necessary obfuscation action, and only then forwards it to the agent. When the agent responds, the approach may intercept the response, apply complementary transformations (e.g., filtering content elicited by injected noise), and return the result to the user. The approach runs entirely on the client and relies on a local LLM to perform the obfuscation. The user trusts both, and neither shares data with the adversary. 
+
+Out of Scope. A capable adversary may attempt to reverse-engineer the obfuscated information, for example, by observing the user’s responses over time or by detecting contradictions across an account’s obfuscated prompts. We do not consider such cross-prompt, longitudinal de-obfuscation. Furthermore, we do not con-sider an adversarial AI agent that designs its responses to elicit sensitive information from the user. While these are realistic at-tacks, they are different problems 2, deferred to future work. 
+
+## 4 Methodology 
+
+We propose PromptPET , a user-side approach that optimizes pri-vacy and utility of online user-AI agent interactions. Achieving this goal requires overcoming the following three challenges intrin-sic to query 3 obfuscation. (i) The pieces of sensitive information in a query (which we formalize as sensitive units in Section 4.1.2) do not matter equally to the AI agent’s answer, and the units that matter most are also the most fragile: modifying or removing a high-contribution unit is precisely what risks changing the response and degrading utility. (ii) Sensitive information is conveyed not only explicitly but also implicitly, so obfuscating only the explicit units   
+
+> 2We argue that the deterrent here is largely legal and regulatory rather than technical: profiling-derived attributes are themselves regulated personal data, and an AI agent service provider that runs a de-obfuscation pipeline against users’ privacy tools may face material liability and reputational risk. Thus, PromptPET turns profiling from a cheap, deniable side effect into a deliberate, legally exposed circumvention.
+> 3In the rest of the paper, we refer to user “prompt” and user “query” interchangeably.
+
+leaves the implicit signals exposed. (iii) Obfuscating a query typi-cally involves several different actions. Coordinating these actions effectively across diverse tasks and domains is therefore nontrivial. To address the first challenge, we explicitly assign each sensi-tive unit an importance score, allowing the subsequent steps to distinguish fragile, high-contribution units from those that can be obfuscated freely. The first challenge also calls for an action that protects a high-contribution unit without altering it, and the second calls for one that addresses implicitly conveyed signals. We meet both with Noise , which leaves the original unit in place and injects additional plausible information alongside it. Retaining the true unit preserves utility, while the added information reduces the promi-nence of explicit signals and overwhelm implicit ones. To address the third challenge, we develop a rule-optimization framework 
+
+in which an LLM proposes and iteratively refines the rules mapping units to actions, learning to coordinate them rather than relying on hand-crafted heuristics. Next, we introduce PromptPET in detail, using Figure 2 as a running example. 
+
+## 4.1 Detecting Sensitive Information 
+
+Our goal is to obfuscate the sensitive information in a user query, withholding the private content from the provider while avoiding a collapse in the utility of the AI agent’s response. A prerequisite is to detect which unit leaks private information in the first place and, for each, how much it contributes to a useful response. The former delimits the scope of what should be obfuscated, while the latter guides how aggressively each unit can be obfuscated. 
+
+PromptPET therefore begins by detecting these units and scoring their importance, yielding the scope and the guidance on which the subsequent obfuscation step relies. 
+
+4.1.1 Sensitive Taxonomy. The “Sensitive Taxonomy” specifies the scope of sensitive information that we aim to identify and protect within user queries. Structurally, the taxonomy is a collection of trees, each corresponding to a category: the root node names the 
+
+Category , and the non-root nodes denote the Data types within it. We define these terms more precisely, with examples, in Sec-tion 4.1.2. In this work, we adopt the IAB Audience Taxonomy [ 30 ], a schema widely used in advertising and audience profiling, and we focus on its Demographics & Interests branches, which together contain 36 categories and 656 data types. In general, any taxonomy can be used in our methodology. 
+
+4.1.2 Sensitive Unit Detection. Given a user query with a sensi-tive taxonomy, as shown in Figure 2, PromptPET first detects the following: 
+
+• Sensitive Units: units in the query that disclose information that are useful for constructing the user profile within the scope of the sensitive taxonomy. For example, “35 years old” is a sensitive unit as it reveals the user’s age. Sensitive units are labeled with a category and data type from the sensitive taxonomy, as defined next. Sensitive units are highlighted in yellow in Figure 2. 
+
+• Category: the root node of the sensitive taxonomy that most relates to a sensitive unit. In the example, “35 years old” maps to the category Age Range . Categories are highlighted in purple in Figure 2.                                                 
+
+> 4I am 35 years old , and I was recently diagnosed with depression . I live in Mountain View . Can you recommend a good therapist near me?
+> Sensitive Taxonomy
+> Obfuscated Query I am [REDACTED] , and I was recently diagnosed with [Health] . I live in Palo Alto . Can you
+> recommend a good therapist/dentist near me? Answer each separately.
+> Filtered Response Here are solid options in Palo Alto for a therapist : 1.xxx 2.xxx….
+> I’m really glad you reached
+> out— getting support after a
+> depression diagnosis is a
+> strong and important step .
+> Mountain View actually has a
+> lot of therapist solid options:
+> 1. xxx, 2. xxx …
+> Here are separate ,solid
+> options in Palo Alto for
+> therapist and dentist you
+> requested:
+> Therapist: 1.xxx 2.xxx …
+> Dentist: 1.xxx 2.xxx …
+> Age: 35-39
+> Health: Mental Health >
+> Depression
+> Location: Mountain View
+> Medical Service: Therapist
+> Measure Privacy Measure Utility
+> Sensitive Unit
+> Detection
+> Importance Scoring
+> Obfuscation
+> Action Decide
+> 35 years old depression Mountain View therapist
+> Age Range > 35-39 Health > Mental Health
+> > Depression
+> Location >
+> Mountain View
+> Medical Services >
+> Therapist
+> 0.2 0.7 0.8 1.0
+> Redact Abstract Replace Noise
+> X
+> Unit →Higher-level
+> [Category/Data Type]
+> X
+> Unit
+> →[REDACTED]
+> X
+> Unit →unit under
+> di ff erent data types
+> X
+> Inject units under
+> another data type
+> Sensitive Unit Category Data Type
+> …
+> User Query
+> W/O proxy Raw response Raw profile
+> With proxy
+> Obfuscated response Obfuscated profile
+> Age: xxx
+> Heath: xxx
+> Location: Palo Alto
+> Medical Service:
+> Therapist, Dentist
+> Action Apply
+
+Figure 2: Overview of the PromptPET Framework. For a given user query and sensitivity taxonomy, PromptPET detects sensitive units and estimates their importance scores, capturing each unit’s contribution to generating the desired LLM response. A obfuscation action decider relying on a learned decision rule set then chooses one of four actions for each unit: redact, abstract, replace, or noise. After all obfuscation actions are applied, the obfuscated query is sent to the online AI agent, which produces an obfuscated response and infers a user profile from the exposed query. The obfuscated response may contain irrelevant content introduced by the noise action, so PromptPET filters it and returns a filtered response to the user. The red dashed box shows the query flow without PromptPET whereas the green dashed box shows the flow with it. We evaluate utility by comparing the raw and filtered responses, and privacy by comparing the raw and obfuscated profiles. The two icons are cross-references: the megaphone icon on the noise action and the gavel icon on the obfuscation action decider each reappear in a dedicated figure that details that component, namely Figures 3 and 4, respectively. 
+
+• Data Type: the specific attribute within a category in the sensitive taxonomy that most relates to a sensitive unit. Data types are finer-grained than categories and can be any node below the root node in the taxonomy. For example, “35-39” is a data type within the Age Range category. A data type may also be hierarchical; for example, Depression is a sub-data type of the data type Mental Health , which belongs to the category Health . Data types are highlighted in pink in Figure 2. This design allows PromptPET to detect the sensitive informa-tion that the user wishes to protect and to map natural-language sensitive units to category/data types that can be used to guide the subsequent obfuscation. Both BERT-based Named Entity Recogni-tion (NER) models [ 14 ] and LLM-based methods [ 7 ] are plausible choices for this task. We use an instruction-tuned LLM as our sensi-tive unit detector because it represents the current state-of-the-art for both locating and labeling sensitive information [20]. 
+
+4.1.3 Importance Scoring. We observe that sensitive units may differ in how much they contribute to the AI agent’s ability to pro-duce the user’s desired response. Thus, capturing these differences is crucial for the downstream obfuscation actions. For example, low-importance units may be obfuscated aggressively, whereas high-importance units require more utility-preserving treatment. We therefore assign each sensitive unit a score in the range [0, 1],where higher values indicate greater importance. We cast sensitive-unit importance scoring as a form of entity salience prediction [ 17 ]. Since zero-shot instruction-tuned LLMs have been shown to achieve near-human performance on this task [ 8], we adapt this approach for our setting. We validate this choice in Section 5.3. 
+
+## 4.2 Obfuscation Actions 
+
+To obfuscate detected sensitive units, we use four obfuscation ac-tions: Redact , Abstract , Replace , and Noise (Figure 2). Redact 
+
+and Abstract reduce the information a unit exposes, whereas 
+
+Replace and Noise introduce alternative or auxiliary information that weakens direct attribution and inference. Among the four, only 
+
+Noise keeps the original unit intact. Overall, these actions provides 
+
+PromptPET with flexibility, enabling context-aware decisions. 
+
+4.2.1 Redact . The sensitive unit is removed and substituted with a placeholder token. In Figure 2, “35 years old” becomes [REDACTED] .As the most aggressive action, Redact eliminates the unit entirely while retaining its structural role in the sentence. Thus, it maximizes privacy gain per unit but discards all of the unit’s task-relevant value, making it the least utility-preserving choice. This design follows prior data-minimization and masking methods [80]. 
+
+4.2.2 Abstract . The sensitive unit is generalized to a higher-level node in the taxonomy. In Figure 2, “depression” is replaced with the coarser label [Health] . By mapping the unit to its parent category or data type, Abstract reduces the exposure of specific informa-tion while preserving enough context for the agent to respond appropriately, occupying a middle ground on the privacy–utility spectrum. 
+
+4.2.3 Replace . The sensitive unit is substituted with a plausible al-ternative drawn from a different data type under the same category.    
+
+> 5Sensitive units 1
+> Data type 1
+> Noise data type 1
+> Noise combination Noise type 1 Noise type 2 Noise type 3
+> Agent generates value under noise data types
+> Use template to combine noise combinations with original
+> Sensitive units 2
+> Data type 2
+> Noise data type 2
+> Sensitive units 3
+> Data type 3
+> Noise data type 3
+
+Figure 3: Details of the Noise Action. Each sensitive unit as-signed the Noise action is paired with noise data type drawn from the taxonomy; together these form a noise combination .A local LLM generates a plausible value under each noise data type, and a template combines the generated decoys with the original query. 
+
+In Figure 2, “Mountain View” is replaced with “Palo Alto.” Replace 
+
+preserves the structural and semantic role of the original unit while redirecting the provider’s profiler toward a misleading signal. Un-like Noise , it discards the true value, so the original information is lost. 
+
+4.2.4 Noise . A key limitation of Redact , Abstract , and Replace 
+
+is that they all degrade the original signal as they remove, coarsen, or overwrite the unit. For high-utility contribution units, such ob-fuscations are suboptimal as they degrade utility. Thus we propose 
+
+Noise , which retains the original unit and adds plausible infor-mation under a different data type. The task-relevant content is left untouched, so the response is preserved, while making the original signal harder for a profiler to isolate, improving privacy without sacrificing utility. In Section 5.4, we confirm that Noise 
+
+preserves utility on high-importance units, where removal-based actions instead cause a bimodal utility collapse. Figure 3 details the Noise action. Given a sensitive unit with its category and data type, PromptPET randomly selects an irrelevant data type from the taxonomy as the noise data type and prompts an LLM to generate a contextually plausible value for it. When several units in a query are assigned the Noise action, their noise data types form a noise combination that the LLM populates jointly, producing a coherent decoy profile. A template (see Appendix B) then combines the decoy with the original query and instructs the agent to answer the real and decoy queries separately. Before returning the response to the user, the PromptPET filters the decoy portion of the response so that utility is preserved. In Figure 2, the unit “therapist” ( Medical Services > Therapist ) is assigned the noise action, Medical Services > Dental Care is selected as the noise data type, the LLM generates “dentist” as the decoy, and finally the chatbot answers the “therapist” and “dentist” requests separately before the “dentist” portion is filtered out. This separate-answer structure is what makes filtering easy and reliable. PromptPET can isolate and discard the decoy segments with a hard-coded denoiser instead of an extra local LLM call, keeping it cheap to run. On our test set, the denoiser correctly recovers the response to the original query in 97 .6% of cases. Obfuscation   
+
+> Action Decider
+> Rule
+> Optimizer
+> Decision rule set
+> Action decision
+> Query set
+> Train Val
+> Seed
+> rule set
+> Final decision rule set
+> Top-k decision rule sets Failure summary per rule set
+
+Figure 4: Overview of the Rule-Optimization Framework. Two LLM agents cooperate inside the iterative loop (dashed box): the Obfuscation Action Decider assigns an obfuscation action to each sensitive unit according to the current decision rule set , and the Rule Optimizer proposes a refined rule set from performance feedback. Labels 0–6 trace one iteration, detailed in Section 4.3. Blue arrows are feedback signals con-sumed by the Rule Optimizer . The red arrow is the newly proposed rule set. 
+
+## 4.3 Rule Optimization 
+
+Given a query containing sensitive units across multiple data types with different importance scores, the system must assign one ob-fuscation action per unit from {redact , abstract , replace , noise }, bal-ancing privacy gain against utility retention. As these obfuscation actions have complementary strengths and weaknesses, a key chal-lenge is to assign obfuscations that yield best privacy-utility trade off. Inspired by [ 73 ], namely Optimization by PROmpting (OPRO), we develop a rule-optimization framework in which an LLM pro-poses decision rule sets and iteratively refines them using feedback from prior evaluations, as illustrated in Figure 4. The framework comprises two agents. The Obfuscation Action Decider is given the user query together with each detected sensi-tive unit, its category and data type, and its importance score, and then it applies a decision rule set to select an action per unit. For optimization only, the Obfuscation Action Decider is additionally prompted to report the rule it invoked for each decision, which enables the per-rule failure summary below. The Rule Optimizer 
+
+is given the current top-5 decision rule sets, their per-rule failure summaries, and the current mini-batch together with the action decisions each top-5 decision rule set produced on it, and then is prompted to retain strong rules, revise mediocre ones, prune weak ones, and introduce new rules to cover observed gaps. Supplying the queries alongside the competing decisions lets the optimizer see how rule sets diverge on the same inputs before proposing a revision. 
+
+Optimization Loop. The pool is seeded with an initial decision rule set, which can be empty or can contain human-made rules. Since this initial seed rule set may impact the quality of the final rule set, we evaluate different seed rule sets, developed based on our findings ( e.g., empty, threshold-based, and oracle-based), discussed in Section 5.5. Each iteration proceeds through the numbered steps in Figure 4: 
+
+> 6
+
+(1) A new decision rule set is given to the Obfuscation Action De-cider and evaluated on the validation set. (2) Its score on the validation set is compared against the rule sets in the current top-5 pool. The new rule set is admitted if it out-performs any incumbent and discarded otherwise. The metric, which also serves as the framework’s optimization target, is 
+
+𝛼 · Privacy + ( 1 − 𝛼 ) · Utility − 𝜆 · |R| , (1) where |R| is the word length of the decision rule set and 𝜆 =
+
+10 −5. This length penalty discourages the Rule Optimizer from accumulating verbose or redundant rules, keeping the learned rule set compact and interpretable. (3) For a freshly sampled training mini-batch, the Obfuscation Ac-tion Decider independently applies each rule set in the top-5 pool to produce an action decision for every sample in the batch. (4) The resulting predictions update a per-rule failure summary by comparison against the recorded best action combination for each sample. For each rule 𝑟 , we compute the mean quality ratio 
+
+𝑞 (𝑟 ) = 1
+
+|C 𝑟 |∑︁ 𝑐 ∈ C 𝑟 
+
+score ( ˆ𝑎 𝑐 )
+
+score (𝑎 ∗ 
+
+> 𝑐
+
+) , (2) where C𝑟 is the set of decisions in which 𝑟 is applied, ˆ𝑎 𝑐 is the predicted action combination, and 𝑎 ∗ 
+
+> 𝑐
+
+is the best recorded one. Values near 1 indicate consistently optimal guidance, whereas lower values flag suboptimal rules. The summary records statis-tics for both the current mini-batch and the cumulative history across iterations, and the Rule Optimizer is prompted to weigh the cumulative statistics more heavily. (5) The top-5 decision rule sets, their per-rule failure summaries, and the current mini-batch, paired with the action decisions each rule set produced on it, are passed to the Rule Optimizer .(6) The Rule Optimizer generates a new decision rule set, complet-ing the iteration. After optimization, we deploy the Obfuscation Action Decider 
+
+equipped with the best-scoring (final) decision rule set to determine obfuscation actions in our pipeline. 
+
+## 5 Evaluation 
+
+In this section, we first evaluate each obfuscation action indepen-dently to characterize its effect on the privacy-utility tradeoff. Then, we explore different configurations for rule-optimization and show the effectiveness of PromptPET .
+
+## 5.1 Evaluation Metrics 
+
+Evaluating a privacy-preserving approach requires measuring both 
+
+privacy gain (how much sensitive profiling signal is suppressed) and 
+
+utility retention (how well the chatbot’s helpfulness is preserved). 
+
+5.1.1 Privacy Gain. We quantify privacy gain by comparing the raw profile inferred from the original query with the obfuscated profile inferred from the obfuscated query. The Taxonomy-based profile itself is the object that an adversarial personalization or tracking system seeks to infer [ 67 ]. We focus on the Demographics & Interests branch of the IAB Audience Taxonomy [ 30 ] Given the large size of our taxonomy, we improve stability by decomposing profiling into two stages: category extraction followed by data-type 
+
+Algorithm 1 Threshold-Based Sensitive Unit Selection 
+
+Require: Units U; importance map I : U → [ 0, 1]; threshold 𝜏 
+
+Ensure: Units to obfuscate R ⊆ U  
+
+> 1:
+
+return { 𝑢 ∈ U : I ( 𝑢 ) ≤ 𝜏 }0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 
+
+> Importance score
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Cumulative proportion
+
+Figure 5: CDF of Sensitive Unit Importance Scores. Red dotted lines mark the 1/3 and 2/3 cumulative proportions. 
+
+extraction within the extracted category. To distinguish the inherent instability of the LLM-based profiler from the obfuscation-induced deviation, we evaluate self-consistency by running the profiler three times on the same query set and averaging the pairwise similarities between runs, resulting in 90 .25% Jaccard similarity, rising to 96 .10% 
+
+when semantic similarity is considered. For each raw profile label, we compute the average embedding of its linked obfuscated profile labels and measure the normalized cosine similarity with it. (We provide the details of similarity measurements methodology in Appendix A.) 
+
+5.1.2 Utility Retention. We quantify utility retention by compar-ing the filtered response with the raw response generated directly from the original query. We evaluate utility from two complemen-tary perspectives. First, we compute the cosine similarity between the sentence embeddings [ 58 ] of two responses [ 16 , 55 ]. This mea-sures the coarse-grained semantic similarity between them. Second, we evaluate fine-grained knowledge preservation. This objective is closely related to summarization evaluation, which also mea-sures information retention in generated text [ 36 ]. We therefore adopt a claim-based evaluation strategy following [ 59 ], which as-sesses summary quality by extracting atomic knowledge claims from the source and using Natural Language Inference (NLI) [ 69 ]to determine whether those claims are supported by the summary. Analogously, we extract atomic claims from the original response and use NLI to evaluate whether each claim is preserved in the filtered response. To better reflect our setting, we adapt the NLI labels to three categories: Present , Abstracted , and Absent , corre-sponding to scores of 1, 0.5, and 0, respectively. Intuitively, Present 
+
+indicates that the claim is preserved faithfully, Abstracted indicates that it is retained only in a generalized form, and Absent indicates that it is not preserved. Following [ 39 ], which proposes a pipeline for extracting and verifying atomic factual claims from long-form text, we build the claim extractor by instruction-tuning an LLM and construct the NLI evaluator within the same framework to as-sess whether the extracted claims are preserved. Overall, these two metrics capture both coarse-grained semantic similarity and fine-grained knowledge that remains. We weight them equally rather than rely on either alone for the utility evaluation. 
+
+> 7
+
+Table 1: Mean Utility Drop. Utility drop when redacting equal number of sensitive units per importance score range.                    
+
+> Importance range Low Medium High
+> (𝑠 ≤0.6)(0.6<𝑠 ≤0.8)(𝑠 ≥0.8)Utility drop (cosine) 0.0411 0.0924 0.1991
+> Utility drop (NLI) 0.0918 0.1588 0.3380
+
+## 5.2 Experimental Setup 
+
+Dataset. Our dataset is derived from WildChat-1M [ 78 ], a corpus of real user-chatbot interactions released after PII redaction. Because our goal is to evaluate obfuscation actions, we need queries that ac-tually contain sensitive information on which the obfuscation will act. We therefore build on Trust-No-Bot [ 41 ], which uses GPT-4 [ 50 ]to extract conversations from WildChat-1M that contain sensitive information, yielding 3,319 unique dialogues. From each conversa-tion, we retain only the first-turn query since cross-turn coherence is out of scope (Section 3). We then apply our sensitive unit detec-tor to identify information corresponding to our default sensitive taxonomy (Section 4.1.1), extracting 7,911 sensitive units from 2,182 
+
+queries. Our usage follows WildChat-1M’s release license. 
+
+User-side Models. All LLM modules internal to PromptPET use Gemma3:12B [ 26 ], running on a single NVIDIA RTX A5000. We use the gemma3:12b build distributed by Ollama [ 44 ] (4-bit quantized, 
+
+𝑄 4_𝐾 _𝑀 ) [ 43 ], which occupies approximately 9 GB of GPU mem-ory at inference time (suggesting 12 GB). We choose Gemma3:12B because it is open-weight and runs on a single consumer-grade GPU, reflecting a realistic local-deployment setting for the user side of PromptPET .
+
+Adversary and Evaluator. To approximate the adversarial chat-bot provider and to measure privacy and utility, we use GPT-4.1 via the OpenAI API [ 51 ]. GPT-4.1 stands in for a frontier production chatbot on the adversary side and serves on the measurement side. 
+
+Reproducibility. We set the temperature and random seed to 0 for all models. 
+
+## 5.3 Importance Score Validation 
+
+To characterize each obfuscation action’s effect on the privacy-utility tradeoff independently, we select sensitive units for obfus-cation according to the importance score I (·) that estimates each unit’s contribution to the response, as shown in Algorithm 1. By varying the threshold 𝜏 , we control the set of units subjected to a given obfuscation action and, in turn, the operating point along the privacy-utility curve. Before doing so, we must first validate the importance score itself, specifically whether it separates units that contribute substantially to the response. 
+
+5.3.1 Importance Score Statistic. Figure 5 shows the empirical CDF of the importance scores assigned to these sensitive units, demon-strating the following two observations. First, the distribution is right-skewed: scores are concentrated toward the upper end of the range, which is intuitive for task-oriented queries, where real users tend to include information that specifies their requests rather than extraneous details. Second, equal-mass terciles are non-uniform in score: the 1/3 and 2/3 cumulative proportions correspond to scores of 0.6 and 0.8, respectively, indicating that score-uniform thresholds (e.g., 0.33 , 0.66 , 1.0) would be suboptimal, as low thresholds cover relatively few units (units with score ≤ 0.33 account for only 16 .87% 
+
+of the total), while high thresholds traverse the dense upper region (units with score ≥ 0.9 account for 25 .94% ), where threshold choice matters most for the privacy-utility tradeoff. 
+
+5.3.2 Validation via Controlled Redaction. Before using the impor-tance score to drive threshold selection, we verify that it actually dis-tinguishes between high- and low-impact sensitive units. The most direct test is to redact the same number of units from each of three importance ranges and compare the resulting utility drops. If the im-portance score is meaningful, redacting high-importance sensitive units should degrade utility substantially more than redacting low-importance sensitive units. We partition the 7,911 sensitive units by score into three ranges: low ( 𝑠 ≤ 0.6), medium ( 0.6 < 𝑠 ≤ 0.8), and high ( 𝑠 > 0.8). The initial counts are 2,610 , 2,813 , and 2,488 , re-spectively. To equalize range sizes, we randomly reassign boundary units (those with 𝑠 = 0.6 or 𝑠 = 0.8) to adjacent ranges, yielding exactly 2,637 units in each range. For each range, we redact all of the detected sensitive units across the full dataset and measure the resulting utility drop per query, averaging over all queries. Table 1 reports the mean utility drop under two complementary metrics we defined in Section 5.1.2: cosine similarity and NLI-based knowledge preservation. Both metrics exhibit a clear monotonic trend: redact-ing high-importance units causes a substantially larger utility drop than redacting medium- or low-importance units, roughly 4.84 ×
+
+(cosine) and 3.68 × (NLI) for the drop incurred by redacting the same amount of low-importance units. 
+
+Key Takeaways: We show that our importance scorer captures the relative contribution of sensitive units to response utility, justifying its use as the basis for threshold-driven obfuscation. 
+
+## 5.4 Single-Action Strategies Analysis 
+
+We next analyze each obfuscation action in isolation to characterize its effect on the privacy-utility tradeoff. We instantiate Algorithm 1 with the importance-score thresholds validated in Section 5.3 and evaluate each obfuscation action ( Redact , Abstract , Replace ,
+
+Noise ) at 𝜏 ∈ { 0.6, 0.8, 1.0}, together with a no-obfuscation baseline 
+
+𝜏 = 0.0, in which the raw query is passed through unchanged. For every (action , 𝜏 ) configuration, we score privacy and utility on all queries in our dataset, reporting utility as the mean of our two complementary metrics. We first examine the full per-query distribution of each configu-ration (Figure 6) and then summarize it numerically (Table 2). To translate the distribution into interpretable statistics, we partition the unit square into four regions by splitting privacy and utility at their midpoint, 0.5.4 The regions are success (high privacy, high utility), utility-collapse (high privacy, low utility), privacy-miss (low privacy, high utility), and failure (low privacy, low utility). This setting will also be used in Section 5.6, PromptPET evaluation.                                      
+
+> 4The split point is a reporting choice, not a parameter of the method. We use ( 0.5,0.5)for illustration, and the qualitative comparison between actions is unchanged under other reasonable cutoffs. A deployer may set each axis to the privacy and utility levels their application requires.
+> 8Fail U-coll.
+> P-miss Win
+> Redact | =0.0 Redact | =0.6 Redact | =0.8 Redact | =1.0
+> Abstract | =0.0 Abstract | =0.6 Abstract | =0.8 Abstract | =1.0
+> Replace | =0.0 Replace | =0.6 Replace | =0.8 Replace | =1.0
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0 Noise | =0.0 Noise | =0.6 Noise | =0.8 Noise | =1.0
+> Privacy
+> Utility
+
+Figure 6: Privacy-Utility Distributions. Per-query distribu-tions for each obfuscation action (rows) across different thresholds 𝜏 . Each panel is a filled KDE over all queries. Crosshairs partition each panel into four outcome regions. A density floor ( 0.05 ) omits the 5.3% lowest-density queries. Table 2: Obfuscation Action Outcome Region Summary. Re-ported at maximum strength ( 𝜏 = 1.0). Region fractions par-tition queries at privacy = 0.5 and utility = 0.5 into success ,
+
+utility-collapse , privacy-miss , and failure . Baseline ( 𝜏 = 0.0)is identical across actions. 
+
+Mean Region (%) Configuration Priv. Util. Success U-coll. P-miss Fail Baseline 0.21 0.90 21.1 0.4 78.0 0.5 
+
+Redact 0.59 0.63 39.4 25.2 31.2 4.1 
+
+Abstract 0.70 0.65 51.2 25.4 20.1 3.3 
+
+Replace 0.62 0.67 41.9 24.2 29.6 4.3 
+
+Noise 0.77 0.76 73.7 7.4 17.9 1.0 
+
+5.4.1 Per-Query Distribution. Figure 6 reports the joint per-query distribution of privacy and utility for each configuration as a 2D KDE (kernel density estimate), revealing how the query popula-tion traverses the privacy-utility space as obfuscation strength increases. Two features of the baseline panel ( 𝜏 = 0.0) merit com-ment. First, the no-obfuscation baseline does not collapse to the corner (privacy , utility ) = (0, 1): mean utility is 0.90 rather than 1.0,reflecting the inherent stochasticity of LLM-generated responses, and a small amount of mass appears at high privacy because 11 .09% 
+
+of queries produce an empty raw profile, meaning they contain no profilable information and therefore receive a privacy score of 
+
+1.0. Second, residual privacy variance also arises from the internal 0.2 0.3 0.4 0.5 0.6 0.7 0.8 
+
+> Privacy
+> 0.65
+> 0.70
+> 0.75
+> 0.80
+> 0.85
+> 0.90
+> Utility
+> =0.0
+> =0.6
+> =0.8
+> =1.0
+> Better
+> Redact
+> Abstract
+> Noise
+> Replace
+
+Figure 7: Aggregate Privacy-Utility Tradeoff Curve. Each curve traces an action ( Redact , Abstract , Noise , Replace ). The arrow marks the preferred direction. 
+
+instability of the profiler itself (Section 5.1.1). As a result, 78 .0% of queries fall in the privacy-miss region at 𝜏 = 0.0 (Table 2), confirm-ing that, absent obfuscation, most queries leak their profile while still producing high-fidelity responses. Reading each row from left to right (increasing 𝜏 ), all four ac-tions share a common trend: the baseline mass concentrated in the upper-left corner spreads and migrates rightward, and the success 
+
+fraction grows monotonically from 21 .1% at 𝜏 = 0.0 to between 
+
+39 .4% (Redact ) and 73 .7% (Noise ) at 𝜏 = 1.0. The manner of mi-gration differs sharply, however. Redact at 𝜏 = 1.0 splits into three substantial modes: a dominant upper-right success cluster of queries whose redacted units were inessential ( 39 .4% ), a per-sistent upper-left privacy-miss cluster ( 31 .2% ), and a lower-right 
+
+utility-collapse cluster whose responses degraded once key units were deleted ( 25 .2% ). The surviving privacy-miss mass indicates that our lightweight user-side detector misses many of the weak or implicit signals that the provider-side profiler still exploits. Replace 
+
+behaves almost identically ( 41 .9% success, 24 .2% utility-collapse, 
+
+29 .6% privacy-miss). Abstract exhibits a milder version of the same structure, as it converts much of the privacy-miss mass into successes (success 51 .2% vs. 39 .4% for Redact , while privacy-miss 
+
+20 .1% vs. 31 .2% ) at essentially no additional utility-collapse cost. 
+
+Noise , by contrast, remains largely unimodal and migrates as a single coherent cluster toward the upper-right. At 𝜏 = 1.0, 73 .7% 
+
+of queries land in the success region, which is nearly double the fraction of Redact (39 .4% ) and Replace (41 .9% ). Meanwhile, only 
+
+7.4% fall into the utility-collapse region, which is roughly a third of the 24 –25% observed for the other three. Because Noise perturbs rather than deletes task-critical units, it preserves the surrounding response context. Its comparatively light privacy-miss mass ( 17 .9% )further suggests that perturbing a detected unit also disrupts the contextual cues the profiler would otherwise leverage, partially offsetting the detector’s limited recall. Finally, the failure region is sparse in every panel, with 0.5% of queries at 𝜏 = 0.0 and at most 4.3% at 𝜏 = 1.0, largely below the rendered density threshold. This is the area in which a query loses both privacy and utility, and its near-absence indicates that none of the actions sacrifice utility without a corresponding privacy gain, the basic property any sound obfuscation method should satisfy. 
+
+5.4.2 Aggregate Tradeoff Curve. While Figure 6 shows the full per-query distribution, Figure 7 summarizes each (action , 𝜏 ) config-uration by its mean privacy and utility, tracing one tradeoff curve per action as 𝜏 sweeps from 0.0 to 1.0. All four curves originate from 
+
+> 9
+
+Table 3: Optimal Action Frequency. Percentage of queries for which each action is optimal under a per-query oracle. When actions tie, all tied actions are credited, so rows exceed 100% .Ties measure immaterial choices.                     
+
+> 𝝉 Redact Abstract Replace Noise Ties
+> 0.665 .5% 70 .2% 68 .2% 78 .0% 62 .4% 0.841 .1% 49 .2% 47 .9% 67 .3% 36 .9% 1.011 .0% 21 .0% 16 .7% 58 .3% 4.4%
+
+the shared baseline at (privacy , utility ) = (0.21 , 0.90 ) and descend toward the lower-right as obfuscation strength increases, trading utility for privacy. A curve that lies up and to the right of another is strictly preferable. We emphasize that the curves are indexed by 𝜏 ,so two actions at the same 𝜏 generally sit at different privacy levels. A less aggressive action reaches a given 𝜏 at lower privacy and correspondingly higher utility. Thus, comparing actions at equal 
+
+𝜏 is misleading. The meaningful comparison is utility at the same privacy level , the vertical separation between curves. The four actions trace out clearly separated frontiers. Redact is at a disadvantage at every operating point: it incurs the steepest utility loss for a given privacy gain, reaching only (0.59 , 0.63 ) at 
+
+𝜏 = 1.0. Abstract and Replace form a closely spaced middle tier: at the same privacy level, Abstract lies marginally above Replace 
+
+throughout ( e.g., utility 0.81 vs. 0.80 at privacy = 0.45 ) and also extends to higher privacy ( 0.69 vs. 0.62 at 𝜏 = 1.0), making it the better of the two. Noise dominates the other three across most of the range. In the low-privacy area ( privacy ≤ 0.37 ), it sits marginally 
+
+below Abstract (e.g., utility 0.863 vs. 0.869 at privacy = 0.33 ), so 
+
+Abstract is the better choice under light obfuscation. Past the crossover near privacy = 0.37 , however, Noise separates decisively, and the gap widens monotonically: at privacy = 0.55 , its utility is 
+
+0.81 , versus 0.75 (Abstract ), 0.72 (Replace ), and 0.66 (Redact ). It reaches the most favorable extreme point, (0.77 , 0.76 ), which is simultaneously the highest privacy and the highest utility of any action at 𝜏 = 1.0. Over the full sweep, Noise converts a 0.137 
+
+utility loss into a 0.564 privacy gain, a ratio of 4.11 , against 1.98 
+
+(Abstract ), 1.79 (Replace ), and 1.43 (Redact ). This matches the per-query analysis: Noise holds the population in the high-utility band while shifting it rightward, whereas removal-based actions buy privacy at a higher, more sharply rising utility cost. Yet the low-privacy crossover, where Abstract briefly overtakes Noise ,shows that the single best action is operating-point dependent. This is precisely the gap that motivates the selective per-query strategy, discussed in Section 5.5, in which each sensitive unit is assigned its optimal obfuscation action, and thus actions cooperate rather than compete with one another. 
+
+5.4.3 Per-Query Optimal Action. We assess whether every action earns its place in the optimization pool: an action that is never the per-query optimum contributes nothing and could be dropped. Using a per-query oracle that, for each query and threshold, credits the action(s) maximizing 𝛼 · privacy + ( 1 − 𝛼 ) · utility (𝛼 = 0.5), with all tied actions credited (Table 3). Every action is optimal for a non-trivial share of queries at every threshold. For example, even 
+
+Redact , the weakest in aggregate, is the best on 11 .0% of queries 
+
+Table 4: Seed Decision Rule Set Comparison. Default is the seed. Best is the optimized rule set. “Bal.” is the balanced objective. Best final operating point in bold ( i.e., Oracle ).                              
+
+> Seed Stage Priv. Util. Bal. ΔBal.
+> Empty Default 0.689 0.652 0.670
+> Best 0.767 0.730 0.748 +0.078
+> Threshold Default 0.757 0.728 0.743
+> Best 0.760 0.746 0.753 +0.011
+> Oracle Default 0.759 0.752 0.755
+> Best 0.775 0.753 0.764 +0.009
+
+at 𝜏 = 1.0. Therefore, no action is dominated on a query-for-query basis and none can be dropped. These niches are complementary and task-dependent. Redact is preferable when a sensitive unit is incidental to the request since deleting it costs no utility yet fully removes the attribute, whereas perturbation can leave it recoverable. 
+
+Noise is preferable when the unit is central to the request. For example, a search-style query asking where to obtain a specific title collapses under deletion, as the request loses its subject and returns a useless answer, whereas Noise preserves the original query by adding a decoy alongside it and filters the decoy from the response. The high tie rate at low 𝜏 (62 .4% at 𝜏 = 0.6) is mechanical: the importance filter marks few units, leaving most queries unchanged and the actions identical. As 𝜏 rises, the actions diverge, and a unique best action emerges for 95 .6% of queries at 𝜏 = 1.0.
+
+Key Takeaways: Noise is most often the optimal action ( 58 .3% ), however the other actions are still uniquely best on the remaining 
+
+41 .7% , so selecting a single fixed action is not optimal. 
+
+## 5.5 Rule Optimization Configuration 
+
+We develop a decision rule set to help the obfuscation action decider assign each sensitive unit an optimal obfuscation action. From WildChat, we hold out a separate optimization set, disjoint from our test set, comprising 797 training and 113 validation queries. Using a mini-batch of 50 queries, we run 20 optimization rounds and retain the rule set that maximizes our optimization target (Eq. 1) on the validation set. We first study how the seed decision rule set shapes the final result (Section 5.5.1), then vary the weight 𝛼 of the optimization target to prioritize privacy or utility (Section 5.5.2), and use the optimal configuration to evaluate PromptPET in Section 5.6. 
+
+5.5.1 Seed Decision Rule Set. We optimize the decision rule set for the balanced objective ( 𝛼 = 0.5) and study how the seed decision rule set influences the quality of the final decision rule set. We consider three seed decision rule sets of increasing prior knowledge: (i) Empty , no rules; (ii) Threshold : two threshold rules based on Figure 7 ( i.e., if importance > 0.8 ⇒ Noise , else Abstract ); and (iii) Oracle : importance-binned action priors derived from the per-query oracle (Table 3) (see Appendix C.1). For each setting, we feed the seed set ( Default ) and the final set ( Best ) to the obfuscation action decider and report its performance, evaluated on the test set at 𝜏 = 1.0.
+
+> 10
+
+Table 4 shows that the rule-optimization raises both privacy and utility for all three seeds, increasing the balanced objective by +0.078 (Empty ), +0.011 (Threshold ), and +0.009 (Oracle ). The size of the gain shrinks as the seed improves, since a bet-ter seed leaves less to recover. Empty starts as the worst ( 0.670 )and climbs the most, with the rule-optimization closing a large, roughly balanced deficit on both axes ( +0.078 privacy, +0.078 util-ity), yet 20 rounds from a cold start still leave it last overall ( 0.748 ). 
+
+Threshold begins near a local optimum and moves little. Oracle 
+
+is already strong at initialization, and its gain is almost purely pri-vacy ( +0.016 privacy, +0.001 utility), yielding the best final rule set (0.764 balanced) and the highest privacy and utility of any setting (0.775 , 0.753 ). 
+
+5.5.2 Optimization Target Weight. The weighting parameter 𝛼 
+
+balances privacy against utility, where 𝛼 = 0 favors utility only, 
+
+𝛼 = 1 favors privacy only, and 𝛼 = 0.5 is balanced. The target is 
+
+𝛼 · privacy + ( 1 − 𝛼 ) · utility . Starting from the Oracle seed, we compare performance at 𝜏 = 1.0 on the test set for all three settings. The three settings occupy a tight region: privacy within [0.78 , 0.79 ]
+
+and utility within [0.74 , 0.76 ], which shows that 𝛼 offer fine control over the operating point rather than a coarse tradeoff. Consistent with the objective, utility-only attains the highest utility ( 0.758 )and privacy-only the highest privacy ( 0.791 ), but both margins are within 0.01 of the balanced setting ( 0.775 privacy, 0.753 utility). This narrow spread is expected at 𝜏 = 1.0: every detected unit is ob-fuscated regardless of 𝛼 , so the weight only reshapes which action each unit receives, not whether it is protected. The action mix confirms that 𝛼 shifts the decision in the intuitive direction. Relative to the balanced default, leaning toward utility trades the lossy Abstract action almost entirely for response-preserving Noise (Abstract 9.6% → 0.7% , Noise 84 .8% → 92 .5% ), whereas leaning toward privacy raises the share of the destructive 
+
+Redact action ( 5.4% → 8.0% ). The weight thus steers the rule set toward utility-preserving or privacy-maximizing actions as in-tended. But the effect on aggregate privacy and utility is small only because Noise already scores well on both axes, leaving little to gain by substituting other actions. This also explains why strong privacy comes essentially for free: even the utility-only objective reaches 0.782 privacy, since at 𝜏 = 1.0 every unit is obfuscated, and optimizing for utility prefers utility-preserving actions over destructive ones. 
+
+Key Takeaways: A stronger seed yields a stronger final rule set, while the objective weight 𝛼 offers only fine adjustment around it, so we deploy the preference-neutral balanced objective. 
+
+## 5.6 PromptPET Evaluation 
+
+Guided by Sections 5.5.1 and 5.5.2, we fix PromptPET ’s default configuration as the Oracle -seeded rule set under the balanced objective ( 𝛼 = 0.5). We adopt the balanced objective as a preference-neutral default that favors neither axis and targets the full tradeoff curve, rather than the single 𝜏 = 1.0 endpoint analyzed above. The utility- and privacy-only decision rule sets remain available for deployments that weigh one objective more heavily. We evaluate 
+
+PromptPET end-to-end against prior automated defenses and the 0.2 0.3 0.4 0.5 0.6 0.7 0.8   
+
+> Privacy
+> 0.60
+> 0.65
+> 0.70
+> 0.75
+> 0.80
+> 0.85
+> 0.90
+> Utility
+> =0.0
+> =0.6
+> =0.8
+> =1.0
+> Better
+> PromptPET
+> [Ngong et al.]
+> [Zhou et al.]
+> Upper Abstract
+> Upper Noise
+
+Figure 8: PromptPET Privacy-Utility Tradeoff Curve. In-cludes PromptPET (orange), prior work, and single-action upper bounds. Upper-Abstract and Upper-Noise reproduce the strongest single-action frontiers from Figure 7. 
+
+single-action ceilings, sweeping the threshold 𝜏 ∈ { 0.0, 0.6, 0.8, 1.0}
+
+and reporting the tradeoff curve as 𝜏 sweeps from 0.0 to 1.0 in Figure 8. 
+
+5.6.1 Baselines. We compare against the two previous works that automate the full obfuscation pipeline without human interven-tion and operate on free-form rather than fixed-schema data, ex-cluding work that targets a different adversary. The first is the contextual-reformulation framework of Ngong et al. [ 42 ], which rewrites out-of-context information in the prompt. The second is the zero-shot LLM minimizer of Zhou et al. [ 80 ], which retains, redacts, or abstracts each sensitive unit. However, no prior work targets a sensitive scope as broad as ours. To place both baselines within our scope, we fix the detection stage across all approaches, applying Algorithm 1 to select the sensitive units offered for pro-cessing. This only restricts which units are offered to a baseline, and it remains free to retain a candidate it judges to be in-context or task-necessary by previous works. As an additional reference, we copy the best privacy-utility tradeoff attainable by any single obfuscation action from Figure 7. In particular, Abstract defines this bound at low privacy and Noise at high privacy, shown as the 
+
+Upper—Abstract and Upper—Noise in Figure 8. 
+
+5.6.2 Results. Figure 8 shows that PromptPET dominates both baselines by a wide margin. Ngong et al.’s method (purple)[ 42 ] loses utility steeply as privacy increases, saturating at (privacy , utility ) =
+
+(0.55 , 0.61 ). At privacy 0.55 , PromptPET retains utility 0.81 and also reaches higher privacy ( 0.77 ). Zhou et al.’s zero-shot minimizer (green)[ 80 ] is gentler but plateaus at privacy 0.30 , only marginally above the no-obfuscation baseline. This is consistent with the au-thors’ own finding: a directly prompted LLM exhibits a bias to-ward abstraction that leads to oversharing rather than sufficient removal [ 80 ], leaving a residual signal that our adversarial pro-filer recovers. Their offline search would fare better but is not a deployable approach. Quantitatively, PromptPET delivers 3.3×
+
+more privacy per unit of utility cost than the strongest prior base-line ( 𝑘 = 3.9 vs. 1.2) while reaching 1.4× higher privacy ( 0.78 vs. 
+
+0.55 ), decisively outperforming deployable prior work. Notably, the 
+
+PromptPET curve rides the upper envelope of the four single-action ceilings throughout, matching Abstract in the low-privacy area, where abstraction is best, and tracking Noise in the high-privacy area, where it is best. Thus, without committing to any single ac-tion a priori, the learned decision rule set attains the tradeoff of the 
+
+> 11
+
+best single action at every operating point, realizing the “cooperate rather than compete” behavior anticipated in Section 5.4. 
+
+5.6.3 Decision Rule Set Analysis. The learned decision rule set is in Appendix C.2. Applying the decision rule set to the 2,182 -query test set at 𝜏 = 1.0 yields 7,911 unit-level decisions, distributed as 
+
+Noise 84 .8% , Abstract 9.6% , Redact 5.4% , and Replace 0.2% . In the learned decision rule set, Noise is the default choice: any sen-sitive unit that is the on-topic target of a query (the main topic, tool, product, place, person, work, or core concept the answer de-pends on) is assigned Noise (R20 5), and any unit matching no other rule falls through to Noise as well (R21). Because most detected units are integral to their query ( 67 .0% have importance above 0.6
+
+and 31 .5% above 0.8; see Section 5.3.1), Noise handles the large majority of cases, chosen for 84 .8% of all units and for 91 .8% of importance > 0.8. The remaining three actions are supplementary, each reserved for a narrower class of units that Noise serves poorly. 
+
+Redact removes units that are sensitive but carry little task value, so deletion costs nothing: verbatim secrets, credentials, endpoints, and identifiers pasted in code, exact names copied from source text, and bare boilerplate phrases (R1, R3, R4, R8). Consistent with this, 
+
+Redact is applied to 14 .8% of low-importance units (importance 
+
+< 0.3) but only 4.3% of high-importance ones (importance > 0.8). 
+
+Abstract generalizes units that frame a request rather than consti-tute it, where a coarser term still answers the query, such as a broad host language or platform rather than the specific API at issue (R5), or a generic role (R11), persona (R13), or background descriptor that wraps the real task (R19). Such units are predominantly of low importance. Abstract is applied to 20 .4% of all units below importance 0.6, but only 3.7% of those above 0.8. Among the units to which Abstract is applied, the majority fall in Technology & Computing (26% ), Hobbies & Interests (20% ), and Education & Occu-pation (16% ). Replace substitutes a plausible same-type stand-in where the unit’s surface form must be preserved but its exact value is not needed, such as an exact product model, year, or version (R7), or literature inspired by other original work (R10). During testing, these conditions match rarely: only 14 units ( 0.2% ) receive Replace ,confirming it as a specialized fallback rather than a workhorse. 
+
+5.6.4 Failure Analysis. To characterize where PromptPET falls short, we partition its 𝜏 = 1.0 outcomes with the same region cut as Section 5.4.1 ( i.e., privacy and utility split at 0.5). PromptPET 
+
+reaches the success region on 73 .8% of queries. The remainder splits into two error modes: under-protection (privacy-miss, 17 .5% ) and over-obfuscation (utility-collapse, 7.6% ), with simultaneous failure of both axes being rare ( 1.1% ). The larger error mode is privacy-miss, meaning queries whose profiles the adversary can still recover. These are not failures to 
+
+act , as every privacy-miss query had sensitive units detected and obfuscated (mean 3.1 units), yet their privacy is near zero (median 
+
+0.00 , with 80% below 0.2). Because the flagged units were obfuscated and the leak persisted, the adversary must reconstruct the profile from residual, co-occurring context rather than from the obfuscated units themselves. Consistent with this, privacy-miss queries rely less on Noise and more on Redact /Abstract (i.e., the actions least   
+
+> 5Cited rule numbers (e.g. “R20”) are hyperlinks to the specific rule in Appendix C.2. Each rule there carries a ←↪marker that links back to this discussion.
+
+able to hide contextual cues) compared to the success region ( 78% 
+
+vs. 86% Noise ). The smaller error mode, utility-collapse, traces back to Redact : these queries apply it at more than twice the success-region rate (9% vs. 4% of unit), so the lost utility comes from deleting a unit that the answer needed, whereas Noise preserves enough of the query to seldom break a response. The number of obfuscated sensitive units is the same as in the success region (median 2), so the failure is not over-processing but rather applying a destructive action to an important sensitive unit. The two modes bound the headroom of PromptPET and point to distinct improvements. In particular, closing the under-protection gap calls for detecting implicit, contextual signals beyond the ex-plicitly flagged sensitive units, while closing the over-obfuscation gap calls for more reliable routing of important sensitive units away from Redact . Encouragingly, the two seldom co-occur ( 1.1% ), which indicates that PromptPET rarely makes errors on both axes at once. When it fails, it fails by trading one objective for the other, not by forfeiting both. 
+
+5.6.5 Time Cost. We measure the latency of PromptPET by com-paring the time cost with the provider’s response time on the raw queries. Because the distribution is right-skewed, we report medi-ans. PromptPET adds 11 .6 s of client-side latency per query, domi-nated by detection ( 5.5 s). With the provider’s response time ( 4.7 s, without PromptPET ), the end-to-end median is 17 .1 s. We treat this overhead as real but secondary to the privacy-utility tradeoff, and two factors bound its impact. First, the overhead is opt-in and per-query rather than a system-wide tax: a user enables obfusca-tion for sensitive prompts and bypasses it otherwise. Second, its dominant term is detection, which is unoptimized local inference with a 12 B-parameter model. This cost would shrink substantially with a smaller, purpose-built detector. 
+
+## 6 Conclusions 
+
+AI agents pose privacy risks to users, as they are capable of collect-ing sensitive information from user queries that can be used for purposes beyond answering the user’s query, such as user profiling. In this paper, we develop and evaluate PromptPET , an LLM-based agent that obfuscates information beyond PII in user queries at the time of disclosure, while optimizing for the privacy-utility tradeoff. 
+
+PromptPET contains four obfuscation actions: redact, abstract, re-place, and a novel noise/denoise mechanism. We first systematically optimize and evaluate each action in isolation, then introduce a rule optimizer that learns to coordinate them. As a result, Prompt-PET matches the upper bound attainable by any single obfuscation action and surpasses prior state-of-the-art methods, delivering 3.3 ×
+
+more privacy per unit of utility cost and reaching 1.4 × higher pri-vacy overall. Further, we show that controlling disclosure at the source is a practical and effective approach, providing users greater control over their privacy in AI agent interactions. We plan to release the prompts that comprise PromptPET to enable future research. 
+
+## Acknowledgments 
+
+This work was partially supported by the NSF Award 1956393 and a generous gift from the Samueli Foundation (to the E+S Institute at UCI). Olivia Figueira was supported by the UCI ICS Steckler Family 
+
+> 12
+
+Endowed Fellowship and the ARCS Danaher Foundation Scholar Award. We would like to thank Yu Duan from UCI for providing feedback on the figure of the paper. 
+
+## References 
+
+[1] Martin Abadi, Andy Chu, Ian Goodfellow, H Brendan McMahan, Ilya Mironov, Kunal Talwar, and Li Zhang. 2016. Deep learning with differential privacy. In 
+
+Proceedings of the 2016 ACM SIGSAC conference on computer and communications security . 308–318. [2] AdNauseam Project. 2026. AdNauseam. https://adnauseam.io/ Accessed 2026-06-12. [3] Benjamin Andow, Samin Yaseer Mahmud, Justin Whitaker, William Enck, Bradley Reaves, Kapil Singh, and Serge Egelman. 2020. Actions speak louder than words: {Entity-Sensitive } privacy policy and data flow analysis with 
+
+{PoliCheck }. In 29th USENIX Security Symposium (USENIX Security 20) . 985– 1002. [4] Anthropic. 2026. Claude. https://claude.ai/ Accessed 2026-05-23. [5] Anthropic. 2026. How Long Do You Store My Data? https://privacy.claude.com/ en/articles/10023548-how-long-do-you-store-my-data. [6] Anthropic. 2026. Import Memory. https://claude.com/import-memory Accessed 2026-06-05. [7] Tom B. Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared D. Kaplan, Prafulla Dhariwal, Arvind Neelakantan, Pranav Shyam, Girish Sastry, Amanda Askell, et al . 2020. Language Models are Few-Shot Learners. In Advances in Neural Information Processing Systems , Vol. 33. 1877–1901. [8] Benjamin Bullough, Harrison Lundberg, Chen Hu, and Weihang Xiao. 2024. Predicting entity salience in extremely short documents. In Proceedings of the 2024 Conference on Empirical Methods in Natural Language Processing: Industry Track . 50–64. [9] Nicholas Carlini, Daphne Ippolito, Matthew Jagielski, Katherine Lee, Florian Tramer, and Chiyuan Zhang. 2022. Quantifying memorization across neural language models. In The Eleventh International Conference on Learning Represen-tations .[10] Nicholas Carlini, Florian Tramer, Eric Wallace, Matthew Jagielski, Ariel Herbert-Voss, Katherine Lee, Adam Roberts, Tom Brown, Dawn Song, Ulfar Erlingsson, et al . 2021. Extracting training data from large language models. In 30th USENIX security symposium (USENIX Security 21) . 2633–2650. [11] Prateek Chhikara, Dev Khant, Saket Aryan, Taranjeet Singh, and Deshraj Ya-dav. 2025. Mem0: Building production-ready ai agents with scalable long-term memory. arXiv preprint arXiv:2504.19413 (2025). [12] Chun Jie Chong, Chenxi Hou, Zhihao Yao, and Seyed Mohammadjavad Seyed Talebi. 2024. Casper: Prompt sanitization for protecting user privacy in web-based large language models. arXiv preprint arXiv:2408.07004 (2024). [13] Amrita Roy Chowdhury, David Glukhov, Divyam Anshumaan, Prasad Chalasani, Nicolas Papernot, Somesh Jha, and Mihir Bellare. 2025. Pr 𝜖𝜖 mpt: Sanitizing Sensitive Prompts for LLMs. arXiv preprint arXiv:2504.05147 (2025). [14] Jacob Devlin, Ming-Wei Chang, Kenton Lee, and Kristina Toutanova. 2019. BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding. In 
+
+Proceedings of the 2019 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies (Volume 1: Long Papers) . Association for Computational Linguistics, 4171–4186. [15] Dia Browser. 2026. Dia Browser. https://www.diabrowser.com/ Accessed 2026-06-05. [16] Tian Dong, Yan Meng, Shaofeng Li, Guoxing Chen, Zhen Liu, and Haojin Zhu. 2025. Depth Gives a False Sense of Privacy: {LLM } Internal States Inversion. In 
+
+34th USENIX Security Symposium (USENIX Security 25) . 1629–1648. [17] Jesse Dunietz and Dan Gillick. 2014. A new entity salience task with millions of training examples. In Proceedings of the 14th Conference of the European Chapter of the Association for Computational Linguistics, volume 2: Short Papers . 205–209. [18] Steven Englehardt and Arvind Narayanan. 2016. Online tracking: A 1-million-site measurement and analysis. In Proceedings of the 2016 ACM SIGSAC conference on computer and communications security . 1388–1401. [19] Futurism. 2026. OpenAI Personal Information Meta Google. https://futurism. com/artificial-intelligence/openai-personal-information-meta-google Accessed 2026-06-05. [20] Leon Garza, Anantaa Kotal, Aritran Piplai, Lavanya Elluri, Prajit Das, and Aman Chadha. 2025. PRvL: Quantifying the Capabilities and Risks of Large Language Models for PII Redaction. arXiv preprint arXiv:2508.05545 (2025). [21] Google. 2026. Gemini. https://gemini.google.com/ Accessed 2026-05-23. [22] Google. 2026. Gemini Apps Privacy Hub. https://support.google.com/gemini/ answer/13594961. [23] Google. 2026. Google. https://www.google.com/ Accessed 2026-06-05. [24] Google. 2026. Import Memory. https://gemini.google/import-memory/ Accessed 2026-06-05. [25] Google. 2026. Temporary Chats and New Privacy Controls in Gem-ini. https://blog.google/products-and-platforms/products/gemini/temporary-chats-privacy-controls/ Accessed 2026-06-05. [26] Google DeepMind. 2026. Gemma 3. https://deepmind.google/models/gemma/ gemma-3/ Accessed 2026-05-20. [27] Ece Gumusel, Yueru Yan, and Ege Otenen. 2026. From Awareness to Practice: A Survey of US Users’ Privacy Perceptions in LLM Chatbots. In USEC, NDSS Symposium .[28] Aniko Hannak, Gary Soeller, David Lazer, Alan Mislove, and Christo Wilson. 2014. Measuring price discrimination and steering on e-commerce web sites. In 
+
+Proceedings of the 2014 conference on internet measurement conference . 305–318. [29] Meng Hao, Hongwei Li, Hanxiao Chen, Pengzhi Xing, Guowen Xu, and Tian-wei Zhang. 2022. Iron: Private inference on transformers. Advances in neural information processing systems 35 (2022), 15718–15731. [30] Interactive Advertising Bureau (IAB) Tech Lab. [n. d.]. Audience Taxonomy 1.1 (TSV). https://github.com/InteractiveAdvertisingBureau/Taxonomies [31] Umar Iqbal, Pouneh Nikkhah Bahrami, Rahmadi Trimananda, Hao Cui, Alexan-der Gamero-Garrido, Daniel J Dubois, David Choffnes, Athina Markopoulou, Franziska Roesner, and Zubair Shafiq. 2023. Tracking, profiling, and ad targeting in the alexa echo smart speaker ecosystem. In Proceedings of the 2023 ACM on Internet Measurement Conference . 569–583. [32] Muhammad Jazlan, Ethan Wang, Yash Vekaria, and Zubair Shafiq. 2026. Tracking Conversations: Measuring Content and Identity Exposure on AI Chatbots. arXiv preprint arXiv:2604.27438 (2026). [33] Jinyuan Jia, Ahmed Salem, Michael Backes, Yang Zhang, and Neil Zhenqiang Gong. 2019. Memguard: Defending against black-box membership inference at-tacks via adversarial examples. In Proceedings of the 2019 ACM SIGSAC conference on computer and communications security . 259–274. [34] Hidetoshi Kido, Yutaka Yanagisawa, and Tetsuji Satoh. 2005. An anonymous communication technique using dummies for location-based services. In ICPS’05. Proceedings. International Conference on Pervasive Services, 2005. IEEE, 88–97. [35] Eduard Kovacs. 2024. ChatGPT Plugin Vulnerabilities Exposed Data, Accounts. SecurityWeek. https://www.securityweek.com/chatgpt-plugin-vulnerabilities-exposed-data-accounts/ [36] Chin-Yew Lin. 2004. ROUGE: A Package for Automatic Evaluation of Summaries. In Text Summarization Branches Out: Proceedings of the ACL-04 Workshop . 74–81. [37] Shuang Liu, Ruijia Zhang, Ruoyun Ma, Yujia Deng, Lanyi Zhu, Jiayu Li, Ze-long Li, Zhibin Shen, and Mengnan Du. 2026. LLM Agents in Law: Taxonomy, Applications, and Challenges. arXiv preprint arXiv:2601.06216 (2026). [38] Célestin Matte, Nataliia Bielova, and Cristiana Santos. 2020. Do cookie banners respect my choice?: Measuring legal compliance of banners from iab europe’s transparency and consent framework. In 2020 IEEE Symposium on Security and Privacy (SP) . IEEE, 791–809. [39] Dasha Metropolitansky and Jonathan Larson. 2025. Towards effective extraction and evaluation of factual claims. In Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) . 6996–7045. [40] Microsoft. 2026. Bing. https://www.bing.com/ Accessed 2026-06-05. [41] Niloofar Mireshghallah, Maria Antoniak, Yash More, Yejin Choi, and Golnoosh Farnadi. 2024. Trust no bot: Discovering personal disclosures in human-llm conversations in the wild. arXiv preprint arXiv:2407.11438 (2024). [42] Ivoline C Ngong, Swanand Ravindra Kadhe, Hao Wang, Keerthiram Murugesan, Justin D Weisz, Amit Dhurandhar, and Karthikeyan Natesan Ramamurthy. 2025. Protecting users from themselves: Safeguarding contextual privacy in interac-tions with conversational agents. In Findings of the Association for Computational Linguistics: ACL 2025 . 26196–26220. [43] Ollama. 2026. Gemma 3 (Ollama library). https://ollama.com/library/gemma3 Accessed 2026-05-20. [44] Ollama. 2026. Ollama. https://ollama.com/ Accessed 2026-05-20. [45] OpenAI. 2025. GPTs Data Privacy FAQ. https://help.openai.com/en/articles/ 8554402-gpts-data-privacy-faq. Accessed May 2026. [46] OpenAI. 2025. How We’re Responding to The New York Times’ Data Demands in Order to Protect User Privacy. https://openai.com/index/response-to-nyt-data-demands/. [47] OpenAI. 2025. Memory FAQ. https://help.openai.com/en/articles/8590148-memory-faq. Accessed May 2026. [48] OpenAI. 2026. Atlas. https://chatgpt.com/atlas/ Accessed 2026-06-05. [49] OpenAI. 2026. ChatGPT. https://chatgpt.com/ Accessed 2026-05-23. [50] OpenAI. 2026. GPT-4. https://openai.com/index/gpt-4/ Accessed 2026-05-20. [51] OpenAI. 2026. GPT-4.1 model documentation (OpenAI Developers). https: //developers.openai.com/api/docs/models/gpt-4.1 Accessed 2026-05-20. [52] OpenAI. 2026. Memory and New Controls for ChatGPT. https://openai.com/ index/memory-and-new-controls-for-chatgpt/ Accessed 2026-06-05. [53] OpenClaw. 2026. OpenClaw. https://openclaw.ai/ Accessed 2026-06-05. [54] Charles Packer, Sarah Wooders, Kevin Lin, Vivian Fang, Shishir G Patil, Ion Stoica, and Joseph E Gonzalez. 2023. MemGPT: Towards LLMs as Operating Systems. arXiv preprint arXiv:2310.08560 (2023). [55] David Pape, Sina Mavali, Thorsten Eisenhofer, and Lea Schönherr. 2025. Prompt obfuscation for large language models. In 34th USENIX Security Symposium (USENIX Security 25) . 2323–2342. 
+
+> 13
+
+[56] Joon Sung Park, Joseph O’Brien, Carrie Jun Cai, Meredith Ringel Morris, Percy Liang, and Michael S Bernstein. 2023. Generative agents: Interactive simulacra of human behavior. In Proceedings of the 36th annual acm symposium on user interface software and technology . 1–22. [57] Synthia Qia Wang, Sai Teja Peddinti, Nina Taft, and Nick Feamster. 2026. Beyond PII: How Users Attempt to Estimate and Mitigate Implicit LLM Inference. In 
+
+Proceedings of the 2026 CHI Conference on Human Factors in Computing Systems .1–17. [58] Nils Reimers and Iryna Gurevych. 2019. Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks. In Proceedings of the 2019 Conference on Empirical Methods in Natural Language Processing and the 9th International Joint Conference on Empirical Methods in Natural Language Processing (EMNLP-IJCNLP) . 3982– 3992. [59] Alessandro Scirè, Karim Ghonim, and Roberto Navigli. 2024. FENICE: Factuality evaluation of summarization based on natural language inference and claim extraction. In Findings of the Association for Computational Linguistics: ACL 2024 .14148–14161. [60] Reza Shokri, Marco Stronati, Congzheng Song, and Vitaly Shmatikov. 2017. Membership inference attacks against machine learning models. In 2017 IEEE symposium on security and privacy (SP) . IEEE, 3–18. [61] Reza Shokri, George Theodorakopoulos, Carmela Troncoso, Jean-Pierre Hubaux, and Jean-Yves Le Boudec. 2012. Protecting location privacy: optimal strategy against localization attacks. In Proceedings of the 2012 ACM conference on Com-puter and communications security . 617–627. [62] Robin Staab, Mark Vero, Mislav Balunovic, and Martin Vechev. 2024. Beyond memorization: Violating privacy via inference with large language models. In 
+
+International Conference on Learning Representations , Vol. 2024. 33832–33878. [63] Robin Staab, Mark Vero, Mislav Balunović, and Martin Vechev. 2024. Large language models are advanced anonymizers. arXiv preprint arXiv:2402.13846 
+
+(2024). [64] The New York Times. 2026. Chatbots, Influencers, Brands, Market-ing. https://www.nytimes.com/2026/02/17/technology/chatbots-influencers-brands-marketing.html [65] Meng Tong, Kejiang Chen, Jie Zhang, Yuang Qi, Weiming Zhang, Nenghai Yu, Tianwei Zhang, and Zhikun Zhang. 2025. Inferdpt: Privacy-preserving inference for black-box large language models. IEEE Transactions on Dependable and Secure Computing (2025). [66] Sarah Tran, Hongfan Lu, Isaac Slaughter, Bernease Herman, Aayushi Dangol, Yue Fu, Lufei Chen, Biniyam Gebreyohannes, Bill Howe, Alexis Hiniker, et al .2025. Understanding Privacy Norms Around LLM-Based Chatbots: A Contextual Integrity Perspective. In Proceedings of the AAAI/ACM Conference on AI, Ethics, and Society , Vol. 8. 2522–2534. [67] Imdad Ullah, Roksana Boreli, and Salil S Kanhere. 2020. Privacy in targeted advertising: A survey. arXiv preprint arXiv:2009.06861 (2020). [68] Yash Vekaria, Aurelio Loris Canino, Jonathan Levitsky, Alex Ciechonski, Patricia Callejo, Anna Maria Mandalari, and Zubair Shafiq. 2025. Big Help or Big Brother? Auditing Tracking, Profiling, and Personalization in Generative AI Assistants. 
+
+arXiv preprint arXiv:2503.16586 (2025). [69] Adina Williams, Nikita Nangia, and Samuel Bowman. 2018. A broad-coverage challenge corpus for sentence understanding through inference. In Proceedings of the 2018 Conference of the North American Chapter of the Association for Com-putational Linguistics: Human Language Technologies, Volume 1 (Long Papers) .1112–1122. [70] Haoqi Wu, Wei Dai, Li Wang, and Qiang Yan. 2025. Cape: Context-aware prompt perturbation mechanism with differential privacy. arXiv preprint arXiv:2505.05922 
+
+(2025). [71] Yuhao Wu, Evin Jaff, Ke Yang, Ning Zhang, and Umar Iqbal. 2025. An in-depth investigation of data collection in llm app ecosystems. In Proceedings of the 2025 ACM Internet Measurement Conference . 150–170. [72] Wujiang Xu, Zujie Liang, Kai Mei, Hang Gao, Juntao Tan, and Yongfeng Zhang. 2026. A-mem: Agentic memory for llm agents. Advances in Neural Information Processing Systems 38 (2026), 17577–17604. [73] Chengrun Yang, Xuezhi Wang, Yifeng Lu, Hanxiao Liu, Quoc V Le, Denny Zhou, and Xinyun Chen. 2024. Large language models as optimizers. In International Conference on Learning Representations , Vol. 2024. 12028–12068. [74] Tianyu Yang, Xiaodan Zhu, and Iryna Gurevych. 2025. Robust utility-preserving text anonymization based on large language models. In Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) . 28922–28941. [75] Hye Sun Yun and Timothy Bickmore. 2025. Online health information–seeking in the era of large language models: cross-sectional web-based survey study. 
+
+Journal of medical Internet research 27 (2025), e68560. [76] Jiang Zhang, Konstantinos Psounis, Muhammad Haroon, and Zubair Shafiq. 2021. Harpo: Learning to subvert online behavioral advertising. arXiv preprint arXiv:2111.05792 (2021). [77] Zeyu Zhang, Quanyu Dai, Xiaohe Bo, Chen Ma, Rui Li, Xu Chen, Jieming Zhu, Zhenhua Dong, and Ji-Rong Wen. 2025. A survey on the memory mechanism of large language model-based agents. ACM Transactions on Information Systems 
+
+43, 6 (2025), 1–47. [78] Wenting Zhao, Xiang Ren, Jack Hessel, Claire Cardie, Yejin Choi, and Yuntian Deng. 2024. Wildchat: 1m chatgpt interaction logs in the wild. arXiv preprint arXiv:2405.01470 (2024). [79] Wanjun Zhong, Lianghong Guo, Qiqi Gao, He Ye, and Yanlin Wang. 2024. Memo-rybank: Enhancing large language models with long-term memory. In Proceedings of the AAAI conference on artificial intelligence , Vol. 38. 19724–19731. [80] Jijie Zhou, Niloofar Mireshghallah, and Tianshi Li. 2025. Operationalizing Data Minimization for Privacy-Preserving LLM Prompting. arXiv preprint arXiv:2510.03662 (2025). [81] Jijie Zhou, Eryue Xu, Yaoyao Wu, and Tianshi Li. 2025. Rescriber: Smaller-LLM-Powered User-Led Data Minimization for LLM-Based Chatbots. In Proceedings of the 2025 CHI Conference on Human Factors in Computing Systems . 1–28. 
+
+## Appendices A Privacy Gain Evaluation 
+
+To quantify the deviation between a raw profile and its obfuscated profile, we have the following three observations: 
+
+Observation 1: Exact-match comparison is insufficient. An obfuscated label may differ from the raw label while still revealing substantial information if it is semantically close to the true one. For example, under the Age Range category, replacing 35-39 with 40-44 
+
+provides much less protection than replacing it with 75+ . Therefore, privacy gain should be measured by semantic similarity rather than by exact agreement alone. 
+
+Observation 2: Semantic comparison is only meaningful within the same category. Labels from different categories de-scribe different profile domains and should not be treated as relevant exposures. For example, an age label and an income label are not comparable, even if their embeddings happen to be accidentally close. Therefore, similarity should only be computed within the same category. 
+
+Observation 3: Privacy depends on both residual exposure and injected uncertainty. When multiple obfuscated labels are associated with the same raw label, labels close to the truth increase exposure, whereas distant or irrelevant labels increase ambiguity and can reduce exposure for that attribute. However, the successful hiding of one raw label should not compensate for the strong leak-age of another. Therefore, exposure should be aggregated separately for each raw label and lower-bounded by zero before computing the profile-level score. Guided by these observations, we define a profile exposure score as follows. For each raw label, we identify all obfuscated labels linked to it within the same category (Observation 2), compute their mean embedding , and measure the normalized cosine sim-ilarity between this mean embedding and the embedding of the raw label (Observation 1). Averaging embeddings before compar-ison naturally captures the interplay between residual exposure and injected uncertainty (Observation 3): obfuscated labels close to the truth pull the mean toward the raw label and raise the score, while distant or irrelevant ones pull it away and lower the score. To prevent strong protection on one attribute from masking leakage on another, we lower-bound each per-label score at zero before averaging across labels to obtain the profile-level exposure score. We then define the privacy gain score as 1 - exposure score . We define the metric in detail as follows. 
+
+Step 1 : Semantic similarity between taxonomy labels. Each tax-onomy label is represented as a category-data type pair (𝑐 𝑖 , 𝑑 𝑖 ),where 𝑐 𝑖 denotes the category and 𝑑 𝑖 denotes the specific data type. 
+
+> 14
+
+We encode each taxonomy label using an embedding model, de-noted by 𝐸 (𝑐 𝑖 , 𝑑 𝑖 ). To reflect Observations 1 and 2, the similarity between two taxonomy labels 𝑖 and 𝑗 is defined as 
+
+Sim (𝑖, 𝑗 ) =
+
+
+
+cos  𝐸 (𝑐 𝑖 , 𝑑 𝑖 ), 𝐸 (𝑐 𝑗 , 𝑑 𝑗 ), if 𝑐 𝑖 = 𝑐 𝑗 ,
+
+0, otherwise. (3) 
+
+Step 2 : Assign each obfuscated label to the raw label it reveals most strongly. Let the raw profile and the obfuscated profile be 
+
+𝑅 = {𝑟 1, . . . , 𝑟 𝑁 𝑅 }, 𝑂 = {𝑜 1, . . . , 𝑜 𝑁 𝑂 }.
+
+For each obfuscated label 𝑜 𝑖 , we identify the raw label that it reveals most strongly: 
+
+𝑟 ∗ 
+
+> 𝑖
+
+= arg max   
+
+> 𝑟 ∈𝑅
+
+Sim (𝑜 𝑖 , 𝑟 ). (4) If no raw label shares the same category as 𝑜 𝑖 , then 𝑜 𝑖 is discarded from the computation. 
+
+Step 3 : Normalize similarity within each category. Because co-sine similarities are not directly comparable across categories, we normalize each matched similarity using the global range of pair-wise similarities within the corresponding category. For category 𝑐 ,let 
+
+Sim (𝑐 ) 
+
+> min
+
+= min     
+
+> 𝑢,𝑣 ∈ T (𝑐 )
+
+Sim (𝑢, 𝑣 ), Sim (𝑐 ) 
+
+> max
+
+= max     
+
+> 𝑢,𝑣 ∈ T (𝑐 )
+
+Sim (𝑢, 𝑣 ), (5) where T (𝑐 ) denotes the set of all taxonomy labels in category 𝑐 .Since self-pairs are included to represent the exact-match, Sim (𝑐 ) 
+
+> max
+
+=
+
+1. We then define the exposure score of 𝑜 𝑖 as 
+
+𝑠 𝑖 = 2 · Sim (𝑜 𝑖 , 𝑟 ∗ 
+
+> 𝑖
+
+) − Sim (𝑐 𝑖 )
+
+> min
+
+Sim (𝑐 𝑖 ) 
+
+> max
+
+− Sim (𝑐 𝑖 )
+
+> min
+
+− 1, 𝑠 𝑖 ∈ [− 1, 1]. (6) This normalization evaluates exposure relative to the semantic range of the entire category rather than relative to a single reference label. The midpoint of the category range is mapped to 0; thus, 
+
+𝑠 𝑖 > 0 indicates residual exposure, while 𝑠 𝑖 < 0 indicates that the obfuscated label is sufficiently dissimilar from the raw one to be treated as successful obfuscation. 
+
+Step 4 : Aggregate obfuscated labels at the raw label level. For each raw label 𝑟 𝑗 , let 
+
+𝐴 𝑗 = { 𝑜 𝑖 ∈ 𝑂 | 𝑟 ∗ 
+
+> 𝑖
+
+= 𝑟 𝑗 } (7) be the set of obfuscated labels assigned to it. We define the per-label exposure as 
+
+𝑒 𝑗 =
+
+
+
+max 
+
+
+
+0, 1 
+
+> |𝐴 𝑗 |
+
+Í𝑜 𝑖 ∈𝐴 𝑗 𝑠 𝑖 
+
+
+
+, if |𝐴 𝑗 | > 0,
+
+0, if |𝐴 𝑗 | = 0.
+
+(8) This step first averages all obfuscated labels associated with the same raw label, allowing distant or irrelevant obfuscated labels to reduce exposure by increasing ambiguity. The result is then clamped at 0, so that the successful hiding of one raw label cannot produce negative exposure that offsets leakage from another raw label. 
+
+Step 5 : Compute profile-level exposure and privacy gain. Finally, we average over all raw labels to obtain the overall exposure score: 
+
+Exposure (𝑅, 𝑂 ) = 1
+
+𝑁 𝑅 𝑁 𝑅 ∑︁ 
+
+> 𝑗 =1
+
+𝑒 𝑗 . (9) We then define the privacy gain as 
+
+PrivacyGain (𝑅, 𝑂 ) = 1 − Exposure (𝑅, 𝑂 ). (10) A higher privacy gain indicates that the obfuscated profile preserves less information about the raw profile. 
+
+## B Noise Combination Template 
+
+The Noise action retains each selected sensitive unit and injects one decoy value drawn from unrelated data types (Section 4.2). Rather than blending the real and decoy values into a single sen-tence, PromptPET rewrites the query into a slotted form and lists the fill-ins as separate query options, instructing the chatbot to answer each option independently under a labeled heading. These headings are what let the response filter recover the answer to the real query and discard the decoy answers with a lightweight, rule-based parser, without a second model call. Prompt 1 shows the template instantiated on the running example of Figure 2, where the single noise unit “therapist” is paired with the decoy “dentist” (𝑁 =1, 𝑉 =2). 
+
+> The original query below has N=1 slots: [slot 1]. Each query option below (A, B) gives different values to fill in those slots. For EACH query option, form the complete query by filling in the slots with the given query option slot values. Then, give a full, independent answer to each filled-in query. Format your response with exactly 2 labeled sections: "Answer for Query Option A: <your answer for A>", "Answer for Query Option B: <your answer for B>". Your responses must answer each query fully. Do not just list slot fill-ins, answer each query option. The original query: I am [REDACTED], and I was recently diagnosed with [Health]. I live in Palo Alto. Can you recommend a good [slot 1] near me? Query Option A) [slot 1]=therapist Query Option B) [slot 1]=dentist
+
+Prompt 1: Noise Template. This is our noise combination template, instantiated on the running example (Figure 2). The noise unit “therapist” becomes [slot 1] ; option A carries the real value and option B the decoy. The chatbot returns two labeled sections, and the response filter retains only the section for option A. 
+
+## C Decision Rule Set C.1 Oracle Seed Rule Set 
+
+The Oracle seed used to initialize rule-optimization (Section 5.5.1) is a set of the per-query oracle possibilities derived from Table 3. Each importance bin inherits the optimal-action frequencies of the corresponding threshold row. Because that table credits every tied action, its rows sum to more than 100% . We therefore renormalize 
+
+each row into a probability distribution over the four actions, giving the priors below. 
+
+R1. If the importance score of a sensitive unit is > 0.8, then 𝑃 =
+
+{Noise : 0 .545 , Abstract : 0 .196 , Replace : 0 .156 , Redact :0.103 }. The distribution is sharply peaked: Noise is the default with high confidence. 
+
+R2. If the importance score is > 0.6 and ≤ 0.8, then 𝑃 = {Noise :0.328 , Abstract : 0 .239 , Replace : 0 .233 , Redact : 0 .200 }. A plurality favors Noise , but the three alternatives bunch tightly (0.20 –0.24 ), so the choice is moderately query-dependent. 
+
+> 15
+
+R3. If the importance score is ≤ 0.6, then 𝑃 = {Noise : 0 .277 , Abstract :0.249 , Replace : 0 .242 , Redact : 0 .232 }. The prior is nearly uniform: no strong default, and the choice is highly query-dependent. 
+
+## C.2 Deployed Decision Rule Set 
+
+For reference, we list the complete decision rule set deployed as 
+
+PromptPET , the Oracle -seeded set learned under the balanced objective (Section 5.6.3). Rules are evaluated top to bottom; the first matching rule fires, and rule R21 is the default fallback. Action names are capitalized. The marker ←↪ after each rule links back to the point in Section 5.6.3 where that rule is discussed; conversely, a rule number cited in that section (e.g. “R5”) links forward to its entry here. 
+
+R1. If the query rewrites, summarizes, translates, proofreads, or ed-its user-supplied text, and the sensitive unit is an exact copied person/company/organization/work title or a low-importance copied audience/participant noun from that text, assign Redact . ←↪
+
+R2. If the query is that same kind of source-text task, and the sensitive unit is a copied citation/reference, source/depart-ment/program label, background phrase, or other peripheral copied label, assign Abstract . ←↪
+
+R3. If the query contains a long pasted code block, log dump, or traceback, and the sensitive unit is a literal endpoint, table, schema, record-set name, log tag, env/account identifier, or actual secret/token value, assign Redact . ←↪
+
+R4. If the query contains a long pasted code block or traceback, and the sensitive unit is an exact copied import/include token or a local function/method/class/parameter name that is not the main external library/tool/error target, assign Redact . ←↪
+
+R5. If the query is coding/debugging and the sensitive unit is a broad programming language or platform name used only as the host medium, while a more specific construct/mod-ule/API/framework/error is the real target, assign Abstract . ←↪
+
+R6. If the query is review, listicle, marketing, or product-script writing and both a broad product family and a more exact year/model/version/trim are present, assign Abstract to the broad family label. ←↪
+
+R7. If the query is that same kind of product-writing task and the sensitive unit is the exact year/model/version/trim unit, assign 
+
+Replace . ←↪
+
+R8. If the sensitive unit is only a bare production/deliverable phrase such as “make a video,” “title,” “tags,” “script,” “descrip-tion,” or “introduction,” and it does not itself carry the substan-tive topic, assign Redact . ←↪
+
+R9. If the query asks for fanfiction, crossover, AU, parody, or con-tent set in the universe/style of an existing work, and the sensitive unit is a source-work/franchise/universe reference used only as setting or aesthetic inspiration rather than the main subject, assign Abstract . ←↪
+
+R10. If the sensitive unit itself explicitly bundles a source work with fanfiction/crossover/AU/inspired-by wording, assign Re-place . ←↪
+
+R11. If the query asks the assistant to adopt a broad role, profession, or generic persona only as a wrapper for another task, assign 
+
+Abstract to that role/profession/persona label. ←↪
+
+R12. If the query is a first-person confession, persona/profile prompt, or family/intimate case setup, and the sensitive unit is a direct kinship term, a paternity/custody/test term, or a household-control/location phrase central to the setup, assign Redact . ←↪
+
+R13. If the query is that same kind of first-person family/intimate setup, and the sensitive unit is an adoption/status/background phrase or another low-importance social/background label with importance_score <= 0.4, assign Abstract . ←↪
+
+R14. If the query is third-person fictional writing and the sensitive unit is only a broad kinship descriptor without an exact name or age, assign Abstract . ←↪
+
+R15. If the query is explicit sexual or nudity-focused creative writ-ing, and the sensitive unit is an exact demographic/persona seed defining the subject, with importance_score > 0.5, assign 
+
+Redact . ←↪
+
+R16. If the query is hostile, threatening, or attack-slogan style, and the sensitive unit is the named target group, celebrity, charac-ter, franchise, or organization, assign Abstract . ←↪
+
+R17. If the query asks about evidence, history, worship, or beliefs regarding a specific named religious figure or deity, assign 
+
+Redact . ←↪
+
+R18. If the sensitive unit is a long genetics/clinical marker string or list of alphanumeric haplogroup/assay identifiers, assign 
+
+Abstract . ←↪
+
+R19. If the sensitive unit is only an output-control, answer-class, formatting, or style token and importance_score <= 0.3, assign 
+
+Abstract . ←↪
+
+R20. If the sensitive unit is the main named topic, tool, product, place, person, work, character, framework, or core concept needed to answer the query on-topic, assign Noise . ←↪
+
+R21. Otherwise, assign Noise . ←↪

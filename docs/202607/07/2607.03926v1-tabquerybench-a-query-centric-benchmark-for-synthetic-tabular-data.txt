@@ -1,0 +1,713 @@
+Title: TabQueryBench: A Query-Centric Benchmark for Synthetic Tabular Data
+
+URL Source: https://arxiv.org/pdf/2607.03926v1
+
+Published Time: Tue, 07 Jul 2026 02:19:12 GMT
+
+Number of Pages: 17
+
+Markdown Content:
+# TabQueryBench : A Query-Centric Benchmark for Synthetic Tabular Data 
+
+## Jialin Zhang †,¶ Fenghao Dong ‡ Yajie Zhou §
+
+## Vyas Sekar ‡ Shinan Liu †
+
+> †
+
+University of Hong Kong ¶Tongji University ‡Carnegie Mellon University §University of Maryland, College Park 
+
+> fredzhang@tongji.edu.cn, {fenghaod, vsekar}@andrew.cmu.edu, leszhou@umd.edu, shinan6@hku.hk
+
+## ABSTRACT 
+
+Synthetic tabular data support use cases like data sharing, model development under access restrictions, and rapid prototyping of analytical workflows. Modern generative models are evaluated by their statistical similarity, correlation structure, privacy, and down-stream machine-learning utility. However, such evaluations leave a gap: they rarely test the structure that matters for analytical queries. We present TabQueryBench 1, a query-centric benchmark that uses SQL-shaped analytical queries as structural assessors for synthetic data fidelity. It provides an extensible foundation for query-centric synthetic-data evaluation. From 12 public sources of analytical queries, TabQueryBench taxonomizes recurring cross-domain logic into 44 reusable query templates and grounds them to each dataset via a policy-guided template-to-SQL pipeline. This makes queries schema-aware while preserving comparability across generative models. Across 49 datasets and 11 generative models, it activates 10–12 templates per dataset, producing more than 100 ex-ecutable SQL queries per dataset. Our systematic experiments show five main patterns. First, current tabular generative models can have good distance-based fidelity, but they still fall short on query-centric fidelity: RealTabFormer achieves the highest query-centric fidelity, but it only reaches 0.75 ± 0.15 (REAL data score is 1.00 ). Second, tab-ular generative models struggle with very high-cardinality discrete support. Third, SOTA generative models preserve good global con-ditional query-centric fidelity, but fail more on local queries. Fourth, tail fidelity deteriorates as queries move toward the extreme tail; even the best generative model recovers only about 40.7% of real rare values. Finally, there is a fidelity-cost tradeoff in tabular data generation: BayesNet offers the strongest tradeoff, with slightly lower query-centric fidelity but much lower generation cost. 
+
+## 1 INTRODUCTION 
+
+Synthetic tabular data are now used for data sharing [ 5 , 30 , 46 ], model development under access restrictions [ 5, 8, 46 ], and rapid algorithm or system prototyping [ 21 , 36 , 45 , 69 ]. As these use cases mature, benchmarking matters more, because what makes synthetic data useful in these settings is not distributional resemblance alone, but the preservation of the analytical properties that the database community has long treated as the core measure of data quality [9, 14, 31, 42, 48, 50, 65, 66]. Synthetic data consumers often care less about synthetic records as standalone samples. They care more about the functions that those records make possible. A useful synthetic dataset does not merely approximate marginal distributions. It should ideally expose a       
+
+> 1TabQueryBench is open-sourced at https://github.com/TabQueryBench/ TabQueryBench and https://huggingface.co/datasets/TabQueryBench2026/ TabQueryBench/tree/main
+
+controlled approximation of hidden dataset attributes , such as table structure, column relationships, valid joins, and executable queries [36 , 45 , 69 ]. This structural view is important for (1) collaboration, where a partner wants to preview the structure and quality of a sensitive dataset before accessing the real data [ 5, 46 ]; (2) software and data-system testing, where engineers need realistic schemas, constraints, edge cases, and relational consistency [ 5, 45 , 46 , 69 ]; and (3) query-centric analytics, where the target is not an individual row but the answer to aggregates, joins, SQL functions, and text-to-SQL workloads [7, 36]. While recent libraries and benchmarks have made comparison more systematic [ 13 , 16 , 18 , 24 , 39 , 51 –53 , 56 , 61 , 62 ], most evalu-ations still focus on column-level distributional scores, one-shot predictive utility, and privacy reports. At a high level, there exists a disconnect between the evaluation methods used by current tab-ular generative models and the types of structural information that practitioners actually care about. We find that picking generative models based on conventional distance-based metrics may even be misleading for practitioners [26, 64, 68]. 
+
+Our key observation is that existing synthetic tabular benchmarks have limited coverage of the analytical structures that occur in real analytical queries. Current benchmarks score column-level distance, predictive ML utility, or task-specific utility proxies [ 17 , 25 , 34 , 39 ,57 ], none of which directly assesses the analytical properties that diverse downstream workflows care about. A useful contrast comes from the database community, which has long treated occurring query sets as first-class evaluation objects: benchmarks such as TPC-H and TPC-DS record ocurring decision-support SQL queries from real OLAP practice [ 14 , 42 , 48 , 50 ]. Although designed to com-pare database engines, such recurring query patterns also provide natural structural assessors for synthetic data. In contrast, existing synthetic-data benchmarks do not yet use them in this role, which shows a natural reality/generation target mismatch. 
+
+Our answer: TabQueryBench . We argue for a shift from the conventional benchmarking used for tabular generative models to 
+
+query-centric benchmarking, where domain-relevant queries serve as structural assessors of synthetic-data fidelity. The key design challenge is to make these assessors both realistic and generic: real analytical questions are tied to dataset semantics, but a benchmark must evaluate many datasets, tasks, and generative models using queries built from a common set of templates. TabQueryBench ad-dresses this challenge with a two-stage construction pipeline. First, it taxonomizes recurring analytical logic from public sources of analytical queries into reusable five-family templates (i.e., subgroup, conditional, tail/rarity, cardinality/range, and missingness). Second, it grounds these templates to each benchmark dataset through a constrained realization policy that binds template roles to schema-appropriate columns and validates the resulting queries. This design 
+
+> arXiv:2607.03926v1 [cs.DB] 4 Jul 2026
+
+Figure 1: Overview of TabQueryBench , including the benchmark design and representative evaluation results. 
+
+preserves schema-level realism while enabling comparable evalu-ation across datasets, domains, and generative models (Figure 1). 
+
+TabQueryBench also provides fine-grained feedback on specific queries and query families rather than only an aggregate score. This gives both generative-model developers and practitioners ac-tionable signals for tuning, debugging, and selecting generative models. For this query construction and grounding pipeline, we demonstrate that the query-centric conclusions are broadly stable across multiple SQL-regeneration runs. In this work, we identify the following key findings on our bench-mark of 49 datasets and 11 tabular generative models: 
+
+• Current tabular generative models can have good distance-based fidelity, but they still fall short on query-centric fidelity. RealTabFormer achieves the highest query-centric fi-delity, while BayesNet offers the strongest fidelity-cost tradeoff. Yet even these two models remain substantially below the REAL reference. This gap is especially clear when compared with their stronger performance under distance-based fidelity metrics. 
+
+• Tabular generative models fail to synthesize columns with very high-cardinality discrete support. When a column con-tains hundreds or thousands of distinct values, many generative models preserve only a fraction of the real support. For example, on dataset c18, the real title column has 96,777 distinct values, while BayesNet generates only 242 and CTGAN generates 19,630. 
+
+• SOTA generative models preserve good global conditional query-centric fidelity, but fail more on local queries. When a conditional query adds only a filter, fidelity often drops even though the grouping keys and aggregation logic stay unchanged. For example, on dataset c6, TabDiff scores 0.632 on the global 2D count surface but only 0.276 after the local filter is added. 
+
+• Tail fidelity deteriorates as queries move toward the ex-treme tail, even for SOTA generative models. Under stricter rarity thresholds, generative models increasingly lose rare values that appear in the real table. In the discrete-tail diagnostic, even the best generative model recovers only about 40.7% of the real rare values. This result shows that rare-event queries remain fragile under synthetic data. 
+
+• There is a clear cost-fidelity tradeoff in tabular data gen-eration and BayesNet achieves the best balance. RealTab-Former achieves the best query-centric fidelity, but it is also much slower than the other generative models. BayesNet gives slightly lower fidelity, but it runs orders of magnitude faster. This makes BayesNet the more practical choice when users care about both query quality and generation cost. 
+
+TabQueryBench is released as an open benchmark. The code, template catalog, and query-generation artifacts are available on GitHub (https://github.com/TabQueryBench/TabQueryBench), and the benchmark data package and docker images for generative mod-els are mirrored on Hugging Face (https://huggingface.co/datasets/ TabQueryBench2026/TabQueryBench/tree/main). The release is intended to make the benchmark inspectable and reusable. 
+
+## 2 BACKGROUND AND MOTIVATION 
+
+In this section, we present backgrounds of tabular generative mod-els, previous related benchmark designs, and highlight the mis-alignment of focuses between synthetic data evaluation and data analytics. 
+
+## 2.1 Tabular Generative Models 
+
+Tabular synthesis learns a distribution over records with numerical and categorical fields. It supports privacy-preserving data sharing, data augmentation, imputation, and benchmarking when real data is sensitive or scarce. Tables differ from images and text because each column has its own structural type and meaning [ 15 , 73 , 75 ]. A useful generative model should preserve valid values and rare                                                                                                                                                
+
+> 2Benchmark Target setting Evaluation Focus #Datasets #Models Subgroup Cond. Tail Miss. High-card. Dist. Cost
+> Synthcity [51] Generic tabular Metric suite 18 +u5+u✗✗✗△✗✓✗
+> Data-centric [24] Generic tabular Global fidelity 11 5✗✗✗✗✗✓✗
+> SDGym [13] Generic tabular Global fidelity 22 +uu✗✗✗✗✗✓✓
+> SDNist [53, 62] Release task Challenge score 4u✗✗✗✗✗✗✗
+> SyntheRela [27] Multi-table Relational fidelity 39 6✗✗✗✗✗△△
+> SynthRO [52] Health domain Domain validation uu✗✗✗✗✗✓✗
+> SynthEval [39] Generic tabular Metric suite uu✗✗✗✗✗✓✗
+> Multi-dim. [56] Mixed data Global fidelity uu✗✗✗✓△✓✗
+> DP benchmark [61] Private tabular Privacy–utility 712 ✗✗✗✗✗✓△
+> TabArena [18] Tabular ML Predictive utility 51 16 ✗✗✗△△✗✓
+> TabStruct [32] Generic tabular Structural metrics 29 13 ✗△✗✗✗✓✓
+> TabQueryBench (ours) Generic tabular Query-centric fidelity 49 11 ✓✓✓✓✓✓✓
+
+Table 1: Comparison of related benchmarks for synthetic tabular data and adjacent tabular evaluation tasks. We report each benchmark’s target setting, primary evaluation object, scale, and coverage of five query-centric property families, classical distance, and cost. ✓ = direct, △ = partial, ✗ = absent, u = user-specified. 
+
+categories. It should also respect column constraints and cross-column dependencies. Recent models differ mainly in their inductive biases. Bayesian models such as BayesNet use an explicit graphical factorization, which gives a compact view of low-order dependencies [ 47 ]. Tree-based methods such as Adversarial Random Forests (ARF) use adap-tive partitions of the feature space and match the local structure of tables well [ 71 ]. Neural models then shifted the field toward learned representations. CTGAN and TVAE handle mixed feature types through conditional generation and latent-variable model-ing [ 72 ]. Diffusion methods such as TabDDPM, TabSyn, TabDiff, and ForestDiffusion replace adversarial or reconstruction losses with iterative denoising [ 33 , 38 , 55 , 74 ]. Transformer-based models such as REaLTabFormer and TabPFGen use attention or pretrained tabular priors to capture broader dependencies across columns and records [ 40 , 60 ]. Flow-matching models such as TabbyFlow learn a transport path from noise to data and provide a newer alternative to diffusion-based sampling [ 22 ]. Overall, the trend moves from explicit structures to flexible neural samplers, while the central goal remains the same: preserve useful tabular structure without copying the training data. 
+
+## 2.2 Tabular Generative Model Benchmarks 
+
+Existing benchmarks for synthetic tabular data differ along two axes: the setting they target and what they directly evaluate. These two dimensions largely determine what conclusions a benchmark can support and what aspects of synthetic data quality it emphasizes. Most general-purpose benchmarks target single-table generation and score global fidelity, privacy, cost, or downstream machine-learning utility. Synthcity and SynthEval provide reusable evalua-tion infrastructures with user-specified datasets, generative mod-els, and metrics [ 39 , 51 ]. SDGym and the data-centric benchmark of Hansen et al. instead define fixed dataset suites and standard-ized protocols for controlled head-to-head comparison [ 13 , 24 ]. Challenge-style resources such as SDNist are more task-specific: they define public release scenarios and scoring rules for a shared leaderboard [ 53 , 62 ]. Other benchmarks specialize in narrower set-tings. SyntheRela studies multi-table synthesis, SynthRO focuses on health-oriented validation, Sidorenko et al. evaluate mixed and contextual data, Tao et al. benchmark differentially private mecha-nisms, and TabArena evaluates tabular machine-learning systems rather than tabular generative models [ 18 , 27 , 45 , 52 , 56 , 61 ]. Table 1 summarizes each benchmark’s primary evaluation object, reported scale, and coverage of the five query-centric property families to-gether with classical distance and cost baselines. These resources are highly useful, but they do not make the an-swers to analytical queries the main object of evaluation. Distribution-and ML-based benchmarks can report strong global fidelity even when synthetic data gives wrong answers for filtered subgroups, conditional slices, rare rows, or missingness-dependent queries [ 3,29 , 39 , 57 , 61 ]. TabQueryBench targets this gap by evaluating whether synthetic data preserves the answers induced by reusable SQL-shaped analytical queries (see Section 2.4 for concrete mis-match examples). Rather than treating query behavior as one addi-tional metric, TabQueryBench uses dataset-grounded analytical queries as structural assessors for synthetic tabular data, and Ta-ble 1 highlights this shift by separating query-family coverage from distance and cost coverage. 
+
+## 2.3 Database Query Benchmarks 
+
+The database community provides a useful contrast and sources of analytical query patterns: it has long treated recurring query sets, not samples alone, as the object of evaluation. TPC-H and TPC-DS define decision-support benchmarks with generated schemas, pa-rameterized business queries, and controlled execution rules [ 42 ,48 , 65 , 66 ]. Recent public resources extend the same idea to modern analytical settings: ClickBench uses an anonymized web-analytics dataset and a reproducible collection of SQL queries; H2O’s db-benchmark compares data-processing systems through database-like operations such as grouping and joins; and RTABench targets real-time application analytics with normalized schemas, selective filters, joins, and pre-aggregated views [ 11 , 23 , 63 ]. These bench-marks evaluate database engines rather than tabular generative models. TabQueryBench repurposes their central idea: analyti-cally meaningful SQL patterns can serve as reusable assessors, and synthetic data should preserve the answers those assessors induce. 
+
+## 2.4 Mismatch Between the Distance-based and Query-centric Fidelity 
+
+Figure 2 motivates that distance-based fidelity alone is insuffi-cient for evaluating synthetic data . It can diverge with query                       
+
+> 300.01 0.02 0.03 0.04
+> 0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1
+> 1
+> 2
+> 3
+> 4
+> 5
+> 6
+> Wasserstein
+> Query-centric Fidelity
+> N6
+> 00.20.40.60.8
+> 1
+> 2
+> 3
+> 4
+> 56
+> JSD
+> M4
+> 00.20.40.60.8
+> 1
+> 2
+> 3
+> 4
+> 56
+> JSD
+> C9
+> 1BayesNet 2CTGAN 3T-DDPM
+> 4TPF 5T-Syn 6TVAE
+
+Figure 2: Comparison between query-centric fidelity vs. dis-tance based metrics. The x-axis is distance-based fidelity (Wasserstein for N6 ; JSD for M4 and C9 ), and the y-axis is a query-centric fidelity score (the higher the better with 1 be-ing the best, queries are related to conditional structures). Numbers 1–6 identify the same models across figures. 
+
+because a query often depends on a small conditional structure (details in Section 4.2) rather than the whole distribution. We use three dataset-query pairs to illustrate three mismatch pat-terns across numerical (N), mixed (M), and categorical (C) datasets .In N6 , an EEG-based epilepsy classification dataset, the query asks: 
+
+within each class y, which X11 groups contribute the largest share of X10 ? This is a class-conditional ranking query. TabPFGen has one of the smallest Wasserstein distances, but it shifts the dom-inant groups away from the real high-impact buckets, such as 
+
+(𝑦 = 3, 𝑋 11 ∈ { 4, 5, 6, 2, 3}) , toward mostly negative X11 buck-ets. Thus, the distance-based fidelity is high, but the query-centric fidelity is low. TabSyn has a similar Wasserstein distance, but it preserves more of the real top groups and therefore achieves higher query-centric fidelity. In M4 , a medical insurance dataset, the query asks: which (smoker, age) groups contribute the largest share of total children ? This ex-ample shows that a model can look good under a distance-based met-ric while changing the conditional support used by the query. TVAE achieves a low JSD, but it over-concentrates children around 1 and compresses the (smoker, age) support. As a result, the grouped aggregate becomes dominated by a narrow age range. TabPFGen preserves both the children distribution and the smoker-age sup-port better, so it performs well under both metrics. In C9 , the Amazon Employee Access Challenge dataset, the query asks: for a target ROLE_FAMILY , are the relevant ROLE_TITLE keys preserved for rate analysis? This case shows the reverse pattern. Tab-Syn and CTGAN have worse JSD because they distort the broader 
+
+ROLE_TITLE –ROLE_FAMILY structure. However, they still retain many query-relevant ROLE_TITLE keys, so their query-centric fi-delity remains high. These examples show that distance-based fidelity and query-centric fidelity measure different aspects of synthetic data quality. Reliable evaluation therefore needs both global metrics and diverse downstream queries. 
+
+## 3 BENCHMARK SCOPE 
+
+In this section, we present the scope of TabQueryBench .
+
+## 3.1 Design Principles 
+
+Principle 1: Grounded in real analytical queries. TabQueryBench 
+
+is grounded in analytical queries drawn from real-world practice. Rather than relying on synthetic or arbitrary assessors, it char-acterizes datasets through the ways users actually interact with tabular data. This makes the evaluation representative of practical analytical use cases and aligned with downstream analytical needs. 
+
+Principle 2: Decomposable and diagnostic. TabQueryBench sup-ports queries that capture both global and local structures within datasets, with different queries focusing on different structural prop-erties. These structural assessors provide more informative signals than distance-based fidelity metrics, which often compress quality into coarse scores over entire rows or columns. By making evalua-tion decomposable, TabQueryBench enables quality attribution at finer granularity and helps diagnose where structural fidelity is preserved or degraded. 
+
+Principle 3: Reusable by construction. TabQueryBench is de-signed as a reusable pipeline that works across datasets without requiring dataset-specific redesign. Its query generation, execution, and evaluation components are modular and can accommodate new tables, schemas, and domains. This construction makes Tab-QueryBench broadly applicable, extensible, and easy to plug into different data settings. 
+
+## 3.2 Scope 
+
+TabQueryBench is scoped along two dimensions: the queries it considers and the generative models it evaluates. 
+
+Query scope. The benchmark focuses on reusable analytical query patterns that recur across public OLAP and decision-support query collections. In scope are cross-dataset patterns such as subgroup comparison, filtered conditional dependence, tail and rarity analy-sis, cardinality and range structure, and missingness behavior [42, 48 , 49 ]. These patterns are intended to capture structural proper-ties that transfer across datasets and domains, while still being grounded to each dataset through schema-aware realization. Because of the characteristics of synthetic tabular generative models, out of scope are queries whose semantics are inherently non-transferable or not central to analytical fidelity: point lookups by primary key, forensic debugging queries that depend on spe-cific row identifiers, private business-rule queries tied to a single organization, temporal forecasting beyond simple time-bucket ag-gregates, and long relational join chains. The current design is most mature for single-table settings, with relational coverage limited to two-table joins as described in Section 4.3. 
+
+Generative model scope. TabQueryBench evaluates mimicry-style synthetic-data generation. Each generative model observes a real training split and produces a synthetic table or database under the same schema, with the objective of preserving the ana-lytical structure of the original data. This scope matches common synthetic-data release and benchmarking settings, where the cen-tral question is whether the generated data supports the same kinds of analysis as the real data. We therefore do not evaluate differen-tially private synthesis, where utility is explicitly traded against 
+
+> 4
+
+Bayesian Tree GAN VAE Diffusion Transformer Flow-matching 
+
+BayesNet [47] ARF [71] CTGAN [72] TVAE [72] TabDDPM [38]; TabSyn [74] TabDiff [55]; ForestDiffusion [33] REaLTabFormer [60] TabPFGen [40] TabbyFlow [22] 
+
+Note. Throughout the paper, abbreviated model names are used in tables and figures for compactness. BayesNet=Bayes, TabDDPM=T-DDPM, TabSyn=T-Syn, TabDiff=T-Diff, ForestDiffusion=F-Diff, REaLTabFormer=RTF, TabPFGen=TPF, and TabbyFlow=T-Flow 
+
+Table 2: Generative model suite grouped by core modeling technology. TabQueryBench: Query Taxonomy 1 Subgroup (16 templates)    
+
+> Structure (13 templates) aggregated subgroup patterns
+> Size (3 templates) absolute group counts
+> Representative query idea
+> Compare average charges across age groups, or rank regions by customer coverage.
+> 2
+
+Conditional (13 templates)    
+
+> Global / grouped (8 templates) conditional signal by group
+> Local / filtered (5 templates) same summary after slicing
+> Representative query idea
+> Within each category, ask what fraction satisfies a condition before a local slice.
+> 3
+
+Tail / Rarity (8 templates)    
+
+> Tail Coverage (4 templates) recover rare members or outliers
+> Tail Size (4 templates) tail mass, rarity, or level
+> Representative query idea
+> Identify the rarest users or unusual rows, or estimate how much mass lies in the tail.
+> 4
+
+Missingness (3 templates)    
+
+> Marginal Missingness (1 templates) overall missing-rate signal
+> Broad Co-Missingness (2 templates) missingness by state or bucket
+> Representative query idea
+> Track how missing-rate changes across states, buckets, or grouped contexts.
+> 5
+
+Cardinality / Range   
+
+> (4 templates)
+> Discrete (3 templates) support, share, and high-card keys
+> Continuous (1 templates) range-envelope preservation
+> Representative query idea
+> Check whether discrete support counts or a numeric range envelope survives generation.
+
+Figure 3: The Query Template Taxonomy. 
+
+a privacy budget; conditional generation under task-specific con-straints, where query-centric fidelity is not the primary target; or text-to-table generation from natural-language prompts. The gen-erative models included in the current roster all fall within this mimicry-style setting. 
+
+## 3.3 Dataset Suite 
+
+TabQueryBench curates 49 datasets organized by feature regime: 19 categorical-dominant datasets, 19 numerical-dominant datasets, and 11 mixed-type datasets. Categorical datasets often test discrete support coverage, subgroup identity, and rare-state membership, while numerical datasets more often test range structure, continu-ous conditional behavior, and tail mass geometry. Mixed datasets test the coupling of these two regimes [ 20 ]. Per-dataset metadata (rows, columns, and source) is provided in Appendix C, Tables 11. We collect our 49 datasets from four public tabular-data sources: UCI [ 37 ], Kaggle [ 35 ], OpenML [ 44 ], and HuggingFace [ 28 ]. All 49 datasets are single-table tabular datasets. The suite covers a broad range of domains, including business and operations, healthcare and insurance, education and public policy, industrial and engineering settings, media and consumer content, and scientific or life-science data. This broad coverage helps the benchmark reflect the variety of tables that real users analyze. Another criterion is that we choose datasets that can stress-test synthetic data in different ways. Row counts range from 1.5K to 2.46M. Column counts range from 3 to 1,559. In addition, 10 datasets contain high-cardinality features (more than 50 distinct values in a column), and 12 contain substantial missingness. Some datasets are especially useful as stress cases, such as Internet-Advertisements as a very wide table, SECOM as a high-dimensional dataset with heavy missingness, and US Census Data 1990 as a very large table. 
+
+## 3.4 Generative Model Suite 
+
+We evaluate 11 tabular generative models spanning the major mod-eling families currently used for synthetic tabular data. Table 2 groups them by their core modeling technologies: a Bayesian net-work baseline [ 47 ], a tree-based generative model [ 71 ], adversarial and variational neural generative models [ 72 ], diffusion-based meth-ods [ 33 , 38 , 55 , 74 ], transformer-based generative models [ 40 , 60 ], and a recent flow-matching approach [ 22 ]. This breadth is intended to make the benchmark representative of the current methodologi-cal landscape rather than of a single modeling paradigm. For each dataset, generative models are run in the same synthetic setting: the generative model is trained on the real training split and then asked to produce a synthetic table under the original schema. Keeping the training data, schema, and output contract fixed allows differences in query-centric fidelity to be attributed to generative-model be-havior rather than to differences in task formulation. Throughout the paper, we use the compact model names listed in Table 2 when reporting results. Generative models that fail to finish, exceed resource caps, or emit invalid outputs are recorded explicitly rather than silently dropped: instability is itself part of practical model quality [6, 41]. 
+
+## 4 TabQueryBench DESIGN 
+
+The core of TabQueryBench is the construction of dataset-grounded analytical queries. This process proceeds in two stages. Template construction (Stage 1, Section 4.2) distills public sources of ana-lytical queries into a reusable template library, fixed across datasets. 
+
+Query generation (Stage 2, Section 4.3) grounds each template to an individual dataset by deciding which schema columns realize each template role, then expanding the template into executable SQL. Lower-level implementation details, including runtime traces and the per-template policy bundles, are deferred to Appendix A. 
+
+> 5
+
+## 4.1 Pipeline Overview 
+
+Stages 1 and 2 separate two responsibilities that are easily conflated. Stage 1 is dataset-agnostic: it produces query templates whose analytical shape is fixed by public evidence from analytical queries. Stage 2 is dataset-specific: it produces concrete SQL queries by adapting each template to the schema and data profile of one dataset, under a constrained generation procedure that is not free-form prompt authoring. Table 3 previews the grounded questions and SQL that Stage 2 produces. 
+
+## 4.2 Stage 1: Template Construction from Public Query Sources 
+
+Source registry. The current template library is constructed from twelve public sources organized into three categories. The first category is public benchmark material: TPC-H qgen [ 66 ]; TPC-DS qualification and Altinity repositories [ 1, 12 ]; ClickBench [ 11 ]; H2O db-benchmark [ 23 ]; and RTABench [ 63 ]. The second category is curated public SQL repositories: Exploratory-Analysis-of-Car-Evaluation-Dataset-with-SQL [ 43 ], Insurance-Cost-Project-Using-SQL [ 4], and insurance-sql-analysis [ 54 ]. The third category is from official database engine documentation: BigQuery approximate ag-gregate functions [ 19 ], ClickHouse aggregate functions [ 10 ], and Apache Druid SQL functions [ 2]. The benchmark-facing sources inherit the database community’s long-standing practice of encod-ing analytical behavior through reusable query templates rather than ad hoc one-off queries [ 42 , 48 , 49 ]. The full source-to-template attribution is given in Appendix A, Table 7. Some templates may originate from multiple benchmark sources; we deduplicate over-lapping templates so that recurrence does not inflate coverage. 
+
+Why these sources? We use these sources because they can pro-vide public provenances, and can be grounded in analytical query sets used in real database and analytics systems. They give us query patterns that practitioners and benchmark designers already mea-sure, rather than invented prompts. SQL repositories and engine documentation add realistic single-table analyst queries and com-monly supported aggregate idioms. 
+
+Query family taxonomy. A family is a class of SQL query shapes characterized by a shared aggregation primitive and a shared an-alytical question. We identify five families that recur across the source registry for single tables. They each test analytically distinct properties of synthetic data. The full taxonomy is shown in Figure 3, with 44 templates in total, organized as follows: 
+
+• Subgroup contains 16 templates split into Structure (13) and 
+
+Size (3). The Structure branch keeps the subgroup object fixed but varies the grouped summary signal, including totals, means, distinct coverage, robust summaries, and winner-style aggre-gate views. The Size branch instead asks only how large each subgroup is, using absolute count or support views over one-dimensional and two-dimensional groupings. 
+
+• Conditional contains 13 templates split into Global structure 
+
+(8) and Local slices (5). The global branch keeps the conditional summary at full grouped scope, whereas the local branch reuses the same grouped conditional scaffold after adding a predicate-defined slice. 
+
+Family Question Grounded Question Grounded SQL 
+
+Subgroup 
+
+template S-2.1 dataset c2 
+
+> Find subgroup counts and rank groups by size.
+> Which buying groups are most frequent?
+> SELECT buying [<group_field>], COUNT(*) AS row_count FROM c2 [<table>] GROUP BY buying [<group_field>] ORDER BY row_count DESC;
+
+Conditional 
+
+template C-L1 dataset c6  
+
+> Count rows per
+
+(𝑥, 𝑦 )
+
+> cell inside a local slice.
+> Within rows where Subtopic equals Linear Transformations, how many rows fall into each Student Country and Question Level combination?
+> SELECT "Student Country" [<group_x>], "Question Level" [<group_y>], COUNT(*) AS row_count FROM "c6" [<table>] WHERE "Subtopic" = ’Linear Transformations’ [<slice_predicate>] GROUP BY "Student Country" [<group_x>], "Question Level" [<group_y>] ORDER BY row_count DESC;
+
+Tail / rarity 
+
+template T-2.2 dataset m8 
+
+> Count rows by group inside an upper-tail slice.
+> Among the top 3% of balance, which previous values occur most often?
+> SELECT previous [<group_field>], COUNT(*) AS row_count FROM m8 [<table>] WHERE balance > PERCENTILE(balance, 0.97) [<tail_predicate>] GROUP BY previous [<group_field>];
+
+Missingness 
+
+template M-2.1 dataset c5 
+
+> Compute a target missing rate for each state.
+> For each odor category, what fraction of rows has missing stalk-root?
+> SELECT "odor" [<state_col>], AVG(CASE WHEN "stalk-root" [<target_col>] IS NULL THEN 1.0 ELSE 0.0 END) AS missing_rate FROM "c5" [<table>] GROUP BY "odor" [<state_col>] ORDER BY missing_rate DESC;
+
+Cardinality / range 
+
+template K-1.1 dataset c18 
+
+> Enumerate a high-cardinality attribute by support.
+> How many rows are associated with each wine title?
+> SELECT title [<value_col>] AS category_value, COUNT(*) AS support FROM c18 [<table>] WHERE title [<value_col>] IS NOT NULL GROUP BY title [<value_col>] ORDER BY support DESC, category_value;
+
+Table 3: One question and SQL example for each of the five query families. The blue text marks dataset-specific ground-ing, and the orange notes show which template slot each grounded SQL fragment instantiates. Details in Table 10. 
+
+• Tail / rarity contains 8 templates split into Tail Coverage (4) and Tail Size (4). Coverage-oriented templates focus on whether the correct rare members or outliers are recovered, while size-oriented templates focus on whether above-threshold magnitude or data size remains plausible. 
+
+• Missingness contains 3 templates split into Marginal Missing-ness (1) and Broad Co-Missingness (2). We use missingness to describe the pattern of absent or null values, not only the overall count of missing cells. The marginal branch leaves the missing-rate signal unconditional, whereas the broad co-missingness branch conditions on a bucket. 
+
+> 6
+
+• Cardinality / range contains 4 templates split into Discrete 
+
+(3) and Continuous (1). The discrete side tracks support/rank behavior over observed values, while the continuous side tracks min/max and range structure over numerical coverage. Table 3 gives one grounded SQL generation for each query family. Blue texts mark instantiated slots or grounded constants, while the uncolored SQL remains the fixed template shared across datasets. 
+
+Why these query families? A query family enters the taxonomy only if it passes three tests. First, the family must isolate one struc-tural property that no other family covers. Each of these properties might have very different failure modes to uncover. Second, the family must carry provenance: analysts already probe the prop-erty with recurring SQL. Every template traces to a public bench-mark suite, SQL repository, or engine document. Third, the family must sit in a blind spot of the distance-based metrics. A synthetic table can match aggregate statistical distances while still giving wrong answers for filtered subgroups, conditional slices, rare rows, missingness-dependent queries, or high-cardinality support. These three requirements connect the taxonomy directly to the motivation for query-centric evaluation: each family acts as a struc-tural assessor for a recurring analytical query pattern whose answer may not be preserved by distributional resemblance alone. We do not claim that the five families exhaust SQL. They exhaust the query-centric structural properties that are both recurring in public single-table analytical workloads and broadly groundable across heterogeneous tabular datasets. 
+
+## 4.3 Stage 2: Dataset Grounding for Query Generation 
+
+Stage 2 grounds reusable templates to the 49 benchmark datasets by converting each template into executable SQL for each dataset where the template is applicable. The pipeline first reads the dataset schema and computes a lightweight dataset profile containing col-umn types, missingness rates, support sizes for discrete columns, and numeric ranges for continuous columns. It then uses that dataset profile only to determine whether a template is admissible on the dataset. The profiling does not search for columns that make the resulting query visually interesting or artificially easy. The pipeline then maps each template to eligible dataset columns under the fixed policy of that template. A template may require a grouping column, a numeric measure, a predicate column, an ordering column, or a column used to define a bucket or threshold. The binding must satisfy the type and support requirements of the template. For example, a subgroup template needs a valid grouping key, a range template needs an ordered numeric column, and a missingness template needs a column whose missing values can be queried. If no eligible binding exists, the pipeline skips that template on the dataset. After the pipeline accepts a binding, the SQL generator expands the template skeleton under that binding. The SQL generator fills the selected columns into the aggregate expressions, predicates, 
+
+WHERE clauses, GROUP BY clauses, ordering clauses, and limits spec-ified by the template, producing the SQL generation used by the benchmark. When the template requires a constant, threshold, or bucket boundary, the SQL generator derives it from the dataset profile or from the fixed template policy. Then the pipeline checks type compatibility, must-fix preservation, and executability, and rejects invalid generations. The SQL generator also generates the natural-language question, only as a readable interpretation of the accepted SQL generation. As illustrated in Figure 10, the pipeline maps each template to eligible dataset columns and produces a dataset-specific grounded problem together with its SQL generation. Only the SQL generator uses the LLM, and it does so under fixed template policies. 
+
+## 4.4 Pipeline Statistics 
+
+TabQueryBench contains 44 templates (Appendix A, Table 10). Each dataset activates 10–12 templates on average, producing more than 100 executable SQL queries with associated natural-language questions per dataset (Appendix A). Across the 49-dataset suite and 11 generative models, this sums up to several thousands of benchmark queries and tens of thousands of generative-model– dataset–query evaluations. 
+
+## 5 EVALUATION 
+
+We holistically evaluate TabQueryBench and derive key findings from the results. 
+
+## 5.1 Settings 
+
+We evaluate TabQueryBench on 49 datasets and 11 synthetic tabu-lar generative models. For each dataset, we split the real table into a training split and a held-out evaluation split (4:1). Each generative model is trained only on the training split and is then asked to synthesize a table under the same schema. The synthetic table is generated with the same number of rows as the evaluation split. 
+
+SQL grounding setting. The profiler, binder, and validator are deterministic. Only the SQL realizer calls an LLM, and it does so only inside the constrained template-to-SQL realization step. We use the ChatGPT 5.4 API for that step, and the mean API cost is 
+
+5.40 per dataset. The validator rejects invalid SQL, incompatible realizations, and queries that fail execution, and the SQL realizer retries under the same fixed template policy. The full summary by generative model, including the common-9 runtime audit columns, is deferred to Appendix Table 8. 
+
+Generative Models and Hyperparameter Settings. We package each tabular generative model in its own Docker image. For each generative model, we use the recommended configuration from the original implementation when available, and otherwise tune within a bounded search range chosen to balance quality and runtime. For each generative model, we tuned the main capacity, optimization, and training-budget parameters within a bounded search space. For ARF, we varied the number of trees from 10 to 150, the maximum number of iterations from 3 to 20, the minimum node size from 1 to 7, and the split tolerance delta from 0 to 0.02. For BayesNet, we varied the number of rows used for fitting and structure learn-ing from 2K–120K and 1K–25K, respectively, together with the maximum number of discretization bins from 4 to 8 and the max-imum categorical levels from 32 to 128. For CTGAN and TVAE, we tuned the number of epochs, batch size, embedding dimension, and hidden-layer dimensions: CTGAN used 50–200 epochs, batch      
+
+> 70.50.60.70.80.91
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> 0.9
+> 1
+> RTF
+> ARF
+> Bayes
+> TPF
+> T-Diff
+> CTGAN
+> TVAE
+> T-Flow
+> F-Diff
+> T-Syn
+> T-DDPM
+> Distance-based overall score
+> Query overall score
+
+Figure 4: Distance-based and query overall scores do not align across generative models. Points below the diagonal have lower query-centric fidelity than distance-based fidelity; detailed values appear in Appendix Table 8. 
+
+sizes of 10–128, embedding dimensions of 8–32, generator/discrim-inator hidden dimensions from (16 , 16 ) to (64 , 64 ), and pac values from 1 to 10; TVAE used 100–500 epochs, batch sizes of 256–500, embedding dimensions of 32–256, and encoder/decoder hidden dimensions from (64 , 64 ) to (256 , 256 ). For diffusion-based meth-ods, ForestDiffusion varied n_t from 4 to 20, n_estimators from 5 to 100, duplicate_K from 2 to 20, max_depth from 3 to 6, and 
+
+max_train_rows from 4,096 to 50,000; TabDDPM varied the num-ber of diffusion timesteps from 200 to 1,000, training steps from 40 to 5,000, batch size from 64 to 1,000, and learning rate from 10 −4 to 
+
+10 −3; TabDiff varied the number of epochs from 100 to 1,000. For transformer- and flow-based generative models, RealTabFormer used 5–100 epochs, TabbyFlow used 100–700 epochs, and TabPF-Gen varied fit_max_rows from 512 to 4,096 and gen_chunk_rows 
+
+from 64 to 256 while keeping its SGLD settings fixed. Finally, for TabSyn, we varied the VAE and diffusion training epochs from 3 to 20 and the VAE batch size from 16 to 256. 
+
+## 5.2 How Well Do State-of-the-Art Tabular Generative Models Perform under Query-Centric Evaluation? 
+
+Finding 1: Current state-of-the-art tabular generative models often appear faithful under distance-based metrics, but still fall well short on query-centric fidelity (Figure 4). 
+
+To provide an overview of TabQueryBench results, we evaluate whether current tabular generative models preserve the analytical behavior exposed by dataset-grounded analytical queries. We are also curious about whether this query-centric approach provides a different view compared to conventional distance-based fidelity. Figure 4 compares each generative model’s distance-based over-all score with its query overall score. Every generative model lies below the diagonal, so the query-centric view is uniformly stricter than the distance-based one. The ordering also shifts. RealTab-Former remains strongest overall, but ARF and TabPFGen look es-pecially strong under distance-based fidelity relative to their query-side scores, while BayesNet remains comparatively stronger once we ask whether the same synthetic tables preserve the structure         
+
+> 10 210 310 410 5
+> 10 2
+> 10 3
+> 10 4
+> 10 5
+> Real distinct count Synthetic distinct count ARF Bayes CTGAN F-Diff RTF T-Flow T-Diff TPF T-Syn TVAE
+
+Figure 5: Real vs. synthetic distinct counts on high-cardinality discrete columns. Each point is one generative-model–column pair from the discrete rows in Table 4. 
+
+that matters for analytical queries. The full per-generative-model summary is deferred to Appendix Table 8. The appendix table also shows that the failure is not uniform across query families. Missingness is comparatively easy, with all generative models above 0.94 , but Tail/Rarity and Conditional re-main much harder. Even the best tail score is only 0.45 ±0.27 , and the best conditional score is only 0.64 ±0.27 , both achieved by RealTab-Former. Thus, distance-based fidelity can give an overly optimistic picture: it hides the subgroup, conditional, and rare-event failures that matter for real analytical use. 
+
+## 5.3 Where Do Failures Under Query-Centric Fidelity Concentrate? 
+
+A major goal for TabQueryBench is to localize failure modes rather than reporting only an aggregate query score. We study two com-plementary axes: query families, which reveal difficult structures to preserve, and data regimes, which reveal how categorical, nu-merical, and mixed schemas change the failure profile. 
+
+5.3.1 Breaking Down By Query Family. We break down query-centric fidelity across the query families and demonstrate analysis and insights. We first localize failures by query family. This view asks which kinds of analytical query objects are most fragile un-der synthetic generation, rather than averaging all query behavior together. In the main text, we focus on three representative hard regimes. Conditional queries test whether grouped structure re-mains reliable after the analysis is restricted to a filtered local slice. Tail and rarity queries test whether rare regions remain both iden-tifiable and queryable as the support becomes more extreme. High-cardinality queries test whether synthetic data preserves the large discrete support that matters for analytical queries. For each family, we follow the same progression: we first define the query object, then show one grounded example, then summarize the benchmark evidence, and finally explain what the result implies about current synthetic tabular generative models. 
+
+Finding 2: Current SOTA tabular generative models often fail to preserve high-cardinality discrete support (Figure 5 and Table 4).                                                                                                                                                                      
+
+> 8Dataset Rows Column Name Kind Real ARF Bayes CTGAN F-Diff RTF T-Flow T-DDPM T-Diff TPF T-Syn TVAE c14 300,000 7discrete 1219 1217 64 1219 629 1212 1219 -1219 1219 932 1049 c15 600,000 nom_9 discrete 2218 2216 2216 2218 751 2191 2219 -2217 2218 2203 81 c17 8,809 listed_in discrete 484 424 421 474 239 45 467 -411 434 433 324 c17 8,809 date_added discrete 1634 1366 1375 1491 612 48 1562 -1355 1459 1016 924 c18 129,975 region_1 discrete 1179 1114 255 848 293 1097 50 -----c18 129,975 title discrete 96777 62598 242 19630 1022 61865 63708 -----c18 129,975 winery discrete 15786 13729 256 8207 915 13594 15730 -----c3 2,551 ATRINS-DONOR-521 discrete 2541 1649 1572 1581 -150 1609 -1579 1535 2550 83 c3 2,551 CCAGC discrete 2426 1533 1562 1559 -146 1564 -1532 1547 1462 84 c19 48,697 channel_title discrete 2181 2086 256 2163 607 59 2181 -1834 2168 1699 1774
+
+Table 4: Representative column-level cases for cardinality fidelity. Each generative-model entry is a distinct-value count. Entries for generative models are highlighted as First, Second, and Third within each row by closeness to the real statistics. High-Cardinality. We study cardinality because it determines whether the synthetic table preserves the state space needed by downstream analytical queries. For discrete columns, cardinality measures whether the generated table retains the distinct values present in the real data. This is especially important for high-cardinality attributes, where a column may contain hundreds, thou-sands, or even more distinct states. If a generative model drops a large portion of these values, then later filtering, grouping, and sub-group queries no longer operate over the same support as the real table. In this case, the synthetic table may appear reasonable under aggregate distributional metrics while still failing to represent the set of values that downstream analyses depend on. Figure 5 shows that this failure is common on high-cardinality discrete columns. Each point represents one generative-model– column pair, with the x-axis showing the number of distinct values in the real column and the y-axis showing the number of distinct values generated synthetically. The diagonal corresponds to per-fect cardinality preservation. Many points fall far below this line, especially when the real column contains thousands to tens of thou-sands of distinct values. This means that the synthetic table often preserves only a fraction of the real discrete support. The problem is also generative-model-dependent: some generative models remain close to the diagonal for several columns, while others collapse high-cardinality support to only hundreds of synthetic values. Table 4 shows the support loss at the raw column level. For columns with relatively moderate cardinality, some generative mod-els can preserve the distinct count almost exactly. For example, on dataset c14 , CTGAN, T-Flow, T-Diff, and TPF recover nearly all dis-tinct values for columns with around 1K– 12 K real states. However, the table also shows that this behavior is far from universal. Sev-eral generative models collapse the same columns to only a small fraction of the real support: BayesNet repeatedly generates only 
+
+64 or 256 distinct values, ForestDiffusion often reduces thousands of real states to hundreds, and TVAE can collapse high-cardinality columns even more severely. The failure becomes especially clear on the largest-support columns. For dataset c18 , the real designation column has 33 ,068 distinct values, but BayesNet generates only 255 , ForestDiffusion only 74 ,and CTGAN only 9,679 . Similarly, the title column has 96 ,779 real distinct values, while several generative models produce far fewer synthetic states. This support collapse directly affects query-centric fidelity: queries that group by these attributes, filter on specific val-ues, or compare rare category behavior may lose many real states entirely. Therefore, high-cardinality support preservation remains a major weakness of current synthetic tabular generative models. Figure 10 makes this query object concrete. It counts support by title on dataset c18 , so any synthetic collapse in the distinct support of title directly changes which groups exist and how often they appear. 
+
+Finding 3: Current SOTA generative models preserve global conditional structure more reliably than local-slice condi-tional structure (Figure 6). Conditional Failure in Local Slices. A local-slice query evalu-ates the same group-by aggregation as its global counterpart, but only within a filtered subset of the table. Figure 10 shows one grounded local-slice example on dataset c6 . The paired global coun-terpart is obtained by deleting only the predicate WHERE "Subtopic" = ’Linear Transformations’ , while keeping the SELECT , GROUP BY , and ORDER BY clauses unchanged. Therefore, the local query isolates whether the same two-dimensional group structure is pre-served specifically within the “Linear Transformations” subpopula-tion, rather than across the full table. Figure 6 shows that local-slice conditional queries are usually less faithfully preserved than their global counterparts. Each point represents one generative model on one dataset under one paired conditional query. The x-axis reports the fidelity score of the global counterpart, and the y-axis reports the score of the matching local-slice query. The points below the diagonal correspond to cases where the same query structure becomes less faithful after restrict-ing the analysis to a subpopulation. This pattern holds across most paired comparisons. Among the 322 generative-model–dataset–query points, 82 .6% lie below the di-agonal, meaning that the local-slice query has lower fidelity than its global counterpart. The average drop is 0.11 . Thus, current genera-tive models often preserve whole-table conditional structure better than the same structure inside filtered subpopulations. This result shows that high global conditional fidelity is not sufficient: a syn-thetic table may answer broad conditional queries accurately while still failing on the local slices that analysts use to study specific subgroups. 
+
+Finding 4: Current SOTA generative models fail to preserve rare cases and tail distributions, which leads to poor fidelity on tail-focused analytical queries (Figure 7 and Figure 8)      
+
+> 900.20.40.60.81
+> 0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1
+> Global counterpart score
+> Local-slice score
+> L1 2D count
+> L2 Median slice
+> L3 Group quantile
+> L4 Time-bucket
+
+Figure 6: Local-slice vs. global-counterpart conditional scores. Each paired global query G1–G4 is obtained from the match-ing local-slice SQL by deleting only the single WHERE predi-cate; all other query structure is unchanged. Points below the diagonal indicate lower fidelity after restricting the same conditional query to a filtered local slice. The four local tem-plates correspond to C-L1 to C-L4; see Appendix C.1, Table 10 for the full catalog. Tail and Rarity. We first ask whether current generative models preserve the rare regions of individual columns, before evaluating full tail queries. Given a tail threshold 𝜏 , such as 1% , we define the tail region of a column from the real data. For a continuous column, the tail region is defined by the empirical CDF, using the lower and/or upper quantile ranges whose total probability mass is 𝜏 . For a categorical column, we sort categories by frequency in ascending order and define the tail region as the least frequent categories whose cumulative frequency reaches 𝜏 . This definition lets us test whether a generative model preserves rare numerical ranges and rare categorical states, independently of downstream query. We measure this tail preservation using two complementary scores. The first is tail size , which asks whether the synthetic table assigns the right amount of mass to the real tail. We select the tail region on the real data, count how many synthetic rows fall into that real-defined region, and normalize by the corresponding number of real rows. The second is tail coverage , which asks whether the synthetic table recovers the same tail region. We compute the tail region separately on the real and synthetic data, then measure their overlap normalized by the size of the real tail region. For categorical columns, this overlap is the number of shared tail categories; for continuous columns, it is the length or measure of the shared tail interval. The tail overall score averages tail size and tail coverage, so it captures both the amount of synthetic mass placed in the tail and the identity of the rare values or ranges being preserved. Figures 7 and 8 show that current generative models have limited ability to preserve rare regions, and this limitation becomes more severe as the tail threshold tightens. Figure 7 reports the absolute tail scores averaged across generative models. Even at the relatively loose 10% threshold, the tail overall score is only around 0.64 , with tail coverage around 0.55 and tail size around 0.69 . As the thresh-old decreases toward 0.1% , all three scores decline, indicating that generative models preserve both less tail mass and less tail identity when the benchmark focuses on rarer cases. 
+
+> 10%
+> 8%
+> 6%
+> 4%
+> 3%
+> 2%
+> 1%
+> 0.5%
+> 0.1%
+> 0.55
+> 0.6
+> 0.65
+> Tail threshold Score
+> Overall
+> Coverage
+> Size
+
+Figure 7: Tail overall, coverage, and size under progressively rarer support. All three absolute scores decline as the rarity threshold tightens. 
+
+Figure 8 shows that this trend is not caused by a single weak generative model. Each curve tracks one generative model’s tail overall score relative to its own 10% baseline, and most generative models decline as the threshold becomes more extreme. This means that the rare-region failure is broadly shared across current SOTA generative models: even when a generative model performs reason-ably at a coarse tail threshold, its fidelity usually deteriorates as the evaluation moves to rarer support. Together, the two figures show that preserving rare cases and tail distributions remains a difficult regime for synthetic tabular generation. We next evaluate whether these rare-region failures affect the actual tail-query templates in TabQueryBench. These templates are ordinary analytical SQL queries: they use a tail predicate as part of a larger aggregation. Figure 10 shows one representative grounded tail query. It filters dataset m8 to the top 3% of balance and then groups the surviving rows by previous , so fidelity depends on preserving both the tail predicate and the post-filter support pattern. The benchmark results show that current generative models perform poorly on these tail-focused queries. Figure 8 reports the mean tail-query score for each generative model as the tail thresh-old becomes more restrictive. Even at the loose 10% threshold, most generative models are far below strong query-centric fidelity: only RealTabFormer exceeds 0.60 , while many generative models are already below 0.40 , and several are near or below 0.25 . As the thresh-old tightens, the scores generally decline further. In the low-support ultra-tail region, RealTabFormer remains the strongest generative model but still stays below 0.50 , while most other generative models remain substantially lower. This confirms that the rare-region fail-ures observed in Figures 7–8 propagate to actual analytical queries: when a query depends on rare cases, current synthetic tables often cannot provide reliable answers. 
+
+Missingness. Missingness provides a useful contrast. Many gen-erative models match the overall amount of missingness well, but the benchmark still evaluates structured missingness through ex-plicit query objects rather than raw null counts alone. Figure 10 shows one representative grounded missingness query: it groups dataset c5 by odor and asks whether the missing rate of stalk-root 
+
+is preserved within each discrete state. A generative model can therefore match the global missing fraction while still failing this                                                             
+
+> 10 Category Overall Subgroup Conditional Tail / Rarity Missingness Cardinality / Range
+> Query overall ↑Structure ↑Size ↑Global Structure ↑Local Slice ↑Tail Coverage ↑Tail Size ↑Marginal ↑Broad Co-Missingness ↑Discrete ↑Continuous ↑
+> Categorical 0.68 ±0.07 0.77 ±0.06 0.78 ±0.06 0.64 ±0.06 0.63 ±0.10 0.14 ±0.12 0.31 ±0.24 0.93 ±0.01 0.93 ±0.01 0.66 ±0.21 0.88 ±0.16
+> Numerical 0.59 ±0.06 0.52 ±0.08 0.54 ±0.10 0.32 ±0.06 0.15 ±0.09 0.07 ±0.07 0.60 ±0.11 0.99 ±0.01 0.99 ±0.01 0.58 ±0.25 0.92 ±0.08
+> Mix 0.63 ±0.06 0.55 ±0.05 0.63 ±0.05 0.51 ±0.06 0.56 ±0.09 0.10 ±0.12 0.23 ±0.18 0.94 ±0.02 0.94 ±0.02 0.85 ±0.14 0.94 ±0.08
+
+Table 5: Query taxonomy by data regime. Rows are ranked within each column and highlighted as First, Second, and Third. 
+
+> 10%
+> 8%
+> 6%
+> 4%
+> 2%
+> 1%
+> 0.5%
+> 0.1%
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> RTF
+> ARF
+> Bayes
+> CTGAN
+> TPF
+> T-Diff
+> TVAE
+> T-Flow
+> T-Syn
+> F-Diff
+> T-DDPM
+
+Tail threshold 
+
+> Mean tail overall score
+
+Figure 8: Tail degradation across individual generative mod-els. Each curve tracks one generative model’s mean tail over-all score as the rarity threshold tightens. 
+
+query if the alignment between missingness and the conditioning attribute is distorted. 
+
+5.3.2 Breaking Down by Categorical vs. Numerical vs. Mixed. We further separate results across categorical, numerical, and mixed datasets. This analysis tests whether the same query family fails differently depending on the schema regime, rather than treating all tabular datasets as one homogeneous benchmark pool. Table 5 shows that queries on categorical datasets are often about preserving discrete support, subgroup identity, and rare-state membership, whereas queries on numerical datasets more often test range structure, continuous conditional behavior, and tail sizes. 
+
+## 5.4 Fidelity-cost Pareto tradeoff. 
+
+Finding 5: There is a clear cost-fidelity tradeoff in tabular data generation and BayesNet achieves the best balance (Table 9). 
+
+Figure 9 shows that query-centric fidelity and runtime separate into distinct practical regimes once we mark the Pareto frontier. RealTabFormer achieves the highest mean Query overall score on the common-9 datasets, but it is also by far the most expensive generative model, with a mean total runtime close to 150 minutes. It therefore occupies a high-fidelity/high-cost regime rather than a universally attractive operating point. BayesNet, by contrast, lies on the low-cost/strong-fidelity end of the frontier: it is orders of magnitude cheaper than the highest-cost neural generative models while still delivering one of the strongest query scores. ARF remains a cost-effective mid-cost alternative relative to the most expensive generative models, but it does not lie on the strict frontier because BayesNet is both cheaper and slightly stronger. The remaining generative models occupy less favorable regions of the tradeoff space. TabDiff, TabPFGen, TabSyn, and TabbyFlow        
+
+> 0.5 1510 50 100 200
+> 0.5
+> 0.55
+> 0.6
+> 0.65
+> BayesNet
+> TabDDPM
+> CTGAN
+> TVAE
+> ARF
+> ForestDiff.
+> TabbyFlow
+> TabPFGen
+> TabSyn TabDiff
+> RealTabFormer
+> Higher quality
+> Higher cost
+> Mean total runtime (min, log scale)
+> Mean query score
+
+Figure 9: Query-centric fidelity and runtime define a Pareto trade-off on 9 datasets(C2, C7, C14, M4, M6, M8, N3, N6, N11). 
+
+achieve mid-to-high query-centric fidelity, but require substantially more runtime than BayesNet and ARF for no aggregate fidelity gain. CTGAN, TVAE, and TabDDPM are relatively inexpensive, but they fall into a lower-fidelity regime. Overall, the figure sharpens the cost finding that would be missed by looking only at the best score: the highest-fidelity generative model is not the most cost-effective one, and BayesNet offers the strongest practical quality-cost balance on the common-9 runtime slice. 
+
+## 5.5 The Stability of Query Generation Pipeline 
+
+Because TabQueryBench uses a grounded query-generation pipeline, the stability of the benchmark instrument itself matters. The rele-vant question is whether rerunning the LLM-assisted SQL ground-ing step changes the comparative conclusions among generative models. We therefore rerun the same query-generation pipeline three times on a common probe set of nine datasets, selected to cover different column types and dataset sizes. Each run uses the same Stage 1 template library and the same dataset schemas; the only regenerated object is the dataset-specific SQL query set pro-duced by the grounding and realization procedure. To quantify stability, we report three complementary ranking-based statistics. For each dataset–generative-model pair, let 𝑟 1, 𝑟 2, 𝑟 3
+
+denote the generative-model ranks under the three regenerated query sets, and define the local rank spread as Δ𝑟 = max (𝑟 1, 𝑟 2, 𝑟 3) − 
+
+min (𝑟 1, 𝑟 2, 𝑟 3). We then compute Kendall’s 𝑊 on each dataset to measure agreement of the available generative-model ranking across the three runs, where 𝑊 = 1 indicates perfect concordance. Finally, we compute Spearman’s 𝜌 between each pair of run-level ranking vectors and report the mean pairwise correlation. Table 6 summarizes the results. Across the 92 non-missing dataset– generative-model cells, 83.7% of cells move by at most one rank. At the dataset level, the mean Kendall’s 𝑊 is 0.927, and the mean pairwise Spearman’s 𝜌 is 0.903 across the three regeneration pairs.               
+
+> 11 Summary statistic Value
+> Δ𝑟 =055.4%
+> Δ𝑟 =128.3%
+> Δ𝑟 =2–316.3% Mean Kendall’s 𝑊 0.927 Mean pairwise Spearman’s 𝜌 0.903
+
+Table 6: Ranking stability across three regenerated query sets on a 9-dataset probe set. The upper block reports the fractions of dataset–generative-model cells by local rank spread Δ𝑟 ,and the lower block reports the rank-agreement statistics. 
+
+The few visibly unstable cases are concentrated in m4 and n3 ; out-side these outliers, regenerated query sets largely preserve the overall comparative ranking and usually keep the top-performing generative model unchanged. 
+
+## 6 DISCUSSION AND LIMITATIONS 
+
+Query-centric fidelity and distance-based fidelity. Query-centric fidelity is not intended to replace distance-based fidelity. The two views measure different aspects of synthetic data quality. Distance-based metrics summarize global resemblance over columns or dis-tributions, while query-centric fidelity asks whether the synthetic table preserves the answers to analytical operations that down-stream users are likely to run. Our results show why both views are needed. This makes query-centric fidelity a complementary evaluation layer rather than a substitute for statistical similarity. In practice, the right evaluation depends on the downstream use case. Users who need mock data for coarse schema exploration may care more about global resemblance, while users who need data system testing or analytics on synthetic data may need stronger query-centric fidelity. 
+
+Toward query-aware synthetic-data generation. TabQuery-Bench also suggests a model-development direction: future tabular generative models can use query families as training, validation, or model-selection signals. The family-level breakdown identifies where current models lose analytical structure, rather than only reporting an aggregate query score. For example, high-cardinality results point to the need for better discrete support preservation. Tail and rarity results point to the need for better rare-region gen-eration. Local conditional results point to the need for models that preserve filtered subpopulation structure. These targets are concrete because they correspond to executable SQL queries and measurable query answers. A query-aware generative model could therefore optimize not only global distributional resemblance, but also take these analytical queries as part of the loss function or reward signals so that the generated table can support these operations. 
+
+Multi-table query-centric evaluation. The current bench-mark is designed to support the single-table setting, where reusable analytical query patterns can be grounded across heterogeneous schemas through schema-aware realization. A natural next step is multi-table evaluation. In that setting, synthetic data must preserve not only column distributions and single-table query answers, but also joins, foreign-key structure, join selectivity, fanout behavior, and query answers across related tables. Multi-table query-centric fidelity would extend the same principle used in TabQueryBench :synthetic data should preserve the analytical operations that down-stream users are likely to run. This extension would be especially important for analytical questions which cross table boundaries. 
+
+Privacy vs. fidelity. Query-centric fidelity also has a natural connection to privacy evaluation, where synthetic-data releases are often judged through privacy-utility tradeoffs, differential-privacy mechanisms, or threat-specific leakage analyses [ 26 , 46 , 61 , 64 ]. The same structural assessors that measure whether a synthetic table preserves analytical behavior can reveal how much rare support, local subgroup structure, or high-cardinality information survives generation. Query-centric fidelity is not a formal privacy metric, and it is not a substitute for membership-inference, attribute-inference, or differential-privacy analyses. Instead, it highlights a fidelity-privacy tension that users must interpret for their specific settings. In particular, privacy risk is often contextual: some releases may tolerate accurate aggregates, while others may treat specific query outputs as sensitive information. When query outputs are the ob-jects users want to protect, query-centric evaluation provides a useful diagnostic because the same query structure can be used to measure how much protected signal leaks through the synthetic ta-ble. A synthetic table that preserves rare values or high-cardinality keys may be more useful for analytics, but such preservation should be read together with privacy reports and threat models. 
+
+LLM-assisted SQL grounding. TabQueryBench uses an LLM only inside the constrained template-to-SQL realization step: the profiling, binding, and validation are deterministic, and the valida-tion rejects invalid SQL, incompatible realizations, and queries that fail execution. Our stability study suggests that the resulting con-clusions are broadly stable across regenerated query sets, but LLM-assisted SQL grounding remains a source of benchmark-instrument variance. The current study reruns the same grounding pipeline, but it does not yet compare multiple SQL realization models or mul-tiple prompting policies. Future work could audit SQL grounding across different LLMs, compare family-level and model-level rank-ings under these alternative realizations, and include additional human or rule-based checks for ambiguous schema bindings. 
+
+## 7 CONCLUSIONS 
+
+TabQueryBench reframes synthetic tabular data evaluation around analytical query answers. Instead of asking only whether a synthetic table matches the real table under aggregate statistical distances, it asks whether the table preserves the answers to queries that downstream users are likely to run. We instantiate this idea with 49 datasets and 11 generative models. The benchmark uses reusable query templates, schema-aware grounding, and five query families. Our evaluation shows that distance-based fidelity does not reli-ably predict query-centric fidelity. These results suggest that syn-thetic tabular data should be evaluated by the analytical operations it can support. Aggregate resemblance alone is not enough. Future work should study how query-centric fidelity predicts downstream utility in concrete applications, such as dashboard accuracy, text-to-SQL evaluation, and model development on synthetic data. An-other important direction is multi-table evaluation, where synthetic data must preserve joins, foreign-key structure, and query answers across related tables. We believe that TabQueryBench can serve as a foundation for future synthetic-data benchmarks that treat the preservation of analytical query answers as a first-class objective. 
+
+> 12
+
+## Appendix 
+
+## A TEMPLATE SOURCES, TAXONOMY, AND GROUNDING 
+
+This appendix records the template-side sources, taxonomy, grounding rules, and the compact classical distance baseline used in the current benchmark release. The main text gives the high-level pipeline; here we keep only the details needed to audit where templates came from, how the released 44-template inventory is organized, how dataset-specific realizations are constrained, and how the classical reference metrics are defined. 
+
+## A.1 Template Sources 
+
+The current appendix-facing template inventory surfaces 44 templates in total. Table 7 lists the public benchmark, repository, documentation, and paper sources that directly contribute to one or more released templates.                                 
+
+> Direct source Year / venue Templates ClickBench [11] 2022 | benchmark 8H2O db-benchmark [23] 2020 | benchmark 9TPC-H / TPC-DS benchmark specs [65, 66] 1999–2017 | benchmark specs 1TPC-DS benchmark family [65] 2017 | benchmark spec 3TPC-H qgen [66] 1999 | benchmark 4TPC-DS qualification repo [12] Public | TPC-DS family 2TPC-DS Altinity repo [1] Public | TPC-DS family 2RTABench order_events slice [63] 2025 | benchmark + GitHub 2BigQuery approximate aggregate docs [19] Current | docs 2ClickHouse aggregate docs [10] Current | docs 1Snowflake PERCENTILE_CONT docs [58] Current | docs 2Snowflake WIDTH_BUCKET docs [59] Current | docs 1Trino aggregate docs [67] Current | docs 3Apache Druid SQL-function docs [2] Current | docs 1Preserving Missing Data Distribution in Synthetic Data [70] 2023 | paper 3
+
+Table 7: Sources that directly contribute to one or more tem-plates in the released library. 
+
+## A.2 Classical Distance-Based Fidelity 
+
+This appendix records a compact classical baseline. We use Jensen–Shannon distance (JSD) for aligned categorical or discretized distributions, Kolmogorov– Smirnov distance (KS) for the largest cumulative-distribution gap in continu-ous variables, Total Variation distance (TVD) for discrete support discrepancy, and Wasserstein distance for continuous numerical shift, normalized so that results remain comparable across columns. 
+
+## B OVERALL BENCHMARK SUMMARY AND QUERY SCORE HEATMAP 
+
+Dataset ARF Bayes CTGAN F-Diff RTF T-Flow T-DDPM T-Diff TPF T-Syn TVAE c2 0.885 0.889 0.860 0.655 0.951 0.617 0.647 0.636 0.796 0.705 0.833 c3 0.700 0.677 0.691 0.765 0.588 0.573 0.520 0.572 0.678 0.478 0.593 c4 0.986 0.969 0.875 0.749 0.913 0.771 0.773 0.759 0.849 0.756 0.809 c5 0.677 0.622 0.591 0.597 0.676 0.551 0.537 0.546 0.756 0.536 0.570 c6 0.726 0.699 0.547 0.615 0.721 0.585 0.640 0.582 0.679 0.588 0.623 c7 0.886 0.870 0.832 0.768 0.874 0.738 0.765 0.748 0.821 0.736 0.858 c8 0.778 0.989 0.926 0.759 0.989 0.615 0.612 0.631 0.772 0.661 0.744 c9 0.495 0.526 0.482 0.404 0.961 0.581 0.376 0.593 0.457 0.569 0.470 c10 0.654 0.653 0.843 0.653 0.889 0.659 0.653 0.981 0.625 0.093 0.738 c11 0.909 0.889 0.792 0.631 0.978 0.655 0.655 0.977 0.993 0.651 0.903 c12 0.739 0.814 0.749 0.722 0.843 0.125 TF TF 0.739 0.861 0.556 c13 0.571 0.754 0.579 0.852 0.883 0.857 0.604 0.841 0.444 0.857 0.585 c14 0.733 0.822 0.683 0.713 0.793 0.912 0.516 0.915 0.962 0.665 0.579 c15 0.707 0.693 0.752 0.630 0.762 0.690 TF 0.696 0.768 0.684 0.408 c16 0.677 0.593 0.629 0.542 0.721 0.381 TF 0.528 TF 0.516 0.419 c17 0.669 0.629 0.752 0.545 0.485 0.420 0.262 0.562 0.651 0.407 0.615 c18 0.589 0.438 0.549 0.450 0.758 0.387 TF TF TF 0.428 0.541 c19 0.883 0.654 0.553 0.693 0.463 0.623 TF 0.694 0.701 0.683 0.571 c20 0.618 0.969 0.846 0.595 0.959 0.594 0.491 TF 0.614 0.587 0.817 m1 0.691 0.764 0.759 0.730 0.623 0.640 0.594 0.649 0.696 0.641 0.582 m2 0.601 0.628 0.574 0.575 0.542 0.580 0.512 TF 0.626 0.546 0.582 m4 0.775 0.920 0.723 0.737 0.887 0.775 0.651 0.779 0.775 0.784 0.688 m5 0.444 0.443 0.343 0.406 0.580 0.456 0.346 0.444 0.452 0.461 0.332 m6 0.924 0.756 0.476 0.650 0.869 0.703 0.608 0.715 0.686 0.707 0.440 m7 0.802 0.916 0.749 0.726 0.878 0.786 0.727 0.782 0.742 0.786 0.595 m8 0.626 0.741 0.496 0.514 0.671 0.553 0.530 0.530 0.559 0.527 0.488 m9 0.739 0.655 0.708 0.586 0.759 0.512 0.561 0.595 0.658 0.558 0.546 m10 0.689 0.900 0.749 0.646 0.866 0.702 0.550 0.834 0.696 0.698 0.761 m11 0.598 0.729 0.616 0.560 0.868 0.719 0.613 0.680 0.664 0.697 0.599 m12 0.406 0.449 0.371 0.342 0.677 0.435 TF 0.406 0.405 0.412 0.359 n1 0.804 0.811 0.739 0.783 0.780 0.662 0.653 0.926 0.844 0.801 0.776 n2 0.829 0.930 0.687 0.489 0.886 0.555 0.508 0.594 0.703 0.575 0.684 n3 0.522 0.523 0.348 0.495 0.661 0.485 0.505 0.462 0.478 0.539 0.412 n4 0.481 0.498 0.381 0.626 0.606 0.515 0.406 0.637 0.503 0.303 0.398 n5 0.512 0.646 0.538 0.473 0.620 0.532 0.332 0.488 0.520 0.283 0.519 n6 0.821 0.794 0.656 0.756 0.817 0.814 0.683 0.930 0.895 0.723 0.655 n7 0.749 0.900 0.679 0.718 0.799 0.712 0.660 0.788 0.743 0.504 0.738 n8 0.437 0.459 0.328 0.483 0.519 0.433 TF 0.485 0.108 0.417 0.339 n9 0.446 0.500 0.490 0.375 0.581 0.447 0.450 0.333 0.446 0.341 0.481 n10 0.833 0.844 0.823 0.803 0.840 0.832 0.842 0.926 0.835 0.357 0.834 n11 0.828 0.844 0.833 0.802 0.846 0.838 0.844 0.925 0.843 0.736 0.831 n12 0.537 0.536 0.766 0.398 0.908 0.472 0.478 0.365 0.465 0.422 0.805 n14 0.421 0.439 0.399 0.500 0.428 TF 0.426 0.526 0.419 0.454 0.407 n15 0.623 0.816 0.356 0.706 0.765 0.623 0.378 0.716 0.612 0.688 0.589 n16 0.699 0.837 0.806 0.927 0.931 0.927 0.691 0.927 0.927 0.803 0.787 n17 0.383 0.638 0.537 0.353 0.617 TF 0.518 0.365 0.385 0.346 0.524 n18 0.371 0.353 0.303 0.405 0.502 0.420 TF 0.408 0.404 0.418 0.317 n19 0.456 0.580 0.660 0.348 0.625 0.347 0.309 0.406 0.479 0.413 0.530 n20 0.486 0.490 0.350 0.400 0.658 0.400 0.322 TF 0.496 0.465 0.343 
+
+Table 9: Dataset-by-generative-model overall query score heatmap. TF indicates technical failure due to unsupported generation or prohibitively long runtime. Generator Distance-based Fidelity Query Fidelity Cost (min) 
+
+Dist. overall ↑ JSD ↓ KS ↓ TVD ↓ Wasserstein ↓ Query overall ↑ Subgroup ↑ Conditional ↑ Tail / Rarity ↑ Missingness ↑ Cardinality / Range ↑ Train ↓ Gen. ↓
+
+REAL 1.00 ±0.00 0.00 ±0.00 0.00 ±0.00 0.00 ±0.00 0.00 ±0.00 1.00 ±0.00 1.00 ±0.00 1.00 ±0.00 1.00 ±0.00 1.00 ±0.00 1.00 ±0.00 — —ARF 0.91 ±0.13 0.17 ±0.28 0.06 ±0.05 0.15 ±0.27 0.02 ±0.02 0.66 ±0.16 0.67 ±0.37 0.50 ±0.35 0.35 ±0.26 0.97 ±0.14 0.79 ±0.26 4.85 0.70 BayesNet 0.86 ±0.16 0.19 ±0.28 0.16 ±0.16 0.17 ±0.27 0.05 ±0.07 0.70 ±0.17 0.68 ±0.35 0.52 ±0.32 0.43 ±0.30 0.95 ±0.15 0.90 ±0.18 0.24 0.15 
+
+CTGAN 0.81 ±0.13 0.22 ±0.23 0.27 ±0.17 0.20 ±0.22 0.08 ±0.07 0.63 ±0.17 0.63 ±0.36 0.47 ±0.31 0.24 ±0.19 0.96 ±0.14 0.80 ±0.20 3.74 0.77 ForestDiffusion 0.66 ±0.19 0.60 ±0.37 0.15 ±0.13 0.59 ±0.37 0.05 ±0.07 0.61 ±0.15 0.61 ±0.37 0.41 ±0.33 0.08 ±0.14 0.95 ±0.15 0.58 ±0.31 11.2 0.22 
+
+RealTabFormer 0.91 ±0.15 0.15 ±0.24 0.05 ±0.09 0.14 ±0.23 0.01 ±0.01 0.75 ±0.15 0.76 ±0.30 0.64 ±0.27 0.45 ±0.27 0.97 ±0.12 0.89 ±0.17 144.0 3.58 TabbyFlow 0.77 ±0.27 0.36 ±0.36 0.09 ±0.06 0.34 ±0.37 0.04 ±0.04 0.60 ±0.17 0.59 ±0.36 0.44 ±0.32 0.19 ±0.24 0.94 ±0.16 0.76 ±0.33 14.0 5.59 TabDDPM 0.64 ±0.24 0.53 ±0.36 0.29 ±0.27 0.51 ±0.36 0.19 ±0.18 0.55 ±0.14 0.55 ±0.39 0.43 ±0.34 0.13 ±0.21 0.96 ±0.15 0.61 ±0.31 0.84 0.69 TabDiff 0.84 ±0.25 0.21 ±0.27 0.06 ±0.06 0.19 ±0.26 0.03 ±0.05 0.66 ±0.19 0.63 ±0.37 0.46 ±0.32 0.09 ±0.19 0.95 ±0.16 0.85 ±0.30 50.2 11.7 TabPFGen 0.86 ±0.14 0.23 ±0.26 0.10 ±0.09 0.21 ±0.26 0.02 ±0.02 0.65 ±0.18 0.63 ±0.39 0.48 ±0.33 0.27 ±0.23 0.96 ±0.15 0.84 ±0.23 0.003 39.9 TabSyn 0.68 ±0.26 0.61 ±0.42 0.07 ±0.08 0.60 ±0.43 0.02 ±0.03 0.57 ±0.17 0.57 ±0.37 0.43 ±0.30 0.18 ±0.27 0.94 ±0.16 0.65 ±0.33 41.6 0.27 TVAE 0.80 ±0.18 0.26 ±0.28 0.25 ±0.17 0.24 ±0.28 0.08 ±0.08 0.60 ±0.16 0.61 ±0.34 0.43 ±0.29 0.21 ±0.18 0.94 ±0.16 0.75 ±0.21 4.54 0.23 Table 8: Overall benchmark summary across 11 synthetic tabular generative models averaged over 49 datasets. ↑ means higher-is-better and ↓ means lower-is-better. REAL is the self-comparison reference row, and top generative models are highlighted as First, Second, and Third. The last two columns report mean training and generation time in minutes. 
+
+13 C TEMPLATE, DATASET, AND GENERATIVE MODEL CATALOGS 
+
+This appendix collects the long-form catalogs used by the released benchmark: the 44-template taxonomy inventory, the 49-dataset roster, and the active generative-model roster. These tables are grouped here to preserve space while keeping the released benchmark assets in one auditable location. 
+
+## C.1 44-Template Taxonomy Catalog 
+
+The compact taxonomy summary in Appendix A collapses related templates into family-level rows. The longtable below expands that same appendix-facing taxonomy back to the template level while keeping all 44 released templates in one consistent row format. 
+
+Table 10: 44-template taxonomy catalog. 
+
+Template ID No. Canonical template Family Subfamily Upstream source 
+
+grp_cond_rate C-G1 Condition Rate by Group Conditional Global Structure TPC-H, TPC-DS 
+
+grp_ratio_2cond C-G2 Two-Condition Ratio by Group Conditional Global Structure TPC-DS 
+
+ds_within_grp_share C-G3 Item Share Within Each Group Conditional Global Structure TPC-DS qualification 
+
+win_part_avg C-G4 Partition Average by Group Conditional Global Structure H2O db-benchmark 
+
+2d_tgt_rate C-G5 2D Target-Rate Surface Conditional Global Structure TPC-DS 
+
+binned_num_grp_avg C-G6 Binned Group Average Conditional Global Structure Snowflake WIDTH_BUCKET docs 
+
+grp_disp_rank C-G7 Group Dispersion Rank Conditional Global Structure Trino aggregate docs 
+
+ds_base_gated_rank C-G8 Baseline-Gated Extreme Ranking Conditional Global Structure TPC-DS Altinity 
+
+flt_2d_grp_count C-L1 Filtered 2D Count Surface Conditional Local Slice TPC-DS 
+
+med_flt_num C-L2 Filtered Median Slice Conditional Local Slice Snowflake PERCENTILE_CONT docs 
+
+cond_grp_quants C-L3 Filtered Group Quantiles Conditional Local Slice ClickHouse aggregate docs 
+
+rta_time_bucket_cnt C-L4 Filtered Time-Bucket Count Conditional Local Slice RTABench order_events 
+
+rta_time_bucket_mavg C-L5 Time-Bucket Moving Average by Group Conditional Local Slice RTABench order_events 
+
+cb_grp_distinct_topk S-1.1 Distinct-Coverage Ranking by Group Subgroup Structure ClickBench 
+
+cb_flt_distinct_topk S-1.2 Filtered Distinct-Coverage Ranking by Group Subgroup Structure ClickBench 
+
+h2o_grp_sum S-1.3 Total-Measure Ranking by Group Subgroup Structure H2O db-benchmark 
+
+grp_avg_num S-1.4 Mean-Measure Comparison by Group Subgroup Structure H2O db-benchmark 
+
+guarded_grp_avg S-1.5 Support-Gated Mean Comparison by Group Subgroup Structure H2O db-benchmark 
+
+ds_topk_grp_sum S-1.6 Filtered Total-Measure Ranking by Group Subgroup Structure TPC-DS qualification 
+
+h2o_2d_grp_sum S-1.7 Two-Dimensional Total-Measure Ranking Subgroup Structure H2O db-benchmark 
+
+2d_grp_avg S-1.8 Two-Dimensional Mean Comparison Subgroup Structure H2O db-benchmark 
+
+cb_grp_summary_topk S-1.9 Support-and-Mean Ranking by Group Subgroup Structure ClickBench 
+
+tpch_2d_summary S-1.10 Filtered Two-Dimensional Measure Summary Subgroup Structure TPC-H qgen 
+
+h2o_2d_robust S-1.11 Two-Dimensional Robust Measure Summary Subgroup Structure H2O db-benchmark 
+
+tpch_max_agg_win S-1.12 Top Aggregate Winner by Group Subgroup Structure TPC-H qgen 
+
+wtd_topk_sum S-1.13 Support-Gated Weighted Total Ranking by Group Subgroup Structure BigQuery approx docs 
+
+cb_grp_count S-2.1 Group Count Distribution Subgroup Size ClickBench 
+
+cb_flt_grp_count S-2.2 Filtered Group Count Ranking Subgroup Size ClickBench 
+
+cb_2d_topk_count S-2.3 Two-Dimensional Group Count Ranking Subgroup Size ClickBench 
+
+quant_tail_slice T-1.1 Top-Quantile Tail Members Tail / Rarity Tail Coverage Snowflake PERCENTILE_CONT docs 
+
+global_z_outliers T-1.2 Global Z-Score Outliers Tail / Rarity Tail Coverage Trino aggregate docs 
+
+h2o_topn_in_grp T-1.3 Within-Group Top-N Extremes Tail / Rarity Tail Coverage H2O db-benchmark 
+
+ds_subgrp_base_outlier T-1.4 Subgroup-Relative Outliers Tail / Rarity Tail Coverage TPC-DS Altinity 
+
+tpch_rel_total_thr T-2.1 Groups Above a Total-Share Threshold Tail / Rarity Tail Size TPC-H qgen 
+
+tpch_thr_grp_rank T-2.2 Above-Threshold Group Ranking Tail / Rarity Tail Size TPC-H qgen 
+
+grp_pct_point T-2.3 Group-wise Percentile Level Tail / Rarity Tail Size BigQuery approx docs 
+
+thr_rarity_cdf T-2.4 Threshold Exceedance Rarity Tail / Rarity Tail Size Apache Druid SQL docs 
+
+miss_rate_marg M-1.1 Marginal Missing Rate Missingness Marginal Missingness Preserving Missing Data Distribution in Synthetic Data 
+
+miss_rate_disc_state M-2.1 Missing Rate by Discrete State Missingness Broad Co-Missingness Preserving Missing Data Distribution in Synthetic Data 
+
+miss_rate_cont_bucket M-2.2 Missing Rate by Continuous Bucket Missingness Broad Co-Missingness Preserving Missing Data Distribution in Synthetic Data 
+
+card_supp_rank_prof K-1.1 Support Rank Profile Cardinality / Range Discrete ClickBench 
+
+card_dist_share_prof K-1.2 Distinct Share Profile Cardinality / Range Discrete ClickBench 
+
+card_cont_range_env K-1.3 Continuous Range Envelope Profile Cardinality / Range Continuous Trino aggregate docs 
+
+card_hi_card_resp K-2.1 High-Cardinality Response Stability Cardinality / Range Discrete H2O db-benchmark 
+
+## C.2 Dataset Catalog 
+
+Table 11: 49 dataset catalog. 
+
+Series No. Original dataset name Rows Cols Original source URL C c1 Jungle Chess 2pcs Raw Endgame Complete 44819 7 https://www.openml.org/d/41027 C c2 Car Evaluation 1728 7 https://archive.ics.uci.edu/dataset/19/car+evaluation C c3 Splice junction Gene Sequences 3189 3 https://archive.ics.uci.edu/dataset/69/molecular+biology+splice+junction+gene+sequences C c4 Chess King Rook Vs King Pawn 3196 37 https://archive.ics.uci.edu/dataset/22/chess+king+rook+vs+king+pawn C c5 Mushroom 8416 23 https://archive.ics.uci.edu/dataset/73/mushroom C c6 Dataset For Assessing ML In Higher Education 9546 8 https://archive.ics.uci.edu/dataset/1031/dataset+for+assessing+mathematics+learning+in+higher+education C c7 Nursery 12960 9 https://www.openml.org/d/26 C c8 Phishing Websites 11055 31 https://archive.ics.uci.edu/dataset/327/phishing+websites C c9 Amazon Employee Access Challenge 32769 10 https://www.kaggle.com/c/amazon-employee-access-challenge C c10 Poker Hand 1025010 11 https://archive.ics.uci.edu/dataset/158/poker+hand C c11 Connect 4 67557 43 https://archive.ics.uci.edu/dataset/26/connect-4 
+
+Continued on next page 
+
+14 Table 11: 49 dataset catalog (continued). 
+
+Series No. Original dataset name Rows Cols Original source URL C c12 Internet-Advertisements 3279 1559 https://www.openml.org/d/40978 C c13 Us Census Data 1990 2458285 69 https://archive.ics.uci.edu/dataset/116/us+census+data+1990 C c14 Cat In The Dat 300000 25 https://www.kaggle.com/c/cat-in-the-dat C c15 Cat In The Dat Ii 600000 25 https://www.kaggle.com/c/cat-in-the-dat-ii C c16 Fivethirtyeight Comic Characters Dataset 6896 13 https://www.kaggle.com/datasets/fivethirtyeight/fivethirtyeight-comic-characters-dataset C c17 Netflix Shows 8807 12 https://www.kaggle.com/datasets/shivamb/netflix-shows C c18 Wine Reviews 129971 14 https://www.kaggle.com/datasets/zynicide/wine-reviews C c19 Trending YouTube Video Statistics and Comments 40949 16 https://www.kaggle.com/datasets/datasnaek/youtube-new M m1 Remote Worker Productivity 1500 30 https://huggingface.co/datasets/nprak26/remote-worker-productivity M m2 Car Insurance Claim Prediction 58592 44 https://www.kaggle.com/datasets/ifteshanajnin/carinsuranceclaimprediction-classification M m12 Hotel Booking Demand 119390 32 https://www.kaggle.com/datasets/jessemostipak/hotel-booking-demand M m4 Medical Insurance Charges 2772 7 https://huggingface.co/datasets/rahulvyasm/medical_insurance_data M m5 Predict Students Dropout And Academic Success 4424 37 https://archive.ics.uci.edu/dataset/697/predict+students+dropout+and+academic+success M m6 Online Shoppers Purchasing Intention Dataset 12330 18 https://archive.ics.uci.edu/dataset/468/online+shoppers+purchasing+intention+dataset M m7 Stroke Prediction Dataset 5110 12 https://www.kaggle.com/datasets/fedesoriano/stroke-prediction-dataset M m8 Bank Marketing 45211 17 https://archive.ics.uci.edu/dataset/222/bank+marketing M m9 HR Analytics: Job Change of Data Scientists 19158 14 https://www.kaggle.com/datasets/arashnic/hr-analytics-job-change-of-data-scientists M m10 Mobile Price Classification 2000 21 https://www.kaggle.com/datasets/iabhishekofficial/mobile-price-classification M m11 Health Insurance Cross Sell Prediction 381109 12 https://www.kaggle.com/datasets/anmolkumar/health-insurance-cross-sell-prediction N n1 Spambase 4601 58 https://www.openml.org/d/44 N n2 Airfoil Self-Noise 1503 6 https://archive.ics.uci.edu/dataset/291/airfoil+self-noise N n3 Wine Quality 4898 12 https://archive.ics.uci.edu/dataset/186/wine+quality N n4 Communities And Crime 1994 128 https://archive.ics.uci.edu/dataset/183/communities+and+crime N n5 Superconductivity 21263 82 https://www.openml.org/d/44964 N n6 BEED: Bangalore EEG Epilepsy Dataset 8000 17 https://archive.ics.uci.edu/dataset/1134/beed:+bangalore+eeg+epilepsy+dataset N n7 Anuran Calls Mfccs 7195 26 https://archive.ics.uci.edu/dataset/406/anuran+calls+mfccs N n8 Secom 1567 593 https://archive.ics.uci.edu/dataset/179/secom N n9 Pen Based Recognition Of Handwritten Digits 10992 17 https://archive.ics.uci.edu/dataset/81/pen-based+recognition+of+handwritten+digits N n10 Dry Bean Dataset 13611 17 https://archive.ics.uci.edu/dataset/602/dry+bean+dataset N n11 Magic Gamma Telescope 19019 11 https://archive.ics.uci.edu/dataset/159/magic+gamma+telescope N n12 Skin Segmentation 245057 4 https://archive.ics.uci.edu/dataset/229/skin+segmentation N n13 Combined Cycle Power Plant 9568 5 https://archive.ics.uci.edu/dataset/294/combined+cycle+power+plant N n14 First-Order Theorem Proving 2000 52 https://www.openml.org/d/44663 N n15 COIL2000 9822 86 https://www.openml.org/d/298 N n16 Credit Card Fraud Detection 284807 31 https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud N n17 Statlog Shuttle 14500 10 https://archive.ics.uci.edu/dataset/148/statlog+shuttle N n18 APS Failure at Scania Trucks 76000 171 https://archive.ics.uci.edu/dataset/421/aps+failure+at+scania+trucks N n19 Fashion-MNIST 70000 785 https://www.openml.org/d/40996 15 REFERENCES 
+
+[1] Altinity. [n.d.]. ClickHouse TPC-DS Benchmark. https://github.com/Altinity/tpc-ds. https://github.com/Altinity/tpc-ds [2] Apache Druid. [n.d.]. All Druid SQL Functions . https://druid.apache.org/docs/ latest/querying/sql-functions/ [3] Patricia A. Apellániz, Ana Jiménez, Borja Arroyo Galende, Juan Parras, and Santiago Zazo. 2024. Synthetic Tabular Data Validation: A Divergence-Based Ap-proach. IEEE Access 12 (2024), 103895–103907. https://doi.org/10.1109/ACCESS. 2024.3434582 [4] arka420. [n.d.]. Insurance-Cost-Project-Using-SQL. https://github.com/arka420/ Insurance-Cost-Project-Using-SQL. https://github.com/arka420/Insurance-Cost-Project-Using-SQL [5] Andrew G. Bates, Iva Špakulová, Iain Dove, and Andrew Mealor. 2019. ONS Methodology Working Paper Series Number 16: Synthetic Data Pilot . Technical Report. Office for National Statistics. https://www.ons.gov.uk/methodology/ methodologicalpublications/generalmethodology/onsworkingpaperseries/ onsmethodologyworkingpaperseriesnumber16syntheticdatapilot Published 15 January 2019. [6] Bernd Bischl, Giuseppe Casalicchio, Matthias Feurer, Pieter Gijsbers, Frank Hut-ter, Michel Lang, Rafael G. Mantovani, Jan N. van Rijn, and Joaquin Vanschoren. 2021. OpenML Benchmarking Suites. In Proceedings of the Neural Information Processing Systems Track on Datasets and Benchmarks , Vol. 1. [7] Hasan Alp Caferoğlu, Mehmet Serhat Çelik, and Özgür Ulusoy. 2025. SING-SQL: A Synthetic Data Generation Framework for In-Domain Text-to-SQL Translation. https://doi.org/10.48550/arXiv.2509.25672 arXiv:2509.25672 [cs.AI] [8] Andrew Chu, Xi Jiang, Shinan Liu, Arjun Bhagoji, Francesco Bronzino, Paul Schmitt, and Nick Feamster. 2024. Feasibility of state space models for network traffic generation. In Proceedings of the 2024 SIGCOMM Workshop on Networks for AI Computing . 9–17. [9] Andrew Chu, Xi Jiang, Shinan Liu, Arjun Bhagoji, Francesco Bronzino, Paul Schmitt, and Nick Feamster. 2026. Netssm: Multi-flow and state-aware network trace generation using state-space models. Proceedings of the ACM on Networking 
+
+4, CoNEXT1 (2026), 1–24. [10] ClickHouse. [n.d.]. Aggregate Functions . https://clickhouse.com/docs/sql-reference/aggregate-functions/reference [11] ClickHouse. 2022. ClickBench: A Benchmark for Analytical Databases. https://github.com/ClickHouse/ClickBench. https://github.com/ClickHouse/ ClickBench GitHub benchmark. [12] CWI Database Architectures Group. [n.d.]. Reproducing TPC-DS Qualification Results. https://github.com/cwida/tpcds-result-reproduction. https://github. com/cwida/tpcds-result-reproduction [13] DataCebo. 2026. Welcome to SDGym! https://docs.sdv.dev/sdgym Official documentation. [14] Bailu Ding, Surajit Chaudhuri, Johannes Gehrke, and Vivek R. Narasayya. 2021. DSB: A Decision Support Benchmark for Workload-Driven and Traditional Database Systems. Proceedings of the VLDB Endowment 14, 13 (2021), 3376–3388. https://doi.org/10.14778/3484224.3484234 [15] Junhui Ding, Xinchen Zhang, Xiaohui Xie, and Shinan Liu. 2026. TraceCodec: A Compiler-Backed Neural Codec for Stateful Multi-Flow Network Traffic Traces. 
+
+arXiv preprint arXiv:2605.29941 (2026). [16] Yuntao Du and Ninghui Li. 2025. Systematic Assessment of Tabular Data Syn-thesis. In Proceedings of the 2025 ACM SIGSAC Conference on Computer and Communications Security . 2414–2428. https://doi.org/10.1145/3719027.3765067 [17] Khaled El Emam, Lucy Mosquera, Xi Fang, and Alaa El-Hussuna. 2022. Utility Metrics for Evaluating Synthetic Health Data Generation Methods: Validation Study. JMIR Medical Informatics 10, 4 (2022), e35734. https://doi.org/10.2196/ 35734 [18] Nick Erickson, Lennart Purucker, Andrej Tschalzev, David Holzmüller, Pra-teek Mutalik Desai, David Salinas, and Frank Hutter. 2026. TabArena: A Living Benchmark for Machine Learning on Tabular Data. In The Thirty-ninth Annual Conference on Neural Information Processing Systems Datasets and Benchmarks Track . https://openreview.net/forum?id=jZqCqpCLdU [19] Google Cloud. [n.d.]. GoogleSQL Approximate Aggregate Func-tions . https://cloud.google.com/bigquery/docs/reference/standard-sql/approximate_aggregate_functions [20] Léo Grinsztajn, Edouard Oyallon, and Gaël Varoquaux. 2022. Why Do Tree-Based Models Still Outperform Deep Learning on Typical Tabular Data?. In Advances in Neural Information Processing Systems , Vol. 35. 507–520. [21] Ragini Gupta, Shinan Liu, Ruixiao Zhang, Xinyue Hu, Xiaoyang Wang, Hadjer Benkraouda, Pranav Kommaraju, Phuong Cao, Nick Feamster, and Klara Nahrst-edt. 2025. Generative active adaptation for drifting and imbalanced network intrusion detection. arXiv preprint arXiv:2503.03022 (2025). [22] Andrés Guzmán-Cordero, Floor Eijkelboom, and Jan-Willem van de Meent. 2025. Exponential Family Variational Flow Matching for Tabular Data Generation. In 
+
+Forty-second International Conference on Machine Learning . https://openreview. net/forum?id=kjtvCSkSsy [23] H2O.ai. 2020. Database-like Operations Benchmark. https://h2oai.github.io/db-benchmark/. https://h2oai.github.io/db-benchmark/ Benchmark report and reproducibility repository. [24] Lasse Hansen, Nabeel Seedat, Mihaela van der Schaar, and Andrija Petrovic. 2023. Reimagining Synthetic Tabular Data Generation through Data-Centric AI: A Comprehensive Benchmark. In Advances in Neural Information Pro-cessing Systems , Vol. 36. https://papers.nips.cc/paper_files/paper/2023/hash/ 6aa9a05b929fb08ff46a58cab6cf860d-Abstract-Datasets_and_Benchmarks.html Datasets and Benchmarks Track. [25] Mikel Hernandez, Gorka Epelde, Ane Alberdi, Rodrigo Cilla, and Debbie Rankin. 2023. Synthetic Tabular Data Evaluation in the Health Domain Covering Resem-blance, Utility, and Privacy Dimensions. Methods of Information in Medicine 62, S 01 (2023), e19–e38. https://doi.org/10.1055/s-0042-1760247 [26] Julian Höllig and Michaela Geierhos. 2025. Utility Meets Privacy: A Critical Evaluation of Tabular Data Synthesizers. IEEE Access 13 (2025), 44497–44509. https://doi.org/10.1109/ACCESS.2025.3549680 [27] Valter Hudovernik, Martin Jurković, and Erik Štrumbelj. 2024. Benchmarking the Fidelity and Utility of Synthetic Relational Data. arXiv preprint arXiv:2410.03411 
+
+(2024). https://doi.org/10.48550/arXiv.2410.03411 [28] Hugging Face. [n.d.]. Hugging Face Datasets. https://huggingface.co/datasets. https://huggingface.co/datasets Accessed: 2026-07-01. [29] Tobias Hyrup, Anton Danholt Lautrup, Arthur Zimek, and Peter Schneider-Kamp. 2024. Sharing is CAIRing: Characterizing Principles and Assessing Properties of Universal Privacy Evaluation for Synthetic Tabular Data. Machine Learning with Applications 18 (2024), 100608. https://doi.org/10.1016/j.mlwa.2024.100608 [30] Xi Jiang, Shinan Liu, Aaron Gember-Jacobson, Arjun Nitin Bhagoji, Paul Schmitt, Francesco Bronzino, and Nick Feamster. 2024. Netdiffusion: Network data aug-mentation through protocol-constrained traffic generation. Proceedings of the ACM on Measurement and Analysis of Computing Systems 8, 1 (2024), 1–32. [31] Xi Jiang, Shinan Liu, Aaron Gember-Jacobson, Paul Schmitt, Francesco Bronzino, and Nick Feamster. 2023. Generative, high-fidelity network traces. In Proceedings of the 22nd ACM Workshop on Hot Topics in Networks . 131–138. [32] Xiangjian Jiang, Nikola Simidjievski, and Mateja Jamnik. 2026. TabStruct: Measur-ing Structural Fidelity of Tabular Data. In The Fourteenth International Conference on Learning Representations . https://openreview.net/forum?id=XOPH34Extq Oral presentation. [33] Alexia Jolicoeur-Martineau, Kilian Fatras, and Tal Kachman. 2024. Generating and Imputing Tabular Data via Diffusion and Flow-based Gradient-Boosted Trees. In Proceedings of The 27th International Conference on Artificial Intelligence and Statistics (Proceedings of Machine Learning Research) , Sanjoy Dasgupta, Stephan Mandt, and Yingzhen Li (Eds.), Vol. 238. PMLR, 1288–1296. https://proceedings. mlr.press/v238/jolicoeur-martineau24a.html [34] Bayrem Kaabachi, Jérémie Despraz, Thierry Meurers, Karen Otte, Mehmed Halilovic, Bogdan Kulynych, Fabian Prasser, and Jean Louis Raisaro. 2025. A Scoping Review of Privacy and Utility Metrics in Medical Synthetic Data. npj Digital Medicine 8, 1 (2025), 60. https://doi.org/10.1038/s41746-024-01359-3 [35] Kaggle. [n.d.]. Kaggle. https://www.kaggle.com. https://www.kaggle.com Accessed: 2026-07-01. [36] Shivasankari Kannan, Yeounoh Chung, Amita Gondi, Tristan Swadell, and Fatma Ozcan. 2025. High-Fidelity And Complex Test Data Generation For Google SQL Code Generation Services. https://doi.org/10.48550/arXiv.2504.17203 arXiv:2504.17203 [cs.DB] [37] Markelle Kelly, Rachel Longjohn, and Kolby Nottingham. [n.d.]. The UCI Machine Learning Repository. https://archive.ics.uci.edu. https://archive.ics.uci.edu Accessed: 2026-07-01. [38] Akim Kotelnikov, Dmitry Baranchuk, Ivan Rubachev, and Artem Babenko. 2023. TabDDPM: Modelling Tabular Data with Diffusion Models. In Proceedings of the 40th International Conference on Machine Learning (Proceedings of Machine Learning Research) , Vol. 202. 17564–17579. https://proceedings.mlr.press/v202/ kotelnikov23a.html [39] Anton D Lautrup, Tobias Hyrup, Arthur Zimek, and Peter Schneider-Kamp. 2025. Syntheval: a framework for detailed utility and privacy evaluation of tabular synthetic data. Data Mining and Knowledge Discovery 39, 1 (2025), 6. https://doi.org/10.1007/s10618-024-01081-4 [40] Junwei Ma, Apoorv Dankar, George Stein, Guangwei Yu, and Anthony Caterini. 2023. TabPFGen – Tabular Data Generation with TabPFN. In NeurIPS 2023 Second Table Representation Learning Workshop . https://openreview.net/forum?id= 4MkkNsAEmO [41] Mark Mazumder, Colby Banbury, Xiaozhe Yao, Bojan Karlaš, William Gaviria Ro-jas, Sudnya Diamos, Greg Diamos, Lynn He, Alicia Parrish, Hannah Rose Kirk, Jessica Quaye, Charvi Rastogi, Douwe Kiela, David Jurado, David Kanter, Rafael Mosquera, Will Cukierski, Juan Ciro, Lora Aroyo, Bilge Acun, Lingjiao Chen, Mehul Raje, Max Bartolo, Evan Sabri Eyuboglu, Amirata Ghorbani, Emmett Goodman, Addison Howard, Oana Inel, Tariq Kane, Christine R. Kirkpatrick, D. Sculley, Tzu-Sheng Kuo, Jonas W. Mueller, Tristan Thrush, Joaquin Vanschoren, Margaret Warren, Adina Williams, Serena Yeung, Newsha Ardalani, Praveen Paritosh, Ce Zhang, James Y. Zou, Carole-Jean Wu, Cody Coleman, Andrew Y. 
+
+> 16
+
+Ng, Peter Mattson, and Vijay Janapa Reddi. 2023. DataPerf: Benchmarks for Data-Centric AI Development. In Proceedings of the Neural Information Processing Systems Track on Datasets and Benchmarks , Vol. 3. https://papers.nips. cc/paper_files/paper/2023/hash/112db88215e25b3ae2750e9eefcded94-Abstract-Datasets_and_Benchmarks.html [42] Raghunath Othayoth Nambiar and Meikel Poess. 2006. The Making of TPC-DS. In Proceedings of the 32nd International Conference on Very Large Data Bases .VLDB Endowment, 1049–1058. [43] Noshin Nawar Nawar. [n.d.]. Exploratory Analysis of Car Evaluation Dataset with SQL. https://github.com/nehanawar025/Exploratory-Analysis-of-Car-Evaluation-Dataset-with-SQL. https://github.com/nehanawar025/Exploratory-Analysis-of-Car-Evaluation-Dataset-with-SQL [44] OpenML. [n.d.]. OpenML. https://www.openml.org. https://www.openml.org Accessed: 2026-07-01. [45] Neha Patki, Roy Wedge, and Kalyan Veeramachaneni. 2016. The Synthetic Data Vault. In 2016 IEEE International Conference on Data Science and Advanced Analytics . 399–410. https://doi.org/10.1109/DSAA.2016.49 [46] Personal Data Protection Commission Singapore. 2024. Proposed Guide on Synthetic Data Generation. Guidance document. https: //www.pdpc.gov.sg/organisations/resources/guidance-by-topic/proposed-guide-on-synthetic-data-generation Published 24 September 2024. [47] Haoyue Ping, Julia Stoyanovich, and Bill Howe. 2017. DataSynthesizer: Privacy-Preserving Synthetic Datasets. In Proceedings of the 29th International Conference on Scientific and Statistical Database Management (SSDBM ’17) . 42:1–42:5. https: //doi.org/10.1145/3085504.3091117 [48] Meikel Poess and Chris Floyd. 2000. New TPC Benchmarks for Decision Support and Web Commerce. ACM SIGMOD Record 29, 4 (2000), 64–71. https://doi.org/ 10.1145/369275.369291 [49] Meikel Poess, Raghunath Othayoth Nambiar, and David Walrath. 2007. Why You Should Run TPC-DS: A Workload Analysis. In Proceedings of the 33rd International Conference on Very Large Data Bases . 1138–1149. https://www.vldb.org/conf/ 2007/papers/industrial/p1138-poess.pdf [50] Meikel Poess, Bryan Smith, Lubor Kollár, and Per-Åke Larson. 2002. TPC-DS, Taking Decision Support Benchmarking to the Next Level. In Proceedings of the 2002 ACM SIGMOD International Conference on Management of Data . 582–587. https://doi.org/10.1145/564691.564759 [51] Zhaozhi Qian, Rob Davis, and Mihaela van der Schaar. 2023. Syn-thcity: A Benchmark Framework for Diverse Use Cases of Tabular Synthetic Data. In Advances in Neural Information Processing Sys-tems , Vol. 36. https://papers.nips.cc/paper_files/paper/2023/hash/ 09723c9f291f6056fd1885081859c186-Abstract-Datasets_and_Benchmarks.html Datasets and Benchmarks Track. [52] Gabriele Santangelo, Giovanna Nicora, Riccardo Bellazzi, and Arianna Dagliati. 2025. How Good Is Your Synthetic Data? SynthRO, a Dashboard to Evaluate and Benchmark Synthetic Tabular Data. BMC Medical Informatics and Decision Making 25, 1 (2025), 89. https://doi.org/10.1186/s12911-024-02731-9 [53] Aniruddha Sen, Christine Task, Dhruv Kapur, Gary Howarth, and Karan Bhagat. 2023. Diverse Community Data for Benchmarking Data Privacy Algorithms. 
+
+Advances in Neural Information Processing Systems 36 (2023), 51409–51420. [54] Shagufta-DataAnalyst. [n.d.]. insurance-sql-analysis. https://github.com/ Shagufta-DataAnalyst/insurance-sql-analysis. https://github.com/Shagufta-DataAnalyst/insurance-sql-analysis [55] Juntong Shi, Minkai Xu, Harper Hua, Hengrui Zhang, Stefano Ermon, and Jure Leskovec. 2025. TabDiff: a Mixed-type Diffusion Model for Tabular Data Gen-eration. In The Thirteenth International Conference on Learning Representations .https://openreview.net/forum?id=swvURjrt8z [56] Andrey Sidorenko, Michael Platzer, Mario Scriminaci, and Paul Tiwald. 2025. Benchmarking Synthetic Tabular Data: A Multi-Dimensional Evaluation Frame-work. arXiv preprint arXiv:2504.01908 (2025). https://doi.org/10.48550/arXiv. 2504.01908 [57] Joshua Snoke, Gillian M. Raab, Beata Nowok, Chris Dibben, and Aleksandra Slavković. 2018. General and Specific Utility Measures for Synthetic Data. Journal of the Royal Statistical Society Series A: Statistics in Society 181, 3 (2018), 663–688. https://doi.org/10.1111/rssa.12358 [58] Snowflake Inc. 2026. PERCENTILE_CONT — Snowflake Documentation. https: //docs.snowflake.com/en/sql-reference/functions/percentile_cont. https://docs. snowflake.com/en/sql-reference/functions/percentile_cont [59] Snowflake Inc. 2026. WIDTH_BUCKET — Snowflake Documentation. https: //docs.snowflake.com/en/sql-reference/functions/width_bucket. https://docs. snowflake.com/en/sql-reference/functions/width_bucket [60] Aivin V. Solatorio and Olivier Dupriez. 2023. REaLTabFormer: Generating Realistic Relational and Tabular Data using Transformers. arXiv preprint arXiv:2302.02041 (2023). https://doi.org/10.48550/arXiv.2302.02041 [61] Yuchao Tao, Ryan McKenna, Michael Hay, Ashwin Machanavajjhala, and Gerome Miklau. 2021. Benchmarking Differentially Private Synthetic Data Generation Algorithms. arXiv preprint arXiv:2112.09238 (2021). https://doi.org/10.48550/ arXiv.2112.09238 [62] Christine Task, Karan Bhagat, and Gary Howarth. 2023. SDNist v2: Deidentified Data Report Tool. https://doi.org/10.18434/MDS2-2943 [63] Timescale. 2025. RTABench: A Benchmark for Real-Time Analytics Applications. https://github.com/timescale/rtabench. https://github.com/timescale/rtabench GitHub benchmark. [64] Van Tran, Shinan Liu, Tian Li, and Nick Feamster. 2025. Quantifying the Pri-vacy Implications of High-Fidelity Synthetic Network Traffic. arXiv preprint arXiv:2511.20497 (2025). [65] Transaction Processing Performance Council. [n.d.]. TPC Benchmark DS (TPC-DS) Standard Specification. https://www.tpc.org/tpcds/. https://www.tpc.org/ tpcds/ [66] Transaction Processing Performance Council. [n.d.]. TPC Benchmark H (TPC-H) Standard Specification. https://www.tpc.org/tpch/. https://www.tpc.org/tpch/ [67] Trino Software Foundation. 2026. Aggregate Functions — Trino Documentation. https://trino.io/docs/current/functions/aggregate.html. https://trino.io/docs/ current/functions/aggregate.html [68] Boris van Breugel, Zhaozhi Qian, and Mihaela van der Schaar. 2023. Synthetic Data, Real Errors: How (Not) to Publish and Use Synthetic Data. In Proceedings of the 40th International Conference on Machine Learning (Proceedings of Machine Learning Research) , Vol. 202. 34793–34808. https://proceedings.mlr.press/v202/ van-breugel23a.html [69] Jason Walonoski, Mark Kramer, Joseph Nichols, Andre Quina, Chris Moesel, Dylan Hall, Carlton Duffett, Kudakwashe Dube, Thomas Gallagher, and Scott McLachlan. 2018. Synthea: An Approach, Method, and Software Mechanism for Generating Synthetic Patients and the Synthetic Electronic Health Care Record. 
+
+Journal of the American Medical Informatics Association 25, 3 (2018), 230–238. https://doi.org/10.1093/jamia/ocx079 [70] Xinyue Wang, Hafiz Asif, and Jaideep Vaidya. 2023. Preserving Missing Data Distribution in Synthetic Data. In Proceedings of the ACM Web Conference 2023 .2110–2121. https://doi.org/10.1145/3543507.3583297 [71] David S. Watson, Kristin Blesch, Jan Kapar, and Marvin N. Wright. 2023. Ad-versarial Random Forests for Density Estimation and Generative Modeling. In Proceedings of the 26th International Conference on Artificial Intelligence and Statistics (Proceedings of Machine Learning Research) , Vol. 206. 5357–5375. https://proceedings.mlr.press/v206/watson23a.html [72] Lei Xu, Maria Skoularidou, Alfredo Cuesta-Infante, and Kalyan Veeramachaneni. 2019. Modeling Tabular Data using Conditional GAN. In Advances in Neural Information Processing Systems , Vol. 32. https://proceedings.neurips.cc/paper/ 2019/hash/254ed7d2de3b23ab10936522dd547b78-Abstract.html [73] Zhangchen Xu, Fengqing Jiang, Luyao Niu, Yuntian Deng, Radha Poovendran, Yejin Choi, and Bill Yuchen Lin. 2025. Magpie: Alignment Data Synthesis from Scratch by Prompting Aligned LLMs with Nothing. In The Thirteenth International Conference on Learning Representations .[74] Hengrui Zhang, Jiani Zhang, Zhengyuan Shen, Balasubramaniam Srinivasan, Xiao Qin, Christos Faloutsos, Huzefa Rangwala, and George Karypis. 2024. Mixed-Type Tabular Data Synthesis with Score-Based Diffusion in Latent Space. In The Twelfth International Conference on Learning Representations . https://openreview. net/forum?id=4Ay23yeuz0 [75] Yuxuan Zhang, Huan Ling, Jun Gao, Kangxue Yin, Jean-Francois Lafleche, Adela Barriuso, Antonio Torralba, and Sanja Fidler. 2021. DatasetGAN: Efficient La-beled Data Factory with Minimal Human Effort. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) . 10145–10155.

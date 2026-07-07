@@ -1,0 +1,1105 @@
+Title: FedFFT: Taming Client Drift in Federated SAM via Spectral Perturbation Filtering
+
+URL Source: https://arxiv.org/pdf/2607.04170v1
+
+Published Time: Tue, 07 Jul 2026 02:01:45 GMT
+
+Number of Pages: 20
+
+Markdown Content:
+# FedFFT: Taming Client Drift in Federated SAM via Spectral Perturbation Filtering 
+
+Liyang Yuan a,1 , Yibo Yang b, Dandan Guo a,1, ∗
+
+> aSchool of Artificial Intelligence, Jilin University, Changchun, China
+> bKing Abdullah University of Science and Technology, Saudi Arabia
+
+Abstract 
+
+Federated Learning (FL) enables decentralized training without data sharing, but suffers from statistical heterogeneity across clients, leading to client drift, poor generalization, and sharp minima compared to cen-tralized training. Sharpness-Aware Minimization (SAM) has emerged as a promising approach to improve generalization, yet its application in federated learning still suffers from divergence problems, since pertur-bations are computed locally and reflect client-specific loss geometries. To better understand this issue, we provide experimental evidence from a new perspective, the frequency domain, for SAM perturbations in federated settings, revealing that inter-client perturbation inconsistencies are predominantly concentrated in the low-frequency spectrum. Motivated by this insight, we propose Fed erated learning with Frequency-domain Filtering of SAM per turbations ( FedFFT ). It is a lightweight and plug-and-play method that filters out low-frequency components of SAM perturbations without requiring additional communication, thereby suppressing inconsistent components in client updates while preserving consistent learning signals. Extensive experiments across multiple benchmarks and diverse backbones demonstrate that FedFFT consistently out-performs SAM-based FL methods, particularly under severe non-IID distributions. These results highlight the effectiveness, scalability, and general applicability of our frequency-domain perspective for sharpness-aware federated optimization. 
+
+Keywords: Federated Learning, Sharpness-Aware Minimization(SAM), Client-Drift, Optimization 
+
+1. Introduction 
+
+Federated Learning (FL) [1] is a distributed learning paradigm where multiple clients collaboratively train a global model under the coordination of a central server, while keeping their raw data local to preserve privacy. In each communication round, clients perform local training and only transmit model parameters or updates, which are aggregated to update the global model. This framework has been widely applied in privacy-sensitive domains such as healthcare, finance, mobile applications, and autonomous systems [2, 3, 4, 5]. However, the practical effectiveness of FL is severely hampered by the statistical heterogeneity inherent in real-world data, where the local data distributions across clients are typically non-independent and identically distributed (Non-IID). This causes the optimization objectives of individual clients to become misaligned with one another and with the global goal, resulting in local updates that pull the shared model in conflicting directions. This phenomenon are known as client drift [6, 7, 8, 9, 10], which not only slows convergence but can also limits the model’s ability to generalize to the overall underlying distribution. To address the generalization challenges posed by client drift, a promising research direction has shifted from traditional client-side regularization [11, 6, 12, 13, 14] or aggregation methods [15, 16, 17] to exploring the geometry of the loss landscape. These methods build upon the insight that convergence to sharp minima correlates with poor generalization [8], where flatter minima often yield better performance. Sharpness-Aware      
+
+> ∗Corresponding author
+> Email addresses: yuanly24@mails.jlu.edu.cn (Liyang Yuan), yibo.yang93@gmail.com (Yibo Yang),
+> guodandan@jlu.edu.cn (Dandan Guo)
+> 1This work of Liyang Yuan and Dandan Guo was supported by the National Natural Science Foundation of China (NSFC) under Grant No. 62306125.
+> arXiv:2607.04170v1 [cs.LG] 5 Jul 2026
+
+Minimization (SAM) [18] is a representative technique designed for this purpose, seeking flatter regions by optimizing a perturbed loss. Building on this, FedSAM [19, 20] pioneered the application of SAM to local training in Federated Learning. While FedSAM [21, 22] have shown strong performance across different settings, they primarily focus on local flatness, implicitly assuming that minimizing sharpness locally leads to a globally flat minimum. In practice, however, under substantial data heterogeneity, the local and global loss landscapes may diverge considerably, and improvements in local flatness do not necessarily guarantee global flatness. Subsequent works [21, 22, 23, 24] have attempted to bridge this local-global gap through various strategies, such as enhancing client-side updates [21] or shifting the sharpness optimization to the server [23], sometimes employing complex frameworks like the Alternating Direction Method of Multipliers (ADMM) [25]. Despite these advances, existing solutions face a difficult trade-off: purely client-side methods struggle with the deviation of local sharpness estimates, while server-centric approaches often come at the cost of significant communication or computational overhead. Crucially, none of these approaches explicitly investigate the intrinsic nature of the perturbations themselves, leaving open the question of whether they can be refined to better align clients with the global objective. In this work, we address this question by introducing a novel frequency-domain perspective. To our knowledge, we are the first to conduct a systematic experimental study on the spectral properties of client-side SAM perturbations in FL. Our key finding is that the inter-client disagreements are not random noise; they are predominantly concentrated in the low-frequency spectrum, which we hypothesize is strongly tied to client-specific data biases. Motivated by this insight, we propose Federated learning with Frequency-domain Filtering of SAM perturbations (FedFFT), a lightweight and plug-and-play method. FedFFT applies a high-pass filter to the locally computed perturbations, systematically removing the discordant low-frequency components while preserving consistent learning signals in the higher frequencies. This alignment in the spectral domain is achieved without requiring any additional communication overhead. Notably, FedFFT can be seamlessly integrated as a plug-and-play module with federated learning framework that utilizes client-side SAM optimizers, further broadening its applicability. Our contributions are summarized as below: (1) Frequency-domain analysis of perturbations. We provide the first study of SAM perturbations in FL across clients based on spectral decomposition, and reveal that heterogeneity is primarily concentrated in the low-frequency bands. (2) Algorithm design. Based on this insight, we introduce FedFFT, a simple yet effective approach that filters out low-frequency perturbation components to suppress inconsistent client updates while retaining retaining consistent learning signals. (3) Extensive empirical validation. We conduct comprehensive experiments across multiple benchmarks and backbones, under varying degrees of data heterogeneity. The results show that FedFFT outperforms related baselines, particularly in highly non-IID settings, demonstrating both effectiveness and scalability. 
+
+2. Related work 
+
+In this section, we provide an overview of the research most relevant to our work. Specifically, we first review the Sharpness-Aware Minimization (SAM) methodology and its various extensions in deep learning. Next, we summarize key developments in Federated Learning (FL), highlighting the challenges arising from statistical heterogeneity and client drift. Finally, we discuss recent attempts to integrate SAM into FL, emphasizing how existing methods address generalization and convergence issues in decentralized settings. 
+
+2.1. Sharpness-Aware Minimization (SAM) 
+
+The connection between generalization and flat minima was first recognized in early studies [26], and later work confirmed that smoother loss landscapes generally lead to better generalization [27, 28]. Building on this insight, Sharpness-Aware Minimization (SAM) was introduced as a PAC-Bayesian inspired method that explicitly minimizes loss sharpness and achieves strong generalization across image classification benchmarks [18]. Since then, numerous extensions have been developed. A scale-invariant version improves training stability [29], while another reformulates sharpness from both theoretical and intuitive perspectives [30]. Further studies focus on perturbation strategies, including adaptive or random amplitudes [31, 32], dynamic adjustment through DSAM [33], and variance reduction across domains with DISAM [34]. 22.2. Federated Learning 
+
+Federated Learning (FL), introduced with FedAvg [1], enables collaborative model training without raw data sharing. While preserving privacy, this decentralized design exacerbates the client-drift problem —the divergence between local and global updates—mainly due to non-IID data and multi-step local errors [11, 7, 8]. Limited client participation further aggravates drift and degrades performance. To mitigate client drift, existing methods can be broadly grouped into two categories: (i) local objective regularization , which modifies local training to align client updates with the global objective, such as SCAFFOLD [6] , FedProx [12] and FedDyn [11]; and (ii) modified aggregation strategies , which design more robust global update rules beyond simple averaging, such as FedAWA [17], FedLAW [16], and FedDisco [15]. While these approaches improve optimization stability, they are primarily rooted in empirical risk minimization and often overlook the relationship between the global loss landscape and generalization ability. This motivates a new research line that leverages SAM in FL. 
+
+2.3. SAM in Federated Learning 
+
+FedSAM [19, 20] first brought SAM into FL by applying local perturbations to improve generalization. Subsequent variants extended this idea. For example, FedSpeed [35] used an Alternating Direction Method of Multipliers (ADMM) framework to enhance communication efficiency. PLGU [36] and FedSOL [37], explored layer-wise perturbation and proximal-based corrections. FedGAMMA [24] introduced variance-reduction techniques to align client updates from a global perspective. FedSMOO [21] reduced inconsistency by correcting both updates and perturbations through ADMM, while FedLESAM [22] introduced global perturbations to better guide local training. FedFSA [38] focused on parameter sensitivity, applying stronger perturbations only to the most sensitive layers to balance convergence and generalization. FedGloSS [23] shifted attention from local sharpness to global flatness by applying SAM on the server, highlighting the importance of global geometry in federated optimization. Unlike these approaches, our method is motivated by a novel spectral analysis, revealing inter-client disagreement in low-frequency components, which we filter to produce consistent perturbations and flatter minima. 
+
+2.4. Frequency Analysis in Deep Learning 
+
+Frequency-based perspectives have been increasingly adopted to understand deep neural networks. Early studies revealed the spectral bias of neural networks, showing a tendency to learn low-frequency components first [39, 40]. Subsequent work leveraged frequency analysis to interpret network dynamics, such as charac-terizing generalization through Fourier-domain behaviors [39]. Other methods focused on robustness, where perturbation analysis in the frequency domain helped explain vulnerability to high-frequency noise [41, 42]. Otherwise, the feasibility of treating parameter updates as signals is demonstrated by the work [43], which applies FFT to gradients for compression. This shows that optimization signals possess meaningful spectral structure. Unlike these approaches, which analyze networks or inputs, our method conducts spectral analysis di-rectly on SAM’s perturbation vector. We reveal that the perturbation contains structured low-frequency disagreement reflecting optimizer misalignment. By filtering these components, we produce more consistent perturbations that guide the optimization trajectory toward flatter minima. 
+
+3. Background 
+
+3.1. Sharpness-aware Minimization 
+
+To improve model generalization and robustness, modern optimization methods have shifted focus from merely finding solutions with low training loss to finding solutions that reside in flat minima of the loss landscape. SAM [18] is a leading technique for this purpose. It jointly minimizes the loss value and the sharpness by solving the following minimax objective: 
+
+min  
+
+> w
+
+max  
+
+> ∥δ∥≤ ρ
+
+L(w + δ), (1) where L(·) is the empirical loss on the training data, and ρ is the neighborhood size. In practice, the inner maximization is approximated with a single step of gradient ascent. The full optimization process 3for parameter w involves two steps: (1) Compute the perturbation that approximately maximizes the loss: 
+
+δ∗(w) = ρ ∇L (w) 
+
+> ∥∇L (w)∥2
+
+; (2) Update the model parameters using the gradient at the perturbed point: w ←
+
+w − η∇L (w + δ∗(w)) . This procedure encourages the optimizer to converge to flat minima, which are empirically linked to better generalization performance. 
+
+3.2. Federated Learning 
+
+FL is a distributed learning paradigm that enables training a global model on data from K clients, coordinated by a central server, without centralizing the private client datasets Dk. The core objective in FL is to minimize the global empirical risk F (w), defined as the weighted average of the local empirical losses 
+
+fk(w):
+
+min  
+
+> w
+
+F (w) := 1
+
+K
+
+> K
+
+X
+
+> k=1
+
+fk(w), where fk(w) = 1
+
+|D k|
+
+X
+
+> (x,y )∈D k
+
+Lk(w; x, y ). (2) The widely-adopted FedAvg algorithm [1] solves this objective via iterative communication rounds. In each round, the server (1) Broadcasts the global model wt to clients. Clients then perform (2) Local Updates 
+
+on their data to produce wt+1  
+
+> k
+
+. These are (3) Uploaded to the server for (4) Aggregation into the new global model wt+1 = P 
+
+> k
+
+pkwt+1  
+
+> k
+
+.A key challenge in FL is data heterogeneity, where client data distributions are Non-Independent and Identically Distributed (Non-IID). This causes the local objectives fk(w) to be inconsistent with one another, leading to misaligned loss landscapes and the “client drift” phenomenon, which poses a significant challenge to training a robust global model. 
+
+3.3. SAM in Federated Learning 
+
+Given the challenge of training on misaligned local landscapes, a natural strategy is to seek solutions in flat minima. This motivates applying SAM to FL, known as FedSAM [19], which incorporates SAM into each client’s local training. The local and global objectives are: 
+
+min  
+
+> w
+
+F SAM (w) := 1
+
+K
+
+> K
+
+X
+
+> k=1
+
+f SAM  
+
+> k
+
+(w), where f SAM  
+
+> k
+
+(w) = max   
+
+> ∥δk∥≤ ρ
+
+fk(w + δk). (3) Compared with FedAvg, FedSAM differs in that it optimizes the sharpness-aware local objectives rather than the original local losses. While FedSAM encourages convergence to locally flat regions, it does not guarantee a flat global landscape. Under data heterogeneity, the locally computed perturbation vectors 
+
+δk, which capture the directions of sharpness, can themselves diverge. This raises a critical question that existing works have not fully explored: what is the underlying structure of these inter-client perturbation disagreements? Understanding this is key to mitigating their negative impact, which directly motivates our work. 
+
+4. Methods 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 
+
+Frequency Band 
+
+> 1
+> 2
+> 3
+> 4
+> 5
+> 6
+> 7
+> 8
+> Variance
+> 1e 7
+> = 0.1
+> = 0.3
+> = 0.6
+> = 0.8
+> = 1.0
+
+(a) CIFAR-10 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 
+
+Frequency Band  
+
+> 0.5
+> 1.0
+> 1.5
+> 2.0
+> 2.5
+> 3.0
+> 3.5
+> Variance
+> 1e 7
+> = 0.1
+> = 0.3
+> = 0.6
+> = 0.8
+> = 1.0
+
+(b) CIFAR-100 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 
+
+Frequency Band  
+
+> 0.5
+> 1.0
+> 1.5
+> 2.0
+> 2.5
+> Variance
+> 1e 7
+> = 0.1
+> = 0.3
+> = 0.6
+> = 0.8
+> = 1.0
+
+(c) TinyImageNet  
+
+> Figure 1:
+
+(a–c) Variance of SAM perturbations across clients under different levels of data heterogeneity, controlled by the Dirichlet concentration parameter α. Across all datasets and settings, inter-client variance is consistently concentrated in the low-frequency components, indicating that client disagreement is primarily a low-frequency phe-nomenon. 
+
+4In this section, we introduce our proposed method, Federated learning with Frequency domain Filtering of SAM perturbations (FedFFT). We begin by elaborating on the motivation stemming from our observations of client perturbations in federated environments. Subsequently, we provide a detailed description of the FedFFT algorithm. 
+
+4.1. Motivation: Analyzing Client Perturbations in the Frequency Domain 
+
+In FL, non-IID data distributions among clients are the primary cause of the client drift phenomenon. While Sharpness-Aware Minimization (SAM) is a powerful technique for improving generalization, its ap-plication in FL may amplify this issue. Since SAM perturbations are computed locally, they intrinsically reflect the geometry of client-specific loss landscapes, causing the perturbation vectors themselves to diverge. However, the underlying structure of these perturbation divergences remains poorly understood. To bridge this gap, we introduce a novel diagnostic approach. To the best of our knowledge, this work is the first to employ frequency-domain analysis to systematically investigate the nature of SAM perturbation disagreements in a federated context. We treat each client’s perturbation vector as a signal and use the Real-valued Fast Fourier Transform (RFFT) to observe its characteristics. Our analysis is conducted on a per-layer basis to respect the model’s architectural integrity, with the full implementation details provided in below Section 4.2. For each layer, we compute the variance across clients within different frequency bands. As illustrated in Figure 1, which averages these variances across all layers, we discover a clear pattern: 
+
+The primary disagreements are concentrated in the low-frequency components, while the disagreements in high-frequency components are much smaller. This finding suggests that the low-frequency parts are highly correlated with client-specific biases, whereas the high-frequency parts may represent more consistent features of the shared learning task. 
+
+Based on this key insight, we formulate our central hypothesis: by filtering out the discordant low-frequency components while preserving the consistent high-frequency information, we can mitigate client drift and improve the global model’s performance. 
+
+4.2. FedFFT: The Proposed Method 
+
+Considering that inter-client disagreements are predominantly a low-frequency phenomenon, we propose 
+
+Fed erated learning with Frequency-domain Filtering of SAM per turbations ( FedFFT ). Our method re-fines the client-side SAM update by integrating a frequency filtering module. This module is designed as a lightweight, plug-and-play replacement for the standard perturbation calculation within any federated learning framework that employs SAM-based optimizers on client devices. The central motivation for FedFFT stems from a key observation: the SAM perturbation vector itself behaves as an optimization signal with meaningful spectral structure. Earlier analyses focus primarily on the frequency properties of model parameters or input data, but recent systems work has demonstrated that optimization signals—such as gradients—also admit interpretable and structured frequency characteristics. Notably, FFT-based Gradient Sparsification [43] applies the Fast Fourier Transform to gradients and shows that a significant portion of their energy is concentrated in specific frequency bands, enabling principled compression. This establishes an important precedent: optimization vectors are not noise-like; they possess stable, compressible, and manipulable spectral patterns. FedFFT builds upon this foundation but innovates in two crucial ways: (1) We apply spectral analysis to SAM perturbations, not gradients. SAM perturbations encode sharpness-sensitive directions that guide the optimizer, making their spectral structure directly tied to geometry rather than learning signals. (2) Our goal is not compression but drift suppression: by removing low-frequency components, which we empirically identify as the main carriers of inter-client heterogeneity, we obtain more consistent client updates and promote convergence to flatter, more robust minima. Let’s consider a single local update step for a client k at communication round t ∈ [1 , T ] and local iteration e ∈ [1 , E ]. For simplicity, we omit the round and local iteration indices. Now, we first need to compute the standard SAM perturbation δk for client k like FedSAM, denoted as 
+
+δk = ρ · ∇L k(wk)
+
+∥∇L k(wk)∥2
+
+(4) 5where δk has the same size with model parameter wk and includes all layer-wise perturbations δk 
+
+> 1: L
+
+and δkl
+
+is the perturbation of parameter wkl at layer l. The core idea of FedFFT is to selectively discard the discordant low-frequency components of the SAM perturbation while preserving the high-frequency components that capture more consistent aspects of the sharpness landscape. This filtering is performed on a per-layer basis to respect the model’s architectural integrity. For any given weight layer l with parameters wkl , the FedFFT procedure is as follows: 1. Transform to Frequency Domain : Instead of directly applying this perturbation, we transform it into the frequency domain. We flatten the perturbation tensor δkl into a vector vkl and apply the Real-valued Fast Fourier Transform (rFFT): 
+
+ˆvkl = rFFT (vkl ), (5) where ˆvkl is the frequency-domain representation of the perturbation. 2. Apply High-Pass Filter : Next, we apply a high-pass filter operator, Hr (·), which zeroes out the lowest r fraction of frequency coefficients. Given a truncation ratio r ∈ [0 , 1) , the filtering operation is defined as: 
+
+[Hr (ˆ vkl )] m =
+
+(
+
+0, if m < ⌊r · len (ˆ vkl )⌋,
+
+[ˆ vkl ]m, otherwise , (6) where m indexes the frequency coefficients in ascending order. This step is the crux of our method, as it explicitly removes the client-specific biases encoded in the low-frequency domain. 3. Reconstruct Filtered Perturbation : We then transform the filtered vector back into the parameter domain using the inverse rFFT (iRFFT) and reshape it to its original tensor shape to obtain the refined perturbation ˜δl: ˜δkl = reshape (iRFFT (Hr (ˆ vkl ))) . (7) For simplicity, for any given layer’s perturbation tensor δkl at client k, we summarize the three steps above as a filtering operation: ˜δkl = Filter (δkl , r ). (8) Finally, the local model in client k is updated using this filtered perturbation, following the standard SAM procedure: 
+
+wk ← wk − η · ∇L k(wk + ˜δk), (9) where ˜δk is the collection of all layer-wise filtered perturbations ˜δkl .By replacing the standard SAM perturbation with our filtered version, FedFFT forces the local optimizer to ignore the most heterogeneous directions of sharpness, thereby promoting greater consistency among client updates and facilitating convergence to a more robust global minimum. As shown in, we provide the workflow of FedAvg, FedSAM and our FedFFT in Algorithm 1. 
+
+4.3. Complexity Analysis 
+
+Standard SAM. Let d denote the number of parameters and Tfw/bw denote the cost of a forward + backward pass. SAM requires two such passes per iteration: (i) computing gradients and applying the perturbation, and (ii) recomputing gradients at the perturbed parameters. The perturbation itself is linear in d. Thus, the total complexity is 
+
+TSAM = 2 Tfw/bw + O(d),
+
+where the O(d) term is negligible compared with forward/backward computation. 
+
+Ours. Our method modifies only the perturbation step. For each parameter tensor, we perform: (i) flattening the perturbation vector, (ii) forward FFT O(d log d), (iii) frequency-domain masking O(d), (iv) inverse FFT O(d log d). This does not modify the forward/backward computation. Thus, 
+
+TFFT = 2 Tfw/bw + O(d log d).
+
+Comparison. Both SAM and FFT share the same dominant term 2Tfw/bw . The additional O(d log d)
+
+FFT overhead is small in practice because (i) Tfw/bw ≫ d log d for modern deep networks, and (ii) FFT operations are highly optimized on GPUs. Therefore, FFT-SAM maintains the computational structure of SAM while adding only a minor cost. 6Algorithm 1 FedAvg, FedSAM, and Our FedFFT 
+
+Input: Communication rounds T , local epochs E, perturbation radius ρ, local learning rate η, frequency truncation ratio r
+
+Output: Global model wTg 
+
+> 1:
+
+Initialize global model w0 
+
+> g
+> 2:
+
+for t = 0 to T − 1 do  
+
+> 3:
+
+Randomly select active client set St 
+
+> 4:
+
+for each client k ∈ St in parallel do  
+
+> 5:
+
+wk,t, 0 ← wtg 
+
+> 6:
+
+for e = 0 to E − 1 do  
+
+> 7:
+
+perturbation stage  
+
+> 8:
+
+FedAvg: δk,t,e = 0  
+
+> 9:
+
+FedSAM: δk,t,e = ρ · ∇L k (wk,t,e )  
+
+> ∥∇L k(wk,t,e )∥2
+> 10:
+
+FedFFT: δk,t,e  
+
+> 1: L
+
+= Filter (δk,t,e  
+
+> 1: L
+
+, r ) 
+
+> 11:
+
+wk,t,e +1 = wk,t,e − η∇L k(wk,t,e + δk,t,e ) 
+
+> 12:
+
+end for  
+
+> 13:
+
+Send local model wk,t,E to server  
+
+> 14:
+
+end for  
+
+> 15:
+
+wt+1  
+
+> g
+
+← 1
+
+> |St|
+
+P 
+
+> k∈St
+
+wk,t,E  
+
+> 16:
+
+end for  
+
+> 17:
+
+Return wTg
+
+4.4. SAM in FL 
+
+To comprehensively understand the differences among existing SAM-based federated learning optimiza-tion methods, we have systematically summarized representative algorithms in Table 1. A comparison is made from the perspectives of base algorithms (FedAvg, Scaffold, FedDyn), optimization objectives (local or global sharpness), and perturbation construction methods, clearly revealing the differences in their design philosophies. This summary also further demonstrates the uniqueness of FedFFT in perturbation frequency domain filtering, complementing existing methods. 
+
+5. Experiments 
+
+5.1. Experiments Setup 5.1.1. Datasets 
+
+We evaluate our methods on three widely used image classification benchmarks: CIFAR-10 [44], CIFAR-100 [44], and Tiny-ImageNet [45]. These datasets vary in complexity, number of classes, and dataset size, providing a comprehensive evaluation of the robustness and generalization of federated learning algorithms. Specifically, CIFAR-10 contains 60,000 color images of size 32 ×32 pixels across 10 classes, with 50,000 training images and 10,000 test images. CIFAR-100 has the same total number of images but includes 100 classes, with 500 training images and 100 test images per class, making it a more challenging benchmark due to the increased number of classes and finer-grained categories. Tiny-ImageNet is a subset of the ImageNet dataset, consisting of 200 classes, each with 500 training images, 50 validation images, and 50 test images, with images resized to 64 ×64 pixels. Its larger number of classes and higher-resolution images present a significantly more challenging scenario for federated learning. To simulate realistic data heterogeneity across clients, we adopt a Dirichlet distribution-based partition-ing strategy. Specifically, for each dataset, we sample class distributions for each client from a Dirichlet distribution parameterized by α ∈ 0.1, 0.6. A smaller α value corresponds to more non-IID distributions, meaning that individual clients receive highly skewed subsets of classes, reflecting the imbalanced and biased data often observed in real-world federated scenarios. Conversely, a larger α value leads to more IID-like distributions, where each client’s local dataset more closely approximates the overall class distribution. To illustrate the severity of data heterogeneity under the highly non-IID setting, Figure 2 visualizes the 7Table 1: Summary of representative SAM-based federated learning algorithms addressing data heterogeneity. 
+
+Research Work Base Algo-rithm Minimizing Target Perturbation Formulation 
+
+FedSAM ([19, 18]) FedAvg Local sharpness ρ · ∇L k
+
+∥∇L k ∥
+
+MoFedSAM ([19]) FedAvg + Mo-mentum Local sharpness ρ · ∇L k
+
+∥∇L k ∥
+
+FedGAMMA ([24]) Scaffold Local sharpness ρ · ∇L k
+
+∥∇L k ∥
+
+FedSMOO ([21]) FedDyn Local sharpness (cor-rected) 
+
+ρ · ∇L k − μi − s
+
+∥∇L k − μi − s∥
+
+FedLESAM ([22]) FedAvg / Scaf-fold / FedDyn Global sharpness ρ · wkold − wtg
+
+∥wkold − wtg ∥
+
+FedGloSS ([23]) FedDyn-like Global sharpness via pseudo-gradient 
+
+ρ · ∆t−1
+
+> w
+
+∥∆t−1 
+
+> w
+
+∥
+
+FedFFT (ours) FedAvg / Scaf-fold / FedDyn Local sharpness with spec-tral filtering 
+
+ρ · Filter 
+
+ ∇L k
+
+∥∇L k ∥
+
+
+
+client-wise class distributions of CIFAR-10, CIFAR-100, and Tiny-ImageNet under Dirichlet partitions with 
+
+α = 0 .1 and α = 0 .6. Each heatmap illustrates the proportion of samples per class for each client, where the horizontal axis corresponds to client indices and the vertical axis represents class IDs. As expected, the 
+
+α = 0 .1 setting exhibits highly skewed and imbalanced data allocations: certain clients show dark, concen-trated regions indicating dominance of only a few classes, while other classes may be nearly absent. This reflects a strongly non-IID scenario commonly observed in real-world FL applications. In contrast, when 
+
+α = 0 .6, the heatmaps become noticeably smoother with reduced color variations, indicating that clients receive more balanced class distributions and the overall data heterogeneity is significantly alleviated. These two complementary visualizations allow us to systematically assess the behavior and robustness of different federated learning algorithms across varying levels of client data heterogeneity. 81 6 11 16 21 26 31 36 41 46 51 56 61 66 71 76 81 86 91 96  
+
+> Client ID
+> 1
+> 2
+> 3
+> 4
+> 5
+> 6
+> 7
+> 8
+> 9
+> 10
+> Class ID
+> TinyImageNet =0.6 Data Distribution Across Clients
+> 0
+> 100
+> 200
+> 300
+> 400
+
+(a) CIFAR-10, α = 0 .11 6 11 16 21 26 31 36 41 46 51 56 61 66 71 76 81 86 91 96   
+
+> Client ID
+> 1
+> 6
+> 11
+> 16
+> 21
+> 26
+> 31
+> 36
+> 41
+> 46
+> 51
+> 56
+> 61
+> 66
+> 71
+> 76
+> 81
+> 86
+> 91
+> 96
+> Class ID
+> TinyImageNet =0.6 Data Distribution Across Clients
+> 0
+> 25
+> 50
+> 75
+> 100
+> 125
+> 150
+> 175
+
+(b) CIFAR-100, α = 0 .11 6 11 16 21 26 31 36 41 46 51 56 61 66 71 76 81 86 91 96   
+
+> Client ID
+> 1
+> 6
+> 11
+> 16
+> 21
+> 26
+> 31
+> 36
+> 41
+> 46
+> 51
+> 56
+> 61
+> 66
+> 71
+> 76
+> 81
+> 86
+> 91
+> 96
+> 101
+> 106
+> 111
+> 116
+> 121
+> 126
+> 131
+> 136
+> 141
+> 146
+> 151
+> 156
+> 161
+> 166
+> 171
+> 176
+> 181
+> 186
+> 191
+> 196
+> Class ID
+> TinyImageNet =0.6 Data Distribution Across Clients
+> 0
+> 50
+> 100
+> 150
+> 200
+> 250
+> 300
+
+(c) Tiny ImageNet, α = 0 .11 6 11 16 21 26 31 36 41 46 51 56 61 66 71 76 81 86 91 96  
+
+> Client ID
+> 1
+> 2
+> 3
+> 4
+> 5
+> 6
+> 7
+> 8
+> 9
+> 10
+> Class ID
+> TinyImageNet =0.6 Data Distribution Across Clients
+> 0
+> 50
+> 100
+> 150
+> 200
+> 250
+> 300
+> 350
+
+(d) CIFAR-10, α = 0 .61 6 11 16 21 26 31 36 41 46 51 56 61 66 71 76 81 86 91 96   
+
+> Client ID
+> 1
+> 6
+> 11
+> 16
+> 21
+> 26
+> 31
+> 36
+> 41
+> 46
+> 51
+> 56
+> 61
+> 66
+> 71
+> 76
+> 81
+> 86
+> 91
+> 96
+> Class ID
+> TinyImageNet =0.6 Data Distribution Across Clients
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> 60
+> 70
+> 80
+> 90
+
+(e) CIFAR-100, α = 0 .61 6 11 16 21 26 31 36 41 46 51 56 61 66 71 76 81 86 91 96   
+
+> Client ID
+> 1
+> 6
+> 11
+> 16
+> 21
+> 26
+> 31
+> 36
+> 41
+> 46
+> 51
+> 56
+> 61
+> 66
+> 71
+> 76
+> 81
+> 86
+> 91
+> 96
+> 101
+> 106
+> 111
+> 116
+> 121
+> 126
+> 131
+> 136
+> 141
+> 146
+> 151
+> 156
+> 161
+> 166
+> 171
+> 176
+> 181
+> 186
+> 191
+> 196
+> Class ID
+> TinyImageNet =0.6 Data Distribution Across Clients
+> 0
+> 20
+> 40
+> 60
+> 80
+
+(f) Tiny ImageNet, α = 0 .6
+
+Figure 2: Client data distributions across CIFAR-10, CIFAR-100, and Tiny-ImageNet under Dirichlet partitions α = 0 .1 and 
+
+α = 0 .6.
+
+5.1.2. Baselines 
+
+We benchmark FedFFT against a comprehensive suite of baselines in three main categories: (i) foun-dational FL algorithms, including FedAvg [1], SCAFFOLD [6], and FedDyn [11]; (ii) the direct applica-tion of SAM in FL, namely FedSAM and its momentum-enhanced variant MoFedSAM [20, 19]; and (iii) advanced FL-SAM variants that aim to improve consistency, such as FedGAMMA [24], FedSMOO [21], FedLESAM [22], and FedGloSS [23]. To ensure fair comparisons, we integrate our approach with these foundational algorithms following FedLESAM, yielding FedFFT (FedAvg-based), FedFFT-S (SCAFFOLD-based), and FedFFT-D (FedDyn-based). We summarize the characteristics of SAM in FL methods; please refer to the Table 1 for details. 
+
+5.1.3. Backbone 
+
+For the main experiments, the backbone network is ResNet-18 equipped with Group Normalization (GN) layers instead of Batch Normalization (BN) to improve training stability in federated settings. GN alleviates the issues caused by small and heterogeneous local batch sizes, making it more suitable for cross-client training. To further evaluate the generality and robustness of our approach across different model architectures, we additionally conduct cross-model experiments using three representative backbones: ResNet-20, a CIFAR-specific variant where all BN layers are replaced with GN to enhance stability under non-IID data; DenseNet-121, implemented following the standard DenseNet design with GN applied after the final dense block; and Vision Transformer (ViT), where we adopt the vit_tiny_patch16_224 model from the timm library to evaluate our method on transformer-based architectures. These diverse architectures allow us to assess whether the proposed method generalizes effectively beyond a single CNN backbone. 
+
+5.1.4. Implementation Details 
+
+For our experiments on CIFAR-10 [44], CIFAR-100 [44], and Tiny-ImageNet [45], we adopt training configurations consistent with FedSMOO [21] and FedLESAM [22] to ensure fair comparison. The backbone network is ResNet-18 equipped with Group Normalization (GN) layers instead of Batch Normalization (BN) 9to improve training stability in federated settings. Optimization is performed using stochastic gradient descent (SGD). The total number of communication rounds is set to 800 for CIFAR-10 and CIFAR-100, and 300 for Tiny-ImageNet. The initial local learning rate is η = 0 .1. Unless otherwise specified, the learning rate decays exponentially by a factor of 0.998 × per round; however, FedDyn, FedSMOO, FedLESAM-D, and FedFFT-D use a slower decay rate of 0.9995 × for the proxy term. The local training settings for each dataset are as follows: for CIFAR-10, we use a batch size of 50 and 5 local epochs; for CIFAR-100, the batch size is 20 with 2 local epochs; for Tiny-ImageNet, we follow the same configuration as CIFAR-10. These choices balance computational efficiency and convergence in federated settings. 0.1           
+
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> Test Accuracy (%)
+> Test Accuracy on CIFAR10 ( =0.1)
+> 0100 200 300 400 500 600 700 800
+> Communication Rounds
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> 0.9
+> Test Accuracy (%)
+> Test Accuracy on CIFAR10 ( =0.6)
+> FedFFT_D
+> FedDyn
+> FedGloSS
+> FedSAM_D
+> FedSMOO
+
+(a) CIFAR-10 0.0            
+
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> Test Accuracy (%)
+> Test Accuracy on CIFAR100 ( =0.1)
+> 0100 200 300 400 500 600 700 800
+> Communication Rounds
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> Test Accuracy (%)
+> Test Accuracy on CIFAR100 ( =0.6)
+> FedFFT_D
+> FedDyn
+> FedGloSS
+> FedSAM_D
+> FedSMOO
+
+(b) CIFAR-100 0.00          
+
+> 0.05
+> 0.10
+> 0.15
+> 0.20
+> 0.25
+> 0.30
+> 0.35
+> Test Accuracy (%)
+> Test Accuracy on TinyImageNet ( =0.1)
+> 050 100 150 200 250 300
+> Communication Rounds
+> 0.00
+> 0.05
+> 0.10
+> 0.15
+> 0.20
+> 0.25
+> 0.30
+> 0.35
+> 0.40
+> Test Accuracy (%)
+> Test Accuracy on TinyImageNet ( =0.6)
+> FedFFT_D
+> FedDyn
+> FedGloSS
+> FedLESAM_D
+> FedSAM_D
+> FedSMOO
+
+(c) Tiny-ImageNet 
+
+Figure 3: Learning curves on three benchmarks under Dirichlet partitionings with concentration parameters 0.1 and 0.6, using a ResNet-18 model. 
+
+5.2. Main Results 
+
+Comparison with State-of-the-Art Baselines. Table 2 presents the results on CIFAR-10, CIFAR-100, and Tiny-ImageNet with ResNet-18. Overall, FedFFT delivers consistent improvements under both SCAFFOLD and FedDyn frameworks, indicating that frequency-domain perturbation modeling complements existing federated optimization paradigms. On CIFAR-10, FedFFT-D achieves the best performance under both Dirichlet partitions, demonstrating its effectiveness in standard federated settings. For CIFAR-100, while FedFFT-D is slightly outperformed by FedLESAM-S under α = 0 .6, it regains superiority in the more heterogeneous α = 0 .1 case, suggesting that suppressing low-frequency perturbations is particularly beneficial when client data distributions are highly skewed. Moreover, on Tiny-ImageNet, FedFFT-D clearly surpasses all baselines, highlighting its robustness and scalability to larger and more challenging tasks. 10 Table 2: Test accuracy comparison (%) of different methods on CIFAR-10, CIFAR-100 and Tiny-ImageNet, with ResNet-18. “-S” and “-D” denote using SCAFFOLD and FedDyn as base algorithms. All results on Tiny-ImageNet are reproduced by us. Results marked with † are reproduced by us for CIFAR-10 and CIFAR-100. Others are from [21, 22].                                                                                                               
+
+> Method CIFAR-10 CIFAR-100 Tiny-ImageNet
+> α= 0 .6α= 0 .1α= 0 .6α= 0 .1α= 0 .6α= 0 .1
+> FedAvg 79.52 76.00 46.35 42.64 28.31 27.48 FedSAM †81.91 74.92 48.08 45.53 33.16 29.46 MoFedSAM 84.13 78.71 54.38 44.85 33.50 29.77 FedLESAM 81.04 76.93 47.92 44.48 27.91 26.91 Our FedFFT 83.02 77.53 48.59 46.83 33.58 30.43 SCAFFOLD 81.81 78.57 51.98 44.41 35.34 32.11 FedSAM-S †83.88 76.68 50.19 49.14 35.84 31.73 FedGamma-S 82.64 78.95 53.41 46.39 36.85 30.09 FedLESAM-S 84.94 79.52 54.61 48.07 28.47 27.70 Our FedFFT-S 84.69 79.24 52.75 49.85 36.15 33.08 FedDyn 83.22 78.08 50.82 42.50 28.01 24.19 FedSAM-D †82.29 79.11 53.70 46.28 38.18 31.39 FedSMOO-D 84.55 80.82 53.92 46.48 38.71 32.45 FedLESAM-D 84.27 80.08 53.27 46.42 27.36 25.32 FedGloSS-D †82.58 79.23 50.92 47.36 31.72 28.04 Our FedFFT-D 87.19 83.05 54.46 50.90 40.85 34.46
+
+Beyond final accuracy, the convergence curves in Figure 3 further underline the advantage of our method. Across all three datasets—CIFAR-10, CIFAR-100, and Tiny-ImageNet—FedFFT consistently converges faster than competing approaches. This accelerated convergence indicates that by harmonizing client updates at the spectral level, FedFFT navigates the optimization landscape more efficiently, reducing the number of communication rounds required to reconcile heterogeneous updates and stabilizing learning dynamics even under highly non-IID partitions. 
+
+Generalization Across Diverse Model Architectures. To verify that the efficacy of FedFFT is not confined to a specific model class, we evaluate its performance across a diverse range of architectures, from lightweight ResNet-18, ResNet-20 to deeper DenseNet-121 and Vision Transformers (ViT). We perform on CIFAR-10 and CIFAR-100 with a moderately heterogeneous setting α = 0 .6. As shown in Tab 4, FedFFT usually outperforms baselines across different architectures. Critically, the performance gains are substantial even on powerful models like ViT. This suggests that the problem FedFFT addresses—the inconsistency in the low-frequency spectrum of client perturbations—is a fundamental artifact of the federated optimization process itself, independent of a model’s representation capacity. Simply using a larger model does not auto-matically resolve the geometric misalignment between clients. Our spectral filtering acts as a complementary and orthogonal improvement, harmonizing the local updates to allow these powerful architectures to con-verge more effectively. These results therefore underscore the broad applicability and scalability of FedFFT, establishing it as a model-agnostic enhancement for sharpness-aware federated learning. 
+
+Visualization of the Global Loss Landscape. To gain deeper insight into the optimization behavior, we also visualize the 2D loss landscapes of different algorithms on CIFAR-10 with ResNet-18 under the challenging α = 0 .1 setting (Figure 4). We compare four representative methods: FedSAM, FedSMOO, Fed-GLOSS, and our FedFFT-D. The visualized ranges of these landscapes reveal clear differences in sharpness: FedSAM exhibits a steep and narrow basin (range approximately 0.6–8.6), while FedSMOO (0.3–5.7) and FedGLOSS (0.45–5.85) show moderately improved smoothness. In contrast, FedFFT-D displays the widest and flattest landscape (0.3–4.8), with a noticeably broader and smoother central region. This indicates that FedFFT-D not only finds flatter minima but also maintains stability across a larger neighborhood, reflecting stronger generalization and a reduced tendency to overfit client-specific noise. Such landscape characteristics align well with the improved accuracy and convergence speed observed earlier, providing geometric evidence that spectral-level update alignment leads to more stable federated optimization. 
+
+Visualizing the Effect of Spectral Filtering. To qualitatively understand how FedFFT achieves greater consistency, we visualize the distributions of client perturbations, model features, and model param-11 Table 3: Training wall-clock time to reach FedAvg accuracy on CIFAR-10 with Dirichlet α = 0 .1 using ResNet-18. Experiments run on NVIDIA Tesla A40. 
+
+Method Time/Round (s) Rounds Total Time (s) 
+
+FedAvg 11.73 800 9390.21 FedSAM 16.84 718 12093.24 FedSMOO 21.74 312 6785.71 FedGloSS 23.07 487 11235.70 
+
+FedFFT-D (Ours) 21.63 302 6532.98 
+
+eters. The visualizations in Fig. 5 reveal a clear causal chain. (1) More Cohesive Perturbations (Fig. 5.2): 
+
+The process begins with the perturbations themselves. The original SAM perturbations from different clients are widely scattered in the PCA space. After applying FedFFT’s low-frequency filter, these perturbations become significantly more compact, confirming that our method successfully reduces inter-client discrepancy at its source. (2) Aligned Feature Representations (Fig. 5.2): This improved consistency in perturbations directly translates to more aligned model behavior. We observe that the average features extracted by the FedFFT-trained model are much more tightly clustered for each class compared to the scattered features from the FedSAM model. (3) Consolidated Client Models (Fig. 5.2): Ultimately, this leads to better convergence of the models themselves. The parameters of client models trained with FedFFT exhibit a much smaller variance and are clustered closer to a central point, indicating that spectral filtering effectively mitigates client drift and guides all clients toward a more unified and robust global solution. 1.00 0.75 0.50 0.25 0.00 0.25 0.50 0.75 1.00 
+
+> Direction d1 (alpha)
+> 1.00
+> 0.75
+> 0.50
+> 0.25
+> 0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00
+> Direction d2 (beta)
+> FedSAM Landscape
+> 0.6
+> 1.6
+> 2.6
+> 3.6
+> 4.6
+> 5.6
+> 6.6
+> 7.6
+> 8.6
+
+(a) FedSAM 1.00 0.75 0.50 0.25 0.00 0.25 0.50 0.75 1.00  
+
+> Direction d1 (alpha)
+> 1.00
+> 0.75
+> 0.50
+> 0.25
+> 0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00
+> Direction d2 (beta)
+> FedFFT_D Landscape
+> 0.3
+> 0.8
+> 1.3
+> 1.8
+> 2.3
+> 2.8
+> 3.3
+> 3.8
+> 4.3
+> 4.8
+
+(b) FedFFT_D 1.00 0.75 0.50 0.25 0.00 0.25 0.50 0.75 1.00  
+
+> Direction d1 (alpha)
+> 1.00
+> 0.75
+> 0.50
+> 0.25
+> 0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00
+> Direction d2 (beta)
+> FedSMOO Landscape
+> 0.3
+> 0.9
+> 1.5
+> 2.1
+> 2.7
+> 3.3
+> 3.9
+> 4.5
+> 5.1
+> 5.7
+
+(c) FedSMOO 1.00 0.75 0.50 0.25 0.00 0.25 0.50 0.75 1.00  
+
+> Direction d1 (alpha)
+> 1.00
+> 0.75
+> 0.50
+> 0.25
+> 0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00
+> Direction d2 (beta)
+> FedGloSS Landscape
+> 0.45
+> 1.05
+> 1.65
+> 2.25
+> 2.85
+> 3.45
+> 4.05
+> 4.65
+> 5.25
+> 5.85
+
+(d) FedGloss 
+
+Figure 4: 2D loss landscape comparison across different algorithms on CIFAR-10 under Dirichlet partition with 
+
+α = 0 .1, using ResNet-18 as the backbone model. 
+
+Training Efficiency. Training efficiency is another crucial factor in federated learning (FL), as practical deployments often require methods to reach a target accuracy under limited computational and wall-clock budgets. In this study, we adopt FedAvg as the reference baseline and first run it for 800 rounds on CIFAR-10 under a Dirichlet–0.1 client distribution using a ResNet-18 backbone, recording the highest accuracy it achieves. For each competing method, we then evaluate its training efficiency in terms of (i) the number of communication rounds required to match this accuracy level, and (ii) the total wall-clock time consumed. The average per-round time (the “Times” column in Table 3) is computed by dividing the total training time by the number of rounds. As shown in Table 3, although FFT introduces a theoretically higher perturbation cost compared with the linear perturbation used in SAM, its practical overhead is negligible relative to the dominant forward/backward cost. The optimization benefits brought by our FFT-based perturbation filtering lead to significantly fewer required rounds. FedFFT-D reaches the target accuracy in only 302 rounds—representing a 62.25% reduction in communication rounds compared to FedAvg (800 rounds). Even relative to strong baselines such as FedSMOO (312 rounds) and FedGloSS (487 rounds), FedFFT-D still converges faster, requiring the fewest rounds among all methods. The accelerated convergence enabled by our FFT-based optimization leads to a substantial reduction in total wall-clock time. Overall, FedFFT-D achieves the fastest training time among all methods while reaching the same target accuracy as FedAvg. The suppression of low-frequency components in the perturbation appears to enable a more stable and direct optimization trajectory, thereby accelerating convergence under highly heterogeneous client distributions. 12 Table 4: Test accuracy (%) across different backbones on CIFAR-10 and CIFAR-100 with Dirichlet ( α = 0 .6). All methods use FedDyn as the base algorithm. Data Method ResNet18 ResNet20 DenseNet121 ViT CIFAR10 FedSAM 82.29 88.82 89.47 49.04 FedSMOO 84.55 89.86 88.72 50.23 FedGloSS 82.58 84.17 86.84 50.10 FedFFT 87.19 90.56 90.57 53.31 
+
+CIFAR100 FedSAM 53.70 58.92 64.19 28.01 FedSMOO 53.92 58.17 63.74 29.48 FedGloSS 50.92 46.68 57.14 27.54 FedFFT 54.46 61.60 61.66 30.36 
+
+Table 5: Ablation of frequency-domain perturbation filtering strategies on CIFAR-10 using a ResNet-18 backbone. 
+
+Filtering Strategy α=0 .6 α=0 .1
+
+None (FedSAM) 81.91 74.92 High-frequency filtering 81.66 74.81 Random filtering 81.97 75.09 
+
+L2-norm rescaling 81.88 74.79 
+
+Coordinate-wise clipping 80.13 75.19 
+
+Low-frequency (Ours) 83.02 77.53 0.006 0.004 0.002 0.000 0.002 0.004 0.006 
+
+> PC1
+> 0.002
+> 0.000
+> 0.002
+> 0.004
+> PC2
+> Original Perturbations
+> Filtered Perturbations
+
+(a) Client Perturbation Distribution 40 20 0 20 40 60  
+
+> PC1
+> 60
+> 40
+> 20
+> 0
+> 20
+> 40
+> 60
+> PC2
+> FedSAM
+> FedFFT
+
+(b) Model Feature Distribution 0.75 0.50 0.25 0.00 0.25 0.50 0.75 1.00  
+
+> PC1
+> 1.00
+> 0.75
+> 0.50
+> 0.25
+> 0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00
+> PC2
+> FedSAM
+> FedFFT
+
+(c) Client Model Parameters 
+
+Figure 5: Effect of low-frequency perturbation filtering on ResNet-18/CIFAR-10 ( α = 0 .1). The comparison between FedSAM (blue) and FedFFT (red) shows: (a) increased compactness of client perturbations ( conv1.weight ), leading to (b) more consistent model features ( layer4.1.gn2 ) and (c) more aligned client model parameters ( conv1.weight ). 
+
+6. Discussion 
+
+6.1. Ablation Study 6.1.1. Different filtering strategies. 
+
+To validate our central hypothesis—that inter-client inconsistency is primarily concentrated in the low-frequency spectrum—we compare our proposed low-frequency filtering with several alternative perturbation-modification strategies. In addition to the proposed low-frequency filtering, we compare against several al-ternative perturbation-modification strategies using the same filtering ratio of 0.01. Specifically, we evaluate high-frequency filtering, low-frequency filtering, and random filtering under an identical sparsity level. For random filtering, we first flatten the SAM perturbation and apply an rFFT transform; we then randomly select 1% of the frequency coefficients and set them to zero. High-frequency filtering zeros out the top 1% highest-frequency components, whereas low-frequency filtering zeros out the lowest 1% frequency compo-nents. This controlled setup ensures that all methods modify perturbations with the same magnitude of frequency-domain sparsity, allowing for a fair comparison of their effects on inter-client consistency. Beyond 13 high-frequency and random filtering baselines, we further examine two smoothing-style approaches applied to the SAM perturbation δk = ρ · ∇ Lk(wk)/∥∇ Lk(wk)∥2.
+
+L2-norm rescaling constrains the perturbation magnitude by projecting δk back to the SAM radius whenever its ℓ2-norm exceeds ρ. Coordinate-wise clipping suppresses extreme perturbation values using a threshold proportional to the median magnitude of δk. We evaluate all filtering strategies on CIFAR-10 under Dirichlet heterogeneity with α = 0 .6 and α = 0 .1 using a ResNet-18 backbone. As shown in Table 5, high-frequency filtering, random filtering, L2-norm rescaling, and coordinate-wise clipping all produce neg-ligible improvements over the standard FedSAM baseline. In contrast, removing low-frequency components consistently yields substantial and stable performance gains across both heterogeneity levels. These results demonstrate that the effectiveness of FedFFT does not stem from generic smoothing, coefficient trunca-tion, or norm-based regularization, but specifically from filtering the low-frequency spectral components of SAM perturbations—the components exhibiting the largest cross-client disagreement under heterogeneous federated settings. 
+
+6.1.2. Impact of Filtering Ratio. 
+
+We explore the impact of varying the filtering ratio r from 0.1% to 8% to highlight the flexibility and adaptability of hyperparameter tuning in our proposed FedFFT. As shown in Fig. 6, we report the perfor-mance of different r values in FedFFT, where we view FedSAM as baseline and use FedAvg, SCAFFOLD and FedDyn as the base algorithms, respectively. We can find that even with a small r such as 0.1% , ours can consistently outperform its baseline. It proves that removing the discordant low-frequency components is beneficial for sharpness-aware federated optimization. Besides, high filtering ratios ( > 7% ) lead to grad-ual performance degradation, approaching or slightly falling below the baseline, which may remove useful information for optimization. Overall, these results confirm that our FedFFT can stably improve accuracy across all models when maintaining a reasonable filtering ratio. Based on our experiments, we recommend a safe range for r between 0.5% and 4%. 0 1 2 3 4 5 6 7 8  
+
+> Filtering Ratio r(%)
+> 76
+> 78
+> 80
+> 82
+> 84
+> Test Accuracy
+> FedFFT-A
+> FedSAM-A
+> FedFFT-D
+> FedSAM-D
+> FedFFT-S
+> FedSAM-S
+> Figure 6: Test accuracy with different filtering ratios on CIFAR-10 ( α= 0 .1). “-A”, “-S” and “-D” denote using FedAvg, SCAFFOLD and FedDyn as the base algorithms.
+
+6.1.3. Robustness to FL Settings. 
+
+We further conduct a systematic robustness analysis of FedFFT across three key federated learning hy-perparameters: client activation rate, number of local training epochs, and total number of participating clients. The results, summarized in Fig. 7, show that FedFFT consistently and substantially outperforms FedSAM under all tested configurations, with its benefits becoming more pronounced as the learning condi-tions become more challenging. In Fig. 7(a), we vary the activation rate from 5% to 20% while fixing the number of clients to 100 and local epochs to 5. Extremely low activation rates are known to intensify client drift and destabilize optimization, yet FedFFT retains a clear and stable advantage even at the most difficult setting of 5% participation. As the activation rate increases, FedFFT continues to outperform FedSAM, though the performance gap nar-rows slightly—indicating that our spectral filtering is particularly beneficial under sparse-client participation regimes. 14 Table 6: Performance comparison between FedSAM and FedFFT under different perturbation radii ρ on CIFAR-10 with Dirichlet α = 0 .1 using ResNet-18.                  
+
+> Method ρ=0 .05 ρ=0 .10 ρ=0 .15 ρ=0 .20
+> FedSAM 77.91 74.92 69.38 58.49 FedFFT 78.16 77.53 75.29 71.69
+> ∆(Improvement) +0.25 +2.61 +5.91 +13.20
+
+Fig. 7(b) examines the effect of local computation by varying the number of local epochs from 1 to 5, with activation rate fixed at 10% and 100 clients. FedFFT exhibits the largest relative improvements at 1–2 epochs, conditions under which the optimization is more communication-constrained and convergence is harder to achieve. Although the margin decreases as local training deepens, FedFFT consistently maintains a clear lead across all settings, suggesting that its stabilization effect accelerates early-stage convergence while remaining beneficial even with more extensive local training. Finally, Fig. 7(c) evaluates scalability by increasing the number of clients from 20 to 50, 80, and 100, while keeping local epochs at 5 and activation rate at 10%. As the federation becomes larger—and thus more heterogeneous—FedFFT not only maintains but further widens its advantage over FedSAM. The largest improvements are observed when scaling from 20 to 100 clients, demonstrating that spectral filtering remains effective in large, heterogeneous networks. Taken together, these results illustrate that the gains of FedFFT are not tied to a particular configuration, but instead hold broadly across a range of realistic and increasingly challenging FL conditions. Moreover, the trend that FedFFT delivers larger improvements when the FL environment becomes more difficult underscores its ability to mitigate drift, stabilize optimization, and enhance robustness in practical federated systems. 
+
+6.1.4. Sensitivity to the Perturbation Radius. 
+
+The perturbation radius ρ is an important hyperparameter in SAM-based federated optimization meth-ods. In our main experiments, we follow common practice in the literature and set ρ = 0 .1, consistent with prior studies such as FedSMOO and FedLESAM. To further examine how the choice of ρ influences performance, we conduct a sensitivity analysis for both FedSAM and our proposed FedFFT under a range of values: ρ ∈ { 0.05 , 0.10 , 0.15 , 0.20 }.Table 6 summarizes the results on CIFAR-10 with Dirichlet α = 0 .1 using a ResNet-18 backbone. We observe that FedFFT consistently outperforms FedSAM across all perturbation radii, and the performance gap increases as ρ becomes larger. While FedSAM exhibits substantial degradation when the perturbation radius grows, FedFFT maintains stable accuracy, indicating significantly improved robustness. These findings suggest that the spectral filtering mechanism in FedFFT effectively stabilizes SAM-style perturbations under non-IID data distributions, making our method considerably less sensitive to the choice of ρ.5.0% 10.0% 15.0% 20.0% 
+
+> Active Client Ratio
+> 70
+> 72
+> 74
+> 76
+> 78
+> 80
+> Accuracy (%)  FedSAM
+> FedFFT
+> Accuracy Gain
+> 1
+> 2
+> 3
+> 4
+> 5
+> Accuracy Gain (%)
+
+(a) Active Ratio 1 2 3 4 5 
+
+> Epoch
+> 50
+> 55
+> 60
+> 65
+> 70
+> 75
+> 80
+> Accuracy (%)
+> 1
+> 2
+> 3
+> 4
+> 5
+> Accuracy Gain (%)
+
+(b) Local Epochs 20 50 80 100  
+
+> Number of Clients
+> 70
+> 72
+> 74
+> 76
+> 78
+> 80
+> Accuracy (%)
+> 1
+> 2
+> 3
+> 4
+> 5
+> Accuracy Gain (%)
+
+(c) Client Numbers  
+
+> Figure 7:
+
+Comprehensive performance comparison between FedFFT and FedSAM across different experimental con-figurations on CIFAR-10 (Non-IID α = 0 .1) using a ResNet-18 backbone. 
+
+15 6.1.5. Behavior in Personalized Federated Learning Settings. 
+
+Personalization is an important aspect in federated learning (FL), where methods must retain client-specific information while still benefiting from shared global knowledge. Here, we study how the proposed FedFFT behaves under personalized FL frameworks. In FedPer, where each client maintains a private clas-sification head while sharing the feature extractor. Since FedFFT suppresses high-frequency inconsistencies only within the shared representation—while the personalized head preserves client-unique high-frequency signals—the method does not hinder personalization and can even stabilize the learning of shared features. To empirically validate this compatibility, we implemented FedPer [46] with a ResNet-18 backbone on the FEMNIST dataset from the LEAF[47] benchmark, a naturally federated dataset featuring substantial client heterogeneity. For each client, we replaced the local optimizer in FedPer with (i) a SAM optimizer and (ii) our FFT-based SAM optimizer, while keeping all other components identical. As shown in Table 7, FedFFT consistently yields higher accuracy compared to SAM and exhibits smoother convergence behavior. These results confirm that FedFFT effectively preserves client-specific signals while improving the stability of shared representation learning.              
+
+> Table 7: Comparison between SAM and FFT-SAM optimizers and test accuracy on CIFAR-10/100 with Dirichlet α= 0 .1.
+> FEMNIST with ResNet-18 in Personalized FL
+> Method Accuracy
+> FedPer 63.76 FedPer + SAM 65.49 FedPer + FFT-SAM (ours) 67.12
+> Combined with FedAWA
+> Method CIFAR-10 CIFAR-100
+> FedAWA 47.20 33.40 FedAWA+FFT 50.16 34.04
+
+6.1.6. Combine with other methods 
+
+To further validate the universality and compatibility of FedFFT, we integrate it with FedAWA [17], a representative method that improves federated optimization by adaptively learning aggregation weights based on client contributions. This experiment aims to demonstrate that our frequency-domain perturbation filtering is orthogonal to existing FL improvements and can be seamlessly incorporated without modifying their algorithmic pipelines. Specifically, we adopt the standard FedAvg training framework and implement the SAM optimizer on all participating clients. FedFFT is then applied as a drop-in replacement for the original SAM perturbation computation, while FedAWA remains responsible for determining aggregation weights on the server side. This setup ensures that any performance changes can be attributed solely to the effect of frequency-domain filtering rather than confounding factors introduced by altering the aggregation strategy. We evaluate this combined method using the ResNet-20 model under heterogeneous client data distribu-tions. As shown in Table 7, integrating FedFFT consistently enhances the performance of FedAWA across multiple metrics. This demonstrates that our approach can serve as a general-purpose enhancement mod-ule that strengthens optimization stability and robustness, regardless of the underlying federated learning algorithm. 
+
+7. Conclusion 
+
+In this work, we introduce a novel frequency-domain perspective to address divergent perturbations in sharpness-aware federated learning. We identify that inter-client disagreements are predominantly a low-frequency phenomenon and accordingly propose FedFFT, a lightweight filtering method to suppress these discordant components. Extensive experiments validate that FedFFT consistently outperforms state-of-the-art methods, particularly in highly non-IID settings, by converging to visibly flatter and wider global minima. This result not only explains the superior generalization and communication efficiency of our method but also establishes spectral analysis as a powerful new tool for designing robust federated optimization algorithms. 16 Declaration of Generative AI and AI-assisted Technologies in the Writing Process 
+
+During the preparation of this work, the author(s) used generative AI tools, including ChatGPT, in order to improve the clarity, grammar, and overall readability of the manuscript. After using these tools, the author(s) carefully reviewed and edited the content as needed and take full responsibility for the content of the published article. 
+
+8. CRediT authorship contribution statement. 
+
+Liyang Yuan: Conceptualization, Methodology, Software, Validation, Formal analysis, Investigation, Writing - original draft, Visualization. Dandan Guo: Conceptualization, Resources, Writing - review & edit-ing, Supervision, Project administration, Funding acquisition. Yibo Yang: Conceptualization, Methodology, Writing - review & editing, Supervision. 
+
+References 
+
+[1] B. McMahan, E. Moore, D. Ramage, S. Hampson, B. A. y Arcas, Communication-efficient learning of deep networks from decentralized data, in: Proceedings of the 20th International Conference on Artificial Intelligence and Statistics (AISTATS), 2017. [2] R. S. Antunes, C. André da Costa, A. Küderle, I. A. Yari, B. Eskofier, Federated learning for healthcare: Systematic review and architecture proposal, ACM Trans. Intell. Syst. Technol. 13 (4) (May 2022). 
+
+doi:10.1145/3501813 .URL https://doi.org/10.1145/3501813 
+
+[3] A. Rauniyar, D. H. Hagos, D. Jha, J. E. Håkegård, U. Bagci, D. B. Rawat, V. Vlassov, Federated learning for medical applications: A taxonomy, current trends, challenges, and future research directions, IEEE Internet of Things Journal 11 (5) (2024) 7374–7398. doi:10.1109/JIOT.2023.3329061 .[4] L. Fantauzzo, E. Fanì, D. Caldarola, A. Tavera, F. Cermelli, M. Ciccone, B. Caputo, Feddrive: Gen-eralizing federated learning to semantic segmentation in autonomous driving, in: 2022 IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS), 2022, pp. 11504–11511. doi: 10.1109/IROS47612.2022.9981098 .[5] H. Guan, P.-T. Yap, A. Bozoki, M. Liu, Federated learning for medical image analysis: A survey, Pattern Recognition 151 (2024) 110424. doi:10.1016/j.patcog.2024.110424 .URL https://doi.org/10.1016/j.patcog.2024.110424 
+
+[6] S. P. Karimireddy, S. Kale, M. Mohri, S. J. Reddi, S. U. Stich, A. T. Suresh, Scaffold: Stochastic controlled averaging for federated learning (2021). arXiv:1910.06378 .URL https://arxiv.org/abs/1910.06378 
+
+[7] B. Woodworth, K. K. Patel, S. U. Stich, Z. Dai, B. Bullins, H. B. McMahan, O. Shamir, N. Srebro, Is local sgd better than minibatch sgd?, in: Proceedings of the 37th International Conference on Machine Learning, ICML’20, JMLR.org, 2020. [8] T. Li, A. K. Sahu, A. Talwalkar, V. Smith, Federated learning: Challenges, methods, and future directions, IEEE Signal Processing Magazine 37 (3) (2020) 50–60. doi:10.1109/MSP.2020.2975749 .[9] Z. Fan, Y. Wang, J. Yao, L. Lyu, Y. Zhang, Q. Tian, Fedskip: Combatting statistical heterogeneity with federated skip aggregation, in: 2022 IEEE International Conference on Data Mining (ICDM), 2022, pp. 131–140. doi:10.1109/ICDM54844.2022.00023 .[10] M. Kang, S. Kim, K. H. Jin, E. Adeli, K. M. Pohl, S. H. Park, Fednn: Federated learning on concept drift data using weight and adaptive group normalizations, Pattern Recognition 149 (2023) 110230. 17 [11] D. A. E. Acar, Y. Zhao, R. Matas, M. Mattina, P. Whatmough, V. Saligrama, Federated learning based on dynamic regularization, in: International Conference on Learning Representations, 2021. URL https://openreview.net/forum?id=B7v4QMR6Z9w 
+
+[12] T. Li, A. K. Sahu, M. Zaheer, M. Sanjabi, A. Talwalkar, V. Smith, Federated optimization in heteroge-neous networks (2020). arXiv:1812.06127 .URL https://arxiv.org/abs/1812.06127 
+
+[13] Q. Li, B. He, D. Song, Model-contrastive federated learning, in: 2021 IEEE/CVF Conference on Com-puter Vision and Pattern Recognition (CVPR), 2021, pp. 10708–10717. doi:10.1109/CVPR46437. 2021.01057 .[14] J. Xu, S. Wang, L. Wang, A. C.-C. Yao, Fedcm: Federated learning with client-level momentum, ArXiv abs/2106.10874 (2021). URL https://api.semanticscholar.org/CorpusID:235490679 
+
+[15] R. Ye, M. Xu, J. Wang, C. Xu, S. Chen, Y. Wang, Feddisco: federated learning with discrepancy-aware collaboration, in: Proceedings of the 40th International Conference on Machine Learning, ICML’23, JMLR.org, 2023. [16] Z. Li, T. Lin, X. Shang, C. Wu, Revisiting weighted aggregation in federated learning with neural net-works, in: Proceedings of the 40th International Conference on Machine Learning, ICML’23, JMLR.org, 2023. [17] C. Shi, H. Zhao, B. Zhang, M. Zhou, D. Guo, Y. Chang, Fedawa: Adaptive optimization of aggregation weights in federated learning using client vectors, in: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), 2025. [18] P. Foret, A. Kleiner, H. Mobahi, B. Neyshabur, Sharpness-Aware Minimization for Efficiently Improving Generalization (2020). arXiv:2010.01412 .[19] Z. Qu, X. Li, R. Duan, Y. Liu, B. Tang, Z. Lu, Generalized federated learning via sharpness aware minimization (2022). arXiv:2206.02618 .URL https://arxiv.org/abs/2206.02618 
+
+[20] D. Caldarola, B. Caputo, M. Ciccone, Improving generalization in federated learning by seeking flat minima, in: European Conference on Computer Vision, Springer, 2022, pp. 654–672. [21] Y. Sun, L. Shen, S. Chen, L. Ding, D. Tao, Dynamic regularized sharpness aware minimization in federated learning: Approaching global consistency and smooth landscape, in: International Conference on Machine Learning, PMLR, 2023, pp. 32991–33013. [22] Z. Fan, S. Hu, J. Yao, G. Niu, Y. Zhang, M. Sugiyama, Y. Wang, Locally estimated global perturba-tions are better than local perturbations for federated sharpness-aware minimization, in: International Conference on Machine Learning, 2024. [23] D. Caldarola, P. Cagnasso, B. Caputo, M. Ciccone, Beyond local sharpness: Communication-efficient global sharpness-aware minimization for federated learning, in: Proceedings of the IEEE/CVF Confer-ence on Computer Vision and Pattern Recognition, 2025. [24] R. Dai, X. Yang, Y. Sun, L. Shen, X. Tian, M. Wang, Y. Zhang, Fedgamma: Federated learning with global sharpness-aware minimization, IEEE Transactions on Neural Networks and Learning Systems 35 (12) (2024) 17479–17492. doi:10.1109/TNNLS.2023.3304453 .[25] S. Boyd, N. Parikh, E. Chu, B. Peleato, J. Eckstein, 2011. doi:10.1561/2200000016 .[26] S. Hochreiter, J. Schmidhuber, Simplifying neural nets by discovering flat minima, in: Advances in Neural Information Processing Systems, 1994. 18 [27] N. S. Keskar, D. Mudigere, J. Nocedal, M. Smelyanskiy, P. T. P. Tang, On large-batch training for deep learning: Generalization gap and sharp minima, in: International Conference on Learning Representa-tions, 2017. [28] B. Neyshabur, S. Bhojanapalli, D. McAllester, Srebro., Exploring generalization in deep learning, in: Advances in neural information processing systems, 2017. [29] J. Kwon, J. Kim, H. Park, I. K. Choi, Asam: Adaptive sharpness-aware minimization for scale-invariant learning of deep neural networks, in: M. Meila, T. Zhang (Eds.), Proceedings of the 38th International Conference on Machine Learning, Vol. 139 of Proceedings of Machine Learning Research, PMLR, 2021, pp. 5905–5914. [30] J. Zhuang, B. Gong, L. Yuan, Y. Cui, H. Adam, N. Dvornek, S. Tatikonda, J. Duncan, T. Liu, Sur-rogate gap minimization improves sharpness-aware training, in: International Conference on Learning Representations, 2022. [31] Y. Liu, S. Mai, M. Cheng, X. Chen, C.-J. Hsieh, Y. You, Random sharpness-aware minimization., in: Advances in Neural Information Processing Systems, 2022. [32] K. Ahn, A. Jadbabaie, S. Sra, How to escape sharp minima with random perturbations., in: In Forty-first International Conference on Machine Learning., 2024. [33] J. Chen, H. Li, C. P. Chen, Boosting sharpness-aware training with dynamic neighborhood, Pattern Recogn. 153 (C) (Sep. 2024). doi:10.1016/j.patcog.2024.110496 .URL https://doi.org/10.1016/j.patcog.2024.110496 
+
+[34] R. Zhang, Z. Fan, J. Yao, Y. Zhang, Y. Wang, Domain-inspired sharpness-aware minimization under domain shifts, in: International Conference on Learning Representations, 2024. [35] Y. Sun, L. Shen, T. Huang, L. Ding, D. Tao, Fedspeed: Larger local interval, less communication round, and higher generalization accuracy (2023). arXiv:2302.10429 .URL https://arxiv.org/abs/2302.10429 
+
+[36] Z. Qu, X. Li, X. Han, R. Duan, C. Shen, L. Chen, How to prevent the poor performance clients for personalized federated learning?, in: 2023 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), 2023, pp. 12167–12176. doi:10.1109/CVPR52729.2023.01171 .[37] G. Lee, M. Jeong, S. Kim, J. Oh, S.-Y. Yun, Fedsol: Stabilized orthogonal learning with proximal restrictions in federated learning, in: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), 2024. [38] X. Xing, Q. Zhan, X. Xie, Y. Yang, Q. Wang, G. Liu, Flexible sharpness-aware personalized federated learning, in: Proceedings of the AAAI Conference on Artificial Intelligence, Vol. 39, Philadelphia, Pennsylvania, USA, 2025, pp. 21707–21715. [39] N. Rahaman, A. Baratin, D. Arpit, F. Dräxler, M. Lin, F. A. Hamprecht, Y. Bengio, A. C. Courville, On the spectral bias of neural networks, in: International Conference on Machine Learning, 2018. URL https://api.semanticscholar.org/CorpusID:53012119 
+
+[40] Z.-Q. J. Xu, Y. Zhang, T. Luo, Y. Xiao, Z. Ma, Frequency principle: Fourier analysis sheds light on deep neural networks, ArXiv abs/1901.06523 (2019). URL https://api.semanticscholar.org/CorpusID:58981616 
+
+[41] D. Yin, R. G. Lopes, J. Shlens, E. D. Cubuk, J. Gilmer, A fourier perspective on model robustness in computer vision, ArXiv abs/1906.08988 (2019). URL https://api.semanticscholar.org/CorpusID:195317007 
+
+[42] H. Wang, X. Wu, P. Yin, E. P. Xing, High-frequency component helps explain the generalization of con-volutional neural networks, 2020 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) (2019) 8681–8691. URL https://api.semanticscholar.org/CorpusID:173188317 
+
+19 [43] L. Wang, W. Wu, Y. Zhao, J. Zhang, H. Liu, G. Bosilca, J. J. Dongarra, M. Herlihy, R. Fonseca, Superneurons: Fft-based gradient sparsification in the distributed training of deep neural networks, ArXiv abs/1811.08596 (2018). URL https://api.semanticscholar.org/CorpusID:53786504 
+
+[44] A. Krizhevsky, G. Hinton, Learning multiple layers of features from tiny images, Tech. Rep. 0, University of Toronto, Toronto, Ontario (2009). URL https://www.cs.toronto.edu/~kriz/learning-features-2009-TR.pdf 
+
+[45] S. U. CS231N, Tiny imagenet visual recognition challenge, http://cs231n.stanford.edu/ (2015). [46] M. G. Arivazhagan, V. Aggarwal, A. K. Singh, S. Choudhary, Federated learning with personalization layers, CoRR abs/1912.00818 (2019). arXiv:1912.00818 .URL http://arxiv.org/abs/1912.00818 
+
+[47] S. Caldas, S. M. K. Duddu, P. Wu, T. Li, J. Konečný, H. B. McMahan, V. Smith, A. Talwalkar, Leaf: A benchmark for federated settings (2019). arXiv:1812.01097 .URL https://arxiv.org/abs/1812.01097 
+
+20
