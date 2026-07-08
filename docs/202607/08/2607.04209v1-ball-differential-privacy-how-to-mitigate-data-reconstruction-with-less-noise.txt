@@ -1,0 +1,3256 @@
+Title: Ball Differential Privacy: How to Mitigate Data Reconstruction with Less Noise
+
+URL Source: https://arxiv.org/pdf/2607.04209v1
+
+Published Time: Tue, 07 Jul 2026 02:02:41 GMT
+
+Number of Pages: 44
+
+Markdown Content:
+# Ball Differential Privacy -How to Mitigate Data Reconstruction with Less Noise 
+
+Joseph Margaryan and Nirupam Gupta 
+
+Department of Computer Science, University of Copenhagen Copenhagen, Denmark 
+
+josephmargaryan@gmail.com , nigu@di.ku.dk 
+
+Abstract 
+
+Vector embeddings of raw records, while not human-readable, do not preserve privacy of records: an adversary can reconstruct training records from a released model even when that model is a simple convex classifier. Differential privacy (DP) is the principled defense, but its noise is calibrated to the worst-case indistinguishability; hiding arbitrary single-record substitutions, including those far outside the set of plausible alternatives relevant to a reconstruction adversary. The result is noise far larger than what reconstruction robustness requires, degrading accuracy without a corresponding security benefit. We propose Ball-DP : enforcing (ε, δ ) indistinguishability over single-record substitutions restricted to a ball of radius r as per a distance metric d in the embedding space. A deployment facing only local reconstruction threat can choose a small r, thereby reduce noise and recover accuracy. The radius makes the scope of the privacy claim explicit against reconstruction attacks; standard DP is recovered when r covers the entire admissible record domain. We provide noise calibrations for regularized convex learning problems for Ball-DP, and derive the corresponding reconstruction-robustness certificates (named Ball-ReRo ) – upper-bound on an attacker’s reconstruction success. By deriving the optimal finite-prior MAP reconstruction attack, we present empirical auditing of Ball-ReRo certificates for seven benchmark learning tasks. Our experiments show that calibrating noise to Ball-DP yields improvement in utility, considerably exceeding the dilution of reconstruction robustness in high privacy regimes, i.e., when ε is small. 
+
+# 1 Introduction 
+
+Modern machine learning systems rarely operate directly on raw data. Instead, representation-learning pipelines commonly map text, images, or other types of user records to vector embeddings that can be reused by downstream task-specific classifying heads (Bengio et al., 2013; Devlin et al., 2019; Reimers and Gurevych, 2019; Radford et al., 2021). This representation layer creates a false sense of privacy. Embeddings may not be human-readable, yet a model trained on them can reveal information about the training records. In the informed-adversary model, for example, an attacker knowing all but one training record can identify or reconstruct training records from a released model, even if the release is a simple convex model rather than a memorizing neural network Balle et al. (2022). Privacy-preserving AI requires guarantees that remain meaningful even against strong adversaries with side information. Differential privacy (DP) provides such a guarantee by requiring the released model to look nearly the same under arbitrary changes to a single training record (Cummings et al., 2024a). The parameters (ε, δ ) control the strength of this indistinguishability requirement, with smaller values giving stronger protection. A common implementation is output perturbation: train 1
+
+> arXiv:2607.04209v1 [cs.CR] 5 Jul 2026
+
+the model, then add enough noise to mask the effect of any single record (Chaudhuri et al., 2011). This worst-case calibration is simple and broadly applicable, but it can require substantial noise and therefore reduce accuracy when strong privacy is desired. DP is naturally aligned with membership inference attacks (MIA), which ask whether a particular record was used to train the model: by making the released model nearly indistinguishable under any single-record changes, DP limits what an attacker can infer about involvement of specific record. However, participation is not always the sensitive fact of interest (Hayes et al., 2023; Cummings et al., 2024b). In many settings, it may already be known that a person contributed data; the real privacy concern is whether the released model reveals the private content of their record. This motivates training-record reconstruction attacks, where an adversary uses side information to recover the hidden record itself, often by choosing from a set of plausible candidates. The connection between DP guarantee and reconstruction risk is, however, quite loose (Hayes et al., 2023; Cummings et al., 2024b). DP mechanisms provide indistinguishability against worst-case single-record substitutions that can be arbitrarily far from each other in the embedding space. While a reconstruction adversary is interested in generating an estimate (i.e., choosing an element from the candidate set) that is in proximity to the target record. Thus, to prevent reconstruction, it suffices to induce indistinguishability over single-record substitutions that are close to each other in the underlying embedding space. metric ball    
+
+> of radius r
+> target zjIndistinguishable
+> Distinguishable
+
+Figure 1: Illustration of reconstruction protection due to Ball-DP: an adversary can narrow down the target record to points highlighted in blue but cannot reliably tell any further. By limiting the scope of (ε, δ )-indistinguishability to replacements within a metric ball of radius r, Ball-DP mitigates accurate reconstruction while recovering higher model accuracy than standard DP. 
+
+Ball-DP. We propose Ball-DP , which de-ploys the usual (ε, δ )-indistinguishability but applies it to only single-record substitutions within the ball of declared radius r. The radius becomes an explicit privacy parame-ter: smaller r efficiently mitigates local re-construction threats using less noise, while larger r expands the protected set at a cor-responding utility cost. For the regular-ized convex prediction heads that we con-sider, we can ensure (r, ε, δ )-Ball-DP via Gaus-sian output perturbation whose noise scales with r in addition to the indistinguishabil-ity parameters (ε, δ ). As shown in Fig-ure 1, Ball-DP allows an adversary to dif-ferentiate between the target record and acandidate outside the ball of radius r, by enforcing (ε, δ )-indistinguishability over the ball it forces the adversary to incur an er-ror that scales with r in estimating the tar-get record. We can tune r according to our privacy requirement; recovering the stan-dard DP guarantee when r is large enough to cover the entire admissible record do-main. 
+
+Contributions. We make the following contributions. 1. We define (r, ε, δ )-Ball-DP formally, i.e., (ε, δ )-indistinguishability over r-adjacency, and estab-lish its connection to standard DP. 22. We derive ℓ2-sensitivity of strongly convex empirical-risk minimization (ERM) under r-adjacency, and present the Gaussian release mechanism calibrated to Ball-DP guarantee. 3. We formally connect Ball-DP to reconstruction robustness; bounding an attacker’s reconstruc-tion success rate as a function of the oblivious prior and the privacy parameters (r, ε, δ ).4. We empirically validate our theoretical bounds, and compare the accuracy-reconstruction robustness trade-off of Ball-DP and standard DP across seven learning benchmarks. Our empirical evidence suggests that Ball-DP provides comparable reconstruction robustness while requiring less noise, thereby mitigating the accuracy–reconstruction robustness trade-off. At 
+
+ε = 2 and δ = 10 −6, Ball-DP improves mean accuracy over the standard global-radius DP comparator across all seven embedding benchmarks at the reported local policy radii. For example, at the q50 
+
+label-preserving policy radii, Ball-DP improves mean accuracy by 0.57 –36 .47 percentage points. Even at the broader q95 local radii, Ball-DP remains more accurate than the global-radius comparator on every benchmark. Finite-prior maximum a posteriori (MAP) audits show comparable empirical exact-identification rates for candidate sets of size m = 10 .
+
+Comparisons with metric-DP We emphasize that Ball-DP should not be confused with metric-DP, or dX -privacy (Chatzikokolakis et al., 2013; Imola et al., 2022). In its usual form, metric-DP imposes a distance-dependent privacy-loss bound, so privacy degrades continuously with the distance between records. By contrast, (r, ε, δ )-Ball-DP uses the metric only to define a binary adjacency relation D ∼r D′, and then enforces the standard (ε, δ ) indistinguishability inequality uniformly over that restricted adjacent subset of records. Ball-DP need not provide any guarantee for substitutions outside the radius, nor does it require privacy loss to shrink for pairs that are closer than r. The advantage of this formulation is that it separates the privacy policy from the mechanism calibration. In particular, mechanisms whose privacy analyses depend on the adjacency relation only through a sensitivity bound can be adapted by replacing the usual sensitivity to 
+
+r-adjacency sensitivity. We show this explicitly in the following wherein we adapt the standard Gaussian mechanism to Ball-DP. 
+
+Paper organization. The rest of the paper is organized as follows. Section 2 fixes the ERM setup, the informed reconstruction threat model, and the Gaussian output-perturbation notation used throughout. Section 3 introduces Ball-DP as a radius-restricted adjacency policy and gives the corresponding Gaussian calibration for strongly convex ERM. Section 4 translates these privacy guarantees into Ball-ReRo reconstruction certificates and states the finite-prior MAP audit used in the experiments. Section 5 reports the utility and reconstruction-audit results on fixed embedding benchmarks. Section 6 collects the model-specific technical statements needed for the experimental calibration. Section 7 discusses related work on metric privacy, private convex ERM, reconstruction robustness, and prototype-based learning. Finally, Section 8 provide a summary of the paper. Proofs and auxiliary derivations are deferred to the appendices. 
+
+# 2 Preliminaries: ERM, Reconstruction, and Gaussian Releases 
+
+This section formalizes the learning problem, the reconstruction threat model, and the Gaussian-release notation used throughout the paper. The order is as follows: we first specify what is learned from embeddings, then describe why reconstruction is a meaningful privacy breach, and lastly discuss DP and Gaussian output-perturbation guarantees. 3Embedding ERM setup. Let raw examples live in an application-dependent space X0, e.g., photos, text and tabular records, and let labels lie in space Y. A public encoder ϕ : X0 → Rd maps each raw example to an embedding. From this point onwards, a training record is 
+
+zi = ( xi, y i) = ( ϕ(ai), y i) ∈ Z := Rd × Y ,
+
+where ai ∈ X 0 is the corresponding raw example. The label space may either be binary, Y = {0, 1},or multiclass, Y = {1, . . . , K }. A dataset is an ordered tuple D = ( z1, . . . , z n) ∈ Z n. We consider 
+
+ℓ2-regularized empirical risk minimization (ERM) on the training records. For a parameter θ ∈ Rp,a loss function ℓ(θ; z), and regularization parameter λ > 0, we define 
+
+FD(θ) := 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+ℓ(θ; zi) + λ
+
+2 ∥θ∥22, bθ(D) := arg min  
+
+> θ∈Rp
+
+FD(θ). (1) When ℓ(·; z) is convex for every record z, the objective in (1) is λ-strongly convex, hence the minimizer is unique. This is a standard convex-learning template behind regularized linear and generalized-linear heads (Hastie et al., 2009; Shalev-Shwartz and Ben-David, 2014). 
+
+Reconstruction threat model. Embedding-space training does not by itself eliminate record-level privacy risk. We consider an informed reconstruction adversary , following the setting proposed and studied in Balle et al. (2022); Hayes et al. (2023), that observes the released model and has substantial side information about the training set. In particular, all records except one target record z are treated as known; when needed below, we denote this ordered tuple of known records by D− ∈ Z n−1. The adversary also knows the training algorithm, hyperparameters, release rule, and any public information used to form beliefs about the hidden record. The relevant reconstruction task is therefore not an unconstrained search over the full record space. Side information typically narrows the target to a finite shortlist, or more generally a prior distribution, over plausible alternatives (Balle et al., 2022). A privacy breach occurs when the released model lets the adversary identify the hidden record, or a sufficiently close substitute, better than what could be achieved otherwise from its prior information alone. For example, if the adversary has narrowed the target to m plausible candidates and has no further information, an oblivious exact-identification guess succeeds with probability 1/m ; a meaningful reconstruction audit should be interpreted relative to this baseline. 
+
+Differential privacy. The gold standard for privacy-preservation of training records is differential privacy (Dwork and Roth, 2014). Two datasets D, D ′ ∈ Z n are adjacent, written D ∼ D′,if they comprise identical records except one. The two differing records must lie in the admissible record domain. A randomized mechanism M : Zn → Θ is said to satisfy (ε, δ )-differential privacy if for every adjacent pair D ∼ D′ and every measurable set S ⊆ Θ,
+
+Pr[ M (D) ∈ S] ≤ eε Pr[ M (D′) ∈ S] + δ. (2) This indistinguishability prevents any adversary from inferring the inclusion of any record in the training. By extension, DP prevents even an informed adversary, described above, from extracting the hidden record with certainty. 
+
+Gaussian output perturbation. In convex learning, we can ensure DP by output perturbation. Specifically, instead of releasing the ERM output bθ(D), we release a perturbed model: 
+
+eθ(D) = bθ(D) + ξ, ξ ∼ N (0 , σ 2Ip).
+
+4Here, N (0 , σ 2Ip) denotes a Gaussian distribution with mean 0 and covariance matrix σ2Ip. This is commonly referred to as the Gaussian mechanism applied to the trained parameter vector. The variance σ2 scales with the ℓ2 sensitivity of the original unperturbed model (Dwork and Roth, 2014; Chaudhuri et al., 2011; Balle and Wang, 2018): 
+
+∆2 := sup 
+
+> D∼D′
+
+∥bθ(D) − bθ(D′)∥2.
+
+Specifically, when σ ≥ ∆2
+
+> ε
+
+p2 log(1 .25 /δ ), the Gaussian mechanism satisfies (ε, δ )-DP. 
+
+Finite-prior exact-identification audit. The reconstruction threat model above still leaves open how an audit should instantiate the adversary. Prior reconstruction studies often optimize directly for a reconstructed object using attack-specific machinery, such as generative priors or training traces (Balle et al., 2022; Hayes et al., 2023). In experimental evaluations, we take a complementary route that is natural for Ball-DP (presented in the following): side information narrows the target to a small set of plausible candidates inside the declared neighborhood, the adversary’s task is exact identification. Concretely, the audit asks which candidate record would most likely have produced the observed Gaussian-perturbed model. For each candidate zi, the auditor forms the model that would have been released if zi were the hidden target, compares it with the observed release, and chooses the most likely candidate under the prior. Under a uniform finite prior, this becomes a nearest-model rule: choose the candidate whose simulated trained parameter vector is closest to the observed noisy release. Section 4.1 formalizes this MAP rule and gives the corresponding audit algorithm. 
+
+# 3 Ball-DP: Indistinguishability Over Restricted Adjacency 
+
+Ball-DP introduces an explicit adjacency policy for mitigating reconstruction threats. Specifically, instead of asking the privacy mechanism to hide every admissible one-record replacement, it hides one-record replacements inside a declared metric ball. The radius of this ball becomes part of the overall privacy budget along with the indistinguishability parameters. 
+
+3.1 Adjacency policy definition 
+
+Fix a public metric d on the record domain Z. For embeddings, d is typically the Euclidean distance on the embedding coordinate, possibly with label constraints as in 3. 
+
+Definition 3.1 (r-adjacency) . For a radius r > 0, datasets D = ( z1, . . . , z n) ∈ Z n and D′ =(z′
+
+> 1
+
+, . . . , z ′
+
+> n
+
+) ∈ Z n are r-adjacent , written D ∼r D′, if there exists an index j ∈ [n] such that zi = z′
+
+> i
+
+for all i̸ = j and d(zj , z ′ 
+
+> j
+
+) ≤ r. 
+
+We now define Ball-DP as (ε, δ )-indistinguishability over r-adjacency. 
+
+Definition 3.2 (Ball-DP) . A randomized mechanism M : Zn → Θ is said to satisfy (r, ε, δ )-Ball-DP 
+
+if for every measurable set S ⊆ Θ and every r-adjacent pair D ∼r D′, we have 
+
+Pr[ M (D) ∈ S] ≤ eε Pr[ M (D′) ∈ S] + δ. 
+
+The radius r changes the scope of the adjacency relation being protected, not the semantics of (ε, δ ) indistinguishability on that relation. For 0 ≤ r′ ≤ r, every mechanism satisfying (r, ε, δ )-Ball-DP also satisfies (r′, ε, δ )-Ball-DP. Increasing r enables protection against a larger number of substitutions, at the cost of additional noise; a trade-off made precise later in the following. 5Proposition 3.3 (DP as a special case) . Suppose that for all z ∈ Z , we have ∥z∥2 ≤ B and the distance metric is Euclidean: d(z, z ′) := ∥z − z′∥2. Then (r, ε, δ )-Ball-DP implies (ε, δ )-DP as long as r ≥ 2B.
+
+The distance metric d(·, ·) and radius r makes the scope of privacy by Ball-DP explicit in the following sense. If a model release mechanism satisfies (r, ε, δ )-Ball-DP then it prevents an informed adversary with access to all but the hidden record z∗ to estimate z∗ within distance r. Throughout this paper we consider the following label-preserving distance metric. The analyses, however, can be extended in the future to general distance metrics. 
+
+Label-preserving distance metric. Throughout this paper, records are pairs (x, y ) and we use the label-preserving Euclidean metric: 
+
+d (x, y ), (x′, y ′) =
+
+(
+
+∥x − x′∥2, y = y′,
+
+∞, y̸ = y′. (3) Finite-radius adjacency therefore protects embedding changes conditional on the label. It does not protect label changes; that would require a metric assigning finite distance to cross-label substitutions. This choice also makes class counts invariant over adjacent datasets, which is why count-aware calibration does not violate indistinguishability. The metric, radius, embedding map, norm bound, and any count metadata used for calibration are treated as public or fixed by the adjacency policy. This is consistent with settings where a private learner is trained on fixed embeddings supplied by an external representation model. If any of these calibration quantities are estimated from sensitive records, that estimation must be privatized or justified as public side information before the Ball-DP claim applies. 
+
+3.2 Ball-DP for convex learning 
+
+We next connect radius-restricted adjacency to Gaussian output perturbation for the ERM prob-lem (1) . The key quantity is how much a single record replacement can change the gradient contribution of the loss. We capture this through the following uniform regularity assumption. 
+
+Assumption 3.4 (Lipschitz smoothness in sample) . For the parameter set Θ ⊆ Rp containing all ERM minimizers of interest, assume that there exists a Lz ≥ 0 such that for all θ ∈ Θ and z, z ′ ∈ Z ,
+
+∥∇ θℓ(θ; z) − ∇ θℓ(θ; z′)∥2 ≤ Lz d(z, z ′).
+
+Section 6 gives the constant Lz for the ridge-prototype model used in the main experiments and records the corresponding constants for the additional convex heads. The derivations for the secondary heads are deferred to Appendix D. 
+
+Theorem 3.5 (r-adjacency ℓ2-sensitivity of strongly convex ERM) . Assume that FD in (1) is differentiable and λ-strongly convex for every dataset D, and that Assumption 3.4 holds on parameter set Θ. Then, for all D ∼r D′, we have bθ(D) − bθ(D′) 2 ≤ Lz 
+
+> λn
+
+r.
+
+The proof of Theorem 3.5 can be found in Appendix A.2. The theorem shows that the distance between the corresponding ERM solutions is bounded linearly in the radius r. Therefore, the Gaussian output perturbation can be calibrated to the protected radius r rather than to any arbitrary replacement. 6In what follows, Φ denotes the standard normal cumulative distribution function (CDF). For sharper Gaussian calibration, we use the analytic Gaussian mechanism scale of (Balle and Wang, 2018). Given an ℓ2 sensitivity bound ∆, define 
+
+AGM (ε, δ, ∆) := inf 
+
+
+
+σ > 0 : Φ 
+
+ ∆2σ − εσ 
+
+∆
+
+
+
+− eεΦ
+
+
+
+− ∆2σ − εσ 
+
+∆
+
+
+
+≤ δ
+
+
+
+,
+
+where AGM (ε, δ, 0) = 0 by convention. 
+
+Theorem 3.6 (Ball-Gaussian output perturbation) . Fix r > 0, ε > 0 and δ ∈ (0 , 1) . Let f (D) = bθ(D)
+
+and suppose r-adjacency ℓ2-sensitivity is bounded by ∆r, i.e., 
+
+sup  
+
+> D∼rD′
+
+∥f (D) − f (D′)∥2 ≤ ∆r.
+
+If 
+
+M (D) = f (D) + ξ, ξ ∼ N (0 , σ 2Ip), σ ≥ AGM (ε, δ, ∆r),
+
+then M satisfies (r, ε, δ )-Ball-DP. Proof. For every r-adjacent pair D ∼r D′, the two releases are Gaussian distributions with com-mon covariance σ2Ip and means separated by at most ∆r. By the analytic Gaussian mechanism theorem (Balle and Wang, 2018, Theorem 8), the condition σ ≥ AGM (ε, δ, ∆r) implies 
+
+Pr[ Mr(D) ∈ S] ≤ eε Pr[ Mr(D′) ∈ S] + δ
+
+for every measurable set S ⊆ Θ. Since this holds for every D ∼r D′, the mechanism satisfies 
+
+(r, ε, δ )-Ball-DP. Alternatively, if σ ≥ ∆r
+
+> ε
+
+p2 log(1 .25 /δ ), then the same conclusion follows from the classic Gaussian mechanism bound (Dwork and Roth, 2014). Moreover, under Assumption 3.4, due to Theorem 3.5 it suffices to use ∆r = Lz 
+
+> λn
+
+r. Note that the Gaussian mechanism calibrated to (r, ε, δ )-Ball-DP also satisfies (t, ε t, δ t)-Ball-DP for t > r as long as the indistinguishability parameters εt, δ t scales with the ratio t/r . The proof of Proposition 3.7 is deferred to Appendix A.3. 
+
+Proposition 3.7 (Distance-dependent guarantee for Gaussian release) . Suppose Assumption 3.4 holds true and the Gaussian mechanism M with noise parameter σ satisfies (r, ε, δ )-Ball-DP. Then, for any t ≥ r, M satisfies (t, ε t, δ t)-Ball-DP as long as 
+
+δt ≥ Φ
+
+ ∆t
+
+2σ − εtσ
+
+∆t
+
+
+
+− eεt Φ
+
+
+
+− ∆t
+
+2σ − εtσ
+
+∆t
+
+
+
+,
+
+where ∆t := Lz 
+
+> λn
+
+t. Moreover, if the mechanism M is calibrated as per the non-analytical sufficient bound 
+
+σ ≥ ∆r
+
+ε
+
+p2 log(1 .25 /δ ), ∆r := Lz
+
+λn r, 
+
+then M satisfies (t, ε t, δ t)-Ball-DP with ε′ := ε tr and δt = δ.
+
+In particular, if a mechanism has been calibrated for radius r, and one later evaluates substitutions at a larger radius t > r , the same Gaussian release still yields a weaker but valid accounting guarantee, with privacy parameter inflated from ε to ε tr . Hence, when ∥z∥2 ≤ B for all records z, combining Proposition 3.3 with Proposition 3.7, the Ball-DP privacy guarantee can be converted into standard DP guarantee by setting t = 2 B.74 Ball-ReRo Certificates and Audits 
+
+We now translate the radius-restricted indistinguishability guarantee into reconstruction-robustness statements. The goal is not to define a new attack model, but to make precise what an informed adversary can gain from the released Gaussian-perturbed model beyond its prior information. The section has three parts. First, we state the exact finite-prior MAP audit used in the experiments. Second, we define the Ball-ReRo baseline and show how Ball-DP and Ball-RDP imply reconstruction certificates. Third, we give the direct Gaussian Ball-ReRo bound used as the empirical certificate. Throughout this section, the adversary knows the public remainder dataset D−, the training algorithm, the hyperparameters, the Ball-DP policy radius, and the candidate-construction protocol. The hidden record is denoted by Z, the completed dataset is D− ∪ { Z}, and the released model is 
+
+eθ = bθ(D− ∪ { Z}) + ξ, ξ ∼ N (0 , σ 2I).
+
+The audit asks whether eθ identifies the hidden record better than what is already possible from the prior and the allowed candidate set. 
+
+4.1 Finite-prior MAP audit for Gaussian releases 
+
+We consider a finite candidate set 
+
+S = {z1, . . . , z m} ⊆ B d(u, r )
+
+that contains the hidden target, with prior weights π1, . . . , π m > 0 satisfying Pmi=1 πi = 1 . This is an adversary-favorable audit: the side information has already reduced the reconstruction problem to choosing among plausible local alternatives. The remaining question is whether the released model identifies which candidate was used as the hidden training record. 
+
+Proposition 4.1 (Exact finite-prior MAP attack for Gaussian release) . For the Gaussian release described above, a Bayes-optimal exact-identification attack under the finite prior 
+
+πS =
+
+> m
+
+X
+
+> i=1
+
+πiδzi
+
+is 
+
+bzMAP ∈ arg max 
+
+> zi∈S
+
+
+
+log πi − 12σ2 eθ − bθ(D− ∪ { zi}) 22
+
+
+
+.
+
+For a uniform prior on S, the log πi term is constant and the attack reduces to constrained least squares over the candidate set. The proof is deferred to Appendix C. 
+
+4.2 Ball-supported priors and feasible outputs 
+
+A reconstruction certificate must be interpreted relative to the adversary’s side information. In particular, if the audit protocol restricts the reconstructor to a feasible output set, then the oblivious baseline should obey the same restriction. We therefore define the prior support, the allowed-output baseline, and the Ball-ReRo property using the same feasible-output family. 
+
+Definition 4.2 (Ball-supported prior) . A family of priors {πu,r }u∈Z is Ball-supported if each πu,r is supported on the policy ball 
+
+Bd(u, r ) := {z ∈ Z : d(z, u ) ≤ r}.
+
+The record u is a public anchor or reference record and need not itself be sampled from the prior. 8Algorithm 1 Finite-prior MAP audit for Gaussian release 
+
+Require: observed release eθ, public remainder D−, noise scale σ
+
+Require: candidate set S = {z1, . . . , z m} ⊆ B d(u, r ) and prior weights π1, . . . , π m 
+
+> 1:
+
+for i = 1 , . . . , m do  
+
+> 2:
+
+θi ← bθ(D− ∪ { zi}) ▷ candidate model under target zi 
+
+> 3:
+
+si ← log πi − 12σ2 ∥eθ − θi∥22 ▷ Gaussian log-posterior up to constants  
+
+> 4:
+
+end for  
+
+> 5:
+
+return zˆı for any ˆı ∈ arg max i si
+
+Definition 4.3 (Allowed-output reconstruction baseline) . Fix a prior π, reconstruction loss ρ :
+
+Z × Z → [0 , ∞), tolerance η ≥ 0, and feasible output set A ⊆ Z . Define 
+
+κπ,ρ (η; A) := sup 
+
+> a∈A
+
+Pr 
+
+> Z∼π
+
+[ρ(Z, a ) ≤ η].
+
+This is the best success probability of an oblivious adversary that ignores the mechanism output while obeying the same feasible-output restriction as the reconstructor. When the prior, loss, tolerance, and feasible set are clear from context, we write this baseline simply as κ.
+
+Definition 4.4 (Ball-ReRo) . Fix a radius r > 0, a reconstruction loss ρ, a tolerance η ≥ 0, a Ball-supported prior family {πu,r }u∈Z , and feasible output sets {A u,r }u∈Z with Au,r ⊆ Z . A mechanism 
+
+M : Zn → Θ satisfies (η, γ, r )-Ball-ReRo with respect to (ρ, {πu,r }, {A u,r }) if, for every public remainder dataset D− ∈ Z n−1, every anchor u ∈ Z , and every reconstructor R : Θ × Z n−1 → A u,r ,
+
+Pr   
+
+> Z∼πu,r , θ ∼M(D−∪{ Z})
+
+ρ(Z, R (θ, D −)) ≤ η ≤ γ. 
+
+For finite exact-identification audits, the reconstructor is constrained to output one of the candidates in S. With a uniform prior on m candidates and exact-identification loss, the baseline in Definition 4.3 is therefore κ = 1 /m . A smaller policy radius may make it harder to construct a large, well-separated feasible set near a given anchor; this is part of the operational trade-off and must be reported explicitly with the audit. 
+
+Theorem 4.5 (Ball-DP implies Ball-ReRo) . Fix D− ∈ Z n−1, an anchor u ∈ Z , a Ball-supported prior πu,r , a loss ρ, a tolerance η, and a feasible output set Au,r ⊆ Z . Let 
+
+κ := κπu,r ,ρ (η; Au,r ).
+
+If M satisfies (r, ε, δ )-Ball-DP, then every reconstructor R : Θ × Z n−1 → A u,r satisfies 
+
+Pr   
+
+> Z∼πu,r , θ ∼M(D−∪{ Z})
+
+ρ(Z, R (θ, D −)) ≤ η ≤ eεκ + δ. 
+
+Equivalently, M satisfies (η, e εκ + δ, r )-Ball-ReRo for this prior and feasible-output set. 
+
+The proof is in Appendix B.1. Theorem 4.5 is the radius-restricted analogue of the standard observation that DP limits reconstruction attacks (Balle et al., 2022). The important operational term is the baseline κ: it is the best success probability achievable without observing the mechanism output, under the same prior and feasible-output restriction as the reconstructor. If the prior and side information already make this baseline large, then a high raw reconstruction rate may mostly reflect the audit setup rather than additional information leaked by the release. The relevant empirical question is therefore how far the observed success probability rises above κ.We next adapt Rényi-DP (RDP) (Mironov, 2017) to Ball-DP, which we call Ball-RDP , and state the corresponding Ball-ReRo guarantee. 9Definition 4.6 (Ball-RDP) . A mechanism M satisfies (α, ε α) Ball-RDP at radius r if for every 
+
+D ∼r D′,
+
+Dα
+
+ M (D) ∥ M (D′) ≤ εα, α > 1.
+
+The Gaussian release mechanism can be adjusted as follows to ensure Ball-RDP. 
+
+Lemma 4.7 (Gaussian Ball-RDP) . Let M (D) = f (D) + ξ with ξ ∼ N (0 , σ 2I) and r-adjacency sensitivity 
+
+∆2(r) := sup  
+
+> D∼rD′
+
+∥f (D) − f (D′)∥2.
+
+Then for every order α > 1,
+
+Dα
+
+ M (D) ∥ M (D′) ≤ α∆2(r)2
+
+2σ2 for all D ∼r D′.
+
+Lastly, we obtain the following Ball-ReRo guarantee for the Gaussian Ball-RDP mechanism. 
+
+Theorem 4.8 (Ball-RDP implies Ball-ReRo) . Fix D− ∈ Z n−1, a Ball-supported prior πu,r , a loss ρ,a tolerance η, and a feasible output set Au,r ⊆ Z . Let κ := κπu,r ,ρ (η; Au,r ). If a mechanism satisfies 
+
+(α, ε α) Ball-RDP at radius r for some α > 1, then every reconstructor R with outputs in Au,r obeys the Ball-ReRo inequality with 
+
+γ = γα := min 
+
+
+
+1, κ (α−1) /α exp 
+
+ α − 1
+
+α εα
+
+ 
+
+.
+
+The proof of Lemma 4.7 is in Appendix B.2, and the proof of Theorem 4.8 is in Appendix B.3. 
+
+4.3 Gaussian Ball-ReRo bounds 
+
+The preceding theorems apply to Ball-DP and Ball-RDP mechanisms, but they can be loose for Gaussian releases. We therefore use the testing, or blow-up-function, viewpoint on reconstruction robustness (Balle et al., 2022; Kaissis et al., 2023; Hayes et al., 2023). For distributions P and Q on the release space and κ ∈ [0 , 1] , write 
+
+Bκ(P, Q ) := sup {P (E) : E measurable and Q(E) ≤ κ}.
+
+This quantity asks how large an attack-success event can be under the target-dependent release law if the same event has baseline probability at most κ under a reference release law. In our Gaussian output-perturbation setting, the relevant output laws have equal covariance, so this testing problem has a closed form; Appendix B.4 proves the Gaussian identity used below. The next results are the certificates plotted in the experiments and should be read as release-level upper bounds under the stated feasible-set prior. 
+
+Theorem 4.9 (Direct Gaussian Ball-ReRo) . Let M (D) = f (D) + ξ with ξ ∼ N (0 , σ 2I), and let 
+
+∆2(r) denote the r-adjacency sensitivity of f . Fix D− ∈ Z n−1, an anchor u ∈ Z , a Ball-supported prior πu,r , a reconstruction loss ρ, a tolerance η, and a feasible output set Au,r ⊆ Z . Define 
+
+κ := κπu,r ,ρ (η; Au,r )
+
+and ¯∆( D−) := sup  
+
+> z∈supp( πu,r )
+
+∥f (D− ∪ { z}) − f (D− ∪ { u})∥2.
+
+10 Then every reconstructor R with outputs in Au,r obeys 
+
+Pr[ ρ(Z, R (θ, D −)) ≤ η] ≤ Φ
+
+
+
+Φ−1(κ) + ¯∆( D−)
+
+σ
+
+
+
+≤ Φ
+
+
+
+Φ−1(κ) + ∆2(r)
+
+σ
+
+
+
+,
+
+Here the displayed bound is extended continuously at the endpoint baselines: if κ = 0 the bound is 0,and if κ = 1 the bound is 1. The proof is in Appendix B.5. 
+
+Corollary 4.10 (Uniform finite prior under exact identification) . Suppose πS is the uniform prior on m candidates, 
+
+πS = 1
+
+m
+
+> m
+
+X
+
+> i=1
+
+δzi , S ⊆ B d(u, r ),
+
+and the decoder is constrained to output a candidate in S. Consider the exact-identification loss 
+
+ρID (z, z ′) := 1{z̸ = z′} with tolerance η = 0 . Then, every reconstructor R satisfies 
+
+Pr[ R(θ, D −) = Z] ≤ Φ
+
+
+
+Φ−1(1 /m ) + ∆2(r)
+
+σ
+
+
+
+,
+
+where the probability is over Z ∼ πS and θ ∼ M (D− ∪ { Z}). The feasible-output oblivious baseline is exactly κ = 1 /m .
+
+The proof is in Appendix B.6. The direct bound is the main certificate plotted in the experiments. Under homogeneous Gaussian calibration at fixed (ε, δ ), the ratio ∆2(r)/σ is fixed by the calibration rule, so shrinking r does not by itself improve the numerical Ball-ReRo bound. The radius still matters because it changes both the protected adjacency scope and the amount of noise needed to reach that certificate. The empirical MAP audit then measures the resulting identification trade-off for the feasible candidate sets that can actually be constructed inside the policy ball. A sharper support-specific Gaussian exact-identification bound is available, but it is not used in the reported experiments; we state it in Appendix B.7. 
+
+# 5 Experimental Analysis 
+
+5.1 Goals and scope 
+
+The empirical evaluation asks three operational questions. First, at the same target (ε, δ ), how much accuracy is recovered by calibrating to a declared local radius rather than to the global bounded-replacement radius? Second, for a fixed reconstruction certificate γ, how much utility is lost as the protected local neighborhood grows? Third, when an informed adversary is restricted to a finite local candidate set, how do empirical MAP attack rates compare with the oblivious baseline and the theorem-backed certificate? All reported ERM results use δ = 10 −6, m = 10 , and Gaussian output perturbation. We choose the Ball-DP radius r through empirical local-radius policies. For each benchmark, q50 , q80 , and 
+
+q95 denote the radii obtained from the 50 th, 80 th, and 95 th percentiles of the same-label distance distribution under the label-preserving metric (3) . These three policies represent progressively larger protected neighborhoods; Sections 5.3 and 5.6 describe how they are used in the accuracy and MAP audits. The standard comparator uses the full bounded-replacement radius rstd = 2 B for utility experiments and an empirical same-label diameter in the finite-prior attack audit. 11 Table 1: Mean accuracies over ten independent Gaussian release seeds for the ridge-prototype private ERM experiment at ε = 2 and m = 10 across seven embedding benchmarks. Ball-DP columns use local adjacency radii q50 , q80 , and q95 ; Std is the global-radius comparator calibrated with the same Gaussian rule.                                    
+
+> Data embeddings Acc q50 Acc q80 Acc q95 Acc (Std) AG News 0.8616 0.8610 0.8606 0.8559 BANKING77 0.6358 0.5697 0.5218 0.2711 CIFAR-10 0.7374 0.7360 0.7340 0.6649 Emotion 0.3010 0.2932 0.2887 0.2458 IMDb 0.6212 0.6135 0.6071 0.5632 MNIST 0.8356 0.8345 0.8330 0.7840 TREC-6 0.2496 0.2460 0.2412 0.2036
+
+5.2 Experimental model 
+
+The seven-dataset utility table and the finite-prior MAP audit use a ridge-prototype classifier on fixed embeddings. This head is the closed-form audit case: its optimizer, sensitivity, and noiseless informed-adversary inverse problem are explicit, which lets us separate privacy calibration from numerical approximation error. The Ball-DP calibration theorem itself is not ridge-specific; Section 6.2 verifies the required Lz constants for binary logistic regression, softmax logistic regression, and squared-hinge SVMs, and Section 5.5 reports an IMDb utility–certificate sweep for two of these additional heads alongside ridge prototypes. For record (z, y ) with z ∈ Rd and y ∈ { 1, . . . , C }, the ridge-prototype model learns one prototype 
+
+μc ∈ Rd per class by minimizing 
+
+FD(μ) = 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+∥zi − μyi ∥22 + λ
+
+2
+
+> C
+
+X
+
+> c=1
+
+∥μc∥22. (4) Prediction uses the nearest prototype. The full ridge-prototype statements are collected in Section 6, with the core learning proofs in Section A. In the reported runs λ = 0 .01 .For this model, Corollary 6.2 gives the count-worst-case exact local sensitivity 
+
+∆proto (r) = 2r
+
+2 + λn .
+
+When class counts are public, the count-aware variant is stated separately in Proposition 6.3. Gaussian output perturbation is then calibrated by substituting the relevant sensitivity into Theorem 3.6. 
+
+5.3 Utility at local policy radii 
+
+Table 1 reports the main utility comparison at ε = 2 across seven embedding benchmarks. It replaces the earlier single-radius noise-ratio table because it answers the operational question directly: what accuracy do stakeholders get when they choose a protected neighborhood? At this privacy level, all tabulated Ball-DP radii improve over the global-radius comparator. Smaller local radii generally yield higher utility, with near ties at the reported precision across several datasets; q95 provides the broadest local protection among the three local policies. For text datasets, the fixed embeddings are computed with the all-MiniLM-L6-v2 Sentence Transformers model, which is based on Sentence-BERT and MiniLM Reimers and Gurevych (2019); Wang et al. (2020); Sentence Transformers (2026). For image datasets, the fixed embeddings are computed with ImageNet-pretrained ResNet-18 features implemented in TorchVision He et al. (2016); Paszke et al. (2019); PyTorch contributors (2026). The embedding maps are treated as public 12 preprocessing components of the adjacency policy. The benchmark suite consists of AG News Zhang et al. (2015), BANKING77 Casanueva et al. (2020), CIFAR-10 Krizhevsky (2009), Emotion Saravia et al. (2018), IMDb Maas et al. (2011), MNIST LeCun et al. (1998), and TREC-6 Li and Roth (2002). The absolute accuracies should not be read as benchmark-leading numbers: the ridge-prototype head is intentionally simple and can be poorly matched to some fixed embeddings, notably on Emotion and TREC-6. We retain these rows as stress tests for the privacy calibration rather than as claims of competitive task performance. The gains are not uniform, which is itself useful for deployment planning. At q50 , improvements over the standard comparator range from 0.03 percentage points on AG News to 14 .00 points on BANKING77. At q80 , the range is 0.04 –12 .37 points; at q95 , it is 0.03 –11 .09 points. These differences quantify the utility cost of protecting a larger local neighborhood at the same (ε, δ ).
+
+5.4 Accuracy at a fixed reconstruction certificate 
+
+The most interpretable privacy–utility visualization is accuracy as a function of the certified exact-identification upper bound γ from Corollary 4.10. A higher point means better utility; a farther-left point means a smaller certified exact-identification risk. Figure 2 shows the regenerated seven-dataset private-ERM accuracy–certificate trade-off from the publication report. The plot uses the finite rows for the direct certificate column and aggregates seed-first before plotting. The important interpretation is that the radius labels do not denote different certificate values at the same ε. Under matched Gaussian calibration, γ is determined by m, ε, and δ through ∆2/σ .The radius instead tells the reader which substitutions are protected and how much utility is retained while achieving that numerical certificate. 
+
+5.5 Convex-head comparison on IMDb 
+
+The preceding seven-dataset frontier uses ridge prototypes to keep the exact finite-prior inverse problem explicit. The calibration theorem, however, applies to every convex head for which Assumption 3.4 is verified. Proposition 6.6 gives those constants for binary logistic regression, softmax logistic regression, and squared-hinge SVMs. To make this scope visible empirically, Figure 3 repeats the private-ERM utility–certificate sweep on IMDb embeddings at the local radius policy 
+
+q50 for binary logistic regression, ridge prototypes, and the squared-hinge SVM. This experiment uses five Gaussian release seeds per mechanism and nominal privacy levels ε ∈ { 8, 16 , 32 }.Table 2: IMDb convex-head comparison at local radius policy q50 . Each cell reports mean accuracy ± seed-first 
+
+95% confidence interval over five Gaussian release seeds. The ReRo certificates are γ = 0 .5987 , 0.9238 , 0.9995 
+
+for ε = 8 , 16 , 32 , respectively, and are the horizontal-axis values used in Figure 3.                                                                       
+
+> Head Mechanism ε= 8 ε= 16 ε= 32
+> Binary logistic Ball-DP (q50) 0.720 ±0.014 0.747 ±0.008 0.757 ±0.004
+> Binary logistic Standard DP 0.679 ±0.026 0.725 ±0.013 0.748 ±0.007
+> Ridge prototype Ball-DP (q50) 0.728 ±0.006 0.743 ±0.005 0.748 ±0.003
+> Ridge prototype Standard DP 0.702 ±0.008 0.731 ±0.006 0.743 ±0.005
+> Squared-hinge SVM Ball-DP (q50) 0.721 ±0.023 0.759 ±0.011 0.776 ±0.006
+> Squared-hinge SVM Standard DP 0.673 ±0.033 0.729 ±0.020 0.761 ±0.011
+
+At every displayed privacy level and for all three convex heads, Ball-DP has higher mean accuracy than the global-radius comparator at the same reported ReRo certificate. The gains are largest at the strongest privacy level, ε = 8 : 4.12 accuracy points for binary logistic regression, 2.65 points for 13 0.2 0.3 0.4 0.5 0.6                            
+
+> 0.832
+> 0.840
+> 0.848
+> 0.856
+> 0.864
+> Accuracy
+> AG News-embeddings
+> 0.2 0.4 0.6 0.8 1.0
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> BANKING77-embeddings
+> 0.2 0.4 0.6 0.8 1.0
+> 0.48
+> 0.56
+> 0.64
+> 0.72
+> CIFAR-10-embeddings
+> 0.2 0.3 0.4 0.5 0.6
+> 0.16
+> 0.24
+> 0.32
+> 0.40
+> 0.48
+> Accuracy
+> Emotion-embeddings
+> 0.2 0.4 0.6 0.8 1.0
+> Direct Gaussian ReRo bound
+> 0.54
+> 0.60
+> 0.66
+> 0.72
+> IMDb-embeddings
+> 0.2 0.4 0.6 0.8 1.0
+> Direct Gaussian ReRo bound
+> 0.60
+> 0.66
+> 0.72
+> 0.78
+> 0.84
+> MNIST-embeddings
+> 0.2 0.4 0.6 0.8 1.0
+> Direct Gaussian ReRo bound
+> 0.15
+> 0.30
+> 0.45
+> 0.60
+> 0.75
+> Accuracy
+> TREC-6-embeddings
+> Ball-DP (q50) Ball-DP (q80) Ball-DP (q95) Standard DP
+
+Figure 2: Private-ERM accuracy versus the direct exact-identification upper bound γ on the seven embedding benchmarks for the ridge-prototype head. Solid curves are Ball-DP mechanisms calibrated at local radii 
+
+q50 , q80 , and q95 ; the dashed curve is the global-radius comparator. Points are seed-first means over ten independent Gaussian release seeds. At a fixed numerical certificate level, the vertical gap shows the utility gained by protecting a local neighborhood rather than the global bounded-replacement radius. Table 1 gives the corresponding per-dataset accuracy values. 
+
+ridge prototypes, and 4.80 points for the squared-hinge SVM. As privacy weakens, the gap shrinks: at ε = 32 , the corresponding gains are 0.96 , 0.53 , and 1.49 points. This pattern is consistent with the calibration story: local radius-aware noise matters most when the Gaussian perturbation is large. The head comparison also shows a utility trade-off that is separate from the privacy certificate. When one can afford high ε, the secondary convex heads can outperform the ridge prototype: at 
+
+ε = 32 , the squared-hinge SVM reaches the highest mean accuracy in this sweep, 0.776 under Ball-DP. However, these higher-utility heads are also more sensitive to stronger privacy in the reported experiment. From ε = 32 to ε = 8 , Ball-DP accuracy drops by 3.68 points for binary logistic regression and 5.54 points for the squared-hinge SVM, compared with 2.00 points for the ridge prototype. Thus the secondary heads can be attractive in the high-utility, weak-privacy regime, while the ridge prototype remains a stable closed-form audit head for the main seven-dataset reconstruction study. 14 0.60 0.70 0.80 0.90 1.00          
+
+> Direct Gaussian ReRo bound
+> 0.65
+> 0.70
+> 0.75
+> 0.80
+> Accuracy
+> Binary logistic regression
+> 0.60 0.70 0.80 0.90 1.00
+> Direct Gaussian ReRo bound
+> Squared-hinge SVM
+> 0.60 0.70 0.80 0.90 1.00
+> Direct Gaussian ReRo bound
+> Ridge prototype
+> IMDb: private ERM accuracy versus ReRo bound
+> Ball-DP (q50) Standard DP
+
+Figure 3: IMDb convex-head comparison at local radius policy q50 . Each panel shows private-ERM accuracy as a function of the direct finite-prior ReRo certificate γ. Solid curves are Ball-DP releases calibrated at the local q50 policy radius; dashed curves are the global-radius Standard-DP comparator evaluated on the corresponding q50 row set. Points correspond to ε ∈ { 8, 16 , 32 }, with γ = 0 .5987 , 0.9238 , 0.9995 , respectively. Error bars are seed-first 95% normal intervals over five Gaussian release seeds. 
+
+5.6 Finite-prior reconstruction diagnostics 
+
+This diagnostic is not a new privacy definition; it is an attack audit for a concrete finite candidate support. The prior on that support is part of the attack specification. In the reported audit we use the uniform prior over m = 10 candidates, so the oblivious exact-identification baseline is exactly 
+
+1/m = 0 .1 and comparisons are not confounded by prior imbalance. Proposition 4.1 also covers non-uniform initial priors: changing the prior adds the term log πi to the MAP score and changes the exact-identification baseline to max i πi. Such priors are useful for deployment-specific stress tests, but the aggregate table below uses the uniform prior throughout. Within this uniform-prior protocol, the radius-grid audit varies ε ∈ { 2, 4, 8} and the Ball-DP radius policy in {q50 , q 80 , q 95 }, while evaluating the Standard-DP comparator on the same radius-
+
+q80 feasible-set protocol. For each setup seed, we construct four public-only same-label feasible supports inside the policy ball. Each support has size m = 10 and is chosen by a farthest-point procedure to stress-test identification among well-separated feasible candidates. We then cycle through the support: for each candidate zi ∈ S, we treat zi once as the hidden target, release a Gaussian-perturbed ridge-prototype model trained on D− ∪ { zi}, and run the exact MAP rule of Proposition 4.1. Thus each setup seed contributes 4 × 10 = 40 raw release-and-attack trials, and the ten setup seeds give 400 raw trials per dataset and mechanism. The reported uncertainty is computed seed-first: raw trials are first averaged within each setup seed, and the displayed confidence intervals are then computed across the ten setup-seed averages. The standard mechanism in this audit uses the empirical same-label diameter and count-aware ridge calibration. The radius-grid audit in Figure 4 and Table 3 should not be read as saying that Ball-DP and the standard comparator protect the same adjacency relation. They do not. Ball-DP uses less noise because it protects the declared local ball, whereas the standard comparator uses the global replacement radius. The empirical exact-ID rate therefore need not be lower for Ball-DP and can be higher depending on the sampled feasible-set geometry. The ReRo reference line gives the corresponding direct Gaussian worst-case certificate 
+
+γrel = Φ  Φ−1(1 /m ) + ∆ /σ  ,
+
+15 BANKING77          
+
+> IMDb
+> MNIST
+> AG News
+> Emotion
+> TREC-6
+> CIFAR-10
+> Dataset
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> Exact-ID success probability  ε= 2
+> BANKING77
+> IMDb
+> MNIST
+> AG News
+> Emotion
+> TREC-6
+> CIFAR-10
+> Dataset
+> ε= 4
+> BANKING77
+> IMDb
+> MNIST
+> AG News
+> Emotion
+> TREC-6
+> CIFAR-10
+> Dataset
+> ε= 8
+> Exact-ID attack success with direct Gaussian Ball-ReRo certi fi cate
+> Ball q50 Ball q80 Ball q95 Standard Chance 1/ mDirect Gaussian ReRo bound
+> BANKING77
+> IMDb
+> MNIST
+> AG News
+> Emotion
+> TREC-6
+> CIFAR-10
+> Dataset
+> 0.0 0.1 0.2 0.3 0.4 0.5 0.6
+> Exact-ID success probability
+> ε = 2
+> BANKING77
+> IMDb
+> MNIST
+> AG News
+> Emotion
+> TREC-6
+> CIFAR-10
+> Dataset
+> ε = 4
+> BANKING77
+> IMDb
+> MNIST
+> AG News
+> Emotion
+> TREC-6
+> CIFAR-10
+> Dataset
+> ε = 8
+
+Exact-ID attack success with direct Gaussian Ball-ReRo certificate      
+
+> Ball q50 Ball q80 Ball q95 Standard Chance 1/m Direct Gaussian ReRo bound
+
+Figure 4: Radius-grid exact-identification audit for ridge-prototype finite-prior MAP reconstruction. Each panel fixes ε ∈ { 2, 4, 8}; within each dataset, the first three bars show Ball-DP calibrated at radius policies 
+
+q50 , q80 , and q95 , while the fourth bar shows the global-radius Standard-DP Gaussian comparator evaluated on the same radius-q80 finite-prior feasible-set protocol. The q80 label for the Standard-DP bar therefore describes the attack candidate-support construction, not the Standard-DP privacy adjacency radius. Error bars are seed-first 95% confidence intervals over ten setup seeds, where each setup seed averages four feasible supports and all m = 10 candidate-target trials within each support. The dashed horizontal line is chance, 
+
+1/m = 0 .1. The upper horizontal line is the direct Gaussian ReRo certificate γrel = Φ(Φ −1(1 /m ) + ∆ /σ ),which is independent of the radius policy within a fixed ε panel. For δ = 10 −6 and m = 10 , the displayed certificate values are 0.2024 , 0.3286 , and 0.5987 for ε = 2 , 4, 8, respectively. 
+
+with the calibration values reported in Table 4. Across the reruns shown here, the empirical success probabilities remain below the certificate lines while staying interpretable relative to the chance baseline 1/m .
+
+# 6 Technical Statements for the Experiments 
+
+This section records the model-specific facts used by the experimental section. The statements serve two purposes: they specify the Gaussian sensitivity calibration for the ridge-prototype head, and they show how the generic Ball-DP theorem extends to the additional convex heads used in the IMDb comparison. Proofs are deferred to the appendices. 
+
+6.1 Ridge-prototype head 
+
+The ridge-prototype head is the closed-form audit case. Its optimizer, sensitivity, and informed-adversary inverse problem are explicit, so it supports exact MAP reconstruction diagnostics without numerical approximation error. The statements below are therefore the ridge-specific instantiation of the general convex-ERM theory, not the full scope of the method. 
+
+Theorem 6.1 (Exact gradient Lipschitz constant for ridge prototypes) . Under the label-preserving distance metric defined in Section 3.1, Assumption 3.4 holds for ℓ(μ; ( z, y )) = ∥z − μy∥22 with the exact constant Lz = 2 .
+
+Corollary 6.2 (Exact r-adjacency sensitivity) . Let bμ(D) be the unique minimizer of (4) . The count-worst-case sensitivity at radius r is 
+
+∆proto (r) = sup 
+
+D∼r D′
+
+∥bμ(D) − bμ(D′)∥2 = 2r
+
+2 + λn .
+
+16 Table 3: Exact-identification radius-grid audit for ridge-prototype finite-prior MAP reconstruction. Entries report empirical exact-ID success probability with seed-first 95% confidence intervals over ten setup seeds. Each displayed empirical cell uses 400 raw release-and-attack trials, decomposed as ten setup seeds, four feasible supports per setup seed, and all m = 10 candidate-target trials within each support. The first three columns vary the Ball-DP radius policy. The Standard-DP column uses the global-radius Gaussian comparator evaluated on the same radius-q80 finite-prior feasible-set protocol; this matches Figure 4. Chance is 1/m = 0 .1
+
+for all rows. The final column gives the direct Gaussian ReRo certificate γrel = Φ(Φ −1(1 /m ) + ∆ /σ ).
+
+Dataset ε Ball-DP q50 Ball-DP q80 Ball-DP q95 Standard DP (q80 audit) γrel 
+
+AG News 2 0.153 ± 0.035 0.155 ± 0.029 0.170 ± 0.043 0.138 ± 0.032 0.2024 
+
+AG News 4 0.223 ± 0.034 0.205 ± 0.034 0.195 ± 0.041 0.195 ± 0.041 0.3286 
+
+AG News 8 0.370 ± 0.052 0.373 ± 0.074 0.335 ± 0.043 0.340 ± 0.041 0.5987 
+
+BANKING77 2 0.145 ± 0.019 0.123 ± 0.030 0.108 ± 0.025 0.120 ± 0.032 0.2024 
+
+BANKING77 4 0.133 ± 0.023 0.128 ± 0.042 0.118 ± 0.025 0.113 ± 0.025 0.3286 
+
+BANKING77 8 0.165 ± 0.018 0.185 ± 0.037 0.155 ± 0.051 0.160 ± 0.041 0.5987 
+
+CIFAR-10 2 0.160 ± 0.032 0.155 ± 0.030 0.118 ± 0.023 0.135 ± 0.034 0.2024 
+
+CIFAR-10 4 0.198 ± 0.047 0.230 ± 0.048 0.208 ± 0.025 0.178 ± 0.037 0.3286 
+
+CIFAR-10 8 0.378 ± 0.038 0.373 ± 0.043 0.353 ± 0.044 0.278 ± 0.040 0.5987 
+
+Emotion 2 0.093 ± 0.033 0.120 ± 0.022 0.080 ± 0.023 0.130 ± 0.035 0.2024 
+
+Emotion 4 0.088 ± 0.034 0.095 ± 0.014 0.090 ± 0.018 0.105 ± 0.028 0.3286 
+
+Emotion 8 0.153 ± 0.032 0.120 ± 0.027 0.118 ± 0.030 0.148 ± 0.023 0.5987 
+
+IMDb 2 0.178 ± 0.028 0.173 ± 0.039 0.158 ± 0.061 0.150 ± 0.031 0.2024 
+
+IMDb 4 0.233 ± 0.051 0.213 ± 0.044 0.230 ± 0.059 0.203 ± 0.051 0.3286 
+
+IMDb 8 0.408 ± 0.050 0.375 ± 0.046 0.353 ± 0.046 0.325 ± 0.037 0.5987 
+
+MNIST 2 0.165 ± 0.040 0.145 ± 0.037 0.125 ± 0.030 0.135 ± 0.029 0.2024 
+
+MNIST 4 0.225 ± 0.047 0.218 ± 0.045 0.190 ± 0.060 0.163 ± 0.025 0.3286 
+
+MNIST 8 0.340 ± 0.032 0.303 ± 0.053 0.285 ± 0.036 0.265 ± 0.034 0.5987 
+
+TREC-6 2 0.095 ± 0.019 0.123 ± 0.034 0.108 ± 0.023 0.085 ± 0.033 0.2024 
+
+TREC-6 4 0.105 ± 0.031 0.100 ± 0.032 0.128 ± 0.039 0.105 ± 0.036 0.3286 
+
+TREC-6 8 0.123 ± 0.035 0.118 ± 0.036 0.098 ± 0.019 0.108 ± 0.028 0.5987 
+
+Table 4: Direct Gaussian ReRo certificate values used as horizontal reference lines in Figure 4 and as reference values in the finite-prior audit tables. Here m = 10 , δ = 10 −6, chance is 1/m = 0 .1, and ∆/σ is determined by the analytic Gaussian calibration. 
+
+ε ∆/σ 1/m γrel 
+
+2 0.4483 0.1000 0.2024 4 0.8379 0.1000 0.3286 8 1.5315 0.1000 0.5987 
+
+This is sharper than the generic upper bound from Theorem 3.5. 
+
+Corollary 6.2 is count-worst-case: it allows the changed record to be the only record in its class. If class counts are public, or are fixed component metadata of the label-preserving adjacency graph, the calibration can instead use the smallest nonzero public class count. 
+
+Proposition 6.3 (Count-aware ridge-prototype sensitivity) . Let nc be the public number of records 
+
+17 in class c, and let 
+
+nmin := min {nc : nc > 0}.
+
+Conditional on these counts, the exact r-adjacency sensitivity of the ridge-prototype optimizer is 
+
+∆proto (r; n1, . . . , n C ) = max 
+
+> c:nc>0
+
+2r
+
+2nc + λn = 2r
+
+2nmin + λn .
+
+The maximum is attained by a class with count nmin , since one changed record moves rare-class prototypes the most. Because nmin ≥ 1, the count-aware calibration is never looser than the count-worst-case bound 2r/ (2 + λn ), and it is strictly tighter whenever nmin > 1.
+
+Theorem 6.4 (Exact reconstruction from a noiseless release) . Let D = D− ∪ { (z, y )} and suppose an informed adversary knows D−, n, λ, and the noiseless optimum bμ(D). If the missing label y is known, then 
+
+z = 2( n− 
+
+> y
+
++ 1) + λn 
+
+2 bμy(D) − X 
+
+> (z′,y ′)∈D−:y′=y
+
+z′,
+
+where n− 
+
+> y
+
+is the number of public label-y examples. If the missing label is unknown, define 
+
+μ0 
+
+> c
+
+(D−) := 2 P  
+
+> (z′,y ′)∈D−:y′=c
+
+z′
+
+2n− 
+
+> c
+
++ λn 
+
+for every class c with n− 
+
+> c
+
+> 0. If there is a unique class c such that bμc(D)̸ = μ0 
+
+> c
+
+(D−), then y = c
+
+and the same formula reconstructs z.
+
+The only label-identification obstruction is the degenerate event in which the missing example equals the D−-implied prototype of its own class. In that case, adding the missing record does not move the corresponding released prototype. 
+
+Corollary 6.5 (Known-label noisy inversion) . Fix D− and suppose the missing label y is known. Let 
+
+Ay := 2( n− 
+
+> y
+
++ 1) + λn, S− 
+
+> y
+
+:= X 
+
+> (z′,y ′)∈D−:y′=y
+
+z′.
+
+For the Gaussian release, define 
+
+Wy = ( Ay/2) eμy − S− 
+
+> y
+
+.
+
+If the hidden record is Z, then 
+
+Wy = Z + ηy, ηy ∼ N (0 , τ 2 
+
+> y
+
+I), τy = ( Ay/2) σ. 
+
+Thus, for a uniform finite prior with common known label y, the exact MAP attack is nearest-neighbor decoding of Wy over the candidate support. 
+
+6.2 Logistic and SVM heads 
+
+The same ERM sensitivity theorem applies to the additional convex heads used in the experiments once Assumption 3.4 is verified for each model. For the main text, we record only the resulting constants needed for the Ball-DP calibration; the proof of Proposition 6.6 is deferred to Appendix D. Throughout this subsection we use the label-preserving metric, assume ∥z∥2 ≤ B, and write 
+
+eB := pB2 + 1 
+
+for the augmented feature norm. 18 Proposition 6.6 (Explicit Lz constants for common convex heads) . For same-label substitutions, Assumption 3.4 holds for the following convex heads with the corresponding dataset-independent constants: 
+
+• Squared hinge loss: 
+
+Lz ≤ 2 + 4 Bp2/λ. 
+
+• Binary logistic loss: 
+
+Lz ≤ 1 + eB2
+
+4λ .
+
+• Softmax logistic loss: 
+
+Lz ≤ √2 1 + eB2
+
+2λ
+
+!
+
+.
+
+Consequently, for any of these heads, Theorem 3.5 gives 
+
+∥bθ(D) − bθ(D′)∥ ≤ Lz
+
+λn r for all D ∼r D′,
+
+with Lz chosen from the corresponding case above. 
+
+# 7 Related Work 
+
+Adjacency design beyond the global worst case. The choice of adjacency is central to the meaning of DP Dwork and Roth (2014). Metric formulations such as dX -privacy and later work on metric DP replace the uniform adjacency graph by guarantees that depend on a record metric, especially in location and embedding domains Chatzikokolakis et al. (2013); Imola et al. (2022). Ball-DP is simpler and more policy-oriented: it keeps the standard (ε, δ ) semantics unchanged and restricts the protected substitutions to a declared radius-r neighborhood. 
+
+Private convex ERM and output perturbation. Private ERM under convexity has a long history, including output- and objective-perturbation methods Chaudhuri et al. (2011). In the Gaussian output-perturbation regime, analytic calibration improves over the classical tail-bound formula Balle and Wang (2018). Our generic ERM sensitivity theorem is the local counterpart of the usual output-perturbation analysis. Ridge prototypes give an exact equality rather than only an upper bound, while the binary-logistic, softmax-logistic, and squared-hinge SVM constants show how the same local-calibration argument extends to common convex linear heads. 
+
+Reconstruction attacks and reconstruction robustness. Balle, Cherubin, and Hayes formalized the informed-adversary reconstruction setting and showed that convex models can admit exact or near-exact inversion from noiseless releases Balle et al. (2022). Hayes, Mahloujifar, and Balle derived reconstruction bounds and matching attacks for DP-SGD Hayes et al. (2023). The hypothesis-testing view of privacy, developed in the f -DP line of work, provides a natural route from privacy guarantees to attack bounds Dong et al. (2022). Kaissis et al. used this perspective to derive direct reconstruction bounds for Gaussian and subsampled mechanisms Kaissis et al. (2023). Our Gaussian Ball-ReRo result is the local, radius-thresholded analogue of that direct Gaussian testing argument. 
+
+Prototype-based private learning. Prototype representations are common in classical nearest-centroid classifiers and modern embedding-based learning Snell et al. (2017). Recent private learning work has also explored prototype releases in transfer-learning settings Wahdany et al. (2025). 19 Our use of prototypes is different: the model is chosen as the closed-form audit case because its convex structure yields exact local sensitivity and an exact informed-adversary audit. The broader convex-head contribution is captured by the generic ERM theorem and the explicit logistic/SVM constants. 
+
+# 8 Summary and Future Directions 
+
+This paper introduced Ball-DP, a radius-restricted adjacency relation that makes the locality of a privacy guarantee an explicit, auditable policy choice rather than an implicit byproduct of noise tuning. The standard (ε, δ )-indistinguishability semantics are preserved within the declared neighborhood; only the scope of the guarantee changes. For strongly convex ERM, we showed that sensitivity under r-adjacency scales linearly with r, giving a direct route to recalibrated Gaussian output perturbation. The theorem is instantiated for ridge prototypes, binary logistic regression, softmax logistic regression, and squared-hinge SVMs through explicit record-Lipschitz constants. For ridge-regularized prototype classifiers, the sensitivity, the noiseless informed-adversary inversion, and the finite-prior Gaussian MAP attack are all exact, allowing privacy calibration and reconstruction auditing to be studied without confounding approximation error. The experiments show that this local calibration recovers meaningful accuracy, while empirical exact-identification rates remain below the theorem-backed Ball-ReRo certificates. The additional IMDb convex-head sweep shows the same utility–certificate pattern for binary logistic and squared-hinge SVM heads, supporting the claim that the method is a convex-ERM calibration principle rather than a prototype-only construction. The current analysis is, however, confined to convex, one-shot Gaussian releases with public calibration metadata; it does not address label-changing substitutions, transcript-level releases from private SGD, or nonconvex representation-learning pipelines. Extending the Ball-DP accounting to these settings, particularly multi-step DP-SGD transcripts where sensitivity no longer admits a closed form, is the main direction for future work. 
+
+# References 
+
+B. Balle and Y.-X. Wang. Improving the gaussian mechanism for differential privacy: Analytical calibration and optimal denoising. In Proceedings of the 35th International Conference on Machine Learning , volume 80 of Proceedings of Machine Learning Research , pages 394–403. PMLR, 2018. URL https://proceedings.mlr.press/v80/balle18a.html .B. Balle, G. Cherubin, and J. Hayes. Reconstructing training data with informed adversaries. In 2022 IEEE Symposium on Security and Privacy (SP) , pages 1138–1156. IEEE, 2022. doi: 10.1109/SP46214.2022.9833677. Y. Bengio, A. Courville, and P. Vincent. Representation learning: A review and new perspectives. 
+
+IEEE Transactions on Pattern Analysis and Machine Intelligence , 35(8):1798–1828, 2013. doi: 10.1109/TPAMI.2013.50. I. Casanueva, T. Temčinas, D. Gerz, M. Henderson, and I. Vulić. Efficient intent detection with dual sentence encoders. In Proceedings of the 2nd Workshop on Natural Language Processing for Conversational AI , pages 38–45. Association for Computational Linguistics, 2020. doi: 10.18653/ v1/2020.nlp4convai-1.5. K. Chatzikokolakis, M. E. Andrés, N. E. Bordenabe, and C. Palamidessi. Broadening the scope of differential privacy using metrics. In Privacy Enhancing Technologies: 13th International 
+
+20 Symposium, PETS 2013 , volume 7981 of Lecture Notes in Computer Science , pages 82–102. Springer, 2013. doi: 10.1007/978-3-642-39077-7_5. K. Chaudhuri, C. Monteleoni, and A. D. Sarwate. Differentially private empirical risk minimization. 
+
+Journal of Machine Learning Research , 12(29):1069–1109, 2011. URL https://jmlr.org/papers/ v12/chaudhuri11a.html .R. Cummings, D. Desfontaines, D. Evans, R. Geambasu, Y. Huang, M. Jagielski, P. Kairouz, G. Kamath, S. Oh, O. Ohrimenko, N. Papernot, R. Rogers, M. Shen, S. Song, W. Su, A. Terzis, A. Thakurta, S. Vassilvitskii, Y.-X. Wang, L. Xiong, S. Yekhanin, D. Yu, H. Zhang, and W. Zhang. Advancing differential privacy: Where we are now and future directions for real-world deployment. 
+
+Harvard Data Science Review , 6(1), 2024a. doi: 10.1162/99608f92.d3197524. R. Cummings, S. Hod, J. Sarathy, and M. Swanberg. ATTAXONOMY: Unpacking differential privacy guarantees against practical adversaries, 2024b. J. Devlin, M.-W. Chang, K. Lee, and K. Toutanova. BERT: Pre-training of deep bidirectional transformers for language understanding. In Proceedings of the 2019 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies ,pages 4171–4186. Association for Computational Linguistics, 2019. doi: 10.18653/v1/N19-1423. J. Dong, A. Roth, and W. J. Su. Gaussian differential privacy. Journal of the Royal Statistical Society: Series B (Statistical Methodology) , 84(1):3–37, 2022. doi: 10.1111/rssb.12454. C. Dwork and A. Roth. The Algorithmic Foundations of Differential Privacy , volume 9 of Foundations and Trends in Theoretical Computer Science . Now Publishers, 2014. doi: 10.1561/0400000042. G. B. Folland. Real Analysis: Modern Techniques and Their Applications . Wiley, 2 edition, 1999. ISBN 9780471317166. T. Hastie, R. Tibshirani, and J. Friedman. The Elements of Statistical Learning: Data Mining, Inference, and Prediction . Springer, 2 edition, 2009. doi: 10.1007/978-0-387-84858-7. J. Hayes, B. Balle, and S. Mahloujifar. Bounding training data reconstruction in DP-SGD. In Advances in Neural Information Processing Systems 36 , 2023. URL https://proceedings.neurips.cc/ paper_files/paper/2023/hash/f8928b073ccbec15d35f2a9d39430bfd-Abstract-Conference. html .K. He, X. Zhang, S. Ren, and J. Sun. Deep residual learning for image recognition. In 2016 IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , pages 770–778. IEEE, 2016. doi: 10.1109/CVPR.2016.90. J. Imola, S. P. Kasiviswanathan, S. White, A. Aggarwal, and N. Teissier. Balancing utility and scalability in metric differential privacy. In Proceedings of the 38th Conference on Uncertainty in Artificial Intelligence , volume 180 of Proceedings of Machine Learning Research , pages 885–894. PMLR, 2022. URL https://proceedings.mlr.press/v180/imola22a.html .G. Kaissis, J. Hayes, A. Ziller, and D. Rueckert. Bounding data reconstruction attacks with the hypothesis testing interpretation of differential privacy, 2023. A. Krizhevsky. Learning multiple layers of features from tiny images. Technical report, University of Toronto, 2009. 21 Y. LeCun, L. Bottou, Y. Bengio, and P. Haffner. Gradient-based learning applied to document recognition. Proceedings of the IEEE , 86(11):2278–2324, 1998. doi: 10.1109/5.726791. X. Li and D. Roth. Learning question classifiers. In COLING 2002: The 19th International Conference on Computational Linguistics , 2002. doi: 10.3115/1072228.1072378. A. L. Maas, R. E. Daly, P. T. Pham, D. Huang, A. Y. Ng, and C. Potts. Learning word vectors for sentiment analysis. In Proceedings of the 49th Annual Meeting of the Association for Computa-tional Linguistics: Human Language Technologies , pages 142–150. Association for Computational Linguistics, 2011. URL https://aclanthology.org/P11-1015/ .I. Mironov. Rényi differential privacy. In 2017 IEEE 30th computer security foundations symposium (CSF) , pages 263–275. IEEE, 2017. J. Neyman and E. S. Pearson. On the problem of the most efficient tests of statistical hypotheses. 
+
+Philosophical Transactions of the Royal Society of London. Series A, Containing Papers of a Mathematical or Physical Character , 231:289–337, 1933. doi: 10.1098/rsta.1933.0009. A. Paszke, S. Gross, F. Massa, A. Lerer, J. Bradbury, G. Chanan, T. Killeen, Z. Lin, N. Gimelshein, L. Antiga, A. Desmaison, A. Köpf, E. Yang, Z. DeVito, M. Raison, A. Te-jani, S. Chilamkurthy, B. Steiner, L. Fang, J. Bai, and S. Chintala. PyTorch: An im-perative style, high-performance deep learning library. In Advances in Neural Information Processing Systems 32 , pages 8024–8035, 2019. URL https://papers.neurips.cc/paper/ 9015-pytorch-an-imperative-style-high-performance-deep-learning-library .PyTorch contributors. TorchVision resnet-18 model documentation. PyTorch documenta-tion, 2026. URL https://docs.pytorch.org/vision/stable/models/generated/torchvision. models.resnet18.html . Accessed 2026-06-11. A. Radford, J. W. Kim, C. Hallacy, A. Ramesh, G. Goh, S. Agarwal, G. Sastry, A. Askell, P. Mishkin, J. Clark, G. Krueger, and I. Sutskever. Learning transferable visual models from natural language supervision. In Proceedings of the 38th International Conference on Machine Learning , volume 139 of Proceedings of Machine Learning Research , pages 8748–8763. PMLR, 2021. URL https: //proceedings.mlr.press/v139/radford21a.html .N. Reimers and I. Gurevych. Sentence-BERT: Sentence embeddings using siamese BERT-networks. In Proceedings of the 2019 Conference on Empirical Methods in Natural Language Processing and the 9th International Joint Conference on Natural Language Processing , pages 3982–3992. Association for Computational Linguistics, 2019. doi: 10.18653/v1/D19-1410. E. Saravia, H.-C. T. Liu, Y.-H. Huang, J. Wu, and Y.-S. Chen. CARER: Contextualized affect representations for emotion recognition. In Proceedings of the 2018 Conference on Empirical Meth-ods in Natural Language Processing , pages 3687–3697. Association for Computational Linguistics, 2018. doi: 10.18653/v1/D18-1404. Sentence Transformers. sentence-transformers/all-MiniLM-L6-v2. Hugging Face model card, 2026. URL https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2 . Accessed 2026-06-11. S. Shalev-Shwartz and S. Ben-David. Understanding Machine Learning: From Theory to Algorithms .Cambridge University Press, 2014. doi: 10.1017/CBO9781107298019. 22 J. Snell, K. Swersky, and R. S. Zemel. Prototypical networks for few-shot learning. In Advances in Neural Information Processing Systems 30 , pages 4077–4087, 2017. URL https://papers.nips. cc/paper/6996-prototypical-networks-for-few-shot-learning .D. Wahdany, M. Jagielski, A. Dziedzic, and F. Boenisch. Differentially private prototypes for imbalanced transfer learning. In Proceedings of the AAAI Conference on Artificial Intelligence ,volume 39, pages 20991–20999, 2025. doi: 10.1609/aaai.v39i20.35395. W. Wang, F. Wei, L. Dong, H. Bao, N. Yang, and M. Zhou. MiniLM: Deep self-attention distillation for task-agnostic compression of pre-trained transformers. In Advances in Neural Information Processing Systems 33 , pages 5776–5788, 2020. URL https://proceedings.neurips.cc/paper/ 2020/hash/3f5ee243547dee91fbd053c1c4a845aa-Abstract.html .X. Zhang, J. Zhao, and Y. LeCun. Character-level convolutional networks for text classification. In 
+
+Advances in Neural Information Processing Systems 28 , 2015. URL https://papers.nips.cc/ paper/5782-character-level-convolutional-networks-for-text-classification .
+
+# Ethics considerations 
+
+This paper studies privacy guarantees and reconstruction attacks for machine-learning models trained on potentially sensitive data. The experiments use fixed embedding representations and theorem-aligned attack protocols whose purpose is to audit privacy leakage under controlled assumptions, not to facilitate unauthorized extraction of personal data from deployed systems. Empirical attack evaluations should be run only on datasets for which the researchers have authorization, and released artifacts should omit raw private records. No human-subject intervention is involved in the analysis reported here. The experiments evaluate candidate identification in embedding space rather than recovered raw images or text. 
+
+# A Proofs for Main Results 
+
+A.1 Proof of Proposition 3.3 
+
+Proof. If ∥z∥2 ≤ B and ∥z′∥2 ≤ B, the triangle inequality gives 
+
+∥z − z′∥2 ≤ ∥ z∥2 + ∥z′∥2 ≤ 2B. 
+
+Thus every admissible single-record replacement is 2B-adjacent, so the bounded-replacement adja-cency graph is contained in the Ball adjacency graph at radius 2B.
+
+A.2 Proof of Theorem 3.5 
+
+We first state a generic optimizer-perturbation bound that does not depend on the metric or on any Lipschitz-in-sample assumption. 
+
+Lemma A.1 (Single-record optimizer perturbation) . Let D, D ′ ∈ Z n differ only at index j, with records zj and z′ 
+
+> j
+
+. Suppose FD is differentiable and λ-strongly convex, and suppose the minimizers 
+
+bθ(D) and bθ(D′) lie in a parameter set Θ. Then 
+
+∥bθ(D) − bθ(D′)∥2 ≤ 1
+
+λn sup 
+
+> θ∈Θ
+
+∇θℓ(θ; zj ) − ∇ θℓ(θ; z′ 
+
+> j
+
+) 2 .
+
+23 Proof of Lemma A.1. Let 
+
+u := bθ(D), v := bθ(D′).
+
+If u = v, the result is immediate, so assume u̸ = v. Since FD is differentiable and λ-strongly convex, its gradient is λ-strongly monotone: 
+
+∇FD(a) − ∇ FD(b), a − b ≥ λ∥a − b∥22 for all a, b. 
+
+Apply this with a = u and b = v. Since u minimizes FD, ∇FD(u) = 0 , and therefore 
+
+λ∥u − v∥22 ≤ − ∇ FD(v), u − v ≤ ∥∇ FD(v)∥2 ∥u − v∥2.
+
+Dividing by ∥u − v∥2 gives 
+
+λ∥u − v∥2 ≤ ∥∇ FD(v)∥2.
+
+Since v minimizes FD′ , ∇FD′ (v) = 0 , so 
+
+∥∇ FD(v)∥2 = ∥∇ FD(v) − ∇ FD′ (v)∥2.
+
+The datasets differ only at index j, hence all unchanged records and the regularizer cancel in the gradient difference: 
+
+∇FD(v) − ∇ FD′ (v) = 1
+
+n
+
+ ∇θℓ(v; zj ) − ∇ θℓ(v; z′ 
+
+> j
+
+) .
+
+Because v ∈ Θ, we have 
+
+∇θℓ(v; zj ) − ∇ θℓ(v; z′ 
+
+> j
+
+) 2 ≤ sup 
+
+> θ∈Θ
+
+∇θℓ(θ; zj ) − ∇ θℓ(θ; z′ 
+
+> j
+
+) 2 .
+
+Combining the previous displays yields 
+
+∥bθ(D) − bθ(D′)∥2 ≤ 1
+
+λn sup 
+
+> θ∈Θ
+
+∇θℓ(θ; zj ) − ∇ θℓ(θ; z′ 
+
+> j
+
+) 2 ,
+
+as claimed. 
+
+Proof of Theorem 3.5. Let D ∼r D′ and let j be the differing coordinate. By Lemma A.1, 
+
+∥bθ(D) − bθ(D′)∥2 ≤ 1
+
+λn sup 
+
+> θ∈Θ
+
+∇θℓ(θ; zj ) − ∇ θℓ(θ; z′ 
+
+> j
+
+) 2 .
+
+Assumption 3.4 gives 
+
+sup 
+
+> θ∈Θ
+
+∇θℓ(θ; zj ) − ∇ θℓ(θ; z′ 
+
+> j
+
+) 2 ≤ Lz d(zj , z ′ 
+
+> j
+
+).
+
+Since D ∼r D′, we have d(zj , z ′ 
+
+> j
+
+) ≤ r. Therefore 
+
+∥bθ(D) − bθ(D′)∥2 ≤ Lz
+
+λn r. 
+
+24 A.3 Proof of Proposition 3.7 
+
+Proof. Fix t > 0 and consider any pair D ∼t D′. By Theorem 3.5 with radius t,
+
+∥bθ(D) − bθ(D′)∥2 ≤ ∆t := Lz
+
+λn t. 
+
+Thus the two releases are Gaussian distributions with common covariance σ2Ip and means separated by at most ∆t. The Gaussian privacy profile therefore implies that the release is (εt, δ t)-DP on the 
+
+t-adjacency relation whenever 
+
+δt ≥ Φ
+
+ ∆t
+
+2σ − εtσ
+
+∆t
+
+
+
+− eεΦ
+
+
+
+− ∆t
+
+2σ − εσ 
+
+∆t
+
+
+
+For the closed-form statement, assume 
+
+σ ≥ ∆r
+
+ε
+
+p2 log(1 .25 /δ ), ∆r := Lz
+
+λn r. 
+
+Set εt = εt/r . Since 
+
+∆t
+
+εt
+
+= (Lz /(λn )) tεt/r = Lz rλn ε = ∆r
+
+ε ,
+
+the chosen σ also satisfies 
+
+σ ≥ ∆t
+
+εt
+
+p2 log(1 .25 /δ ).
+
+Whenever εt lies in the usual parameter range for the classical Gaussian mechanism bound, that bound gives (εt, δ )-DP on the t-adjacency relation. 
+
+A.4 Proofs for the Ridge-Prototype Model 
+
+A.4.1 Proof of Theorem 6.1 
+
+Proof. We identify the parameter μ = ( μ1, . . . , μ C ) with the concatenated vector in RCd obtained by stacking the class blocks. Under this identification, the per-example loss is 
+
+ℓ(μ; ( z, y )) = ∥z − μy∥22.
+
+Fix a class index c ∈ { 1, . . . , C }. The gradient of ℓ with respect to block μc is 
+
+∇μc ℓ(μ; ( z, y )) = 2( μy − z) 1{c = y} .
+
+Now take two records (z, y ) and (z′, y ′) and subtract their blockwise gradients: 
+
+∇μc ℓ(μ; ( z, y )) − ∇ μc ℓ(μ; ( z′, y ′)) = 2( μy − z) 1{c = y} − 2( μy′ − z′) 1c = y′ .
+
+Under the label-preserving metric of Equation (3) , finite record distance occurs only when y = y′.Therefore the only nonvacuous case is y = y′. In that case the display above simplifies to 
+
+∇μc ℓ(μ; ( z, y )) − ∇ μc ℓ(μ; ( z′, y )) = 2( z′ − z) 1{c = y} .
+
+This means that all blocks are zero except the block indexed by y. The full gradient difference therefore has exactly one nonzero block, equal to 2( z′ − z). Its Euclidean norm is thus 
+
+∥∇ μℓ(μ; ( z, y )) − ∇ μℓ(μ; ( z′, y )) ∥2 = 2 ∥z − z′∥2.
+
+25 By the definition of the label-preserving metric, 
+
+d (z, y ), (z′, y ) = ∥z − z′∥2.
+
+Substituting this identity into the previous display yields 
+
+∥∇ μℓ(μ; ( z, y )) − ∇ μℓ(μ; ( z′, y )) ∥2 = 2 d (z, y ), (z′, y ).
+
+Hence Assumption 3.4 holds with Lz = 2 .To see that the constant is exact, choose any same-label pair with z̸ = z′. The last display becomes an equality, so no smaller constant can work uniformly. 
+
+A.4.2 Proof of Corollary 6.2 
+
+Proof. Let 
+
+bμ(D) ∈ arg min  
+
+> μ
+
+FD(μ)
+
+be the unique minimizer of the ridge-prototype objective. For each class c, define the class sum and class count 
+
+Sc(D) := X
+
+> i:yi=c
+
+zi, nc(D) := # {i : yi = c}.
+
+Because the objective separates over the class blocks, we can write 
+
+FD(μ) = 
+
+> C
+
+X
+
+> c=1
+
+ 1
+
+n
+
+X
+
+> i:yi=c
+
+∥zi − μc∥22 + λ
+
+2 ∥μc∥22
+
+ .
+
+Fix a class c. Differentiating the cth summand with respect to μc gives 
+
+∇μc FD(μ) = 2
+
+n
+
+X
+
+> i:yi=c
+
+(μc − zi) + λμ c.
+
+Expand the sum: 
+
+∇μc FD(μ) = 2nc(D)
+
+n μc − 2
+
+n Sc(D) + λμ c.
+
+Group the μc terms: 
+
+∇μc FD(μ) = 
+
+ 2nc(D)
+
+n + λ
+
+
+
+μc − 2
+
+n Sc(D).
+
+At the optimum this gradient is zero, so 
+
+ 2nc(D)
+
+n + λ
+
+bμc(D) = 2
+
+n Sc(D).
+
+Multiply both sides by n:  2nc(D) + λn bμc(D) = 2 Sc(D).
+
+Therefore the closed-form optimizer is 
+
+bμc(D) = 2Sc(D)2nc(D) + λn . (5) 26 Now let D′ be obtained from D by replacing one record (z, y ) by (z′, y ) with ∥z − z′∥2 ≤ r.Because the label is preserved, the class counts do not change: 
+
+nc(D′) = nc(D) for every class c. 
+
+The class sums are also unchanged for all classes except the affected class y:
+
+Sc(D′) = Sc(D) for c̸ = y, 
+
+while for the affected class, 
+
+Sy(D′) = Sy(D) − z + z′.
+
+Substituting these identities into (5) shows that 
+
+bμc(D′) = bμc(D) for every c̸ = y, 
+
+and 
+
+bμy(D′) − bμy(D) = 2 Sy(D′) − Sy(D)
+
+2ny(D) + λn = 2( z′ − z)2ny(D) + λn .
+
+Thus the full parameter difference has exactly one nonzero block, namely the yth block. Its norm is therefore 
+
+∥bμ(D′) − bμ(D)∥2 = ∥bμy(D′) − bμy(D)∥2 = 2∥z′ − z∥2
+
+2ny(D) + λn .
+
+Since the changed record itself belongs to class y, we have ny(D) ≥ 1. Hence 
+
+∥bμ(D′) − bμ(D)∥2 ≤ 2r
+
+2ny(D) + λn ≤ 2r
+
+2 + λn .
+
+This proves the upper bound 
+
+∆proto (r) ≤ 2r
+
+2 + λn .
+
+To prove equality, choose a dataset in which the modified record is the only example from its class, so that ny(D) = 1 . Choose the replacement so that ∥z − z′∥2 = r. For this pair, 
+
+∥bμ(D′) − bμ(D)∥2 = 2r
+
+2 + λn .
+
+Therefore the upper bound is attained, and 
+
+∆proto (r) = 2r
+
+2 + λn .
+
+A.4.3 Proof of Proposition 6.3 
+
+Proof. Under the label-preserving metric, adjacent datasets differ by replacing (z, y ) with (z′, y ), so the class labels and hence the count vector are unchanged along every adjacency edge. The proof of Corollary 6.2 gives, for a replacement in class c,
+
+∥bμ(D′) − bμ(D)∥2 = 2∥z′ − z∥2
+
+2nc + λn .
+
+Conditional on the public count vector, the only remaining choices are the class c and the replacement distance. The radius policy imposes ∥z′ − z∥2 ≤ r, so the largest possible movement is 
+
+max 
+
+> c:nc>0
+
+2r
+
+2nc + λn .
+
+The denominator is smallest for a class with the smallest nonzero count nmin , which gives 2r/ (2 nmin +
+
+λn ). Equality is attained by choosing such a class and a replacement at distance exactly r.27 A.4.4 Proof of Theorem 6.4 
+
+Proof. For each class c ∈ { 1, . . . , C }, define the class sum and class count in the known dataset D−
+
+by 
+
+S− 
+
+> c
+
+:= X
+
+> (z′,y ′)∈D−
+> y′=c
+
+z′,n− 
+
+> c
+
+:= # {(z′, y ′) ∈ D− : y′ = c}.
+
+Since the full dataset is D = D− ∪ { (z, y )}, the full-data class statistics are 
+
+Sc(D) = S− 
+
+> c
+
++ z 1{c = y} , nc(D) = n− 
+
+> c
+
++ 1{c = y} .
+
+As shown in the proof of Corollary 6.2, the released prototype satisfies 
+
+bμc(D) = 2Sc(D)2nc(D) + λn .
+
+We now prove the two claims separately. 
+
+Part 1: exact record reconstruction when the label is known. Assume the adversary knows the missing label y. Then for the affected class, 
+
+Sy(D) = S− 
+
+> y
+
++ z, ny(D) = n− 
+
+> y
+
++ 1 .
+
+Substituting these identities into the closed-form optimizer gives 
+
+bμy(D) = 2( S− 
+
+> y
+
++ z)2( n− 
+
+> y
+
++ 1) + λn .
+
+Multiply both sides by the denominator: 
+
+ 2( n− 
+
+> y
+
++ 1) + λn bμy(D) = 2( S− 
+
+> y
+
++ z).
+
+Expand the right-hand side: 
+
+ 2( n− 
+
+> y
+
++ 1) + λn bμy(D) = 2 S− 
+
+> y
+
++ 2 z. 
+
+Subtract 2S− 
+
+> y
+
+from both sides: 
+
+ 2( n− 
+
+> y
+
++ 1) + λn bμy(D) − 2S− 
+
+> y
+
+= 2 z. 
+
+Finally divide by 2:
+
+z = 2( n− 
+
+> y
+
++ 1) + λn 
+
+2 bμy(D) − S− 
+
+> y
+
+.
+
+Since S− 
+
+> y
+
+= P  
+
+> (z′,y ′)∈D−:y′=y
+
+z′, this is exactly the displayed reconstruction formula. 
+
+Part 2: label identification from the changed prototype. For any class c̸ = y, the missing record does not affect class c. Thus 
+
+Sc(D) = S− 
+
+> c
+
+, nc(D) = n− 
+
+> c
+
+.
+
+Substituting into the closed-form optimizer gives 
+
+bμc(D) = 2S−
+
+> c
+
+2n− 
+
+> c
+
++ λn .
+
+28 Define the D−-implied baseline prototype 
+
+μ− 
+
+> c
+
+:= 2S−
+
+> c
+
+2n− 
+
+> c
+
++ λn .
+
+Then we have shown that 
+
+bμc(D) = μ− 
+
+> c
+
+for every c̸ = y. 
+
+Therefore, if there is a unique class c⋆ such that 
+
+bμc⋆ (D)̸ = μ− 
+
+> c⋆
+
+,
+
+that class must be the true missing class: c⋆ = y. Once the label is identified, Part 1 reconstructs the record exactly. It remains to characterize the only case where the missing class fails to move. Suppose 
+
+bμy(D) = μ− 
+
+> y
+
+.
+
+Using the formulas above, this means 
+
+2( S− 
+
+> y
+
++ z)2( n− 
+
+> y
+
++ 1) + λn = 2S−
+
+> y
+
+2n− 
+
+> y
+
++ λn .
+
+Cancel the common factor 2: S− 
+
+> y
+
++ z
+
+2( n− 
+
+> y
+
++ 1) + λn = S−
+
+> y
+
+2n− 
+
+> y
+
++ λn .
+
+Cross-multiply: 
+
+(S− 
+
+> y
+
++ z)(2 n− 
+
+> y
+
++ λn ) = S− 
+
+> y
+
+(2 n− 
+
+> y
+
++ 2 + λn ).
+
+Expand the left-hand side: 
+
+S− 
+
+> y
+
+(2 n− 
+
+> y
+
++ λn ) + z(2 n− 
+
+> y
+
++ λn ) = S− 
+
+> y
+
+(2 n− 
+
+> y
+
++ λn ) + 2 S− 
+
+> y
+
+.
+
+Subtract the common term S− 
+
+> y
+
+(2 n− 
+
+> y
+
++ λn ) from both sides: 
+
+z(2 n− 
+
+> y
+
++ λn ) = 2 S− 
+
+> y
+
+.
+
+Finally divide by 2n− 
+
+> y
+
++ λn to get 
+
+z = 2S−
+
+> y
+
+2n− 
+
+> y
+
++ λn = μ− 
+
+> y
+
+.
+
+Thus, 
+
+bμy(D) = μ− 
+
+> y
+
+=⇒ z = μ− 
+
+> y
+
+.
+
+The converse is immediate: if z = μ− 
+
+> y
+
+, then substituting this into the formula for bμy(D) gives back 
+
+μ− 
+
+> y
+
+. Hence 
+
+bμy(D) = μ− 
+
+> y
+
+⇐⇒ z = μ− 
+
+> y
+
+.
+
+So the only obstruction to label identification is the degenerate case in which the missing record equals the D−-implied prototype of its class. 29 A.4.5 Proof of Corollary 6.5 
+
+Proof. By the closed-form optimizer in (5), if the missing record is (Z, y ) then 
+
+bμy(D− ∪ { (Z, y )}) = 2( S− 
+
+> y
+
++ Z)
+
+Ay
+
+, Ay = 2( n− 
+
+> y
+
++ 1) + λn. 
+
+The Gaussian release gives 
+
+eμy = 2( S− 
+
+> y
+
++ Z)
+
+Ay
+
++ ξy, ξy ∼ N (0 , σ 2I).
+
+Multiplying by Ay/2 and subtracting S− 
+
+> y
+
+yields 
+
+Wy = Ay
+
+2 eμy − S− 
+
+> y
+
+= Z + Ay
+
+2 ξy.
+
+Thus Wy = Z + ηy with ηy ∼ N (0 , (Ayσ/ 2) 2I). For a uniform finite prior with common known label, the Gaussian likelihood is proportional to 
+
+exp 
+
+
+
+− ∥Wy − zi∥22
+
+2τ 2
+
+> y
+
+
+
+,
+
+so MAP decoding is nearest-neighbor decoding over the candidate set. 
+
+# B Proofs for Ball-ReRo 
+
+B.1 Proof of Theorem 4.5 
+
+Proof. For each record z ∈ Z , define the completed dataset 
+
+Dz := D− ∪ { z},
+
+and let 
+
+Pz := Law  M (Dz )
+
+be the law of the mechanism output under Dz . Define the success indicator 
+
+A(z, θ ) := 1ρ(z, R (θ, D −)) ≤ η .
+
+The reconstruction success probability is 
+
+psucc = EZ∼πu,r Eθ∼PZ [A(Z, θ )] .
+
+Because πu,r is supported on Bd(u, r ), every z in its support satisfies d(z, u ) ≤ r. Hence Dz and Du
+
+are r-adjacent. Since M is (ε, δ ) r-adjacency DP, for every such z and every measurable event E,
+
+Pz (E) ≤ eεPu(E) + δ. 
+
+Apply this inequality to 
+
+Ez := {θ : ρ(z, R (θ, D −)) ≤ η}.
+
+Then 
+
+Eθ∼Pz [A(z, θ )] = Pz (Ez ) ≤ eεPu(Ez ) + δ. 
+
+30 Averaging over Z ∼ πu,r gives 
+
+psucc ≤ eεEZ∼πu,r Eθ∼Pu [A(Z, θ )] + δ. 
+
+By Tonelli’s theorem (Folland, 1999, Chapter 2), 
+
+psucc ≤ eεEθ∼Pu Pr 
+
+> Z∼πu,r
+
+[ρ(Z, R (θ, D −)) ≤ η] + δ. 
+
+For each fixed θ, the output constraint gives R(θ, D −) ∈ A u,r . Therefore 
+
+Pr 
+
+> Z∼πu,r
+
+[ρ(Z, R (θ, D −)) ≤ η]
+
+≤ sup 
+
+> a∈A u,r
+
+Pr 
+
+> Z∼πu,r
+
+[ρ(Z, a ) ≤ η] = κ. 
+
+Substituting this bound yields 
+
+psucc ≤ eεκ + δ, 
+
+which is the claimed Ball-ReRo guarantee. 
+
+B.2 Proof of Lemma 4.7 
+
+Proof. Fix a pair of r-adjacent datasets D ∼r D′. Write 
+
+μ0 := f (D), μ1 := f (D′).
+
+Then the two released distributions are 
+
+M (D) ∼ N (μ0, σ 2I), M (D′) ∼ N (μ1, σ 2I).
+
+For two Gaussians with the same covariance matrix, the order-α Rényi divergence is 
+
+Dα
+
+ N (μ0, σ 2I) ∥ N (μ1, σ 2I) = α
+
+2σ2 ∥μ0 − μ1∥22.
+
+Applying this identity gives 
+
+Dα
+
+ M (D) ∥ M (D′) = α
+
+2σ2 ∥f (D) − f (D′)∥22.
+
+By the definition of r-adjacency sensitivity, 
+
+∥f (D) − f (D′)∥2 ≤ ∆2(r).
+
+Substituting this into the previous display proves 
+
+Dα
+
+ M (D) ∥ M (D′) ≤ α ∆2(r)2
+
+2σ2 .
+
+31 B.3 Proof of Theorem 4.8 
+
+Proof. For each candidate record z, let 
+
+Dz := D− ∪ { z}, Pz := Law  M (Dz ).
+
+Define 
+
+A(z, θ ) := 1ρ(z, R (θ, D −)) ≤ η .
+
+The reconstruction success probability is 
+
+psucc =
+
+Z
+
+> Z
+
+Z
+
+> Θ
+
+A(z, θ ) Pz (dθ ) πu,r (dz ).
+
+Because πu,r is supported on Bd(u, r ), every z in its support satisfies Dz ∼r Du. By Ball-RDP, 
+
+Dα(Pz ∥Pu) ≤ εα.
+
+In particular, Pz is absolutely continuous with respect to Pu for all relevant z. Let 
+
+Λz (θ) := dP z
+
+dP u
+
+(θ).
+
+Rewrite psucc using Pu as the reference measure: 
+
+psucc =
+
+Z
+
+> Θ
+
+Z 
+
+> Z
+
+A(z, θ )Λ z (θ) πu,r (dz )
+
+
+
+Pu(dθ ).
+
+Fix θ and apply Hölder’s inequality with conjugate exponents α and α′ = α/ (α − 1) :
+
+Z
+
+> Z
+
+A(z, θ )Λ z (θ) πu,r (dz )
+
+≤
+
+Z 
+
+> Z
+
+A(z, θ ) πu,r (dz )
+
+1/α ′ Z 
+
+> Z
+
+Λz (θ)α πu,r (dz )
+
+1/α 
+
+.
+
+For fixed θ, the output constraint gives R(θ, D −) ∈ A u,r , so the first factor is bounded by 
+
+Z
+
+> Z
+
+A(z, θ ) πu,r (dz ) = Pr 
+
+> Z∼πu,r
+
+[ρ(Z, R (θ, D −)) ≤ η] ≤ κ. 
+
+Therefore 
+
+psucc ≤ κ1/α ′
+
+Z
+
+> Θ
+
+Z 
+
+> Z
+
+Λz (θ)α πu,r (dz )
+
+1/α 
+
+Pu(dθ ).
+
+Let 
+
+H(θ) := 
+
+Z
+
+> Z
+
+Λz (θ)α πu,r (dz ).
+
+Since x 7 → x1/α is concave, Jensen’s inequality gives 
+
+Z 
+
+> Θ
+
+H(θ)1/α Pu(dθ )
+
+α
+
+≤
+
+Z
+
+> Θ
+
+H(θ)Pu(dθ ).
+
+Consequently,  psucc 
+
+κ1/α ′
+
+α
+
+≤
+
+Z
+
+> Z
+
+Z 
+
+> Θ
+
+Λz (θ)αPu(dθ )
+
+
+
+πu,r (dz ).
+
+32 By the definition of Rényi divergence, 
+
+Z
+
+> Θ
+
+Λz (θ)αPu(dθ ) = exp  (α − 1) Dα(Pz ∥Pu) ≤ e(α−1) εα .
+
+Thus  psucc 
+
+κ1/α ′
+
+α
+
+≤ e(α−1) εα .
+
+Taking the αth root and using 1/α ′ = ( α − 1) /α yields 
+
+psucc ≤  κe εα (α−1) /α .
+
+Since a probability is at most one, the claimed minimum with 1 follows. 
+
+B.4 A Gaussian testing lemma 
+
+Lemma B.1 (Blow-up function for equal-covariance Gaussians) . Let 
+
+P = N (μ1, σ 2I), Q = N (μ0, σ 2I),
+
+∆ := ∥μ1 − μ0∥2.
+
+Then for every κ ∈ [0 , 1] ,
+
+sup {P (E) : Q(E) ≤ κ} = Φ 
+
+
+
+Φ−1(κ) + ∆
+
+σ
+
+
+
+,
+
+where the values at κ = 0 and κ = 1 are understood as the continuous limits, namely 0 and 1,respectively. Proof. By translation and orthogonal invariance of Gaussian measures, it is enough to consider 
+
+Q = N (0 , σ 2I), P = N (∆ e1, σ 2I),
+
+where e1 is the first standard basis vector. The log-likelihood ratio is 
+
+log dP dQ (x) = ∆
+
+σ2 x1 − ∆2
+
+2σ2 ,
+
+which is increasing in x1. By the Neyman–Pearson lemma (Neyman and Pearson, 1933), among all measurable events with a fixed Q-mass, an event that maximizes P (E) is a likelihood-ratio upper level set. Hence, in this Gaussian shift case, an optimal event at fixed Q-mass is a half-space 
+
+Et := {x : x1 ≥ t}.
+
+Choose t such that Q(Et) = κ. Under Q, x1 ∼ N (0 , σ 2), so 
+
+κ = 1 − Φ( t/σ ) and t = σΦ−1(1 − κ).
+
+Under P , x1 ∼ N (∆ , σ 2), hence 
+
+P (Et) = 1 − Φ
+
+ t − ∆
+
+σ
+
+
+
+= Φ 
+
+
+
+Φ−1(κ) + ∆
+
+σ
+
+
+
+.
+
+The Neyman–Pearson lemma gives optimality, proving the identity. 33 B.5 Proof of Theorem 4.9 
+
+Proof. Fix D− ∈ Z n−1 and an anchor u ∈ Z . For each z in the support of πu,r , define 
+
+Dz := D− ∪ { z}, Du := D− ∪ { u}.
+
+Let 
+
+Pz := Law( M (Dz )) , Qu := Law( M (Du)) .
+
+Because the mechanism is Gaussian output perturbation, 
+
+Pz = N (f (Dz ), σ 2I), Qu = N (f (Du), σ 2I).
+
+Set 
+
+∆z := ∥f (Dz ) − f (Du)∥2, ∆⋆ := ¯∆( D−).
+
+By definition, ∆z ≤ ∆⋆ for all z in the support. Since d(z, u ) ≤ r, also Dz ∼r Du, and hence 
+
+∆⋆ ≤ ∆2(r).For each z, define 
+
+Ez := {θ : ρ(z, R (θ, D −)) ≤ η}.
+
+The attack success probability is 
+
+psucc = EZ∼πu,r [PZ (EZ )] .
+
+By Lemma B.1, 
+
+Pz (Ez ) ≤ Φ
+
+
+
+Φ−1(Qu(Ez )) + ∆z
+
+σ
+
+
+
+≤ Φ
+
+
+
+Φ−1(Qu(Ez )) + ∆⋆
+
+σ
+
+
+
+.
+
+Therefore 
+
+psucc ≤ EZ∼πu,r 
+
+
+
+Φ
+
+
+
+Φ−1(Qu(EZ )) + ∆⋆
+
+σ
+
+ 
+
+.
+
+Let 
+
+a := ∆⋆
+
+σ , g(t) := Φ  Φ−1(t) + a .
+
+For t ∈ (0 , 1) , with x = Φ −1(t) and φ denoting the standard normal density, 
+
+g′(t) = φ(x + a)
+
+φ(x) = exp 
+
+
+
+−ax − a2
+
+2
+
+
+
+> 0, g′′ (t) = − aφ(x) exp 
+
+
+
+−ax − a2
+
+2
+
+
+
+≤ 0.
+
+Thus g is nondecreasing and concave on (0 , 1) , and the same conclusion holds on [0 , 1] by continuous extension. Jensen’s inequality gives 
+
+psucc ≤ Φ
+
+
+
+Φ−1 EZ∼πu,r [Qu(EZ )]  + ∆⋆
+
+σ
+
+
+
+.
+
+It remains to bound the expectation inside Φ−1. By Tonelli’s theorem (Folland, 1999, Chapter 2), 
+
+EZ∼πu,r [Qu(EZ )] = Eθ∼Qu Pr 
+
+> Z∼πu,r
+
+[ρ(Z, R (θ, D −)) ≤ η].
+
+34 For each fixed θ, the output constraint gives R(θ, D −) ∈ A u,r , so 
+
+Pr 
+
+> Z∼πu,r
+
+[ρ(Z, R (θ, D −)) ≤ η] ≤ κπu,r ,ρ (η; Au,r ) = κ. 
+
+Thus 
+
+EZ∼πu,r [Qu(EZ )] ≤ κ. 
+
+Using the monotonicity of g yields 
+
+psucc ≤ Φ
+
+
+
+Φ−1(κ) + ∆⋆
+
+σ
+
+
+
+.
+
+Finally, ∆⋆ ≤ ∆2(r) gives the second displayed inequality in the theorem. 
+
+B.6 Proof of Corollary 4.10 
+
+Proof. Under the exact-identification loss ρID (z, z ′) = 1{z̸ = z′} with tolerance η = 0 , the success event is exactly R(θ, D −) = Z. The allowed output set is Au,r = S. For the uniform prior 
+
+πS = 1
+
+m
+
+> m
+
+X
+
+> i=1
+
+δzi ,
+
+the best oblivious feasible-set strategy is to guess any one candidate, so 
+
+κπS ,ρ ID (0; S) = sup 
+
+> a∈S
+
+Pr 
+
+> Z∼πS
+
+[Z = a] = 1
+
+m .
+
+Substituting this value into Theorem 4.9 and then using ¯∆( D−) ≤ ∆2(r) gives 
+
+Pr[ R(θ, D −) = Z] ≤ Φ
+
+
+
+Φ−1(1 /m ) + ∆2(r)
+
+σ
+
+
+
+,
+
+which is the claimed exact-identification bound. 
+
+B.7 Support-specific finite-Gaussian exact-identification bound 
+
+The following bound is a sharper finite-prior statement for equal-covariance Gaussian releases. It is useful as a technical comparison point, but it is not the quantity plotted in the experiments; the main text uses the simpler direct certificate from Corollary 4.10. 
+
+Theorem B.2 (Support-specific finite-Gaussian exact-ID bound) . Let Pi = N (μi, σ 2I) be the release law under candidate zi, with prior weights πi > 0 and P 
+
+> i
+
+πi = 1 . Fix any reference Gaussian 
+
+Q = N (μ0, σ 2I) and define 
+
+di := ∥μi − μ0∥2
+
+σ .
+
+Then every exact-identification rule satisfies 
+
+Pr[ bZ = Z] ≤ max   
+
+> q1,...,q m≥0: P
+> iqi≤1
+> m
+
+X
+
+> i=1
+
+πi Φ Φ−1(qi) + di
+
+ ,
+
+with boundary cases interpreted by continuity. In particular, if πi = 1 /m and di ≤ R for all i, then 
+
+Pr[ bZ = Z] ≤ Φ Φ−1(1 /m ) + R .
+
+35 Proof. Let Ai be the event that the attack outputs candidate zi. The events A1, . . . , A m are disjoint, and therefore mX
+
+> i=1
+
+Q(Ai) ≤ 1.
+
+Write qi := Q(Ai). By Lemma B.1, applied to Pi = N (μi, σ 2I) and Q = N (μ0, σ 2I),
+
+Pi(Ai) ≤ Φ Φ−1(qi) + di
+
+ , di = ∥μi − μ0∥2
+
+σ .
+
+The exact-identification success probability is 
+
+psucc =
+
+> m
+
+X
+
+> i=1
+
+πiPi(Ai).
+
+Combining the previous two displays gives 
+
+psucc ≤
+
+> m
+
+X
+
+> i=1
+
+πiΦ Φ−1(qi) + di
+
+
+
+for some nonnegative qi with P 
+
+> i
+
+qi ≤ 1. Maximizing over all such qi proves the first claim. For the uniform-prior specialization, assume di ≤ R for all i and define 
+
+hR(q) := Φ  Φ−1(q) + R .
+
+For q ∈ (0 , 1) , with x = Φ −1(q) and φ denoting the standard normal density, 
+
+h′
+
+> R
+
+(q) = φ(x + R)
+
+φ(x) = exp 
+
+
+
+−Rx − R2
+
+2
+
+
+
+> 0, h′′ 
+
+> R
+
+(q) = − Rφ(x) exp 
+
+
+
+−Rx − R2
+
+2
+
+
+
+≤ 0.
+
+Thus hR is nondecreasing and concave on (0 , 1) , and the same conclusion holds on [0 , 1] by continuous extension. Jensen’s inequality gives 
+
+1
+
+m
+
+> m
+
+X
+
+> i=1
+
+Φ Φ−1(qi) + di
+
+ ≤ 1
+
+m
+
+> m
+
+X
+
+> i=1
+
+hR(qi)
+
+≤ hR
+
+1
+
+m
+
+X
+
+> i
+
+qi
+
+!
+
+= Φ Φ−1 1
+
+m
+
+X
+
+> i
+
+qi
+
+!
+
++ R
+
+!
+
+.
+
+Because P 
+
+> i
+
+qi ≤ 1 and the same map is nondecreasing, 
+
+psucc ≤ Φ Φ−1(1 /m ) + R .
+
+This proves the stated finite-Gaussian support bound. 36 C Proof of Proposition 4.1 
+
+Proof. Fix a finite candidate set S = {z1, . . . , z m} and prior weights π1, . . . , π m. For each candidate 
+
+zi, the Gaussian release density is 
+
+p(eθ | zi, D −) = (2 πσ 2)−p/ 2 exp 
+
+
+
+− 12σ2 eθ − bθ(D− ∪ { zi}) 22
+
+
+
+,
+
+where p is the parameter dimension. By Bayes’ rule, for each i = 1 , . . . , m ,
+
+p(zi | eθ, D −) = πi p(eθ | zi, D −)
+
+Pmj=1 πj p(eθ | zj , D −) =
+
+πi exp 
+
+
+
+− 12σ2 eθ − bθ(D− ∪ { zi}) 22
+
+Pmj=1 πj exp 
+
+
+
+− 12σ2 eθ − bθ(D− ∪ { zj }) 22
+
+ .
+
+Take logarithms: 
+
+log p(zi | eθ, D −) = log πi − 12σ2 eθ − bθ(D− ∪ { zi}) 22 + C(eθ),
+
+where C(eθ) is a constant independent of the candidate index i. Since the MAP rule chooses the candidate with the largest posterior probability, and since C(eθ) is the same for every candidate, any MAP estimator is of the form 
+
+arg max 
+
+> zi∈S
+
+
+
+log πi − 12σ2 eθ − bθ(D− ∪ { zi}) 22
+
+
+
+.
+
+If the prior is uniform, then log πi is the same for every candidate and can be dropped, leaving the least-squares objective. 
+
+# D Derivations for Secondary Convex Head Constants 
+
+Proof of Proposition 6.6. We prove the three constants separately. Throughout this proof, the record metric is the label-preserving metric used in the statement. Thus finite-distance substitutions have the same label, and for a same-label pair (z, y ), (z′, y ) the distance is ∥z − z′∥2. Different-label pairs have infinite distance, so they impose no additional finite Lipschitz constraint in Assumption 3.4. The derivations in the three subsections below establish all bounded-parameter and ERM-minimizer constants in Proposition 6.6. Substituting any of them into Theorem 3.5 gives the stated radius-r sensitivity bound. 
+
+D.1 Squared Hinge 
+
+Fix a label y ∈ {− 1, 1} and a parameter vector w ∈ Rd. For a feature vector z, define 
+
+q(z) := 1 − yw ⊤z, h(z) := q(z)+ = max {0, q (z)}.
+
+The squared-hinge loss is 
+
+ℓ(w; z, y ) = h(z)2.
+
+The scalar map u 7 → (u+)2 is differentiable everywhere: its derivative is 0 for u < 0, is 2u for u > 0,and is also 0 at u = 0 because the one-sided derivatives both equal 0. Hence, by the chain rule, 
+
+∇wℓ(w; z, y ) = 2 h(z)∇w(1 − yw ⊤z) = 2 h(z)( −yz ) = −2yzh (z).
+
+37 Write 
+
+g(z) := ∇wℓ(w; z, y ) = −2yzh (z).
+
+We first bound the scalar hinge difference. The map m(a) := a+ = max {0, a } is 1-Lipschitz on R.Indeed, if a, b ≤ 0, then m(a) = m(b) = 0 ; if a, b ≥ 0, then |m(a) − m(b)| = |a − b|; and if a ≥ 0 ≥ b,then |m(a) − m(b)| = a ≤ a − b = |a − b|, with the remaining mixed case symmetric. Therefore, 
+
+|h(z) − h(z′)| ≤ | q(z) − q(z′)|
+
+= |(1 − yw ⊤z) − (1 − yw ⊤z′)|
+
+= |yw ⊤(z′ − z)|
+
+= |w⊤(z′ − z)|≤ ∥ w∥2 ∥z′ − z∥2 = ∥w∥2 ∥z − z′∥2.
+
+Next, for any admissible feature vector u with ∥u∥2 ≤ B,
+
+h(u) = max {0, 1 − yw ⊤u}≤ 1 + |w⊤u|≤ 1 + ∥w∥2∥u∥2
+
+≤ 1 + B∥w∥2.
+
+In particular, h(z′) ≤ 1 + B∥w∥2.Now subtract the gradients and add and subtract zh (z′):
+
+g(z) − g(z′) = −2yzh (z) + 2 yz ′h(z′)= −2y zh (z) − z′h(z′)
+
+= −2y z(h(z) − h(z′)) + ( z − z′)h(z′).
+
+Taking Euclidean norms and using |y| = 1 gives 
+
+∥g(z) − g(z′)∥2 ≤ 2
+
+
+
+∥z∥2|h(z) − h(z′)| + ∥z − z′∥2|h(z′)|
+
+
+
+≤ 2
+
+
+
+B∥w∥2∥z − z′∥2 + (1 + B∥w∥2)∥z − z′∥2
+
+
+
+=  2 + 4 B∥w∥2
+
+∥z − z′∥2.
+
+Thus, on ΘR = {w : ∥w∥2 ≤ R},
+
+∥∇ wℓ(w; z, y ) − ∇ wℓ(w; z′, y )∥2 ≤ (2 + 4 BR )∥z − z′∥2,
+
+so Lz (R) = 2 + 4 BR is valid. It remains to bound the radius of ERM minimizers. Let 
+
+FD(w) = 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+max {0, 1 − yiw⊤zi}2 + λ
+
+2 ∥w∥22,
+
+and let w⋆ ∈ arg min w FD(w). Since w⋆ minimizes FD,
+
+FD(w⋆) ≤ FD(0) .
+
+38 At w = 0 , every hinge value is max {0, 1} = 1 , so 
+
+FD(0) = 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+12 + λ
+
+2 ∥0∥22 = 1 .
+
+The empirical squared-hinge term is nonnegative, hence 
+
+FD(w⋆) = 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+max {0, 1 − yi(w⋆)⊤zi}2 + λ
+
+2 ∥w⋆∥22 ≥ λ
+
+2 ∥w⋆∥22.
+
+Combining the last three displays, 
+
+λ
+
+2 ∥w⋆∥22 ≤ FD(w⋆) ≤ FD(0) = 1 ,
+
+so 
+
+∥w⋆∥2 ≤
+
+r 2
+
+λ .
+
+Substituting R = p2/λ into Lz (R) = 2 + 4 BR gives the ERM-minimizer constant 
+
+Lz ≤ 2 + 4 B
+
+r 2
+
+λ .
+
+D.2 Binary Logistic 
+
+Let y ∈ {− 1, 1}, let 
+
+ez := 
+
+z
+
+1
+
+
+
+∈ Rd+1 , eθ := 
+
+wb
+
+
+
+∈ Rd+1 , eB := pB2 + 1 .
+
+Then ∥ez∥2 ≤ eB, and for same-label pairs, 
+
+∥ez − ez′∥2 =
+
+z − z′
+
+0
+
+
+
+> 2
+
+= ∥z − z′∥2.
+
+Define the score s(ez) := eθ⊤ ez and the sigmoid σ(u) := (1 + e−u)−1. The binary logistic loss is 
+
+ℓ(eθ; ez, y ) = log  1 + exp( −ys (ez)) .
+
+With u = −ys (ez), we have 
+
+ddu log(1 + eu) = eu
+
+1 + eu = σ(u), ∇eθu = −yez. 
+
+Therefore, 
+
+∇eθℓ(eθ; ez, y ) = −yσ (−yeθ⊤ ez)ez. 
+
+For two same-label examples, set 
+
+α := σ(−yeθ⊤ ez), β := σ(−yeθ⊤ ez′).
+
+39 Since 0 ≤ σ ≤ 1, 0 ≤ α, β ≤ 1. The gradient difference satisfies 
+
+∇eθℓ(eθ; ez, y ) − ∇ eθℓ(eθ; ez′, y ) 2
+
+= −yα ez + yβ ez′
+
+> 2
+
+= −αez + βez′ 
+
+> 2
+
+.
+
+Add and subtract αez′:
+
+−αez + βez′ = α(ez′ − ez) + ( β − α)ez′.
+
+Thus, 
+
+−αez + βez′ 
+
+> 2
+
+≤ | α| ∥ ez′ − ez∥2 + |β − α| ∥ ez′∥2
+
+≤ ∥ z − z′∥2 + eB|β − α|.
+
+The sigmoid derivative is 
+
+σ′(u) = σ(u)(1 − σ(u)) .
+
+For t ∈ [0 , 1] ,
+
+t(1 − t) = 14 −
+
+
+
+t − 12
+
+2
+
+≤ 14 ,
+
+so 0 ≤ σ′(u) ≤ 1/4 and σ is 1/4-Lipschitz. Therefore, 
+
+|β − α| ≤ 14 −yeθ⊤ ez′ + yeθ⊤ ez
+
+= 14 eθ⊤(ez − ez′)
+
+≤ 14 ∥eθ∥2 ∥ez − ez′∥2
+
+= 14 ∥eθ∥2 ∥z − z′∥2.
+
+Substituting this into the gradient-difference bound gives 
+
+∇eθℓ(eθ; ez, y ) − ∇ eθℓ(eθ; ez′, y ) 2 ≤ 1 + eB∥eθ∥2
+
+4
+
+!
+
+∥z − z′∥2.
+
+Hence, on ΘR = {eθ : ∥eθ∥2 ≤ R},
+
+Lz (R) = 1 + eBR 
+
+4
+
+is valid. Now consider the regularized objective, with both weights and intercept regularized, 
+
+FD(eθ) = 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+ℓ(eθ; ezi, y i) + λ
+
+2 ∥eθ∥22.
+
+Let eθ⋆ be an ERM minimizer. First-order optimality gives 
+
+0 = ∇FD(eθ⋆) = 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+∇eθℓ(eθ⋆; ezi, y i) + λeθ⋆,
+
+40 so 
+
+λeθ⋆ = − 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+∇eθℓ(eθ⋆; ezi, y i).
+
+Taking norms and using the triangle inequality, 
+
+λ∥eθ⋆∥2 ≤ 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+∇eθℓ(eθ⋆; ezi, y i) 2 .
+
+For each example, 
+
+∇eθℓ(eθ⋆; ezi, y i) 2 = −yiσ(−yi(eθ⋆)⊤ ezi)ezi 2
+
+≤ | yi| · 1 · ∥ ezi∥2
+
+≤ eB. 
+
+Therefore, 
+
+λ∥eθ⋆∥2 ≤ 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+eB = eB, 
+
+and hence 
+
+∥eθ⋆∥2 ≤ eBλ .
+
+Substituting R = eB/λ into the fixed-parameter constant gives 
+
+Lz ≤ 1 + eB
+
+4 · eBλ = 1 + eB2
+
+4λ = 1 + B2 + 1 4λ .
+
+D.3 Softmax Logistic 
+
+Let y ∈ { 1, . . . , K }, let ez = ( z, 1) ∈ Rd+1 , and let fW ∈ RK×(d+1) . Define 
+
+p(ez) := softmax( fW ez), a(ez) := p(ez) − ey,
+
+where ey is the yth standard basis vector in RK . For scores s := fW ez, the softmax loss is 
+
+ℓ(fW ; ez, y ) = −sy + log 
+
+> K
+
+X
+
+> c=1
+
+esc
+
+!
+
+.
+
+For each class c, ∂ℓ ∂s c
+
+= −1{c = y} + esc
+
+PKj=1 esj
+
+= pc(ez) − (ey)c.
+
+Thus ∇sℓ = p(ez) − ey = a(ez). Since sc = ew⊤ 
+
+> c
+
+ez for the cth row ew⊤ 
+
+> c
+
+of fW , the row-wise chain rule gives 
+
+∇fW ℓ(fW ; ez, y ) = a(ez)ez⊤.
+
+For a same-label pair, write 
+
+a := a(ez), a′ := a(ez′).
+
+41 Subtract the gradients and add and subtract a(ez′)⊤:
+
+∇fW ℓ(fW ; ez, y ) − ∇ fW ℓ(fW ; ez′, y )= aez⊤ − a′(ez′)⊤
+
+= a(ez − ez′)⊤ + ( a − a′)( ez′)⊤.
+
+Taking Frobenius norms and using the triangle inequality, 
+
+∇fW ℓ(fW ; ez, y ) − ∇ fW ℓ(fW ; ez′, y ) F
+
+≤ a(ez − ez′)⊤ 
+
+> F
+
++ (a − a′)( ez′)⊤ 
+
+> F
+
+.
+
+For vectors u, v , ∥uv ⊤∥F = ∥u∥2∥v∥2, so 
+
+∇fW ℓ(fW ; ez, y ) − ∇ fW ℓ(fW ; ez′, y ) F (6) 
+
+≤ ∥ a∥2 ∥ez − ez′∥2 + ∥a − a′∥2 ∥ez′∥2.
+
+We bound the two factors separately. First, since p(ez) is a probability vector, 
+
+∥a∥22 = ∥p(ez) − ey∥22
+
+= (1 − py(ez)) 2 + X
+
+> c̸=y
+
+pc(ez)2
+
+≤ (1 − py(ez)) 2 +
+
+X
+
+> c̸=y
+
+pc(ez)
+
+
+
+> 2
+
+= (1 − py(ez)) 2 + (1 − py(ez)) 2
+
+≤ 2.
+
+Thus ∥a∥2 ≤ √2.Second, because a−a′ = p(ez)−p(ez′), we need a Lipschitz bound for softmax. For p = softmax (x),the Jacobian is 
+
+J(x) = Diag( p) − pp ⊤.
+
+It is symmetric. In row i,
+
+> K
+
+X
+
+> j=1
+
+|Jij (x)| = pi(1 − pi) + X 
+
+> j̸=i
+
+pipj
+
+= pi(1 − pi) + pi
+
+X 
+
+> j̸=i
+
+pj
+
+= 2 pi(1 − pi)
+
+≤ 12 .
+
+42 Therefore ∥J(x)∥∞ ≤ 1/2. Since J(x) is symmetric, ∥J(x)∥2 ≤ ∥ J(x)∥∞ ≤ 1/2. Applying the mean-value theorem to x 7 → softmax( x) along the segment between fW ez and fW ez′ gives 
+
+∥p(ez) − p(ez′)∥2 ≤ 12 ∥fW ez − fW ez′∥2
+
+= 12 ∥fW (ez − ez′)∥2
+
+≤ 12 ∥fW ∥F ∥ez − ez′∥2.
+
+Hence 
+
+∥a − a′∥2 ≤ 12 ∥fW ∥F ∥ez − ez′∥2.
+
+Since ∥ez′∥2 ≤ eB and ∥ez − ez′∥2 = ∥z − z′∥2, substituting the two bounds into (6) yields 
+
+∇fW ℓ(fW ; ez, y ) − ∇ fW ℓ(fW ; ez′, y ) F
+
+≤ √2 + eB∥fW ∥F
+
+2
+
+!
+
+∥z − z′∥2.
+
+Therefore, on ΘR = {fW : ∥fW ∥F ≤ R},
+
+Lz (R) = √2 + eBR 
+
+2
+
+is valid. It remains to bound the Frobenius norm of regularized ERM minimizers. Let 
+
+FD(fW ) = 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+ℓ(fW ; ezi, y i) + λ
+
+2 ∥fW ∥2 
+
+> F
+
+,
+
+and let fW ⋆ minimize this objective. First-order optimality gives 
+
+0 = 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+∇fW ℓ(fW ⋆; ezi, y i) + λfW ⋆,
+
+so 
+
+λfW ⋆ = − 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+∇fW ℓ(fW ⋆; ezi, y i).
+
+Taking Frobenius norms and applying the triangle inequality, 
+
+λ∥fW ⋆∥F ≤ 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+∇fW ℓ(fW ⋆; ezi, y i) F .
+
+For one example, define p⋆(ezi) := softmax( fW ⋆ ezi). Then 
+
+∇fW ℓ(fW ⋆; ezi, y i) =  p⋆(ezi) − eyi
+
+ez⊤ 
+
+> i
+
+,
+
+and hence, by the same probability-vector bound used above, 
+
+∇fW ℓ(fW ⋆; ezi, y i) F = ∥p⋆(ezi) − eyi ∥2 ∥ezi∥2 ≤ √2 eB. 
+
+43 Therefore, 
+
+λ∥fW ⋆∥F ≤ 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+√2 eB = √2 eB, 
+
+so every ERM minimizer satisfies 
+
+∥fW ⋆∥F ≤√2 eBλ .
+
+Substituting R = √2 eB/λ into the bounded-parameter constant gives 
+
+Lz ≤ √2 + eB
+
+2 ·√2 eBλ
+
+= √2 1 + eB2
+
+2λ
+
+!
+
+= √2
+
+
+
+1 + B2 + 1 2λ
+
+
+
+.
+
+44
