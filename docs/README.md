@@ -6,44 +6,38 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-08
-- 运行时间：2026-07-08 20:53:14 UTC
+- 最新运行日期：2026-07-09
+- 运行时间：2026-07-09 21:19:52 UTC
 - 运行状态：成功
-- 本次总论文数：8
+- 本次总论文数：6
 - 精读区：4
-- 速读区：4
+- 速读区：2
 
 ### 今日简报（AI）
-今日精选8篇论文，精读覆盖分布式地理数据安全范围计数与去中心化多任务数据集估值两大方向。最推荐9分论文《Efficient and Secure Range Counting...》解决查询范围保护问题，以及8分论文《Efficient Decentralized Multi-task Dataset Valuation...》提出模型合并估值新思路。建议读者优先关注球差分隐私与抖动高斯机制，这两篇对数据重建防护有实用启发。
-- 详情：[/202607/08/README](/202607/08/README)
+今日精读两篇9分论文，分别聚焦联邦学习的参与隐私审计与协同合成数据知识迁移。最值得关注的是隐私保护的缓冲聚合方案，以及通过合成数据增强联邦学习效果。建议结合实际场景验证这两项技术的可落地性。
+- 详情：[/202607/09/README](/202607/09/README)
 
 ### 精读区论文标签
-1. [Efficient and Secure Range Counting over Distributed Geographic Data with Query Range Protection](/202607/08/2607.04194v1-efficient-and-secure-range-counting-over-distributed-geographic-data-with-query-range-protection)  
+1. [Continual Learning With Participation Privacy: An Auditable Buffering-Aggregation Recipe](/202607/09/2607.07209v1-continual-learning-with-participation-privacy-an-auditable-buffering-aggregation-recipe)  
    标签：评分：9.0/10、query:daily
-   evidence：分布式数据上具有查询范围保护的隐私保护范围计数
-2. [Efficient Decentralized Multi-task Dataset Valuation via Model Merging](/202607/08/2607.03346v1-efficient-decentralized-multi-task-dataset-valuation-via-model-merging)  
+   evidence：持续学习中的参与隐私，可审计的缓冲聚合方案
+2. [Collaborative Synthetic Data Generation for Knowledge Transfer in Federated Learning](/202607/09/2607.07565v1-collaborative-synthetic-data-generation-for-knowledge-transfer-in-federated-learning)  
+   标签：评分：9.0/10、query:daily
+   evidence：具有形式化隐私保证的联邦学习
+3. [DRIFTLENS: Measuring Memory-Induced Reasoning Drift in Personalized Language Models](/202607/09/2607.02374v1-driftlens-measuring-memory-induced-reasoning-drift-in-personalized-language-models)  
    标签：评分：8.0/10、query:daily
-   evidence：隐私约束下的分散多任务数据集估值
-3. [Scalable Differentially Private Data Compression via Diffusion and Stochastic Codes](/202607/08/2607.03392v1-scalable-differentially-private-data-compression-via-diffusion-and-stochastic-codes)  
+   evidence：个性化语言模型推理漂移测量
+4. [APeB: Benchmarking Personalization Ability of Large Language Model Agents](/202607/09/2607.03162v1-apeb-benchmarking-personalization-ability-of-large-language-model-agents)  
    标签：评分：8.0/10、query:daily
-   evidence：使用扩散模型和随机码的差分隐私数据压缩
-4. [Air-Plan: Query-Optimized Topology Selection for Over-the-Air Decentralized Federated Learning](/202607/08/2607.04254v1-air-plan-query-optimized-topology-selection-for-over-the-air-decentralized-federated-learning)  
-   标签：评分：8.0/10、query:daily
-   evidence：面向空口去中心化联邦学习的查询优化拓扑选择，直接相关于分布式机器学习中的隐私
+   evidence：LLM代理的个性化能力评测
 
 ### 速读区论文标签
-1. [Ball Differential Privacy: How to Mitigate Data Reconstruction with Less Noise](/202607/08/2607.04209v1-ball-differential-privacy-how-to-mitigate-data-reconstruction-with-less-noise)  
-   标签：评分：7.0/10、query:daily
-   evidence：球差分隐私通过限制替换半径降低噪声需求
-2. [Dithered Gaussian Mechanism for Randomness-Efficient Differential Privacy](/202607/08/2607.06320v1-dithered-gaussian-mechanism-for-randomness-efficient-differential-privacy)  
-   标签：评分：7.0/10、query:daily
-   evidence：随机高效的抖动高斯差分隐私机制
-3. [SpecGradFilter: A Spectral Gradient Filtering Framework for Taming Federated Heterogeneity](/202607/08/2607.04189v1-specgradfilter-a-spectral-gradient-filtering-framework-for-taming-federated-heterogeneity)  
+1. [SpecGradFilter: A Spectral Gradient Filtering Framework for Taming Federated Heterogeneity](/202607/09/2607.04189v1-specgradfilter-a-spectral-gradient-filtering-framework-for-taming-federated-heterogeneity)  
    标签：评分：6.0/10、query:daily
-   evidence：联邦学习中基于频域的梯度过滤方法
-4. [FLAIR: Distributed Federated Learning with Dynamic Clustering](/202607/08/2607.06025v1-flair-distributed-federated-learning-with-dynamic-clustering)  
+   evidence：用于联邦异质性的频谱梯度过滤
+2. [Unlearning to Protect: A Distilled Reinforcement Learning Framework with Privacy-Preserving Feature Unlearning and XAI for IoT Security](/202607/09/2607.07635v1-unlearning-to-protect-a-distilled-reinforcement-learning-framework-with-privacy-preserving-feature-unlearning-and-xai-for-iot-security)  
    标签：评分：6.0/10、query:daily
-   evidence：分布式联邦学习协议，动态聚类，具有隐私保护特性
+   evidence：物联网安全中基于强化学习的隐私保护特征遗忘
 
 
 <div class="dpr-home-promo-card">
