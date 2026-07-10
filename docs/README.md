@@ -6,38 +6,38 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-09
-- 运行时间：2026-07-09 21:19:52 UTC
+- 最新运行日期：2026-07-10
+- 运行时间：2026-07-10 21:36:42 UTC
 - 运行状态：成功
 - 本次总论文数：6
-- 精读区：4
-- 速读区：2
+- 精读区：5
+- 速读区：1
 
 ### 今日简报（AI）
-今日精读两篇9分论文，分别聚焦联邦学习的参与隐私审计与协同合成数据知识迁移。最值得关注的是隐私保护的缓冲聚合方案，以及通过合成数据增强联邦学习效果。建议结合实际场景验证这两项技术的可落地性。
-- 详情：[/202607/09/README](/202607/09/README)
+今日精读5篇速读1篇，聚焦隐私保护下的分布式地理数据计数与视觉特征安全学习。最值得关注的是《Efficient and Secure Range Counting》和《TrustCLIP》，分别从查询范围保护与对抗重构角度实现高安全性。建议普通读者优先从这两篇论文入手，理解数据加密与特征脱敏的核心机制。
+- 详情：[/202607/10/README](/202607/10/README)
 
 ### 精读区论文标签
-1. [Continual Learning With Participation Privacy: An Auditable Buffering-Aggregation Recipe](/202607/09/2607.07209v1-continual-learning-with-participation-privacy-an-auditable-buffering-aggregation-recipe)  
+1. [Efficient and Secure Range Counting over Distributed Geographic Data with Query Range Protection](/202607/10/2607.04194v1-efficient-and-secure-range-counting-over-distributed-geographic-data-with-query-range-protection)  
    标签：评分：9.0/10、query:daily
-   evidence：持续学习中的参与隐私，可审计的缓冲聚合方案
-2. [Collaborative Synthetic Data Generation for Knowledge Transfer in Federated Learning](/202607/09/2607.07565v1-collaborative-synthetic-data-generation-for-knowledge-transfer-in-federated-learning)  
+   evidence：分布式地理数据上的安全和范围计数，保护查询隐私
+2. [TrustCLIP: Learning Private Visual Features via Adversarial Reconstruction](/202607/10/2607.04484v1-trustclip-learning-private-visual-features-via-adversarial-reconstruction)  
    标签：评分：9.0/10、query:daily
-   evidence：具有形式化隐私保证的联邦学习
-3. [DRIFTLENS: Measuring Memory-Induced Reasoning Drift in Personalized Language Models](/202607/09/2607.02374v1-driftlens-measuring-memory-induced-reasoning-drift-in-personalized-language-models)  
+   evidence：通过对抗重建学习私有视觉特征
+3. [MLQENABLER: Enabling Secure Machine Learning Queries over Encrypted Database in Cloud Computing](/202607/10/2607.08197v1-mlqenabler-enabling-secure-machine-learning-queries-over-encrypted-database-in-cloud-computing)  
+   标签：评分：9.0/10、query:daily
+   evidence：加密数据库上的安全机器学习查询
+4. [Equivariant Quantum Clustering with Differential Privacy: Parameter-Efficient Privacy-Preserving Analysis Across Heterogeneous Sensitive Datasets](/202607/10/2607.08092v1-equivariant-quantum-clustering-with-differential-privacy-parameter-efficient-privacy-preserving-analysis-across-heterogeneous-sensitive-datasets)  
    标签：评分：8.0/10、query:daily
-   evidence：个性化语言模型推理漂移测量
-4. [APeB: Benchmarking Personalization Ability of Large Language Model Agents](/202607/09/2607.03162v1-apeb-benchmarking-personalization-ability-of-large-language-model-agents)  
+   evidence：等变量子聚类与差分隐私
+5. [Coded Task Offloading for Fluid Computing: A Privacy-Aware Approach under D2D Networks](/202607/10/2607.08440v1-coded-task-offloading-for-fluid-computing-a-privacy-aware-approach-under-d2d-networks)  
    标签：评分：8.0/10、query:daily
-   evidence：LLM代理的个性化能力评测
+   evidence：隐私感知的分布式编码任务卸载
 
 ### 速读区论文标签
-1. [SpecGradFilter: A Spectral Gradient Filtering Framework for Taming Federated Heterogeneity](/202607/09/2607.04189v1-specgradfilter-a-spectral-gradient-filtering-framework-for-taming-federated-heterogeneity)  
+1. [EdgeRefine: Privacy-Utility Balance for Graphs via Jaccard Sampling under Edge Differential Privacy](/202607/10/2607.08659v1-edgerefine-privacy-utility-balance-for-graphs-via-jaccard-sampling-under-edge-differential-privacy)  
    标签：评分：6.0/10、query:daily
-   evidence：用于联邦异质性的频谱梯度过滤
-2. [Unlearning to Protect: A Distilled Reinforcement Learning Framework with Privacy-Preserving Feature Unlearning and XAI for IoT Security](/202607/09/2607.07635v1-unlearning-to-protect-a-distilled-reinforcement-learning-framework-with-privacy-preserving-feature-unlearning-and-xai-for-iot-security)  
-   标签：评分：6.0/10、query:daily
-   evidence：物联网安全中基于强化学习的隐私保护特征遗忘
+   evidence：图学习的边差分隐私
 
 
 <div class="dpr-home-promo-card">
