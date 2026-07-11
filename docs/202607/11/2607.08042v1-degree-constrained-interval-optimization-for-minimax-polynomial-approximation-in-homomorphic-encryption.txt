@@ -1,0 +1,897 @@
+Title: Degree-Constrained Interval Optimization for Minimax Polynomial Approximation in Homomorphic Encryption
+
+URL Source: https://arxiv.org/pdf/2607.08042v1
+
+Published Time: Fri, 10 Jul 2026 00:21:13 GMT
+
+Number of Pages: 11
+
+Markdown Content:
+> 1
+
+# Degree-Constrained Interval Optimization for Minimax Polynomial Approximation in Homomorphic Encryption 
+
+Jiheon Woo, Donggyun Ryu, and Yongjune Kim 
+
+Abstract —Homomorphic encryption (HE) enables privacy-preserving inference under arithmetic constraints that restrict encrypted evaluation to additions and multiplications. As aresult, non-polynomial activation functions must be replaced by polynomial approximations. Among polynomial approximation methods, minimax approximation, typically computed by the Remez algorithm, is a standard approach because it minimizes the maximum approximation error over a given design interval. For minimax polynomial design, the approximation interval is a critical hyperparameter: a wider interval improves robustness to large-magnitude inputs while increasing the minimax approxima-tion error under a fixed degree budget. In this paper, we formu-late this trade-off as a distribution-aware interval optimization problem, where the approximation interval is chosen to minimize the mean-squared error (MSE) with respect to the pre-activation distribution of interest. To effectively control outside-interval inputs, we combine minimax polynomials with domain extension functions (DEFs) and their HE-realizable polynomial counter-parts, domain extension polynomials (DEPs), which approximate a clipping operation outside the design interval and thereby suppress uncontrolled polynomial extrapolation. We first derive an analytically tractable DEF-based proxy objective that captures the trade-off between within-interval minimax approximation error and outside-interval clipping error. We then connect this idealized objective to HE-realizable DEP constructions through an implementation-error decomposition with an accompanying upper bound. Numerical experiments on representative non-polynomial activation functions show that the proposed interval optimization achieves significantly lower MSE than conventional minimax baselines, with particularly large gains for sigmoid, tanh, and GELU, while the minimizer of the analytical proxy closely matches that of the numerical ideal objective. 
+
+Index Terms —Homomorphic encryption, Privacy-preserving machine learning, Polynomial approximation, Interval optimiza-tion 
+
+I. I NTRODUCTION 
+
+The rapid advancement of artificial intelligence (AI) has accelerated the adoption of machine learning as a service (MLaaS), in which clients delegate inference tasks to remote servers. However, this paradigm raises significant privacy concerns with respect to the handling of sensitive user data. To address these concerns, privacy-preserving machine learning (PPML) has emerged as a key research area, aiming to perform inference while keeping user data confidential [1]–[4]. Among various approaches to PPML, homomorphic en-cryption (HE) is regarded as one of the most promising 
+
+J. Woo, D. Ryu, and Y. Kim are with the Department of Electrical Engi-neering, Pohang University of Science and Technology (POSTECH), Pohang 37673, South Korea (e-mail: {jhwoo1997, dgryu, yongjune }@postech.ac.kr). 
+
+solutions [5], [6]. HE allows a server to perform computations directly on encrypted data without decryption. This property naturally supports a non-interactive inference setting: once the user provides the encrypted input, the server can execute the entire inference pipeline and return the encrypted result [7], [8]. Compared with interactive protocols such as multi-party computation (MPC) [9], this setting avoids repeated client-server communication and active client participation during inference. A major practical challenge in HE-based PPML is that most HE schemes support only a limited set of operations: addition, multiplication, and rotation. Consequently, non-polynomial operations in neural networks, such as activation functions, cannot be directly evaluated under HE. A common approach is therefore to replace such functions with polynomial approx-imations, enabling the inference pipeline to be represented as an arithmetic circuit. A broad class of HE-oriented polynomial approximation methods has been developed to balance numer-ical accuracy and computational efficiency [10]–[12]. Since the polynomial degree directly affects both approximation accuracy and homomorphic evaluation cost, designing low-degree yet accurate polynomial approximations remains a central challenge. Minimax approximation is a standard tool for replacing non-polynomial functions with degree-constrained polynomials by controlling the worst-case error over a given design interval [13], [14]. In principle, the minimax approximation error can be reduced by increasing the polynomial degree. Under HE constraints, however, a higher degree generally leads to a larger homomorphic evaluation cost. In particular, in the CKKS scheme [6], ciphertext–ciphertext multiplications are the primary source of noise growth, so feasibility is governed by the multiplication count and, more critically, the multiplica-tive depth. If the required depth exceeds the available noise budget, the evaluation may require costly bootstrapping [15]. Accordingly, reducing the minimax error solely by raising the polynomial degree is often impractical in HE-based inference. Another fundamental limitation is that minimax approxima-tion provides worst-case error control only within the design interval; outside this interval, the polynomial can deviate from the target function by an arbitrarily large margin. Fig. 1 illustrates the sensitivity of polynomial approximations of activation functions. A degree-14 m inimax polynomial ap-proximates ReLU accurately on the design interval [−1, 1] .However, when evaluated at an outside-interval input, the polynomial can produce a dramatically amplified error: at arXiv:2607.08042v1 [cs.CR] 9 Jul 2026 2
+
+x = 1.5, the approximation incurs an absolute error of 
+
+≈ 4.09 × 10 3, whereas ReLU(1 .5) = 1 .5. In other words, instead of producing an activation close to 1.5, the polynomial evaluation may produce an error thousands of times larger than the target value. In HE, intermediate plaintext values are not observable, so such amplified activation errors can propagate through subsequent layers and significantly degrade inference accuracy. A common response is to enlarge the design interval, but this introduces a competing trade-off. For a given polynomial degree, enlarging the interval improves coverage of large-magnitude inputs and reduces the risk of extrapolation beyond the design interval, at the cost of larger minimax error within the interval. Indeed, in the large-interval setting studied in [16], maintaining a fixed small worst-case error by minimax approximation can require polynomial degree Ω( t) on [−t, t ].Thus, under a given degree budget, an overly conservative interval can substantially degrade approximation fidelity in the region of interest. Beyond simple interval enlargement, the behavior of the approximation outside the design interval can be controlled through the framework of domain-extension functions (DEFs) and domain-extension polynomials (DEPs) [16]. Intuitively, a DEF provides an effective interval-control mechanism that preserves the desired function behavior on the design interval 
+
+[−t, t ], while saturating the effective response beyond this interval so that large-magnitude inputs do not lead to unstable polynomial extrapolation. A DEP is a polynomial realization of this mechanism, designed to be compatible with homomor-phic polynomial evaluation. This extension-based approach, however, does not remove the need to optimize the approximation interval. Rather, it changes the failure mode from uncontrolled polynomial ex-trapolation to a controlled clipping error outside the design interval. Thus, the interval parameter t still determines a fundamental trade-off: a smaller t improves the minimax approximation within the interval [−t, t ] under a given de-gree budget, but increases the probability mass assigned to the clipped region; a larger t reduces the clipping error at the expense of a larger minimax error within the interval. Therefore, even when DEFs or DEPs are used, the design interval should be selected by optimizing the total MSE. Accordingly, we formulate an interval optimization prob-lem in which the approximation interval [−t, t ] is chosen to minimize the mean-squared error (MSE) over the pre-activation distribution of interest. Our framework decomposes the MSE into a within-interval approximation term and an outside-interval term. For the within-interval term, we relate the MSE to the minimax error through the equioscillation characterization, which yields an analytically tractable surro-gate objective. For the outside-interval term, DEFs and DEPs provide a controlled saturation mechanism that replaces un-stable extrapolation with a bounded clipping error. This leads to a two-level design framework: an ideal DEF-based proxy that provides an analytically tractable model of the trade-off between within-interval minimax error and clipping error, and a DEP-based realization that quantifies the additional gap induced by replacing the ideal hard-clipping DEF with an HE-                     
+
+> -1.5 -1 -0.5 00.5 11.5
+> x
+> 10 -6
+> 10 -4
+> 10 -2
+> 10 0
+> 10 2
+> 10 4
+> Absolute Error
+> Fig. 1. The absolute error of minimax polynomial approximation for
+> ReLU( x)with degree n= 14 on the approximation interval [−1,1] .
+
+realizable DEP composition. The main contributions of this paper are summarized as follows:  
+
+> •
+
+To the best of our knowledge, we provide the first prin-cipled formulation of interval optimization for degree-constrained minimax polynomial approximation by min-imizing the MSE over the pre-activation distribution.  
+
+> •
+
+We derive a DEF-based objective that captures the trade-off between within-interval minimax error and outside-interval clipping error in an analytically tractable form.  
+
+> •
+
+We establish a connection between the ideal DEF anal-ysis and HE-realizable DEP constructions through an implementation-error decomposition, and derive an upper bound on the DEP-induced MSE gap.  
+
+> •
+
+We numerically compare the analytical DEF-based proxy, the numerical ideal DEF objective, and practical DEP realizations for representative activation functions. The rest of this paper is organized as follows. Section II introduces preliminaries. Section III presents the proposed interval optimization objective and practical proxy forms based on the ideal DEF. Section IV introduces the HE-realizable DEP class for interval control and provides its error decomposition. Section V presents numerical experiments. Section VI con-cludes. II. P RELIMINARIES 
+
+A. Homomorphic Encryption 
+
+HE is a cryptographic primitive that enables computations on encrypted data, yielding an encrypted output that decrypts to the corresponding plaintext result. In PPML, approximate-arithmetic HE schemes for real-valued data, such as the CKKS scheme [6], are widely adopted. The supported homomorphic operations include element-wise arithmetic operations such as addition and multiplication; in packed schemes, rotations are also supported. Regarding multiplication, it is common to distinguish ciphertext–plaintext multiplication (PMult), which involves a plaintext constant, from ciphertext–ciphertext mul-tiplication (CMult), which is typically the computational bot-3
+
+tleneck and a primary source of noise growth. Accordingly, computational cost and feasibility are governed largely by the multiplicative depth and the noise growth induced by repeated ciphertext multiplications. When the multiplicative depth approaches the available noise budget, costly bootstrap-ping operations are required to refresh the ciphertext [15]. Such operational constraints have immediate consequences for model design under HE. Common ML components such as ReLU, sigmoid, tanh, normalization, and comparisons involve non-polynomial or non-arithmetic operations and therefore cannot be directly evaluated using native HE operations. A standard approach is to replace each non-polynomial primitive with a polynomial approximation, so that the entire infer-ence pipeline becomes an arithmetic circuit. In this setting, approximation design plays a critical role in determining the behavior of encrypted inference. Because intermediate plaintext values are not observable during encrypted execution, the approximation interval must be chosen to control out-of-interval behavior while keeping the polynomial degree and multiplicative depth feasible under HE. 
+
+B. Minimax Approximation 
+
+A widely used baseline for polynomial approximation under HE is the minimax approximation [13], which directly controls the worst-case error over a prescribed design interval. Given a continuous function f on [a, b ] and the space Πn of poly-nomials of degree at most n, the minimax problem is 
+
+p∗ 
+
+> n
+
+:= arg min 
+
+> p∈Πn
+
+max 
+
+> x∈[a,b ]
+
+∣∣f (x) − p(x)∣∣. (1) The corresponding uniform (worst-case) approximation error is defined as 
+
+En := max 
+
+> x∈[a,b ]
+
+∣∣f (x) − p∗
+
+> n
+
+(x)∣∣. (2) The Remez algorithm is an iterative method for computing p∗
+
+> n
+
+by exploiting the classical equioscillation characterization of minimax solutions [13], [14]. Except in the zero-error case, the optimal error function f (x) − p∗
+
+> n
+
+(x) alternates in sign and attains equal magnitude at n + 2 extremal points. In HE-oriented design, minimax polynomials have been widely used to approximate non-polynomial primitives such as sign, ReLU, and max-pooling functions because they provide uniform error control over a prescribed interval [10]–[12]. This differs from least-squares criteria, which minimize an integrated or average error and therefore do not directly constrain the maximum deviation [13]. 
+
+C. Domain Extension Functions and Polynomials 
+
+A key practical challenge in HE-oriented approximation is that polynomial approximations provide controlled accuracy only on a prescribed design interval. Outside this interval, the polynomial values can deviate from the target function values by an arbitrarily large margin, since the polynomial is no longer constrained by the minimax criterion outside its design range; this is particularly problematic in encrypted execution, where intermediate plaintext values cannot be monitored di-rectly. To address this challenge, the domain extension methodol-ogy of [16] enlarges the input interval by introducing a DEF that maps a wider input interval to a narrower one, while preserving the behavior of the original approximation in a smaller region. The DEF is defined as 
+
+D(x) = 1
+
+2
+
+(
+
+|x + 1 | − | x − 1|
+
+)
+
+. (3) While D(x) is not a polynomial and thus cannot be evaluated under HE, the idea of domain extension can be approximated by polynomials, leading to the introduction of DEPs. A polynomial d(·) is a DEP in the class D(δ, r, R 1, R 2) if it satisfies [16]: 
+
+|x − d(x)| ≤ δ|x|3, ∀x ∈ [−r, r ], (4) 
+
+0 ≤ d′(x) ≤ 1, ∀x ∈ [−r, r ], (5) 
+
+d(r) < d (x) < R 1, ∀x ∈ (r, R 2], (6) 
+
+−R1 < d (x) < d (−r), ∀x ∈ [−R2, −r). (7) Here, δ controls how closely the DEP follows the identity map on [−r, r ]. The parameter r specifies the radius of this preservation region. The parameters R1 and R2 specify the controlled output interval and the extended input interval, respectively. In particular, the conditions in (6) and (7) ensure that inputs in the extended regions (r, R 2] and [−R2, −r)
+
+are mapped into the bounded interval (−R1, R 1), thereby avoiding unstable extrapolation for large-magnitude inputs. The extension factor L is defined as 
+
+L := R2
+
+R1
+
+. (8) This extension factor also provides a scaling rule for compos-ing multiple DEP stages. Let B(·) denote a fixed base DEP satisfying B(·) ∈ D (δ, r, R, LR ) for some L > 1. For each stage i, define the scaled DEP 
+
+Bi(x) := LiB
+
+( x
+
+Li
+
+)
+
+, i = 0 , 1, . . . , m − 1. (9) The m-stage DEP composition is then given by 
+
+g(m)(x) := B0 ◦ B1 ◦ · · · ◦ Bm−1(x). (10) Through this scaling-and-composition structure, a base DEP that extends the admissible interval by a factor of L can be repeatedly applied to cover an exponentially larger input inter-val as m increases, while maintaining near-identity behavior in the preservation region [−r, r ]. Thus, DEPs provide an HE-compatible mechanism for controlling out-of-interval behavior. However, the DEP framework itself does not determine the target design interval; the design interval should be selected. III. I NTERVAL OPTIMIZATION VIA DEF In this section, we develop an interval optimization frame-work in an idealized setting based on the DEF. Let f : R → R
+
+denote the target non-polynomial function, and let X denote the pre-activation random variable. For each design radius 
+
+t > 0, let pn,t ∈ Πn denote the degree-n minimax polynomial on [−t, t ], defined as 
+
+pn,t := arg min 
+
+> p∈Πn
+
+max 
+
+> x∈[−t,t ]
+
+∣∣f (x) − p(x)∣∣. (11) 4
+
+The design interval is then determined by optimizing t to minimize the induced MSE objective. Throughout the paper, we distinguish three progressively more practical objectives. Since the polynomial degree n and scaling factor L are fixed throughout the interval-selection problem, we suppress the dependence on n and L in the objective notation unless otherwise needed. First, JDEF (t) de-notes the ideal clipping objective based on the non-polynomial hard-clipping map. Second, ̂ JDEF (t) denotes an analytically tractable surrogate of JDEF (t), introduced to characterize the interval-selection mechanism. Third, JDEP (t) denotes the practical objective induced by DEP compositions that are real-izable under HE. The theoretical analysis focuses on ̂ JDEF (t),while the numerical validation compares it with JDEF (t) and the HE-realizable objective JDEP (t).Let D(·) denote the normalized hard-clipping DEF defined in Section II-C. For each design radius t > 0, we use its scaled version 
+
+Dt(x) := tD 
+
+( x
+
+t
+
+)
+
+=
+
+
+
+−t, x < −t, x, −t ≤ x ≤ t, t, x > t. 
+
+(12) Using this map, we define the clipped polynomial evaluator as 
+
+qn,t, DEF (x) := pn,t 
+
+(Dt(x)). (13) We then define the DEF-based MSE objective as 
+
+JDEF (t) := E
+
+[(f (X) − qn,t, DEF (X))2]
+
+. (14) The interval selection problem is to minimize JDEF (t) over 
+
+t > 0. Using the piecewise form of Dt, the objective decomposes into within-interval and outside-interval terms: 
+
+JDEF (t) = 
+
+∫ t
+
+> −t
+
+(f (x) − pn,t (x))2hX (x) dx 
+
++
+
+∫ ∞
+
+> t
+
+(f (x) − pn,t (t))2hX (x) dx 
+
++
+
+∫ −t
+
+> −∞
+
+(f (x) − pn,t (−t))2hX (x) dx, (15) where hX (x) denotes the probability density function (PDF) of X. We denote the first integral by JDEF ,in (t) and the sum of the last two integrals by JDEF ,out (t). To obtain a tractable outside-interval surrogate, we substitute the target endpoint values f (t) and f (−t) for the polynomial endpoint values pn,t (t) and pn,t (−t), respectively. This endpoint-value substitution yields the outside-interval surrogate ̂
+
+JDEF ,out (t) := 
+
+∫ ∞
+
+> t
+
+(f (x) − f (t)) 2hX (x) dx 
+
++
+
+∫ −t
+
+> −∞
+
+(f (x) − f (−t)) 2hX (x) dx. (16) For the within-interval term, we define the minimax error as 
+
+En(t) := ‖f − pn,t ‖∞,[−t,t ]. (17) Let et(x) := f (x)−pn,t (x) denote the corresponding residual, and let zt(x) := et(x)/E n(t) ∈ [−1, 1] denote its normalized          
+
+> Fig. 2. Comparison of the empirical distribution of the normalized residual values zt(x) = et(x)/E n(t)with the arcsine law for the degree-15 minimax approximation of ReLU on the design interval [−t, t ]with t= 3 .
+
+version. We model the residual values over the design interval as arcsine-distributed: 
+
+et(X) | {| X| ≤ t} ∼ Arcsine[ −En(t), E n(t)] . (18) As shown in Fig. 2, the empirical distribution of the resid-ual values closely follows the arcsine density ht(v) =1/(π√En(t)2 − v2) for v ∈ (−En(t), E n(t)) . Similar behav-ior is observed for the other activation functions and design radii in Section V, supporting this modeling choice. This model is motivated by the equioscillatory structure of minimax residuals. By the equioscillation characterization of minimax approximation [13], [14], the residual et is uniformly bounded by En(t) on [−t, t ] and attains the values +En(t)
+
+and −En(t) with alternating signs at the n + 2 alternation points. The normalized residual zt(x) therefore attains the values −1 and 1 with alternating signs at these n + 2 points. The same alternation structure appears in the Chebyshev polynomial Tn+1 (x/t ) = cos ((n + 1) arccos( x/t )), which attains alternating values of −1 and 1 at its n + 2 extremal points on [−t, t ]. Since this Chebyshev-type oscillation is exactly a cosine in the phase variable (n+ 1) arccos( x/t ), and the values of a cosine with uniformly distributed phase follow the arcsine law, we approximate the residual-value distribution by the arcsine distribution in (18). Under this model, the conditional second moment is 
+
+E[et(X)2 | | X| ≤ t] =
+
+∫ En (t)
+
+> −En(t)
+
+v2
+
+π√En(t)2 − v2 dv (19) 
+
+= En(t)2
+
+π
+
+∫ π
+
+> 0
+
+cos 2 θ dθ (20) 
+
+= En(t)2
+
+2 , (21) where (20) follows from v = En(t) cos θ. This yields the within-interval proxy term ̂
+
+JDEF ,in (t) := En(t)2
+
+2 Pr( |X| ≤ t). (22) 5
+
+Combining the within-interval term with the outside-interval term in (16), we define the proxy DEF objective as ̂
+
+JDEF (t) := ̂ JDEF ,in (t) + ̂ JDEF ,out (t)= En(t)2
+
+2 Pr( |X| ≤ t) + ̂ JDEF ,out (t). (23) The only remaining quantity in the proxy objective (23) is the minimax error En(t) as a function of the design radius t.How this relation is obtained depends on the activation type: for positively homogeneous activations such as ReLU and LeakyReLU, the entire error–radius curve is fixed by a single numerically computed value En(1) through an exact scaling argument (Section III-A); for non-homogeneous activations such as sigmoid, tanh, and GELU, no such scaling is available, and En(t) must instead be sampled over a range of radii and approximated by a fitted surrogate (Section III-B). 
+
+A. Analytical Case: Homogeneous Functions 
+
+We first consider a simple scaling property that will be used to obtain an analytical form of the proxy objective for positively homogeneous activations. 
+
+Proposition 1: If f (·) is positively homogeneous of degree one, i.e., f (λx ) = λf (x) for all λ > 0, then, for every t > 0,the minimax error on [−t, t ] satisfies En(t) = tE n(1) .
+
+Proof: Let s∗ 
+
+> n, 1
+
+∈ Πn be a minimizer on [−1, 1] . Define 
+
+sn,t (x) := t s ∗
+
+> n, 1
+
+(x/t ) for x ∈ [−t, t ]. Since s∗ 
+
+> n, 1
+
+∈ Πn, we also have sn,t ∈ Πn. Writing x = tu , where u ∈ [−1, 1] , and using the positive homogeneity of f , we obtain 
+
+En(t) ≤ ‖ f − sn,t ‖∞,[−t,t ]
+
+= max 
+
+> |u|≤ 1
+
+∣∣f (tu ) − t s ∗
+
+> n, 1
+
+(u)∣∣
+
+= max 
+
+> |u|≤ 1
+
+∣∣tf (u) − t s ∗
+
+> n, 1
+
+(u)∣∣
+
+= t‖f − s∗
+
+> n, 1
+
+‖∞,[−1,1] = tE n(1) . (24) Hence, En(t) ≤ tE n(1) .Conversely, let s ∈ Πn be arbitrary and define ˜sn, 1(u) :=  
+
+> 1
+> t
+
+s(tu ) for u ∈ [−1, 1] . Then ˜sn, 1 ∈ Πn. Again writing x =
+
+tu , we have 
+
+‖f − s‖∞,[−t,t ] = max  
+
+> |u|≤ 1
+
+|f (tu ) − s(tu )|
+
+= max  
+
+> |u|≤ 1
+
+|tf (u) − t ˜sn, 1(u)|
+
+= t‖f − ˜sn, 1‖∞,[−1,1] ≥ tE n(1) . (25) Since this holds for every s ∈ Πn, taking the infimum over s
+
+yields En(t) ≥ tE n(1) . Combining the two inequalities gives 
+
+En(t) = tE n(1) .
+
+To parameterize the design radius relative to the input distribution, we define the normalized radius α := t/σ , where 
+
+σ denotes the standard deviation of the input distribution. We next derive a characterization of the proxy objective under a Gaussian pre-activation model. The Gaussian model is used here as an analytically tractable reference case, since the re-quired tail probabilities and truncated moments admit closed-form expressions; for other input densities, the same DEF objective and proxy construction can be evaluated numerically. 
+
+Theorem 1: Let X ∼ N (0 , σ 2) and let f be positively homogeneous of degree one, with Bf := f (1) 2 + f (−1) 2 > 0
+
+and εn := En(1) > 0. Under the endpoint-value substitution, the proxy objective ̂ JDEF (t) is strictly convex on (0 , ∞)
+
+and admits a unique global minimizer t∗ = σα ∗ on (0 , ∞),where the optimal normalized radius α∗ is the unique positive solution of 
+
+ε2
+
+> n
+
+2
+
+[
+
+α(2Φ( α)−1)+α2φ(α)
+
+]
+
++Bf
+
+[αQ (α)−φ(α)] = 0 , (26) where φ(x) is the standard normal PDF, and Φ( ·) denotes the standard normal cumulative distribution function (CDF) with 
+
+Q(α) := 1 − Φ( α).
+
+Proof: By Proposition 1, the within-interval proxy term becomes 
+
+En(t)2
+
+2 Pr( |X| ≤ σα ) = σ2α2ε2
+
+> n
+
+2
+
+(2Φ( α) − 1). (27) Under the endpoint-value substitution, the outside-interval term is ̂
+
+JDEF ,out (σα ) = f (1) 2
+
+∫ ∞
+
+> t
+
+(x − t)2φσ (x) dx 
+
++ f (−1) 2
+
+∫ −t
+
+> −∞
+
+(x + t)2φσ (x) dx (28) 
+
+= σ2Bf
+
+[
+
+(1 + α2)Q(α) − αφ (α)
+
+]
+
+, (29) where (28) follows from the positive homogeneity of f , f (t) = 
+
+tf (1) and f (−t) = tf (−1) for t > 0, and φσ (·) denotes the PDF of N (0 , σ 2). Combining (27) and (29), we obtain a closed-form expression for the proxy objective ̂ JDEF (σα ).Differentiating twice with respect to α gives 
+
+d2
+
+dα 2̂ JDEF (σα ) = σ2
+
+( ε2
+
+> n
+
+2 ψ(α) + 2 Bf Q(α)
+
+)
+
+, (30) where ψ(α) := 2(2Φ( α) − 1) + 2 α(4 − α2)φ(α). To establish strict convexity, it suffices to show ψ(α) ≥ 0 for α ≥ 0,as Bf > 0 and Q(α) > 0. The derivative ψ′(α) =2φ(α)( α2 − 1)( α2 − 6) shows that ψ increases on (0 , 1) ,decreases on (1 , √6) , and increases again on (√6, ∞). Thus, the only interior local minimum occurs at α = √6, while 
+
+α = 0 serves as the boundary minimum. Since ψ(0) = 0 
+
+and ψ(√6) > 0, we have ψ(α) > 0 for all α > 0.Hence, the second derivative of ̂ JDEF (σα ) is always positive for all α > 0, which establishes the strict convexity of ̂
+
+JDEF (σα ) as a function of α. Since t = σα is an affine change of variables, ̂ JDEF (t) is also strictly convex in t.Moreover, d
+
+> dα
+
+̂ JDEF (σα )∣∣α=0 = −2σ2Bf φ(0) < 0, whereas 
+
+> d
+> dα
+
+̂ JDEF (σα ) → ∞ as α → ∞ . Thus, the unique minimizer lies in (0 , ∞) and is characterized by the first-order condition 
+
+> d
+> dα
+
+̂ JDEF (σα ) = 0 , which yields (26). 
+
+Example 1 (ReLU): For f (x) = max {x, 0}, we have Bf =
+
+f (1) 2 + f (−1) 2 = 1 . Under the DEF proxy objective with the endpoint-value substitution, the optimal normalized radius α∗
+
+is obtained by solving the following equation: 
+
+ε2
+
+> n
+
+2
+
+(
+
+α(2Φ( α) − 1) + α2φ(α)
+
+)
+
++
+
+[
+
+αQ (α) − φ(α)
+
+]
+
+= 0 . (31) 6
+
+Example 2 (LeakyReLU): Let λ ∈ [0 , 1) . Define the LeakyReLU by 
+
+fλ(x) = 
+
+{
+
+x, x ≥ 0,λx, x < 0. (32) We have Bf = fλ(1) 2 + fλ(−1) 2 = 1 + λ2. Under the DEF proxy objective with the endpoint-value substitution, the optimal normalized radius α∗ is obtained by solving the following equation: 
+
+ε2
+
+> n
+
+2
+
+(
+
+α(2Φ( α)−1)+α2φ(α)
+
+)
+
++(1+ λ2)
+
+(
+
+αQ (α)−φ(α)
+
+)
+
+= 0 .
+
+(33) For both ReLU and LeakyReLU, the optimal radius is computed through the following procedure. 1) Compute the unit-interval minimax error εn = En(1) by solving the degree-n minimax problem on [−1, 1] .2) Substitute the activation-dependent constant Bf into the optimality condition in Theorem 1, where Bf = 1 for ReLU and Bf = 1 + λ2 for LeakyReLU. The resulting scalar equation in α is then solved by a bisection method. 3) Set the optimal design radius as t∗ = σα ∗, and construct the final minimax polynomial pn,t ∗ on [−t∗, t ∗].Although the homogeneous case requires a numerical minimax computation to obtain the unit-interval error εn = En(1) ,its dependence on the design radius follows exactly from the scaling law En(t) = tε n. We now turn to non-homogeneous activations, for which no such scaling law is generally avail-able and the minimax-error curve En(t) must be estimated. 
+
+B. Numerical Surrogate for Non-Homogeneous Functions 
+
+For activations without degree-one positive homogeneity, such as sigmoid, tanh, and GELU, the scaling relation En(t) = 
+
+tE n(1) no longer holds, so En(t) cannot be recovered from a single reference value and must instead be characterized over the range of candidate radii. We therefore estimate the error– radius curve t 7 → En(t) numerically by sampling minimax errors over candidate design radii and fitting a smooth surro-gate ˜En(t).Let T := {t1, . . . , t K } denote the grid of sampled design radii. For each tj ∈ T , we compute 
+
+pn,t j = arg min 
+
+> p∈Πn
+
+‖f − p‖∞,[−tj ,t j ] (34) using Chebfun [17], and evaluate 
+
+En(tj ) = ‖f − pn,t j ‖∞,[−tj ,t j ]. (35) Since En(t) varies over the candidate range, we construct the surrogate ˜En(t) by least-squares polynomial regression in t; in our experiments we use a degree-15 polynomial fit. The fitted 
+
+˜En(t) is then substituted for En(t) in the proxy objective (23). Fig. 3 compares, for representative non-homogeneous func-tions, the tractable proxy ̂ JDEF (t)—evaluated with this fit-ted surrogate ˜En(t)—against the numerically evaluated ideal objective JDEF (t) over the sampled candidate radii. While 
+
+JDEF (t) is obtained by direct numerical evaluation of (14), ̂
+
+JDEF (t) combines the arcsine-residual approximation for the within-interval term, and the fitted surrogate ˜En(t) for the minimax-error curve. As shown in Fig. 3, ̂ JDEF (t) almost exactly tracks JDEF (t) near the optimum and accurately reproduces the minimizing radius t∗. This confirms that the proposed proxy preserves the interval selection behavior of the ideal DEF objective and, in particular, validates the surrogate approximation at the radii relevant for interval selection. The corresponding optimal radii and MSE values are summarized in Tables I and II. IV. I NTERVAL OPTIMIZATION VIA DEP In this section, we connect the DEF-based objective to an HE-realizable DEP construction. The hard-clipping map 
+
+Dt(·) used in the ideal DEF objective is non-polynomial and therefore cannot be evaluated directly under HE. As in [16], we replace Dt(·) with a polynomial DEP composition, which provides interval control on a conservative input interval while approximately preserving inputs in a smaller high-probability region. Let R0 denote a conservative covered-input radius for the pre-activation magnitude. That is, R0 is chosen so that 
+
+Pr( |X| > R0) is negligible under the pre-activation dis-tribution. For a given design radius t ∈ (0 , R 0), the DEP composition is then used to map the covered input interval 
+
+[−R0, R 0] into the design interval [−t, t ]. For each design radius t, we choose a base DEP 
+
+Bt(·) ∈ D (δt, γt, t, Lt ), (36) where L > 1 is the extension factor, δt controls the identity-preservation error, and 0 < γ < 1 determines the preservation radius r = γt . Equivalently, this corresponds to the setting in Section II-C 
+
+R1 := t, R2 := Lt, r := γt. (37) The number of DEP stages is chosen as 
+
+mL(t) := max 
+
+{
+
+0,
+
+⌈
+
+log L
+
+( R0
+
+t
+
+)⌉} 
+
+. (38) When t ≥ R0, no DEP stage is required and mL(t) = 0 . The 
+
+i-th scaled DEP stage is defined as 
+
+Bt,i (x) := LiBt
+
+( x
+
+Li
+
+)
+
+, i = 0 , 1, . . . , m L(t) − 1. (39) The resulting DEP composition is 
+
+g(mL(t)) (x) := (Bt, 0 ◦ Bt, 1 ◦ · · · ◦ Bt,m L(t)−1
+
+)(x). (40) By the DEP conditions, the base Bt(·) maps the interval 
+
+[−Lt, Lt ] into the controlled interval [−t, t ]. Consequently, the scaled stage Bt,i maps [−Li+1 t, L i+1 t] into [−Lit, L it].Since mL(t) is chosen so that LmL(t)t ≥ R0, the composition satisfies 
+
+g(mL(t)) (x) ∈ [−t, t ], ∀x ∈ [−R0, R 0]. (41) This composition serves as an HE-realizable polynomial sub-stitute for the non-polynomial hard-clipping DEF Dt. On the covered input interval [−R0, R 0], it maps inputs into the design interval [−t, t ].7         
+
+> 246810 12 14 16 18 20
+> t
+> 10 -10
+> 10 -8
+> 10 -6
+> 10 -4
+> 10 -2
+> MSE
+
+(a)          
+
+> 246810 12 14 16 18 20
+> t
+> 10 -8
+> 10 -6
+> 10 -4
+> 10 -2
+> MSE
+
+(b)          
+
+> 246810 12 14 16 18 20
+> t
+> 10 -6
+> 10 -4
+> 10 -2
+> 10 0
+> MSE
+
+(c) Fig. 3. Comparison between the numerically evaluated DEF objective 
+
+JDEF (t) and the proxy objective ̂ JDEF (t) for three representative nonlin-earities: (a) sigmoid, (b) tanh, and (c) GELU. 
+
+Using the DEP-realizable map g(mL(t)) , we define the DEP evaluator as 
+
+qn,t, DEP (x) := pn,t 
+
+(g(mL(t)) (x)). (42) The corresponding MSE is 
+
+JDEP (t) := E
+
+[(f (X) − qn,t, DEP (X))2]
+
+. (43) To relate this objective to the ideal DEF analysis, recall that 
+
+qn,t, DEF (x) = pn,t (Dt(x)) . Then 
+
+f (X) − qn,t, DEP (X) = (f (X) − qn,t, DEF (X))
+
++ (qn,t, DEF (X) − qn,t, DEP (X)). (44) We define the DEP implementation error as 
+
+Jimpl (t) := E
+
+[(qn,t, DEF (X) − qn,t, DEP (X))2]
+
+, (45) 
+
+= E
+
+[(pn,t (Dt(X)) − pn,t (g(mL (t)) (X)) )2]
+
+. (46) By the triangle inequality in L2, equivalently Minkowski’s inequality [18], 
+
+JDEP (t) ≤
+
+(√JDEF (t) + 
+
+√
+
+Jimpl (t)
+
+)2
+
+. (47) Thus, controlling Jimpl (t) directly controls the gap between the ideal DEF objective and its DEP realization. We next derive an upper bound on Jimpl (t) under a covered-input model. 
+
+Lemma 1 ([16, Theorem 3]): Assume that the DEP stages are constructed with extension factor L > 1 and parameter δt,and that the preservation region is [−r, r ] with r = γt . Then the composed mapping g(mL(t)) satisfies 
+
+∥∥∥pn,t − pn,t ◦ g(mL (t)) 
+
+∥∥∥∞,[−r,r ] ≤ Mr r3 L2
+
+L2 − 1 δt, (48) where Mr = max |x|≤ r |p′
+
+> n,t
+
+(x)|.
+
+Proposition 2: Let R0 be a conservative bound on the pre-activation magnitude, and assume that |X| ≤ R0 under the covered-input model. Assume further that the DEP composi-tion has enough stages to cover [−R0, R 0], i.e., LmL(t)t ≥ R0.Then the implementation error satisfies 
+
+Jimpl (t) ≤
+
+(
+
+Mrr3 L2
+
+L2 − 1 δt
+
+)2
+
+Pr( |X| ≤ r)+ 4 ‖pn,t ‖2 
+
+> ∞,[−t,t ]
+
+Pr( r < |X| ≤ R0). (49) 
+
+Proof: Under the covered-input condition |X| ≤ R0, we split the input domain into the preservation region {| X| ≤ r}
+
+and the remaining region {r < |X| ≤ R0}.On {| X| ≤ r}, we have Dt(X) = X because r = γt < t .Therefore, Lemma 1 gives 
+
+E
+
+[(pn,t (Dt(X)) − pn,t (g(mL(t)) (X)) )21{| X|≤ r}
+
+]
+
+≤
+
+(
+
+Mrr3 L2
+
+L2 − 1 δt
+
+)2
+
+Pr( |X| ≤ r). (50) On {r < |X| ≤ R0}, the hard-clipping map satisfies 
+
+Dt(X) ∈ [−t, t ], and (41) gives g(mL (t)) (X) ∈ [−t, t ]. Hence, both arguments of pn,t (·) lie in [−t, t ], and therefore 
+
+∣∣∣pn,t (Dt(X)) − pn,t (g(mL (t)) (X)) 
+
+∣∣∣ ≤ 2‖pn,t ‖∞,[−t,t ]. (51) 8
+
+It follows that 
+
+E
+
+[(pn,t (Dt(X)) − pn,t (g(mL(t)) (X)) )21{r< |X|≤ R0}
+
+]
+
+≤ 4‖pn,t ‖2 
+
+> ∞,[−t,t ]
+
+Pr( r < |X| ≤ R0). (52) Combining (50) and (52) proves (49). 
+
+Define 
+
+Uimpl (t) := 
+
+(
+
+Mrr3 L2
+
+L2 − 1 δt
+
+)2
+
+Pr( |X| ≤ r)+ 4 ‖pn,t ‖2 
+
+> ∞,[−t,t ]
+
+Pr( r < |X| ≤ R0). (53) Substituting this bound into (47), we obtain the final upper bound 
+
+JDEP (t) − JDEF (t) ≤ 2
+
+√
+
+JDEF (t)Uimpl (t) + Uimpl (t). (54) The bound separates the DEP implementation error into two contributions. The first term in Uimpl (t) measures the near-identity error on the preservation region [−r, r ] and is controlled by the DEP parameter δt, the derivative scale Mr,and the preservation radius r. The second term accounts for inputs outside the preservation region but still inside the covered input interval [−R0, R 0]. Consequently, the DEP-based objective remains close to the ideal DEF objective when the DEP accurately preserves inputs in [−r, r ] and the probability mass of r < |X| ≤ R0 is small. V. N UMERICAL EXPERIMENTS 
+
+We evaluate the proposed interval optimization framework under two controlled pre-activation models with unit variance: a Gaussian model X ∼ N (0 , σ 2) with σ = 1 , and a Laplace model X ∼ Laplace(0 , b ) with b = 1 /√2. All numerical min-imax approximations are computed using Chebfun [17]. For each candidate radius t, we compute the degree-15 minimax polynomial p15 ,t on [−t, t ]. The numerical ideal DEF objective 
+
+JDEF (t) is evaluated by directly integrating the ideal-clipping MSE in (14). The practical DEP objective is evaluated under the covered-input model |X| ≤ R0.For the analytical proxy ̂ JDEF (t), the minimax-error curve 
+
+En(t) is handled according to the activation type. For ReLU and LeakyReLU with slope λ = 0.01 , we use the exact homogeneity-based scaling law En(t) = tE n(1) . For sigmoid, tanh, and GELU, we compute En(t) on the sampled grid T
+
+and fit a degree-15 polynomial surrogate ˜En(t) to the sampled values. The HE-realizable interval control is implemented using the DEP composition introduced in Section IV. Because intermediate values cannot be monitored during encrypted execution, the DEP composition must be defined over acovered input region [−R0, R 0] before evaluation. Here, R0 is a coverage parameter that controls the probability of encoun-tering inputs outside the DEP-supported region, whereas the minimax design radius t is optimized separately to minimize the distribution-induced approximation MSE. We select R0 using an aggregate tail-probability budget. Following the encrypted ResNet-20 evaluation setting of [19], the inference involves approximately N = 1 .88 × 10 9 scalar activation evaluations on the CIFAR-10 test set and requires 
+
+N · Pr( |X| > R 0) ≤ η, (55)                                    
+
+> 246810 12 14 16 18 20
+> t
+> 10 -4
+> 10 -3
+> 10 -2
+> 10 -1
+> MSE
+> (a)
+> 246810 12 14 16 18 20
+> t
+> 10 -4
+> 10 -3
+> 10 -2
+> 10 -1
+> MSE
+> (b)
+> 246810 12 14 16 18 20
+> t
+> 10 -10
+> 10 -8
+> 10 -6
+> 10 -4
+> 10 -2
+> MSE
+> (c) Fig. 4. Comparison of the analytical proxy ̂JDEF (t), the numerical ideal objective JDEF (t), and the practical objectives JDEP ,L 1(t)and JDEP ,L 2(t)
+> for representative nonlinearities: (a) ReLU, (b) LeakyReLU, and (c) sigmoid.
+
+with η = 10 −3. Under the conservative Laplace tail model, this criterion gives R0/σ ≈ 19 .99 ; hence, we use R0 = 20 σ
+
+throughout the experiments. For each candidate design radius t, the number of DEP 9                          
+
+> 246810 12 14 16 18 20
+> t
+> 10 -8
+> 10 -7
+> 10 -6
+> 10 -5
+> 10 -4
+> 10 -3
+> 10 -2
+> 10 -1
+> MSE
+> (a)
+> 246810 12 14 16 18 20
+> t
+> 10 -7
+> 10 -6
+> 10 -5
+> 10 -4
+> 10 -3
+> 10 -2
+> 10 -1
+> 10 0
+> MSE
+> (b) Fig. 5. Comparison of the analytical proxy ̂JDEF (t), the numerical ideal objective JDEF (t), and the practical objectives JDEP ,L 1(t)and JDEP ,L 2(t)
+> for representative nonlinearities: (a) tanh, (b) GELU.
+
+stages is chosen as 
+
+mL(t) = max 
+
+{
+
+0,
+
+⌈
+
+log L
+
+( R0
+
+t
+
+)⌉} 
+
+. (56) To realize HE-compatible interval control, we instantiate the cubic base DEP of [16], 
+
+Bcubic (x) = x − 4
+
+27 x3. (57) For a design radius t, the scaled cubic DEP is 
+
+Bt(x) = t B cubic (x/t ) = x − 4
+
+27 t2 x3. (58) We evaluate two extension factors from the admissible range 
+
+1.5 < L < 1.5√3, namely L1 = 1 .6 and L2 = 2 .5. A larger L covers [−R0, R 0] with fewer DEP stages, but it also reduces the admissible preservation region. Accordingly, L1
+
+provides a larger preservation region at the cost of more DEP stages, whereas L2 reduces the stage count at the cost of a smaller preservation region. This choice exposes the practical trade-off between preservation accuracy and accumulated DEP composition error. Figs. 4 and 5, together with Table I, summarize the optimal design radii and the corresponding objective values under the Gaussian input model. The corresponding results under the Laplace input model are reported in Table II. For each func-tion, we compare the analytical proxy ̂ JDEF , the numerically evaluated ideal DEF objective JDEF , and the practical DEP objectives JDEP ,L 1 and JDEP ,L 2 .As a fixed-interval baseline, we use a degree-15 minimax polynomial designed on the conservative interval [−R0, R 0] = [−20 σ, 20 σ]. This baseline uses the same degree as the final minimax approximation polynomial p15 ,t used in the proposed method, but it does not include the additional DEP stages. Following the cubic DEP construction of [16], each DEP stage requires two non-scalar multiplications. Therefore, the DEP composition adds approximately 2mL(t) non-scalar mul-tiplications and 2mL(t) multiplicative levels, where mL(t) = 
+
+⌈log L(R0/t )⌉. Thus, the fixed-interval Remez baseline should be interpreted as a conservative approximation-error reference with the same final minimax degree, rather than as a strict HE-cost-matched baseline. The practical objectives JDEP ,L 1
+
+and JDEP ,L 2 capture the MSE after including the DEP stages. The primary role of ̂ JDEF is to provide an analytically tractable surrogate for the ideal interval-selection objective 
+
+JDEF . Tables I and II show that this surrogate accurately preserves the minimizer structure of the numerical ideal objec-tive. Across all tested nonlinearities, ̂ JDEF yields minimizing radii that closely match those obtained from the numerically evaluated ideal objective JDEF . Thus, although ̂ JDEF is not constructed to reproduce the absolute MSE pointwise, it reli-ably preserves the interval-selection behavior of the ideal DEF objective. The gap between JDEF and the practical DEP objectives 
+
+JDEP ,L 1 and JDEP ,L 2 reflects the implementation error in-troduced by replacing the ideal hard-clipping DEF with a polynomial DEP composition. In the Gaussian and Laplace settings considered here, L = 2 .5 achieves a smaller practical MSE than L = 1.6. Although a smaller extension factor is closer to the ideal clipping behavior at the level of each individual DEP stage, it also requires more stages to cover the same input interval [−R0, R 0]. These results suggest that the accumulated composition error dominates the per-stage approximation benefit in the tested settings. Compared with the conservative fixed-interval Remez base-line on [−20 σ, 20 σ], the optimized DEP-based evaluators achieve substantially lower MSE. The improvement is es-pecially pronounced for sigmoid, tanh, and GELU, where the achieved MSE is lower by several orders of magnitude. Table II shows analogous behavior under the Laplace model. Compared with the Gaussian case, the heavier tails shift the optimal design radii to larger values, while the analytical proxy still tracks the ideal DEF minimizer closely. VI. C ONCLUSION 
+
+We studied interval optimization for degree-constrained minimax polynomial approximation under homomorphic en-cryption. By treating the approximation interval as an op-timization variable, we formulated a distribution-aware ob-jective that explicitly balances the trade-off between within-interval minimax error and outside-interval clipping error. 10 
+
+TABLE I COMPARISON OF THE OPTIMAL RADIUS t∗ AND THE CORRESPONDING OBJECTIVE VALUES FOR FIXED -INTERVAL REMEZ BASELINES , THE ANALYTICAL PROXY ̂ JDEF , THE NUMERICAL IDEAL OBJECTIVE JDEF , AND THE PRACTICAL DEP OBJECTIVES JDEP ,L 1 AND JDEP ,L 2 FOR A GAUSSIAN DISTRIBUTION .
+
+Function Metric Fixed Remez ( R0 = 20 )̂ JDEF JDEF JDEP ,L 1 JDEP ,L 2
+
+ReLU Radius R0 3.23 3.20 5.10 4.60 Value 1.65 × 10 −2 6.02 × 10 −4 5.86 × 10 −4 1.75 × 10 −3 1.51 × 10 −3
+
+LeakyReLU Radius R0 3.24 3.20 5.10 4.60 Value 1.62 × 10 −2 5.92 × 10 −4 5.76 × 10 −4 1.73 × 10 −3 1.49 × 10 −3
+
+Sigmoid Radius R0 4.49 4.50 8.10 8.00 Value 4.40 × 10 −4 1.14 × 10 −10 1.15 × 10 −10 1.29 × 10 −6 8.10 × 10 −7
+
+Tanh Radius R0 2.95 3.00 4.70 4.40 Value 2.04 × 10 −2 4.62 × 10 −8 5.12 × 10 −8 1.89 × 10 −5 1.23 × 10 −5
+
+GELU Radius R0 4.62 4.60 7.00 6.80 Value 1.57 × 10 −2 3.46 × 10 −7 3.49 × 10 −7 2.30 × 10 −4 1.54 × 10 −4
+
+TABLE II COMPARISON OF THE OPTIMAL RADIUS t∗ AND THE CORRESPONDING OBJECTIVE VALUES FOR FIXED -INTERVAL REMEZ BASELINES , THE ANALYTICAL PROXY ̂ JDEF , THE NUMERICAL IDEAL OBJECTIVE JDEF , AND THE PRACTICAL DEP OBJECTIVES JDEP ,L 1 AND JDEP ,L 2 FOR A LAPLACE DISTRIBUTION .
+
+Function Metric Fixed Remez ( R0 = 20 )̂ JDEF JDEF JDEP ,L 1 JDEP ,L 2
+
+ReLU Radius R0 5.11 5.10 6.50 6.10 Value 1.57 × 10 −2 1.66 × 10 −3 1.58 × 10 −3 3.01 × 10 −3 2.60 × 10 −3
+
+LeakyReLU Radius R0 5.13 5.10 6.60 6.10 Value 1.54 × 10 −2 1.64 × 10 −3 1.56 × 10 −3 2.97 × 10 −3 2.57 × 10 −3
+
+Sigmoid Radius R0 5.47 5.50 8.10 8.00 Value 3.55 × 10 −4 4.02 × 10 −9 4.04 × 10 −9 1.41 × 10 −6 8.92 × 10 −7
+
+Tanh Radius R0 3.16 3.20 4.50 4.30 Value 1.80 × 10 −2 1.39 × 10 −7 1.60 × 10 −7 1.57 × 10 −5 1.00 × 10 −5
+
+GELU Radius R0 6.69 6.70 8.00 8.00 Value 1.83 × 10 −2 7.36 × 10 −5 7.52 × 10 −5 6.34 × 10 −4 4.51 × 10 −4
+
+We then derived an analytically tractable DEF-based proxy objective and connected it to HE-realizable DEP construc-tions through an implementation-error decomposition. The numerical results on representative non-polynomial activation functions show that the minimizer of the analytical proxy closely matches that of the ideal DEF objective across the tested functions. Moreover, the practical DEP-based evaluators achieve substantially lower MSE than the conservative fixed-interval Remez baseline, with particularly large gains for sigmoid, tanh, and GELU. Integration of the proposed framework into end-to-end HE-based neural network inference, including the interplay be-tween layer-wise pre-activation distributions, cumulative ap-proximation errors across multiple non-polynomial primitives, and actual HE evaluation costs under specific cryptographic library implementations, is an important direction for future investigation that builds upon the analytical foundation estab-lished here. REFERENCES [1] M. Al-Rubaie and J. M. Chang, “Privacy-preserving machine learning: Threats and solutions,” IEEE Secur. Privacy , vol. 17, no. 2, pp. 49–58, Mar./Apr. 2019. [2] M. S. Riazi, B. D. Rouhani, and F. Koushanfar, “Deep learning on private data,” IEEE Secur. Privacy , vol. 17, no. 6, pp. 54–63, Nov./Dec. 2019. [3] C. Juvekar, V. Vaikuntanathan, and A. Chandrakasan, “GAZELLE: A low latency framework for secure neural network inference,” in Proc. USENIX Secur. Symp. (USENIX Secur.) , Aug. 2018, pp. 1651–1669. [4] B. Reagen, W.-S. Choi, Y. Ko, V. T. Lee, H.-H. S. Lee, G.-Y. Wei, and D. Brooks, “Cheetah: Optimizing and accelerating homomorphic encryption for private inference,” in Proc. IEEE Int. Symp. High-Perform. Comput. Archit. (HPCA) , Feb. 2021, pp. 26–39. [5] C. Gentry, “Fully homomorphic encryption using ideal lattices,” in Proc. Annu. ACM Symp. Theory Comput. (STOC) , May 2009, pp. 169–178. [6] J. H. Cheon, A. Kim, M. Kim, and Y. Song, “Homomorphic encryption for arithmetic of approximate numbers,” in Proc. Int. Conf. Theory Appl. Cryptol. Inf. Secur. (ASIACRYPT) , Dec. 2017, pp. 409–437. [7] R. Gilad-Bachrach, N. Dowlin, K. Laine, K. Lauter, M. Naehrig, and J. Wernsing, “Cryptonets: Applying neural networks to encrypted data with high throughput and accuracy,” in Proc. Int. Conf. Mach. Learn. (ICML) , Jun. 2016, pp. 201–210. [8] R. Dathathri, O. Saarikivi, H. Chen, K. Laine, K. Lauter, S. Maleki, M. Musuvathi, and T. Mytkowicz, “CHET: an optimizing compiler for fully-homomorphic neural-network inferencing,” in Proc. ACM SIG-PLAN Conf. Program. Lang. Des. Implement. (PLDI) , Jun. 2019, pp. 142–156. [9] D. Evans, V. Kolesnikov, and M. Rosulek, “A pragmatic introduction to secure multi-party computation,” Found. Trends Priv. Secur. , vol. 2, no. 2–3, pp. 70–246, Dec. 2018. [10] E. Lee, J.-W. Lee, J.-S. No, and Y.-S. Kim, “Minimax approximation of sign function by composite polynomial for homomorphic comparison,” 
+
+IEEE Trans. Dependable Secure Comput. , vol. 19, no. 6, pp. 3711–3727, 11 
+
+Nov./Dec. 2022. [11] J.-W. Lee, H. Kang, Y. Lee, W. Choi, J. Eom, M. Deryabin, E. Lee, J. Lee, D. Yoo, Y.-S. Kim, and J.-S. No, “Privacy-preserving machine learning with fully homomorphic encryption for deep neural network,” 
+
+IEEE Access , vol. 10, pp. 30 039–30 054, Mar. 2022. [12] J. Lee, E. Lee, J.-W. Lee, Y. Kim, Y.-S. Kim, and J.-S. No, “Precise approximation of convolutional neural networks for homomorphically encrypted data,” IEEE Access , vol. 11, pp. 62 062–62 076, Jun. 2023. [13] L. N. Trefethen, Approximation Theory and Approximation Practice, Extended Edition . Philadelphia, PA, USA: SIAM, 2019. [14] R. Pach´ on and L. N. Trefethen, “Barycentric-Remez algorithms for best polynomial approximation in the Chebfun system,” BIT Numer. Math. ,vol. 49, no. 4, pp. 721–741, Dec. 2009. [15] J. H. Cheon, K. Han, A. Kim, M. Kim, and Y. Song, “Bootstrapping for approximate homomorphic encryption,” in Proc. Annu. Int. Conf. Theory Appl. Cryptographic Techn. (EUROCRYPT) , 2018, pp. 360–384. [16] J. H. Cheon, W. Kim, and J. H. Park, “Efficient homomorphic evaluation on large intervals,” IEEE Trans. Inf. Forensics Security , vol. 17, pp. 2553–2568, Jul. 2022. [17] T. A. Driscoll, N. Hale, and L. N. Trefethen, “Chebfun guide,” 2014. [18] E. M. Stein, Singular Integrals and Differentiability Properties of Functions . Princeton University Press, 1970, no. 30. [19] E. Lee, J.-W. Lee, J. Lee, Y.-S. Kim, Y. Kim, J.-S. No, and W. Choi, “Low-complexity deep convolutional neural networks on fully homo-morphic encryption using multiplexed parallel convolutions,” in Proc. Int. Conf. Mach. Learn. (ICML) , 2022, pp. 12 403–12 422.

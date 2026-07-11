@@ -6,38 +6,37 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-10
-- 运行时间：2026-07-10 21:36:42 UTC
+- 最新运行日期：2026-07-11
+- 运行时间：2026-07-11 20:51:17 UTC
 - 运行状态：成功
-- 本次总论文数：6
-- 精读区：5
-- 速读区：1
+- 本次总论文数：5
+- 精读区：1
+- 速读区：4
 
 ### 今日简报（AI）
-今日精读5篇速读1篇，聚焦隐私保护下的分布式地理数据计数与视觉特征安全学习。最值得关注的是《Efficient and Secure Range Counting》和《TrustCLIP》，分别从查询范围保护与对抗重构角度实现高安全性。建议普通读者优先从这两篇论文入手，理解数据加密与特征脱敏的核心机制。
-- 详情：[/202607/10/README](/202607/10/README)
+1) 今日精读一篇同态加密多项式逼近优化论文，速读三篇涉及生成式AI机密性和开源小模型隐私测量（有重复）。  
+2) 最值得关注：精读论文提出度约束区间优化方法，显著提升同态加密最小极大多项式逼近效率；速读提示开源小LLM在共享决策隐私保护中具潜力。  
+3) 建议优先精读同态加密优化论文以理解底层效率突破，并关注开源小模型隐私研究方向。
+- 详情：[/202607/11/README](/202607/11/README)
 
 ### 精读区论文标签
-1. [Efficient and Secure Range Counting over Distributed Geographic Data with Query Range Protection](/202607/10/2607.04194v1-efficient-and-secure-range-counting-over-distributed-geographic-data-with-query-range-protection)  
+1. [Degree-Constrained Interval Optimization for Minimax Polynomial Approximation in Homomorphic Encryption](/202607/11/2607.08042v1-degree-constrained-interval-optimization-for-minimax-polynomial-approximation-in-homomorphic-encryption)  
    标签：评分：9.0/10、query:daily
-   evidence：分布式地理数据上的安全和范围计数，保护查询隐私
-2. [TrustCLIP: Learning Private Visual Features via Adversarial Reconstruction](/202607/10/2607.04484v1-trustclip-learning-private-visual-features-via-adversarial-reconstruction)  
-   标签：评分：9.0/10、query:daily
-   evidence：通过对抗重建学习私有视觉特征
-3. [MLQENABLER: Enabling Secure Machine Learning Queries over Encrypted Database in Cloud Computing](/202607/10/2607.08197v1-mlqenabler-enabling-secure-machine-learning-queries-over-encrypted-database-in-cloud-computing)  
-   标签：评分：9.0/10、query:daily
-   evidence：加密数据库上的安全机器学习查询
-4. [Equivariant Quantum Clustering with Differential Privacy: Parameter-Efficient Privacy-Preserving Analysis Across Heterogeneous Sensitive Datasets](/202607/10/2607.08092v1-equivariant-quantum-clustering-with-differential-privacy-parameter-efficient-privacy-preserving-analysis-across-heterogeneous-sensitive-datasets)  
-   标签：评分：8.0/10、query:daily
-   evidence：等变量子聚类与差分隐私
-5. [Coded Task Offloading for Fluid Computing: A Privacy-Aware Approach under D2D Networks](/202607/10/2607.08440v1-coded-task-offloading-for-fluid-computing-a-privacy-aware-approach-under-d2d-networks)  
-   标签：评分：8.0/10、query:daily
-   evidence：隐私感知的分布式编码任务卸载
+   evidence：同态加密实现隐私保护的加密推理多项式逼近
 
 ### 速读区论文标签
-1. [EdgeRefine: Privacy-Utility Balance for Graphs via Jaccard Sampling under Edge Differential Privacy](/202607/10/2607.08659v1-edgerefine-privacy-utility-balance-for-graphs-via-jaccard-sampling-under-edge-differential-privacy)  
+1. [Privilege and confidentiality in generative AI workflows](/202607/11/2607.05479v1-privilege-and-confidentiality-in-generative-ai-workflows)  
    标签：评分：6.0/10、query:daily
-   evidence：图学习的边差分隐私
+   evidence：生成式AI工作流中的保密性
+2. [Measuring the practice of shared-decision making (OPTION12): An Investigation into Open-sourced Smaller LLMs (OS-sLLMs) for Better Privacy and Sustainability](/202607/11/2607.06127v1-measuring-the-practice-of-shared-decision-making-option12-an-investigation-into-open-sourced-smaller-llms-os-sllms-for-better-privacy-and-sustainability)  
+   标签：评分：6.0/10、query:daily
+   evidence：隐私保护的小型本地部署大模型
+3. [Measuring the practice of shared-decision making (OPTION12): An Investigation into Open-sourced Smaller LLMs (OS-sLLMs) for Better Privacy and Sustainability](/202607/11/2607.06127v2-measuring-the-practice-of-shared-decision-making-option12-an-investigation-into-open-sourced-smaller-llms-os-sllms-for-better-privacy-and-sustainability)  
+   标签：评分：6.0/10、query:daily
+   evidence：隐私保护的开源小语言模型用于临床决策评估
+4. [Lower Bounds for PIR with Preprocessing from Blackbox Cryptography](/202607/11/2607.06451v2-lower-bounds-for-pir-with-preprocessing-from-blackbox-cryptography)  
+   标签：评分：6.0/10、query:daily
+   evidence：针对预处理单服务器私有信息检索（PIR）的理论下界
 
 
 <div class="dpr-home-promo-card">
