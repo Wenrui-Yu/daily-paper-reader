@@ -6,37 +6,31 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-11
-- 运行时间：2026-07-11 20:51:17 UTC
+- 最新运行日期：2026-07-12
+- 运行时间：2026-07-12 20:09:45 UTC
 - 运行状态：成功
-- 本次总论文数：5
+- 本次总论文数：3
 - 精读区：1
-- 速读区：4
+- 速读区：2
 
 ### 今日简报（AI）
-1) 今日精读一篇同态加密多项式逼近优化论文，速读三篇涉及生成式AI机密性和开源小模型隐私测量（有重复）。  
-2) 最值得关注：精读论文提出度约束区间优化方法，显著提升同态加密最小极大多项式逼近效率；速读提示开源小LLM在共享决策隐私保护中具潜力。  
-3) 建议优先精读同态加密优化论文以理解底层效率突破，并关注开源小模型隐私研究方向。
-- 详情：[/202607/11/README](/202607/11/README)
+今日精读医疗领域可信LLM智能体论文，速读密码学与边缘智能两篇。  
+最值得关注的是医疗LLM智能体的可信性研究（9.0分），强调安全与可靠。  
+建议深入阅读该文，了解AI在医疗中的可信部署挑战与解决方案。
+- 详情：[/202607/12/README](/202607/12/README)
 
 ### 精读区论文标签
-1. [Degree-Constrained Interval Optimization for Minimax Polynomial Approximation in Homomorphic Encryption](/202607/11/2607.08042v1-degree-constrained-interval-optimization-for-minimax-polynomial-approximation-in-homomorphic-encryption)  
+1. [Toward Trustworthy Large Language Model Agents in Healthcare](/202607/12/2607.05055v1-toward-trustworthy-large-language-model-agents-in-healthcare)  
    标签：评分：9.0/10、query:daily
-   evidence：同态加密实现隐私保护的加密推理多项式逼近
+   evidence：用于医疗物流的可信LLM智能体，带有安全护栏
 
 ### 速读区论文标签
-1. [Privilege and confidentiality in generative AI workflows](/202607/11/2607.05479v1-privilege-and-confidentiality-in-generative-ai-workflows)  
+1. [Lower Bounds for PIR with Preprocessing from Blackbox Cryptography](/202607/12/2607.06451v1-lower-bounds-for-pir-with-preprocessing-from-blackbox-cryptography)  
    标签：评分：6.0/10、query:daily
-   evidence：生成式AI工作流中的保密性
-2. [Measuring the practice of shared-decision making (OPTION12): An Investigation into Open-sourced Smaller LLMs (OS-sLLMs) for Better Privacy and Sustainability](/202607/11/2607.06127v1-measuring-the-practice-of-shared-decision-making-option12-an-investigation-into-open-sourced-smaller-llms-os-sllms-for-better-privacy-and-sustainability)  
+   evidence：带预处理的隐私信息检索，与分布式机器学习中的隐私相关
+2. [Voltron: Enabling Elastic Multi-Device Execution of LLM Inference for Empowered Edge Intelligence](/202607/12/2607.07046v1-voltron-enabling-elastic-multi-device-execution-of-llm-inference-for-empowered-edge-intelligence)  
    标签：评分：6.0/10、query:daily
-   evidence：隐私保护的小型本地部署大模型
-3. [Measuring the practice of shared-decision making (OPTION12): An Investigation into Open-sourced Smaller LLMs (OS-sLLMs) for Better Privacy and Sustainability](/202607/11/2607.06127v2-measuring-the-practice-of-shared-decision-making-option12-an-investigation-into-open-sourced-smaller-llms-os-sllms-for-better-privacy-and-sustainability)  
-   标签：评分：6.0/10、query:daily
-   evidence：隐私保护的开源小语言模型用于临床决策评估
-4. [Lower Bounds for PIR with Preprocessing from Blackbox Cryptography](/202607/11/2607.06451v2-lower-bounds-for-pir-with-preprocessing-from-blackbox-cryptography)  
-   标签：评分：6.0/10、query:daily
-   evidence：针对预处理单服务器私有信息检索（PIR）的理论下界
+   evidence：边缘设备LLM推理解决隐私泄露风险
 
 
 <div class="dpr-home-promo-card">
