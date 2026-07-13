@@ -1,0 +1,1490 @@
+Title: BaCon: Efficient Batch Processing of Counting Queries [Full Version]
+
+URL Source: https://arxiv.org/pdf/2607.05832v1
+
+Published Time: Wed, 08 Jul 2026 00:47:18 GMT
+
+Number of Pages: 22
+
+Markdown Content:
+# BaCon : Efficient Batch Processing of Counting Queries 
+
+# Yuxi Liu 
+
+Duke University yuxi.liu@duke.edu 
+
+# Xiao Hu 
+
+University of Waterloo xiaohu@uwaterloo.ca 
+
+# Pankaj K. Agarwal 
+
+Duke University pankaj@cs.duke.edu 
+
+# Jun Yang 
+
+Duke University junyang@cs.duke.edu 
+
+## ABSTRACT 
+
+Counting queries are ubiquitous in database systems, particularly for driving internal system optimization. Learned models for cardi-nality estimation rely heavily on large-scale training data, yet gen-erating such data by executing massive batches of counting queries is expensive. We propose BaCon , an efficient algorithm for batch evaluation of counting queries on top of a database system, without modifying its internals. BaCon integrates the idea of factorized databases with a workload-aware domain quantization strategy, allowing it to evaluate batches of counting queries using compact data structures rather than materializing massive join results. Ba-Con ’s design is compatible with most database management system, and we have implemented it as a client-side application on Post-greSQL with a lightweight C-language UDF (user-defined function). This implementation delivers speedups between 2 × and 178 × over baselines and good performance across various workloads, making training and maintenance of learned cardinality estimation models significantly more practical. 
+
+PVLDB Reference Format: 
+
+Yuxi Liu, Xiao Hu, Pankaj K. Agarwal, and Jun Yang. BaCon : Efficient Batch Processing of Counting Queries. PVLDB, 19(9): 2508-2521, 2026. doi:10.14778/3819518.3819567 
+
+PVLDB Artifact Availability: 
+
+The source code, data, and/or other artifacts have been made available at https://github.com/louisja1/bacon. 
+
+## 1 INTRODUCTION 
+
+Batches of counting queries are not only useful in their own right for database applications, but also frequently serve to collect basic statistics from data for monitoring and optimization. With the growing popularity of learned query optimization [ 12 , 46 , 47 , 82 ]in recent years, an interesting workload has emerged: collecting training data for learned cardinality estimation (CE) [ 13 , 27 , 29 , 40 ,50 , 51 , 58 , 60 , 71 ]. CE is a critical component of query optimization, as its accuracy directly impacts the quality of query execution plans [ 35 , 61 ]. In these workloads, queries typically involve joins and selections over base tables but report only the final counts of the result sets. These query-count pairs are subsequently used to train 
+
+> This work is licensed under the Creative Commons BY-NC-ND 4.0 International License. Visit https://creativecommons.org/licenses/by-nc-nd/4.0/ to view a copy of this license. For any use beyond those covered by this license, obtain permission by emailing info@vldb.org. Copyright is held by the owner/author(s). Publication rights licensed to the VLDB Endowment. Proceedings of the VLDB Endowment, Vol. 19, No. 9 ISSN 2150-8097. doi:10.14778/3819518.3819567
+
+CE models. Such queries may be derived from past workloads or synthesized specifically for training. While the number of distinct join patterns is naturally limited by the database schema, the queries themselves additionally contain a variety of selection conditions, targeting different attributes with varying constants. Beyond simple equality comparisons, many conditions involve inequality or range predicates. Table 1 summarizes nine public query workloads widely used in CE research for training and evaluation. These workloads span three commonly studied benchmark databases—IMDB [ 35 ], STATS [ 18 ] and DSB [ 10 ]—and capture a broad range of query shapes, join structures, and predicate types. Executing such workloads is time-consuming. Even when viewed as a one-time training cost, the overhead can be daunting; in our experience, some workloads require hours or even more than a day to execute (Section 5). Furthermore, models are rarely trained once and then forgotten. As the database state changes, they can become outdated [ 32 , 37 ]: cardinalities from previously executed queries may no longer be accurate, necessitating the re-execution of queries to retrain the models. While monitoring real result counts from query execution feedback can mitigate this issue, simply observ-ing final query result counts is insufficient [ 18 , 29 , 60 ]. Effective training requires (1) the size of intermediate results for subqueries within potentially optimal plans, not just the plan actually executed, and (2) feedback from unseen queries to prepare for potential work-load shifts [ 37 , 72 , 75 ]. In a continuously running environment, executing these monitoring or training queries must not disrupt normal workloads. These observations underscore the need for more efficient support for executing batches of counting queries. Given the extensive literature on query processing, many ideas are applicable to the general problem of batch counting queries— including multi-query optimization, scalable continuous query pro-cessing, and factorized databases—see Section 6 for more discussion. A reasonable starting point, leveraging multi-query optimization, is to exploit the fact that many queries share the same join pattern, dif-fering only in their selection conditions. Instead of executing them independently, one could perform the full join first and then apply individual selection conditions to obtain per-query counts. While this baseline enables shared join processing, it leads to materializing the full join result, which can be massive for large databases. We propose BaCon , a practical, scalable algorithm for efficient 
+
+Ba tch processing of Co unting queries . A key idea, inspired by work on factorized databases [ 7, 8, 56 ], is that a counting query over a join can be evaluated without enumerating the join result. While the count operator cannot generally be pushed down through a join, if the join is processed in a “factorized” manner—grouped by joining attribute values—we can simply count the joining “factors” and arXiv:2607.05832v1 [cs.DB] 7 Jul 2026 Table 1: Summary of nine query workloads across three databases, including the workload name with the link to file, associated data-base, number of queries (Qs), number of tables per query (Ts), number of join patterns (formally defined in Section 2), and a short description with source in the second row for each workload. 
+
+Query Workload DB # Qs # Ts # join patterns 
+
+synthetic [31] IMDB 5,000 1 to 3 16 
+
+> Kipf et al. [29]: generated by the training data generator with a different seed
+
+scale [30] IMDB 500 1 to 5 31 
+
+> Kipf et al. [29]: designed to show how MSCN generalizes to more joins.
+
+job-light [28] IMDB 70 2 to 5 18    
+
+> Kipf et al . [29] : derived from JOB [ 35 ], excluding string predicates and disjunctions.
+
+job-light-single [20] IMDB 254 1 1
+
+> Han et al. [18]: single-table sub-plan queries extracted from job-light.
+
+job-light-join [19] IMDB 696 2 to 5 27 
+
+> Han et al. [18]: join sub-plan queries extracted from job-light.
+
+stats-ceb [24] STATS 146 2 to 7 58   
+
+> Han et al . [18] : designed to be more comprehensive, with more diverse queries and more complex join patterns on STATS, compared to job-light on IMDB.
+
+stats-ceb-single [23] STATS 632 1 1
+
+> Han et al. [18]: single-table sub-plan queries extracted from stats-ceb.
+
+stats-ceb-join [22] STATS 2,603 2 to 7 120 
+
+> Han et al. [18]: join sub-plan queries extracted from stats-ceb.
+
+dsb-grasp-20k [41] DSB 20,000 1 to 5 16     
+
+> A sample of the original workload [ 74 ] generated by SeConCDF [ 75 ] and GRASP [ 73 ] on DSB. From 149,828 original queries, we remove queries not appli-cable to our methods and randomly sample 20,000 queries (details in Section 5).
+
+multiply these counts, avoiding enumeration of the joined result tu-ples. A second key idea is workload-aware quantization of selection attribute domains. This idea allows the data required for count-ing queries to be compressed, naturally exploiting the overlap and sharing of selection predicates within the workload. BaCon seam-lessly combines these ideas, using compact “count maps” rather than bloated join tuples to represent intermediate results; to com-bine these intermediate results, it uses a pair of operators ⊗ and ⊕,defined with clear semantics and amenable to optimization. Finally, to ensure practicality and ease of adoption, we implement BaCon 
+
+as a client application on top of a database system (DBMS) without modifying its internals. BaCon leverages the DBMS for process-ing, utilizes user-defined functions (UDFs), and carefully balances database- and client-side execution to minimize interface overhead. Our experimental results show that BaCon is highly competitive for training workloads for learned CE in Table 1, achieving 2× to 
+
+178 × speedups over baselines. Moreover, BaCon performs well across diverse workloads, providing significant speedups for ex-pensive join patterns while remaining competitive on those where baseline approaches are already efficient. 
+
+## 2 PRELIMINARIES 
+
+Problem Statement and Notations. Consider a database D with 𝑛 
+
+tables 𝑅 1, . . . , 𝑅 𝑛 , where each table 𝑅 𝑖 has a set of attributes denoted 
+
+Attrs [𝑅 𝑖 ]. We are interested in processing a set of counting queries 
+
+QQQ over D.1 Each query counts the number of tuples returned by a          
+
+> 1For simplicity, we discuss only counting queries here, but our methods easily general-ize to all distributive and algebraic SQL aggregates [ 17 ] including also SUM ,MIN ,MAX ,
+> AVG , and STDDEV , where each input expression is a single attribute or computable over attributes from the same table.
+
+Listing 1: First 4 queries in stats_ceb [24].      
+
+> SELECT COUNT(*) FROM badges as b, users as u --𝑄 1
+> WHERE b.UserId = u.Id AND u.UpVotes >= 0; SELECT COUNT(*) FROM comments as c, badges as b --𝑄 2
+> WHERE c.UserId = b.UserId AND c.Score = 0 AND b.Date <=
+> '2014-09-11 14:33:06 '::timestamp; SELECT COUNT(*) FROM comments as c, postHistory as ph --𝑄 3
+> WHERE c.UserId = ph.UserId AND c.Score = 0 AND ph.PostHistoryTypeId = 1; SELECT COUNT(*) FROM comments as c, postHistory as ph --𝑄 4
+> WHERE c.UserId = ph.UserId AND ph.PostHistoryTypeId = 1 AND ph.CreationDate >= '2010-09-14 11:59:07 '::timestamp;
+
+single-table selection or a selection-join over a subset of the tables in D. We assume equality joins with no cycles or self-joins, and that the selection is a conjunction of predicates comparing a single attribute with a literal using =, >, <= , etc. We begin by introducing some useful notations (a table of notations is presented in the full version [42]). Given each query 𝑄 ∈ QQQ:
+
+• Tables 𝑄 denotes the subset of tables in D referenced by 𝑄 .
+
+• Attrs Z 
+
+> 𝑄
+
+denotes the subset of attributes in Tables 𝑄 referenced by the join predicates of 𝑄 .
+
+• Preds Z 
+
+> 𝑄
+
+denotes 𝑄 ’s join predicates, represented as the set of equivalent classes of attributes in Attrs Z 
+
+> 𝑄
+
+induced by 𝑄 ’s join predicates. Two attributes 𝐴 1, 𝐴 2 belong to the same equivalent classes iff 𝐴 1 = 𝐴 2 is logically implied by 𝑄 ’s join predicates. 
+
+• Given a pair of disjoint subsets R and R′ of tables in Tables 𝑄 ,
+
+Attrs Z 
+
+> 𝑄
+
+[R|R′] denotes the subset of attributes of R used by 𝑄 to join with R′; i.e., Attrs Z 
+
+> 𝑄
+
+[R|R′] = {𝐴 ∈ Ð𝑅 ∈R Attrs [𝑅 ] | ∃ E ∈
+
+Preds Z 
+
+> 𝑄
+
+: 𝐴 ∈ E ∧ (∃ 𝐴 ′ ∈ E : 𝐴 ′ ∈ Ð𝑅 ∈R′ Attrs [𝑅 ])} .
+
+• Attrs 𝜎 𝑄 denotes the subset of attributes in Tables 𝑄 referenced by 
+
+𝑄 ’s selection predicates. 
+
+• Preds 𝜎 𝑄 denotes 𝑄 ’s selection predicates, represented as a map-ping from each attribute 𝐴 ∈ Attrs 𝜎 𝑄 to a range 𝐺 over the domain of 𝐴 , such that 𝐺 is the widest range such that 𝐴 ∈ 𝐺 is logically implied by 𝑄 ’s selection predicates. 
+
+• Given a subsets R of tables in Tables 𝑄 , Attrs 𝜎 𝑄 [R] denotes the set of attributes of R referenced by 𝑄 ’s selection conditions; i.e., 
+
+Attrs 𝜎 𝑄 [R] = Attrs 𝜎 𝑄 ∩ Ð𝑅 ∈R Attrs [𝑅 ].For example, Listing 1 shows the first four queries in the work-load stats_ceb [24] over the STATS database [18]. For 𝑄 4:
+
+• Tables 𝑄 4 = {comments , postHistory };
+
+• Attrs Z 
+
+> 𝑄 4
+
+= {comments.UserId , postHistory.UserId };
+
+• Preds Z 
+
+> 𝑄 4
+
+= {{ comments.UserId , postHistory.UserId }} (both join at-tributes are in one equivalence class); 
+
+• Attrs Z 
+
+> 𝑄 4
+
+[{ comments }|{ postHistory }] = {comments.UserId };
+
+• Attrs Z 
+
+> 𝑄 4
+
+[{ postHistory }|{ comments }] = {postHistory.UserId };
+
+• Attrs 𝜎 𝑄 4 = {postHistory.PostHistoryTypeId , postHistory.CreationDate };
+
+• Preds 𝜎 𝑄 4 = {postHistory.PostHistoryTypeId ↦ → [ 1, 1],
+
+postHistory.CreationDate ↦ → [ ’2010-09-14 11:59:07’::timestamp , ∞)} .
+
+The First Baseline: Independent Processing ( IndProc ). A straight-forward solution, adopted by most existing work on learned CE, runs the queries in QQQ one by one, independently, using the DBMS that manages D. We call this approach IndProc for short. The per-formance of IndProc is heavily dependent on the underlying DBMS. A capable DBMS will optimize each query by pushing down se-lection conditions, reordering joins, and choosing appropriate join methods, leveraging data statistics and available indices. Caching by the DBMS buffer pool may also improve execution performance across queries. On the other hand, most DBMS lack advanced meth-ods for optimizing multiple queries simultaneously. Moreover, most of them choose to execute a counting query 𝑄 by first joining all tables in 𝑄 before applying the final COUNT aggregation, failing to explore opportunities for pushing COUNT below joins. 
+
+Join Patterns. Before presenting a more advanced baseline solu-tion as well as our solution in Section 3, we introduce a concept used by both. The join pattern of a query 𝑄 is characterized by 
+
+⟨Tables 𝑄 , Preds Z 
+
+> 𝑄
+
+⟩, i.e., the tables that 𝑄 joins, and 𝑄 ’s join predicates. Suppose queries in QQQ have 𝑞 distinct join patterns 𝔍 1, . . . , 𝔍 𝑞 ; these patterns partition QQQ into a disjoint union of 𝑞 subsets of queries, denoted QQQ[𝔍 1], . . . , QQQ[𝔍 𝑞 ], where each QQQ[𝔍 𝑖 ] is the set of queries with join pattern 𝔍 𝑖 (but may differ in their selection predicates). For example, 𝑄 3 and 𝑄 4 in Listing 1 have the same join pattern (with tables {comments , postHistory } and join predicate comments.UserId =
+
+postHistory.UserId , despite having different selection predicates). 𝑄 1
+
+and 𝑄 2 each contribute a distinct join pattern. In practice, because all queries in QQQ come from the same underlying database D, the number of distinct join patterns tends to be much smaller than the number of queries. For example, JOB’s synthetic [ 31 ] contains 5,000 queries but only 16 distinct join patterns. 
+
+The Second Baseline: Join and Post-Filtering ( PostFilt ). This ap-proach seeks to avoid redundant computation across queries with identical join patterns. We pre-process the queries into partitions 
+
+QQQ[𝔍 1], . . . , QQQ[𝔍 𝑞 ] according to their join patterns. This step requires only a scan over QQQ to perform syntactical analysis. For each partition 
+
+QQQ[𝔍 𝑖 ], we compute the join only once, followed by a post-filtering step, which checks each join result tuple against the selection pred-icates of queries in QQQ[𝔍 𝑖 ] to determine which queries’ counts to increment. We call this baseline PostFilt .There are many options for implementing the post-filtering step, as discussed in Section 6, including methods that first build a data structure for QQQ[𝔍 𝑖 ] for efficient identification and updating of coun-ters in time sublinear to |QQQ[𝔍 𝑖 ]| per join result tuple. While these methods can scale to thousands or millions of queries, the typical workloads we target do not have so many queries per join pattern, as evidenced in Table 1. Through our experiments, we have found a simple strategy leveraging the underlying DBMS to be the most effective. Given a join pattern 𝔍 = ⟨Tables 𝔍 , Preds Z 
+
+> 𝔍
+
+⟩ and 𝑘 queries 
+
+𝑄 1, . . . , 𝑄 𝑘 sharing this pattern, we issue a single SQL query in List-ing 2 to compute all of them. Here, Preds 𝜎 , Tables , and Preds Z are translated into SQL. Each CASE expression determines whether a join result tuple contributes to a query 𝑄 𝑖 by checking its selection predicates (a failed check yields NULL , which is ignored by COUNT ). In the end, a single 𝑘 -component result tuple is computed, with each component holding the result count for one query. 
+
+Discussion. Compared with IndProc , PostFilt eliminates redun-dant computation of joins among queries sharing the same join pattern. However, IndProc can still outperform PostFilt if the se-lection predicates of these queries have little overlap, and if database indices enable IndProc to apply selective selection predicates early 
+
+Listing 2: Computing 𝑘 queries with join pattern 𝔍 in PostFilt .        
+
+> SELECT COUNT(CASE WHEN Preds 𝜎 𝑄 1THEN 1 END), ..., COUNT(CASE WHEN Preds 𝜎 𝑄 𝑘 THEN 1 END) FROM Tables 𝔍 WHERE Preds Z
+> 𝔍 ;
+
+in query processing. In contrast, PostFilt has no effective means to push selection predicates down because in most workloads, the disjunction of all selection predicates from multiple queries cannot be expressed as a succinct, “sargable” [ 64 ] WHERE condition with-out introducing many false positives. Furthermore, most database optimizers do not push aggregation below joins, let alone those with conditional expression inputs as in Listing 2. Therefore, Post-Filt effectively enumerates the full join result before post-filtering and counting—a key limitation that we seek to overcome. 
+
+## 3 BASIC BACON 
+
+This section introduces basic BaCon , focusing on key ideas and the high-level algorithm. Many implementation and optimization details are also crucial to making BaCon competitive in practice, but to simplify presentation, we defer them to Section 4. We start with three key ideas, along with some results and definitions based on them; we then describe the algorithm. Like PostFilt , given a set QQQ of queries, BaCon partitions QQQ into subsets according to join patterns, such that queries in each subset QQQ[𝔍 ] share the same join pattern 𝔍 = ⟨Tables 𝔍 , Preds Z 
+
+> 𝔍
+
+⟩. Hence, most of this section focuses on how to process one such subset of queries given 𝔍 .Before proceeding, we briefly present a geometric view of the problem for intuition. Each result tuple in the cross product of 
+
+Tables 𝔍 can be seen as a point in a high-dimensional space S, where each dimension corresponds to an attribute in Ð𝑅 ∈Tables 𝔍 Attrs [𝑅 ],ignoring those not referenced by any predicate in QQQ[𝔍 ]. Let 𝐽 denote the result of the full join of Tables 𝔍 using Preds Z 
+
+> 𝔍
+
+. Points in 𝐽 are those cross-product points that lie on a hyperplane J in S defined by Preds Z 
+
+> 𝔍
+
+. Each query 𝑄 ∈ QQQ[𝔍 ] corresponds to an orthogonal hyperrectangle in S with range predicates restricted to dimensions in Attrs 𝜎 𝑄 . Our problem boils down to counting, for each 𝑄 , how many points in 𝐽 fall into 𝑄 ’s hyperrectangle. Intuitively, these points are not positioned arbitrarily: not only do they lie on J because of the join predicates, but they also come from the cross product of Tables 𝔍 , meaning that their projections onto the subspace S[Attrs [𝑅 ]] for each 𝑅 ∈ Tables 𝔍 cannot exceed 
+
+|𝑅 | distinct points, which is often much smaller than |𝐽 |. In fact, if we consider the subset of 𝐽 restricted to any particular com-bination of values for all join attributes, their projections onto 
+
+S[Ð𝑅 ∈Tables 𝔍 Attrs [𝑅 ]] will form a perfect Cartesian product of their projections onto each of S[Attrs [𝑅 ]] for 𝑅 ∈ Tables 𝔍 (which we shall substantiate in Section 3.1). This property, along with the fact the query hyperrectangles may overlap significantly, makes it possible to perform counting tasks more efficiently than simply enumerating 𝐽 upfront (which PostFilt does). To further exploit the overlaps among the query hyperrectan-gles, consider a subset of 𝐽 that forms a Cartesian product de-scribed above. We can partition its projection onto to each sub-space S[Attrs [𝑅 ]] into a coarse grid, using the endpoints of the query range predicates (a process we call “quantization” later in Figure 1: A join pattern in the IMDB schema [36]. Section 3.2). For example, in Figure 2, this projection consists of a collection of red points, partitioned by a 4 × 4 grid. A key property of this grid is that all points within a cell lie in the same subset of query hyperrectangles. Therefore, we can compress the red points in each cell to a single “weighted” point, yielding a compressed representation of 𝐽 (which we refer to as a “count map” later in Sec-tion 3.3). This compressed representation is constructed recursively for each 𝔍 , without having to enumerate 𝐽 first (Section 3.4). 
+
+## 3.1 Conditional Orthogonality of Joins 
+
+The first idea has its roots in the well-studied problem of factorized databases and related worst-case optimal join algorithms (further discussed in Section 6). A simple observation is that, in order to count the number of tuples in a cross product between two tables 
+
+𝑅 1 and 𝑅 2, we just need to calculate |𝑅 1 | × | 𝑅 2 |, without enumer-ating 𝑅 1 × 𝑅 2. While the same observation no longer holds for 
+
+|𝑅 1 Z𝑅 1 .𝐴 =𝑅 2 .𝐴 𝑅 2 | when join predicate exists, if we additionally set the join attribute value 𝐴 = 𝑥 , then the number of result tuples 
+
+conditioned on this specific setting can still be computed directly: i.e., 
+
+|𝜎 𝐴 =𝑥 (𝑅 1 Z𝑅 1 .𝐴 =𝑅 2 .𝐴 𝑅 2)| = |𝜎 𝐴 =𝑥 𝑅 1 | × | 𝜎 𝐴 =𝑥 𝑅 2 |. We can generalize this idea further to a star-shaped join as follows. 
+
+Lemma 3.1 (Conditional Orthogonality of Joins). Consider a star-shaped join query centered at 𝐸 0:
+
+𝐸 0 Z𝜃 1 𝐸 1 Z𝜃 2 · · · Z𝜃 𝑛 𝐸 𝑛 .
+
+Here, the 𝐸 𝑖 ’s are subqueries, and for each 𝑖 = 1, . . . , 𝑛 , 𝜃 𝑖 is a con-junctive predicate equating pairs of attributes from 𝐸 0 and 𝐸 𝑖 . Note that there are no join predicates across 𝐸 1, . . . , 𝐸 𝑛 . Denote by A0 the set of join attributes from 𝐸 0 referenced by 𝜃 1, . . . , 𝜃 𝑛 . Let 𝑣 be any mapping of every attribute 𝐴 ∈ A0 to a value 𝑣 (𝐴 ) in 𝐴 ’s domain, and let 𝑣 ⟦𝜃 𝑖 ⟧ denote the condition obtained by applying 𝑣 to 𝜃 𝑖 (i.e., replacing each 𝐴 ∈ A0 by 𝑣 (𝐴 )—note that the resulting condition becomes a selection over 𝐸 𝑖 ). The following equivalence holds: 
+
+𝜎 ∧𝐴 ∈A0 𝐴 =𝑣 (𝐴 )
+
+ 𝐸 0 Z𝜃 1 𝐸 1 Z𝜃 2 · · · Z𝜃 𝑛 𝐸 𝑛 
+
+
+
+=
+
+
+
+𝜎 ∧𝐴 ∈A0 𝐴 =𝑣 (𝐴 ) 𝐸 0
+
+
+
+×
+
+
+
+𝜎 𝑣 ⟦𝜃 1⟧𝐸 1
+
+
+
+× · · · × 
+
+
+
+𝜎 𝑣 ⟦𝜃 𝑛 ⟧𝐸 𝑛 
+
+
+
+.
+
+Example 3.1. Consider the join pattern in Figure 1. Tables title AS t ,
+
+kind_type AS kt , and movie_companies AS mc correspond to 𝐸 0, 𝐸 1, 𝐸 2,while the join between cast_info AS ci and role_type AS rt corresponds to 𝐸 3. In title , suppose we fix t.kind_id= 𝑥 (which joins kt.id ) and t.id= 𝑦 
+
+(which joins mc.movie_id and ci Z rt ). By Theorem 3.1, the number of full join result tuples with (t.kind_id , t.id ) = (𝑥, 𝑦 ) can be com-puted directly as: |𝜎 t.kind_id =𝑥 ∧t.id =𝑦 t| × | 𝜎 kt.id =𝑥 kt | × | 𝜎 mc.movie_id =𝑦 mc | × |𝜎 ci.movie_id =𝑦 (ci Z rt )| , without enumerating the full join result tuples. To compute the full join result size overall, we iterate over all possible combinations of (t.kind_id , t.id ) values in t, apply the above procedure to each combination, and tally the total. 
+
+The style of processing illustrated by the above example has been used recently for efficient computation of aggregate queries [ 33 ]. The subexpression |𝜎 ci.movie_id =𝑦 (ci Z rt )| can be processed by the same procedure. Later in this section, we will see how to extend the idea to computing result counts of multiple queries with different selection predicates beyond simply counting the full join result. 
+
+## 3.2 Quantization of Selection Attributes 
+
+While tables and attribute domains can be large, the number of queries in QQQ places a natural constraint on the number of constants from each domain appearing in selection predicates. In other words, from the perspective of QQQ, fine-grained differences among attribute values may not affect result counts. Our key idea is to compress the attribute domains using workload-aware quantiziation , turning large, complex domains into a small range of integers that are efficient to work with. Given a join pattern 𝔍 , let Attrs 𝜎  
+
+> 𝔍
+
+= Ð𝑄 ∈QQQ[𝔍 ] Attrs 𝜎 𝑄 denote the set of selection attributes in all queries of pattern 𝔍 . We construct a quantization scale 𝔟 𝐴 for each selection attribute 𝐴 ∈ Attrs 𝜎  
+
+> 𝔍
+
+as fol-lows. First, we extract from QQQ[𝔍 ] the set Preds 𝜎  
+
+> 𝔍
+
+(𝐴 ) = {Preds 𝜎 𝑄 (𝐴 ) | ∃𝑄 ∈ QQQ[𝔍 ] : 𝐴 ∈ Preds 𝜎 𝑄 } of predicate ranges associated with 𝐴 .We sort all range endpoints, which partition the domain of 𝐴 into an ordered list of atomic ranges. For each atomic range contained in at least one query range in Preds 𝜎  
+
+> 𝔍
+
+(𝐴 ), we create a new bucket 
+
+in 𝔟 𝐴 and assign it a serial integer id (starting with 1). Hence, 𝔟 𝐴 
+
+maps each relevant atomic range (bucket) to an integer, preserv-ing order. A value 𝑥 from 𝐴 ’s domain is quantized into an integer 
+
+𝔟 𝐴 (𝑥 ), the id of the bucket containing 𝑥 , or 0 if 𝑥 lies outside all of buckets in 𝔟 𝐴 . We present the detailed construction algorithm in the full version [ 42 ], which handles additional intricacies with open or close intervals. Let 𝔅 𝔍 = {𝔟 𝐴 | 𝐴 ∈ Attrs 𝜎  
+
+> 𝔍
+
+} denote the collection of all attribute quantization scales for queries in QQQ[𝔍 ], and 𝔅 𝔍 [𝑅 ] = {𝔟 𝐴 | 𝐴 ∈
+
+Attrs 𝜎  
+
+> 𝔍
+
+∩ Attrs [𝑅 ]} denote those for attributes in table 𝑅 ∈ Tables 𝔍 .Returning to the geometric view introduced at the beginning of the section, 𝔅 𝔍 [𝑅 ] induces a grid over the subspace of S spanning the selection attribute dimensions of 𝑅 . This grid allows us to map each tuple in 𝑅 , by its selection attribute values ⟨𝑥 1, . . . , 𝑥 𝑘 ⟩, to a grid coordinate ®𝑏 = (𝑏 1, . . . , 𝑏 𝑘 ), where each 𝑏 𝑖 = 𝔟 𝐴 𝑖 (𝑥 𝑖 ) is the bucket id for value 𝑥 𝑖 in the quantization scale for attribute 𝐴 𝑖 .Continuing with the geometric intuition, collectively, quantiza-tion scales 𝔅 𝔍 induces a grid over the subspace S[Attrs 𝜎 
+
+> 𝔍
+
+] consisting of the selection attribute dimensions across all tables in Tables 𝔍 . By construction of 𝔅 𝔍 , all query hyperrectangles in QQQ[𝔍 ] perfectly align with grid boundaries. Hence, all selection predicates can be quantized using the same scales. Lemma 3.2 below formalizes the guarantee that precise evaluation of selection predicates is possible in the quantized space. 
+
+Lemma 3.2 (Quantization Preserves Selections). Given a set of selection-join queries QQQ[𝔍 ] and quantization scales 𝔅 𝔍 constructed from QQQ[𝔍 ], there exists a function 𝑓 (𝔟 𝐴 , 𝛿 ) returning an integer range 
+
+[𝑖 1, 𝑖 2] for a range 𝛿 over an attribute 𝐴 with quantization scale Selection attribute: company_type_id                                  
+
+> movie_companies (mc) Q2: … mc.company_type_id = a2AND mc.company_id >= b1AND mc.company_id < b3…
+> Q1: … mc.company_type_id >= a1AND mc.company_id < b2...
+> amc tuple, represented by the values of its selection attributes
+> a projected subslice of mc , one per
+> movie_id (join attribute) value
+> Count map 𝕸 mc ={ (0,1) ↦0, (1,1) ↦1, (2,1) ↦0, (3,1) ↦3, (0,2) ↦0, (1,2) ↦0, (2,2) ↦2, (3,2) ↦0, (0,3) ↦1, (1,3) ↦0, (2,3) ↦0, (3,3) ↦0, (0,0) ↦2, (1,0) ↦0, (2,0) ↦1, (3,0) ↦0 }
+> 𝖇 company_type_id
+> (0, 1) (1, 1) (2, 1) (3, 1)
+> (0, 2) (1, 2) (2, 2) (3, 2)
+> (0, 3) (1, 3) (2, 3) (3, 3)
+> (0, 0) (1, 0) (2, 0) (3, 0)
+> (., .) grid coordinate
+> (𝔟 company_type_id (.), 𝔟 company_id (.))
+> Selection attribute:  company_id
+> 𝖇 company_id
+> a1a2succ( a2)
+> Join attribute:  movie_id
+> b1
+> b2
+> b3
+
+Figure 2: Quantized selection count map for a projected subslice of table mc . The quantization scales for mc are induced by queries 
+
+𝑄 1 and 𝑄 2 (only selection predicates on mc are shown). 
+
+𝔟 𝐴 ∈ 𝔅 𝔍 , such that for any 𝑄 ∈ QQQ[𝔍 ] and every selection predicate 
+
+𝐴 ↦ → 𝛿 in Preds 𝜎 𝑄 : 𝑥 ∈ 𝛿 ⇔ 𝔟 𝐴 (𝑥 ) ∈ 𝑓 (𝔟 𝐴 , 𝛿 ).
+
+As an example, Figure 2 shows the grid over table mc induced by two queries. The quantization scales 𝔟 company_type_id and 𝔟 company_id 
+
+respectively correspond to the two mc attributes referenced by the queries’ selection predicates. (For now, ignore the mention of “pro-jected subslice,” which will be formally introduced in Section 3.4.) The buckets for 𝔟 company_type_id , numbered 1 through 3, are [𝑎 1, 𝑎 2),
+
+[𝑎 2, succ (𝑎 2)) , and [succ (𝑎 2), ∞) , where succ (𝑎 2) denotes the suc-cessor value of 𝑎 2 in the domain; any value in (−∞ , 𝑎 1) will be quantized to special bucket id 0 because this range is not contained in any selection predicate. The buckets for 𝔟 company_id are similarly induced by selection predicates involving company_id .
+
+## 3.3 Quantized Selection Count Maps 
+
+Since queries in QQQ[𝔍 ] ultimately only care about counts, a natural idea following selection attribute quantization is to further aggre-gate the points that fall into each grid cell induced by 𝔅 𝔍 into a single count, instead of enumerating them. Given a table 𝑅 ∈ Tables 𝔍 with selection attributes {𝐴 1, . . . , 𝐴 𝑘 }
+
+and quantization scales 𝔅 𝔍 [𝑅 ] = {𝔟 𝐴 1 , . . . , 𝔟 𝐴 𝑘 }, we compress a subset of tuples in 𝑅 into a (quantized selection) count map 𝔐 : each entry of 𝔐 maps a grid coordinate ®𝑏 = (𝑏 1, . . . , 𝑏 𝑘 ) to 𝔐 [ ®𝑏 ], the count of tuples within the grid cell—i.e., any tuple 𝑡 satisfying 
+
+𝔟 𝐴 𝑖 (𝑡 .𝐴 𝑖 ) = 𝑏 𝑖 for 𝑖 = 1, . . . , 𝑘 . For example, Figure 2 shows the count map for the set of tuples (2D points in the geometric view). We generalize the concept of count map 𝔐 over any subset of tables R ⊆ Tables 𝔍 . Let Attrs 𝜎  
+
+> 𝔍
+
+[R] = Attrs 𝜎  
+
+> 𝔍
+
+∩ Ð𝑅 ∈R Attrs [𝑅 ] denote the set of selection attributes in R from all queries of pattern 𝔍 . A grid coordinate for 𝔐 , with one component for each attribute in 
+
+Attrs 𝜎 
+
+> R
+
+, identifies a grid cell induced by quantization scales {𝔟 𝐴 |
+
+𝐴 ∈ Attrs 𝜎  
+
+> R
+
+} in subspace S[Attrs 𝜎 
+
+> R
+
+]. Given a subset 𝑇 of tuples in the cross product of R corresponding to points in S[Attrs 𝜎 
+
+> R
+
+], 𝔐 counts the corresponding points of 𝑇 in each grid cell. Our goal is to construct a count map over the entire Tables 𝔍 for the full join result set 𝐽 , but importantly, without enumerating 𝐽 .Intuitively, count maps represent intermediate results compactly. Obtaining a count map for a single table is easy, but combining count maps for different subsets of tables into a big one is compli-cated by joins, because not all points in two grid cells in orthogonal subspaces join with each other. However, leveraging Theorem 3.1, we can process points in 𝐽 in groups: points in each group all share appropriate join attribute values, thereby allowing count maps to be computed for different subsets of tables and then conveniently “multiplied.” Then, the product count maps across groups can be “added” to obtain the final result count map. An example will be provided in Section 3.4. We formally define “multiply” and “add” as follows: 
+
+⊗ (multiply) 𝔐 1 and 𝔐 2 are count maps over disjoint subsets R1
+
+and R2 of tables in Tables 𝔍 . We define 𝔐 1 ⊗ 𝔐 2, a count map over 
+
+R1 ∪ R2, as ®𝑏 1 ⌣ ®𝑏 2 ↦ → ( 𝔐 1 [ ®𝑏 1] · 𝔐 2 [ ®𝑏 2]) | ®𝑏 1 ∈ 𝔐 1, ®𝑏 2 ∈ 𝔐 ,where ⌣ concatenates grid coordinate vectors. 
+
+⊕ (add) 𝔐 1 and 𝔐 2 are count maps over the same subset of tables 
+
+R ⊆ Tables 𝔍 (and thus same quantization scales). We define 
+
+𝔐 1 ⊕ 𝔐 2, a count map over R, as ®𝑏 ↦ → ( 𝔐 1 [ ®𝑏 ] + 𝔐 2 [ ®𝑏 ]) | ®𝑏 ∈
+
+𝔐 1 .The following lemmas establish the correctness of using ⊗ and 
+
+⊕ for computing count maps. Formally, given QQQ[𝔍 ], quantization scales 𝔅 𝔍 , a subset of tables R ⊆ Tables 𝔍 , and a subset 𝑇 of tuples in the cross product of R, we say that a count map 𝔐 over R is 
+
+complete with respect to 𝑇 if for any query 𝑄 ∈ QQQ[𝔍 ], the size of the intersection between 𝑇 and the selection-join subquery of 𝑄 
+
+restricted 2 to R can be computed from 𝔐 and 𝔅 𝔍 .
+
+Lemma 3.3 (Multiplying Count Maps). Given QQQ[𝔍 ], consider disjoint subsets R0, . . . , R𝑛 of tables in Tables 𝔍 , where Preds Z 
+
+> 𝔍
+
+implies a join condition 𝜃 𝑖 relating R0 to R𝑖 for each 𝑖 = 1, . . . , 𝑛 , but there is no join condition across R1, . . . , R𝑛 that is not already implied by 
+
+Ó𝑖 𝜃 𝑖 . For each 𝑖 = 1, . . . , 𝑛 , let 𝐸 𝑖 denote the join subquery of tables in R𝑖 , with condition implied by Preds Z 
+
+> 𝔍
+
+. Consider the star-shaped join query centered at 𝐸 0:
+
+𝐸 0 Z𝜃 1 𝐸 1 Z𝜃 2 · · · Z𝜃 𝑛 𝐸 𝑛 ,
+
+which conforms to the query structure in Theorem 3.1. Denote by A0 =
+
+Attrs Z 
+
+> 𝔍
+
+[R0 | ∪ 𝑖 ∈ [ 1,𝑛 ] R𝑖 ] the set of join attributes from 𝐸 0 referenced by 𝜃 1, . . . , 𝜃 𝑛 . Let 𝑣 denote any mapping of every attribute 𝐴 ∈ A to a value 𝑣 (𝐴 ) in 𝐴 ’s domain, for some attribute set A where A0 ⊆ A ⊆
+
+Ð𝑅 ∈R0 Attrs [𝑅 ]. Suppose: 
+
+• 𝔐 0 is a count map over 𝐸 0 complete w.r.t. 𝜎 ∧𝐴 ∈A𝐴 =𝑣 (𝐴 ) 𝐸 0; and 
+
+• ∀ 𝑖 = 1, . . . , 𝑛 : 𝔐 𝑖 is a count map over 𝐸 𝑖 complete w.r.t. 𝜎 𝑣 ⟦𝜃 1⟧𝐸 𝑖 .Then, 𝔐 0 ⊗ 𝔐 1 ⊗ · · · ⊗ 𝔐 𝑛 is complete with respect to 
+
+𝜎 ∧𝐴 ∈A𝐴 =𝑣 (𝐴 )
+
+ 𝐸 0 Z𝜃 1 𝐸 1 Z𝜃 2 · · · Z𝜃 𝑛 𝐸 𝑛 
+
+ .
+
+Lemma 3.4 (Adding Count Maps). Given QQQ[𝔍 ] and a subset of tables R ⊆ Tables 𝔍 , suppose 𝔐 1, . . . , 𝔐 𝑛 are count maps over R,where each 𝔐 𝑖 is complete with respect to a subset 𝑇 𝑖 of tuples in the cross product of R. If 𝑇 1, . . . ,𝑇 𝑛 are disjoint, then 𝔐 1 ⊕ · · · ⊕ 𝔐 𝑛 is complete with respect to Ð𝑖 ∈ [ 1,𝑛 ] 𝑇 𝑖 .
+
+## 3.4 Basic BaCon Algorithm 
+
+We are now ready to describe the overall BaCon algorithm (Al-gorithm 1). First, we make a pass over all queries and partition 
+
+> 2
+
+More precisely, we remove from 𝑄 any table outside R; remove from any equivalent class in Preds Z 
+
+> 𝑄
+
+any attribute outside R and then remove any empty or singleton equivalent class; and remove any entry in Preds 𝜎 𝑄 for an attribute outside R.Algorithm 1 BaCon (QQQ, D)
+
+Input: A set QQQ of counting selection-join queries over D.
+
+Output: Result count for each query in QQQ. 
+
+> 1:
+
+Scan QQQ and partition it into Ð𝔍 QQQ[𝔍 ] by join pattern;  
+
+> 2:
+
+for each subset QQQ[𝔍 ] of QQQ do  
+
+> 3:
+
+𝔅 𝔍 ← { QuantScales (𝑅, QQQ[𝔍 ]) | 𝑅 ∈ Tables 𝔍 }; 
+
+> 4:
+
+Determine the plan tree for 𝔍 ; 
+
+> 5:
+
+𝔐 ← BaConRecurse (root (𝔍 ), ∅) ; 
+
+> 6:
+
+yield from ComputeCounts (QQQ[𝔍 ], 𝔐 ); 
+
+> 7:
+
+end for Algorithm 2 BaConRecurse (𝑅, 𝑢 )
+
+Input: Mapping 𝑢 binds attributes a subset of 𝑅 ’s attributes to specific values. Implicitly, the function also has access to D, 𝔍 
+
+and its plan tree, and the quantization scales 𝔅 𝔍 .
+
+Output: A count map 𝔐 over subtree (𝑅 ), complete w.r.t. result tuples of QQQ[𝔍 ] restricted to subtree (𝑅 ) and consistent with 𝑢 . 
+
+> 1:
+
+𝔐 ← ∅ ; ⊲ missing entries in all maps default to count 0 
+
+> 2:
+
+for each subsequence S[𝑣 ] of entries ⟨𝑣, ·, ·⟩ with the same 𝑣 ,returned by ProcessTable  𝑅, 𝑢, Attrs Z 
+
+> 𝔍
+
+[𝑅 | children (𝑅 )]  do  
+
+> 3:
+
+𝔐 0 ← { ®𝑏 ↦ → 𝑐 | ⟨ 𝑣, ®𝑏, 𝑐 ⟩ ∈ S[𝑣 ]} ; 
+
+> 4:
+
+for each table 𝑅 𝑖 ∈ children (𝑅 ) do  
+
+> 5:
+
+𝑢 𝑖 ←
+
+
+
+𝐴 ′ ↦ → 𝑣 (𝐴 ) 𝐴 ∈ Attrs Z 
+
+> 𝔍
+
+[𝑅 |𝑅 𝑖 ] ∧ 𝐴 ′ ∈ Attrs Z 
+
+> 𝔍
+
+[𝑅 𝑖 |𝑅 ]∧ Preds Z 
+
+> 𝔍
+
+⇒ ( 𝐴 = 𝐴 ′ )
+
+
+
+; 
+
+> 6:
+
+𝔐 𝑖 ← BaConRecurse (𝑅 𝑖 , 𝑢 𝑖 ); 
+
+> 7:
+
+𝔐 0 ← 𝔐 0 ⊗ 𝔐 𝑖 ; 
+
+> 8:
+
+end for  
+
+> 9:
+
+𝔐 ← 𝔐 ⊕ 𝔐 0; 
+
+> 10:
+
+end for  
+
+> 11:
+
+return 𝔐 ;them into subset where each contains queries with the same join pattern. For each subset QQQ[𝔍 ] with join pattern 𝔍 , we construct the quantization scales for them, as discussed in Section 3.2. We then determine an “execution plan” for 𝔍 as an ordered tree, akin to the notion of “(paths in) f-tree” in factorized database literature [ 8 , 56 ]. Nodes in this tree correspond to the tables of Tables 𝔍 , and edges connecting the nodes represent equijoin conditions among them. Assuming that queries are acyclic and contain no cross products, one such tree always exists to capture Preds Z 
+
+> 𝔍
+
+precisely. Indeed, there can be multiple alternative plan trees; we defer the discussion of how to choose one to Section 4. At a high level, we process 
+
+QQQ[𝔍 ] using an in-order traversal of the plan tree starting from its root, by calling its main workhorse, the recursive procedure 
+
+BaConRecurse (Line 5), to compute a count map for QQQ[𝔍 ]. This count map is then used to calculate the result counts for queries, which can be done naively by summing up the counts at grid co-ordinates in each query hyperrectangle; we describe an optimized implementation in Section 4. 
+
+BaConRecurse (Algorithm 2, illustrated in Figure 3) is called on a plan tree node (table) 𝑅 and a filter specified by a mapping 
+
+𝑢 that binds some attributes of 𝑅 to specific values, which defines a “slice,” or the subset 𝑇 of result tuples, of the join of subtree (𝑅 )
+
+(set of tables in the subtree rooted at 𝑅 ) satisfying 𝑢 . The goal of 
+
+BaConRecurse is to compute a count map for this slice 𝑇 (the call title (t)                 
+
+> kind_type (kt) movie_companies (mc) cast_info (ci)
+> ❶Project the desired slice onto tand divide it into subslices ,
+> each a sequence of tuples providing the same binding
+> (values for attributes ( kind_id ,id ) to be joined with t’s children);
+> then, for each subslice :
+
+⊕                
+
+> role_type (rt)
+> same binding
+> (kind_id ,id) =(𝑥 ,𝑦 )
+> with kt.id =𝑥 with mc.move_id =𝑦 with ci.move_id =𝑦
+
+𝔐 "
+
+⋯ ⊗ ⋯
+
+𝔐 # 𝔐 $ 𝔐 %                     
+
+> Subtree rooted at ci
+> ❸Recurse with binding (𝑥 ,𝑦 )into subtrees for count maps
+> of other projected subslices
+> ❷Compute count map 𝔐 !for t’s projected subslice
+> Recursive processing of subtree rooted at ci :
+> subslice by ci.role_id
+> ⊕
+> ⋯⊗⋯
+> ❹Multiply across projected subslices
+> ❺Add across subslices
+
+Figure 3: Illustration of Algorithm 2, continuing Figure 1. to root (𝔍 ) has 𝑢 = ∅, so its slice in fact contains all result tuples in the full join of Tables 𝔍 ). As discussed in Section 3.3, processing the entirety of 𝑇 efficiently is hard; instead, BaConRecurse partitions the slice into “subslices,” where each subslice 𝑇 𝑣 binds a particular combination 𝑣 of values for 𝑅 ’s attributes that join with its chil-dren, i.e., Attrs Z 
+
+> 𝔍
+
+[𝑅 | children (𝑅 )] . To this end, BaConRecurse calls 
+
+ProcessTable (Listing 3) to enumerate all possible such bindings (Line 2). Each iteration of the loop (Lines 2–10) computes a count map for the subslice 𝑇 𝑣 defined by a particular 𝑣 . By Theorem 3.3, this count map can be computed by projecting 𝑇 𝑣 into “projected sublices,” one for 𝑅 and each of 𝑅 ’s child subqueries, and multiply-ing the count maps of these projected subslices. Conveniently, the call to ProcessTable computes, for each projected subslice of 𝑅 , the coordinate-count pairs to populate the count map. We recursively call BaConRecurse on each child of 𝑅 to compute the count map for its projected subslice. Line 7, using ⊗, combines these count maps into a single count map for 𝑇 𝑣 . Finally, applying Theorem 3.4, Line 9 uses ⊕ to accumulate the count maps for all 𝑇 𝑣 ’s into the final count map for 𝑇 to be returned. 
+
+Example 3.2. Following Figure 3, at the root title , BaCon iterates over all possible bindings for (t.kind_id , t.id ) in turn. Suppose the blue subslice fixes t.kind_id = 1, t.id = 1. For the subslice projected to t,suppose 𝔐 0 = 𝔐 t = {( 9) ↦ → 2, . . . }. We recursively call each child with the corresponding binding, as indicated by the arrows pointing to each child. For the “projected subslices” on children, we further assume that 𝔐 2 = 𝔐 mc is the one shown in Figure 2. From the geometric view, 𝔐 2 is computed by the flattened hyperrectangle (in Figure 2) with mc.movie_id = t.id = 1. For illustration, let us say that 𝔐 1 (𝔐 kt )
+
+= {. . . , (1) ↦ → 1, . . . } and 𝔐 3 (𝔐 ci Zrt ) = {. . . , (3, 3, 3) ↦ → 3, . . . }.This subslice contributes to the global count map 𝔐 as follows: 
+
+𝔐 ← 𝔐 ⊕ ( 𝔐 0 ⊗ · · · ⊗ 𝔐 3). We zoom in on one example—how the global count map entry at grid coordinate (9, 1, 2, 2, 3, 3, 3) is updated. Concretely, this global grid coordinate is the concatenation of (9) from 𝔐 0, (1) from 𝔐 1, (2, 2) from 𝔐 2, and (3, 3, 3) from 𝔐 3.Recall that the counts in 𝔐 0, . . . , 𝔐 3 at these coordinates are 2, 1, 2, 3,respectively; therefore, the contribution to the global count map entry is 2 × 1 × 2 × 3 = 12 . After processing this subslice, BaConRecurse 
+
+proceeds to the next (t.kind_id , t.id ) combination in order. 
+
+Delving into ProcessTable (Listing 3), we see how a single SQL query over a table 𝑅 performs “subslicing” (by Aout ) and computes the count maps of all projected subslices. In the FROM subquery that defines TMP , the WHERE condition applies the attribute binding Listing 3: SQL code for ProcessTable (𝑅, 𝑢, Aout ).                                                                                      
+
+> Input: Mapping 𝑢 binds attributes 𝐽 in
+> 1, 𝐽 in
+> 2, . . . to specific values, and
+> Aout ={𝐽 out
+> 1, 𝐽 out
+> 2, . . . }specifies the set of attributes for partitioning result entries. The quantization scales are 𝔅 𝔍 [𝑅 ]={𝔟 𝑆 1,𝔟 𝑆 2, . . . }.
+> Output: Result entries have the form ⟨𝑣, ®𝑏, 𝑐 ⟩, sorted by 𝑣 , where 𝑣 is a mapping from Aout to values, ®𝑏 is a grid coordinate for 𝔅 𝔍 [𝑅 ], and 𝑐 is the associated count.
+> SELECT 𝐽 out
+> 1,𝐽 out
+> 2, ..., B1, B2, ..., COUNT(*) FROM ( SELECT 𝐽 out
+> 1,𝐽 out
+> 2, ..., quantize( 𝑆 1,𝔟 𝑆 1) AS B1, quantize( 𝑆 2,𝔟 𝑆 2) AS B2, ... FROM 𝑅
+> WHERE 𝐽 in
+> 1=𝑢 (𝐽 in
+> 1)AND 𝐽 in
+> 2=𝑢 (𝐽 in
+> 2)AND ... ) AS TMP GROUP BY 𝐽 out
+> 1,𝐽 out
+> 2, ..., B1, B2, ... ORDER BY 𝐽 out
+> 1,𝐽 out
+> 2, ...;
+
+𝑢 that defines 𝑇 , the slice of interest; the SELECT clause uses a user-defined function quantize to check each selection attribute value against a quantization scale and returns its grid coordinate. The outer query groups the TMP tuples by Aout to perform subslicing, and then by their grid coordinates to compute tuple count per grid cell for each projected subslice. Finally, ORDER BY ensures that entries for the same projected subslice, i.e., those with the same binding 𝑣 for Aout , are consecutive in the output. This ordering allows the caller BaConRecurse to detect where a sequence of entries with a new 𝑣 starts, so it can start processing a new subslice. 
+
+## 4 ADDITIONAL OPTIMIZATION AND IMPLEMENTATION DETAILS 
+
+This section fills in some of the details about BaCon not covered by Section 3 and describes additional optimizations needed to make Ba-Con practical for query workloads for training learned CE models. Before delving into details, we note that BaCon takes the high-level approach of leveraging DBMS for processing, not only because it houses the data, but also because it already provides versatile sup-port for indexing and querying. To make BaCon easy to adopt, we do not modify any DBMS internals but instead implement, in a client application, parts of the algorithm that are inefficient for the DBMS. Many optimizations thus involve balancing database- and client-side processing options and mitigating the overhead of inter-facing them. Overall, we perform ProcessTable (Listing 3) inside the DBMS, using cursors to fetched join values, quantization grid co-ordinates, and associated counts. The remainder of BaConRecurse 
+
+(i.e., merging of count maps along the tree structure) and the re-mainder of BaCon (i.e., ComputeCounts ) are performed on the client side. The associated optimizations are presented below. While 
+
+BaCon is currently implemented on top of PostgreSQL, the ideas in this section generalize to other DBMSs, although details may differ. Note that BaCon is not optimized for join patterns character-ized by queries exhibiting little opportunity for shared processing (e.g., when there are too few of them, or their predicates overlap very little), or an underlying full join that is small and cheap to compute to begin with. In such cases, BaCon may not outperform baselines IndProc or PostFilt . Therefore, we also have developed a method called Hybrid , which acts as an optimizer to choose the appropriate method to use among IndProc , PostFilt , and BaCon 
+
+for a given join pattern. In our experimental comparison of these methods in Section 5, we empirically analyze the cases where Ba-Con is not optimal (Section 5.2): they follow our characterizations above and play only a small role in the overall performance of query workloads found in the learned CE literature. Furthermore, despite Hybrid ’s ability to make on per-pattern decisions, it offers no consistent improvement over BaCon overall. This observation speaks to the effectiveness of BaCon , even without Hybrid , for handling practical CE training workloads. More details on Hybrid 
+
+can be found in the full version [42]. 
+
+## 4.1 Choosing Execution Plan for a Join Pattern 
+
+Give a join pattern 𝔍 , the cost of BaConRecurse to process QQQ[𝔍 ]
+
+depends on the choice of a tree-based execution plan, introduced in Section 3.4. A cost-based decision requires fine-grained knowledge of the data distribution, which itself is expensive to acquire. Instead, we follow some heuristics below to construct a tree-based plan. The first heuristic is to pick tree root to be the table 𝑅 with the highest degree in 𝔍 ’s join graph: i.e., the root joins with the largest number of other tables in Tables 𝔍 according to Preds Z 
+
+> 𝔍
+
+. The rationale is to maximize the saving opportunities identified by Theorem 3.3: a root with a large in-degree can potentially avoid enumerating more cross products. Geometrically, this heuristic ensures that, during recursion, the grid coordinates in each descendant lie in low-dimensional subspaces. Once we pick the root, the rest of the tree structure follows naturally from Preds Z 
+
+> 𝔍
+
+. Since we assume queries to be acyclic, no additional join conditions are needed be-yond those corresponding to the tree edges. For example, in Fig-ure 1, even though mc and ci can join on mc.movie_id = ci.movie_id ,there is no edge between them in the tree, because the two join conditions from root t to mc and ci , involving t.id , together imply 
+
+mc.movie_id = ci.movie_id .The next optimization then marks certain tree edges that cor-respond to joining a foreign key (FK) of the parent table 𝑅 to a primary key (PK) of the child table 𝑅 ′. For such a marked FK-PK edge, when BaConRecurse processes 𝑅 , it will simultaneously pro-cess 𝑅 ′: on Line 2, ProcessTable will additionally query 𝑅 ′ and compute its count map along with that for 𝑅 (with appropriate changes to Listing 3); and on Line 4, children of 𝑅 ′ will be directly included, instead of 𝑅 ′ itself. The justification behind this optimiza-tion is that, because of the FK-PK join, each 𝑣 would yield only one joining tuple from 𝑅 ′, meaning there is no cross product to avoid in the first place. Therefore, we should “short-cut” this edge to elimi-nate the associated overhead. 3 For simplicity, our implementation currently restricts this optimization to edges incident to the root, but applying it to the entire tree is possible as future work. The last heuristic dynamically reorders subtrees under each node. We start with an arbitrary ordering. For a node 𝑅 , after some iterations of the loop on Lines 2–10 of Algorithm 2, we count, for each child 𝑅 𝑖 , how many settings of 𝑣 yield no tuples from 𝑅 𝑖 . Then, we reorder the children so that those with more such cases come first. Intuitively, they are more likely to produce an empty count map, with which we can “short-circuit” the sequence of multiplies. 
+
+> 3Note that the direction is important: a PK-FK edge, where the parent table has the primary key, would be a bad candidate to “short-cut,” with an opposite argument.
+
+## 4.2 Mitigating SQL Querying Overhead 
+
+Server- vs. Client-Side Cursors. When BaCon runs a SQL query on the underlying database, we can use either a server-side cur-sor [ 68 ] or a client-side one [ 66 ]. A client-side cursor fetches the entire query result set into client memory. A server-side cursor, in contrast, allows the client to iterate row-by-row without materi-alizing a potentially massive result set. While server-side cursors offer more flexibility and improve scalability, they are consider-ably slower and require state to be maintained on the database server; a large number of concurrent server-side cursors can cause performance issues. Therefore, BaCon uses a server-side cursor for ProcessTable on the root, but switches to client-side cursors for all other calls. The rationale is that the call on the root table (from Line 5 of Algorithm 1) has no bound attributes ( 𝑢 = ∅) and may generate a large result set. In contrast, other calls access much fewer tuples per subslice, and even with the batching optimization below, their result sizes remain manageable for client-side cursors. 
+
+Batching of ProcessTable . During recursive execution of Ba-ConRecurse over the plan tree, the overhead of issuing many SQL queries via ProcessTable can accumulate, especially when many of these queries, with specific attribute bindings, return small re-sult sets. To mitigate this overhead, we batch multiple invocations of ProcessTable for the same table 𝑅 , using a set of bindings 𝑈 
+
+rather than a single binding 𝑢 , into one SQL query. Specifying the combined condition precisely in the WHERE clause of Listing 3 is generally infeasible, as it would have to enumerate all bindings in 
+
+𝑈 . Instead, we compute the minimum and maximum elements 4 of 
+
+𝑈 and use [min (𝑈 ), max (𝑈 )] as a safe but possibly imprecise range bound in WHERE , i.e., WHERE (𝐽 in  
+
+> 1
+
+, 𝐽 in  
+
+> 2
+
+, . . . ) BETWEEN min (𝑈 ) AND 
+
+max (𝑈 ). We extend the query to additionally group by 𝐽 in  
+
+> 1
+
+, 𝐽 in  
+
+> 2
+
+, . . . 
+
+and return them, such that ProcessTable can, using these attribute values, filter out result tuples that do not belong to 𝑈 .In BaConRecurse , we implement this optimization by collect-ing 𝛽 consecutive settings of 𝑣 into a set 𝑉 for processing as a batch, analogous to a 𝛽 -fold loop unrolling on Lines 2–10 of Al-gorithm 2. For each child 𝑅 𝑖 , we project 𝑉 to obtain the set 𝑈 𝑖 of unique bindings on its join attributes with 𝑅 (Line 5), and invoke 
+
+ProcessTable on 𝑅 𝑖 with 𝑈 𝑖 . The detailed algorithm is presented in the full version [42]. We now provide further analysis of this batching optimization. First, beyond reducing the overhead of issuing many queries, batch-ing promotes reuse of ProcessTable calls on the same table and attribute binding. Without batching, consecutive settings of 𝑣 in the loop on Lines 2–10 of Algorithm 2: it is likely that they agree on most components since they are sorted. Therefore, when 𝑣 is projected to obtain some 𝑢 𝑖 , the same 𝑢 𝑖 setting in the previous iteration may be used again to call ProcessTable on the same ta-ble 𝑅 𝑖 , leading to waste unless we cache the results from previous calls. With batching, however, such reuse occurs naturally. So we have not implemented additional caching mechanisms for BaCon ,although further exploration will be a good future work. Second, compressing a set of bindings into a single range may introduce false positives. Indeed, 𝑅 𝑖 may always contain some tuples whose join attribute values lie in [min (𝑈 𝑖 ), max (𝑈 𝑖 )] but 
+
+> 4If each binding involves multiple attributes, we order the bindings lexicographically.
+
+are not contained in 𝑈 𝑖 , because 𝑈 𝑖 is generated from 𝑉 and sub-ject to all other constraints on the slice. Nonetheless, the concern with false positives is at least partly alleviated by the fact that Ba-ConRecurse processes settings of 𝑣 in order, meaning that it will call ProcessTable on 𝑅 𝑖 with “clustered” settings of 𝑢 in 𝑈 .
+
+Implementation of quantize . Since the UDF quantize in Listing 3 is invoked many times, efficient implementation is crucial for per-formance. We implement quantize as C-language UDFs in Post-greSQL [ 1 ], with one variant for each SQL data type. The quanti-zation scale is implemented as an array of sorted boundary points, and a binary search is used to determine the correct bucket id. These C-language UDFs run as compiled code natively inside the server process, greatly outperforming SQL-based UDFs. BaCon 
+
+creates these extensions at the beginning of its execution and drops them at the end. More generally, quantize can be implemented in other DBMSs using available extensions, including CLR (common language runtime) integration for Microsoft SQL Server [ 49 ] or external procedures for Oracle Database [57]. 
+
+## 4.3 Implementation of ComputeCounts 
+
+ComputeCounts is invoked by BaCon to compute the result counts of queries in QQQ[𝔍 ] given the final count map 𝔐 computed by BaConRecurse . Conceptually, it performs a “join” between a set of query hyperrectangles ( QQQ[𝔍 ]) and a set of weighted points ( 𝔐 ), and reports the total weights within each hyperrectangle. Many processing strategies are possible, and the best depends on query and data distributions. For our target of query workloads for train-ing learned CE models, we observe that |QQQ[𝔍 ]| is moderate (in hundreds or thousands) and 𝔐 tends to be sparse (32% on average across join patterns in JOB’s synthetic ). After experimenting with several methods, we have found a simple method based on nested loops to be the most effective for this setting. Basically, for each 
+
+𝑄 ∈ QQQ[𝔍 ] and for each non-zero entry ®𝑏 ↦ → 𝑐 of 𝔐 , we check whether, for every dimension of 𝑄 ’s hyperrectangle with a range bound, the corresponding coordinate in ®𝑏 falls within this bound. If yes, we add the entry’s count 𝑐 to 𝑄 ’s running total. While BaCon 
+
+is implemented in Python, we specifically use Numba’s just-in-time compilation [ 4] for ComputeCounts . With the help from Numba’s compiler optimizations, this simple implementation was able to beat more sophisticated methods. 
+
+## 5 EXPERIMENTS 
+
+We compare IndProc , PostFilt ,5 and BaCon . All algorithms are implemented in Python3, using psycopg2 [ 67 ] to connect to Post-greSQL V16.8 with default configuration. All experiments are con-ducted on a Linux server with an Intel(R) Xeon(R) Gold 5215 CPU (40 logical cores, 2.50GHz), 256GB of main memory, and 1TB of disk storage. We set the batching parameter 𝛽 (Section 4.2) to 50,000 for 
+
+BaCon for all experiments and present results for different 𝛽 ’s in the full version [ 42 ]. Code is available in the GitHub repository [ 43 ].      
+
+> 5We have also evaluated an alternative implementation of PostFilt based on ma-terialized views. The details and results, reported in the full version [ 42 ], show that materialization introduces additional storage costs and preparation-time overhead, without providing overall performance benefits. Hence, Section 5 focuses on the current implementation of PostFilt .
+
+We test three popular datasets: IMDB [ 35 ], STATS [ 18 ], and DSB [ 10 ] (of scaling factor 2). They are loaded and initialized using the provided scripts [ 11 , 21 , 34 ], and the algorithms use exactly the indices provided therein without creating any additional ones. We evaluate the algorithms on nine publicly available work-loads in Table 1. These workloads span a wide range of sizes, query templates, join structures, predicate types, and result sizes, and are widely used for training and evaluating cardinality estimation techniques [ 18 ]. Among the workloads, only dsb-grasp-20k is post-processed [ 44 ] from the source file [ 74 ]. Specifically, CE work, SeConCDF [ 75 ] and GRASP [ 73 ], have numerical/categorical defini-tions for several attributes that are originally defined as char(...) in DSB (e.g., cd.cd_education_status ). As these transformations are not clearly specified, we remove the queries involving such attributes, and then randomly sample 20k queries to ensure that baselines com-plete within a reasonable time. We additionally construct three new workloads based on job-light , used exclusively in Section 5.3. Running time is our main performance metric. For IndProc , end-to-end running time is the sum over all queries. For PostFilt and 
+
+BaCon , it includes pre-processing and time for each join pattern. To prevent baselines from running for too long, we cap IndProc at 900s per query, and PostFilt at 3,600s per join pattern; therefore, some baseline numbers are only lower bounds. In terms of client-side memory usage, because BaCon processes each join pattern separately, memory peaks at the single most complex join pattern in the workload. Across all nine workloads, the maximum memory footprint of BaCon occurs for a join pattern in 
+
+synthetic , at 1.7GB. We do not report memory usage for PostFilt 
+
+and IndProc , as they executed entirely inside the database server. 
+
+Single-Threaded vs. Parallel Execution. Results below focus on single-threaded execution to isolate the algorithmic differences of BaCon compared with the baselines, without the potentially confounding factor of parallelization. We disable parallelism in Post-greSQL by setting max_parallel_workers_per_gather to 0, and restrict all client-side code to a single thread. Besides this single-threaded setting, we have also evaluated all methods in a parallel setting. Under the parallel setting, IndProc and PostFilt fully leverage PostgreSQL’s built-in parallelism; for BaCon , we use a simple multi-process design in which each process handles a subset of join pat-terns (more sophisticated parallelization strategies for BaCon are possible as future work). Briefly, the results show that, even with this simple strategy, BaCon achieves end-to-end speedups of 2 × to 598 × compared with IndProc , consistent with the single-threaded results shown below in Section 5.1. Additional details on the parallel setting can be found in the full version [42]. 
+
+## 5.1 End-to-End Running Time 
+
+Table 2 reports the end-to-end running times of all three approaches across all nine real workloads. Lower-bound values (followed by “+”) are reported if a baseline runs out of time. We additionally show the relative speedups of BaCon over IndProc , which range from approximately 2 × to 178 ×. Speedups over PostFilt are omitted, as 
+
+IndProc outperforms PostFilt on most long-running workloads. Overall, BaCon consistently outperforms both baselines and never times out: the worst per-join-pattern overhead of BaCon across all workloads is below 380s, far below the thresholds for baselines. 
+
+Table 2: End-to-end running times (seconds, rounded) and relative speedups. +: lower-bound values, as IndProc is capped at 900s per query and PostFilt at 3,600s per join pattern.                                                            
+
+> Query Workload IndProc PostFilt BaCon Speedup vs. IndProc
+> synthetic 19,663 11,329+ 1,574 ↑12.49 ×
+> scale 21,100+ 26,342+ 3,475 ↑6.07+ ×
+> job-light 1,620+ 13,662+ 728 ↑2.22+ ×
+> job-light-single 249 13 11 ↑22.50 ×
+> job-light-join 8,601+ 18,353+ 1,541 ↑5.58+ ×
+> stats-ceb 4,274+ 47,353+ 58 ↑73.62+ ×
+> stats-ceb-single 18 22↑8.70 ×
+> stats-ceb-join 35,292+ 53,363+ 198 ↑178.14+ ×
+> dsb-grasp-20k 19,746 4,211 928 ↑21.28 ×
+
+Table 3: Number of timed-out cases. In ( 𝑎 , 𝑏 ), 𝑎 is the number of timed-out queries, and 𝑏 is the number of join patterns that contain any timed-out queries.                                         
+
+> Query Workload # queries # join patterns IndProc PostFilt
+> synthetic 5,000 16 (0, 0) (251, 1)
+> scale 500 31 (20, 7) (84, 6)
+> job-light 70 18 (1, 1) (8, 2)
+> job-light-single 254 1(0, 0) (0, 0)
+> job-light-join 696 27 (3, 1) (32, 3)
+> stats-ceb 146 58 (3, 2) (30, 11)
+> stats-ceb-single 632 1(0, 0) (0, 0)
+> stats-ceb-join 2,603 120 (22, 7) (166, 13)
+> dsb-grasp-20k 20,000 16 (0, 0) (0, 0)
+
+The observed performance trends between IndProc and PostFilt 
+
+align with our analysis in Section 2. In particular, PostFilt is ad-vantageous for join patterns with many queries—where predicates tend to cover larger regions—and without intermediate join blow-ups (e.g., synthetic and dsb-grasp-20k ). In the remaining cases, 
+
+IndProc performs substantially better due to selection push-down in each query. BaCon is able to effectively combine the strengths of both IndProc and PostFilt .Since both PostFilt and BaCon are designed around the notion of join patterns, we further analyze the results on a per-join-pattern basis in Section 5.2. Before doing so, we briefly summarize the other overheads—which are negligible compared with per-join-pattern running time—and omit them from ensuing discussions. IndProc 
+
+incurs no such overheads. Both PostFilt and BaCon require load-ing and parsing SQL queries, extracting join patterns, and group-ing queries accordingly, with complexity linear in the number of queries, tables, and selection attributes. This pre-processing step happens at the beginning when processing each join pattern, and typically completes within a few seconds; the only exception is 
+
+dsb-grasp-20k , where it reaches ≈20s due to the large number of queries (but is still small relative to the end-to-end running time). 
+
+## 5.2 Per-Join-Pattern Result 
+
+In this section, we analyze the results on a per-join-pattern basis. Although IndProc does not operate on join patterns, we group its results accordingly to facilitate direct comparison with the others. We first report the number of timed-out cases in Table 3. BaCon 
+
+never times out. Overall, PostFilt times out more frequently: since it always materializes the unfiltered join, if that times out, all queries associated with the pattern time out. Additionally, workloads on STATS exhibit more time-outs, primarily due to larger intermediate joins than those on IMDB, as noted by Han et al. [18]. Next, we analyze the per-join-pattern overhead across all work-loads. For clarity, consistent with the pre-defined time-out thresh-olds, we assign 3,600s to timed-out join patterns in PostFilt and 900s to timed-out queries in IndProc ; actual running times will be higher. Figure 4 reports the running times of all join patterns, ordered by IndProc ’s times. Before index 120, all join patterns under IndProc complete within 10s; beyond this point, running times increase markedly. The inset zooms in the region before in-dex 200, where BaCon closely tracks IndProc , sometimes faster and sometimes slower within a bounded margin, while PostFilt 
+
+already times out on several patterns. Between indices 160 and 200, BaCon exhibits a small number of clear regressions relative to 
+
+IndProc , with the largest gap (98s) at index 165; we analyze these cases in detail later. Outside the zoomed region, where join pat-terns run substantially longer, BaCon consistently and significantly outperforms IndProc and PostFilt .Additionally, we present a detailed per-join-pattern analysis for 
+
+scale and job-light here; results for the remaining workloads are in the full version [ 42 ]. As shown in Figure 5, scale contains join patterns involving 1 to 5 tables, with more tables generally run longer. Timed-out queries arise mainly from patterns with many tables. For most long-running join patterns, BaCon consistently outperforms the baselines. For fast patterns, BaCon remains com-petitive, as the time gaps are small. However, there are several patterns where BaCon is noticeably slower than either baseline. Taking join pattern 6 as an example, IndProc , PostFilt , and Ba-Con take 61s, 35s, and 153s, respectively. This pattern has condi-tions ci.movie_id = t.id AND mc.movie_id = t.id and only five queries. A breakdown of BaCon ’s running time shows 118s (76%) for exe-cuting SQLs, 5s (3%) for aggregating rows by join attribute bindings and coordinates, and 18s (15%) for merging count maps; thus, SQL execution dominates and already exceeds the running times of the baselines. This regression stems from two factors. First, algorithmi-cally, enumerating tuples from each table and quantizing them can be less efficient than IndProc when predicates are selective and overlaps are limited. Second, although BaCon performs less work than PostFilt , BaCon ’s cursor invocations and row fetching/pars-ing incur more overhead than PostFilt ’s server-side processing. We have similar observations from Figure 6. As discussed by Han et al . [18] , job-light is a classical but relatively simple workload with 1 to 8 queries for each join pattern. The true cardinality range is also a magnitude smaller than that of stats-ceb . Therefore, 
+
+IndProc consistently performs well on all join patterns, except one severe time-out for join pattern 17. However, BaCon remains competitive across join patterns and never times out. Regression compared with baselines is limited: in the worst case, BaCon is 55s slower compared with IndProc on join pattern 8, and 100s compared with PostFilt on join pattern 7. Overall, consistent with the results in Section 5.1, BaCon does well across join patterns: it significantly outperforms the baselines on expensive patterns and remains acceptable on cheap ones. 
+
+Table 4: End-to-end running times (seconds, rounded) and relative speedups. +: lower-bound values, as IndProc is capped at 900s per query and PostFilt at 3,600s per join pattern.                        
+
+> Query Workload IndProc PostFilt BaCon Speedup vs. IndProc
+> job-light-1k 6,208 22,490+ 1,020 ↑6.09 ×
+> job-light-2k 13,818 26,923+ 1,051 ↑13.15 ×
+> job-light-4k 23,617+ 33,981+ 1,109 ↑21.29+ ×
+
+Table 5: End-to-end (E2E) running times for BaCon and Hybrid ,with the number of join patterns handled by each algorithm. I/P/B 
+
+denotes IndProc /PostFilt /BaCon .             
+
+> Query Workload BaCon E2E running time
+> Hybrid E2E running time # join patterns using I/P/B
+> scale 3,475 3,319 0/9/22
+> stats-ceb 58 195 3/1/54 other 5 --0/0/all
+
+## 5.3 Scalability 
+
+In this section, we evaluate the scalability of the three approaches using three synthetic workloads, denoted job-light-* . We choose 
+
+job-light as the reference because, as shown in Figure 6, IndProc 
+
+performs consistently well, except for a single join pattern that times out. Specifically, on jog-light , BaCon outperforms Ind-Proc in only 7 out of the 18 (39%) join patterns. Earlier, we have made the observation that the baselines—especially IndProc —can outperform BaCon on simple join patterns, e.g., where the number of queries is small and intermediate join sizes remain moderate. In particular, if the number of queries is small, there is less oppor-tunity for sharing, and IndProc ’s simple approach of optimizing and evaluating queries one by one works fine. Here, we further investigate how each approach scales as the workload size increases while preserving the original distribution. We construct workloads with 1,000, 2,000, and 4,000 queries each. Queries are generated randomly and independently. We randomly select a query from job-light , reuse its template (and thus its join pattern), but modify its predicate constants: 1) for a constant in equality and inequality predicates, we replace it with a random value from the active domain of the corresponding attribute; 2) for range predicates, we randomize the left endpoint and adjust the right accordingly to preserve the range length. Table 4 shows end-to-end running times and relative speedups. As expected, IndProc ’s running time grows roughly linearly with workload size, since queries are processed independently. Post-Filt grows more slowly because its dominant cost—computing the full join—is amortized across queries with the same join pattern; nevertheless, it still times out frequently. BaCon scales better for two reasons. First, quantization generally benefits larger workloads more. Second, the costs of enumerating join attribute bindings and quantization remain mostly stable: as the size of each quantization scale is bounded by the workload size |QQQ[𝔍 ]| , the cost of quantizing an attribute is only 𝑂 (log (| QQQ[𝔍 ]|)) thanks to binary search. Per-join-pattern results are provided in the full version [ 42 ]. While the number of join patterns remains 18, the number of them where Ba-Con outperforms IndProc increases to 14 (78%) in job-light-1k ,Figure 4: Running time (seconds) per join pattern across 283 join patterns from 9 workloads. Join patterns are ordered by IndProc ’s times. The inset is the zoom-in of the first 200 indices. 
+
+Figure 5: Log-scale running time per join pattern in scale . Join patterns are ordered by the number of tables involved, and the figure is partitioned accordingly (labels shown above). Hatched bars (baselines only) indicate the lower bounds for timed-out cases. 
+
+Figure 6: Log-scale running time per join pattern in job-light ,with same format as Figure 5. 17 (94%) in job-light-2k , and finally 18 (100%) in job-light-4k .Overall, BaCon demonstrates superior scalability compared with both IndProc and PostFilt .
+
+## 5.4 Validation against Hybrid 
+
+As shown in Section 5.2, there exist join patterns for which a base-line, IndProc or PostFilt , outperforms BaCon . These cases typi-cally involve few queries and small intermediate join sizes. As dis-cussed in the full version [ 42 ], we can adopt a hybrid approach that uses a classifier to pick which method to use given a join pattern. Here, we train Hybrid using observations from job_light_join 
+
+and stats_ceb_join , and evaluate it on the remaining seven work-loads. Table 5 reports the E2E running times of Hybrid (using Ba-Con as the reference) on the seven test workloads. Overall, Hybrid 
+
+selects a baseline for 9 join patterns in scale and 4 join patterns 
+
+Figure 7: Log-scale running time per join pattern (where a baseline is chosen) in scale and stats_ceb , including Hybrid ’s. in stats_ceb , while selecting BaCon for all other join patterns and workloads. Even with Hybrid ’s conservative design, end-to-end running times show that mispredictions can occur, sometimes catastrophically. To take a closer look, Figure 7 presents a per-join-pattern analysis, focusing on patterns where Hybrid chooses a baseline. As shown in Figure 7, for scale , all 9 switches to Post-Filt are beneficial, yielding a total saving of 156s. In stats_ceb ,
+
+Hybrid gains minor savings by choosing PostFilt on pattern 27 and IndProc on pattern 57, but incorrectly selecting IndProc on patterns 40 and 56 causes slowdowns of 1s and 129s, respectively. Overall, these results confirm that BaCon remains a safe bet for practical workloads. With additional data statistics or training, a better Hybrid might be possible as future work, but the overhead for statistics collection and training may outweigh its benefit. 6 RELATED WORK 
+
+Select-Join-Aggregate Query Processing. Counting join results (with selection predicates on base tables) is a special form of select-join-aggregate queries. Standard processing typically involves push-ing down selection predicates before evaluating the join and then aggregate. The classic Yannakakis algorithm [ 79 ] computes free-connex join-count queries in 𝑂 (𝑁 ) time, where 𝑁 is the number of tuples. Recent advancements [ 26 ] exploit a hybrid strategy of Yannakakis algorithm that handles acyclic join-count queries in 
+
+𝑂 (𝑁 + 𝑁 · OUT 1− 1 
+
+> 𝑤
+
+) time. BaCon draws inspiration from these techniques, specifically the recursive computation and merging of coordinate-to-count maps during backtracking from [ 2 , 14 , 48 , 70 ]. Cost-based optimizers in these systems, such as Free Join’s [ 70 ], together with the AGM bound [ 6 , 16 ], further inform our initial exploration of cost-based hybrid mechanism detailed in the full ver-sion [ 42 ]. However, more accurate cost estimates may conversely require more expensive estimation methods, such as LpBound [ 80 ], and/or specialized data storages and execution engines, such as Free Join’s COLT [70] and its integration to DuckDB [59]. 
+
+Aggregation Push-down and Factorizations. Aggregation push-down reduces intermediate results via early or deferred aggregation. Classical approaches include eager and lazy aggregation [ 76 ] and integrating GROUP BY into cost-based optimization [ 9]. GuAo [ 33 ]identifies cases where join materialization can be avoided entirely and introduces a corresponding physical operator for SparkSQL [ 5]. Its propagation of frequencies grouped by join attributes resembles 
+
+BaCon ’s bucketization in single-query settings. However, it relies on binary joins, whereas our approach support multi-way merging of count maps. Factorized databases [ 7 , 8, 56 ] eliminate tuple-level redundancy in query results through compact representations that can support efficient aggregation beyond COUNT . These works, fo-cusing on eliminating intra-query redundancy, are complementary to our approach, which also exploits inter-query sharing. Further-more, these works typically employ non-traditional storage layout different from traditional relational databases. 
+
+Optimized Batch Processing of Aggregate Queries. LMFAO [ 62 ]evaluates batches of ground-by aggregates over shared joins with-out materializing intermediates by decomposing queries into views, organizing them via a join tree, and executing a multi-output plan. Like PostFilt , it encodes selection predicates as conditional ex-pressions within aggregates. Unlike BaCon , LMFAO does not pre-process overlaps among cross-query predicates, but instead focuses on sharing computation of join tree traversal and attribute-ordered evaluation, and is implemented as a standalone execution engine. 
+
+Multi-Query & Shared Workload Optimization. Multi-query op-timization (MQO) [ 65 ] identifies shared/similar subexpressions across queries and evaluate them jointly or via plan rewriting. Zhou et al. [ 81 ] propose a common subexpression manager integrated into Microsoft SQL Server, demonstrating improvements on work-loads of tens of queries. Shared Workload Optimization (SWO) [ 15 ]extends this idea to larger workloads by sharing operators, often requiring specialized execution engines. These approaches target general workloads and require accurate cost estimates. 
+
+Learned Cardinality Estimation. Query-aware cardinality estima-tion (CE) models [ 13 , 27 , 29 , 37 , 39 , 40 , 50 , 51 , 58 , 71 ] learn from query-count pairs. Training is typically performed either in a single-shot manner, where a model is (re-)trained from scratch on a batch of queries [ 13 , 27 , 37 , 38 , 40 ], or in multiple rounds, where the model is incrementally updated as new query-count pairs become available [ 25 , 39 , 58 ]. Some hybrid CE models [ 29 , 39 ] additionally require data statistics, e.g., samples/histograms. Recent work stud-ies robustness, training efficiency, and adaptivity to data updates and workload shifts [ 25 , 32 , 37 , 39 , 52 , 60 , 72 , 75 ], increasing the demand for efficiently supporting counting queries. 
+
+Other Related Work. Our work is also related to continuous query processing. More details are provided in the full version [42]. 
+
+## 7 CONCLUSION 
+
+In this paper, we presented BaCon , a method for efficient batch processing of counting queries. BaCon brings together multiple optimization ideas, focusing particularly on developing compact, alternative representations of intermediate results that enable fine-grained sharing of computation. BaCon combines lightweight SQL execution with client-side processing, incorporating a suite of opti-mizations to ensure practical performance on our target workloads. A strength of BaCon is its practicality: it can be deployed without modifying DBMS internals or physical designs. Components of Ba-Con can be accelerated using efficient UDF implementations (such as C-extensions in PostgreSQL), if they are supported by the DBMS. Our results demonstrate significant performance gains across real workloads with diverse characteristics. This level of improvement is empowering: shorter (re)training times make learned CE more practical and allow larger, more comprehensive training workloads. 
+
+BaCon opens up several promising directions for future work. Extending it to support richer join structures, more expressive selec-tion predicates, and more complex aggregates (complex expression inputs or non-algebraic aggregate functions) would further broaden its applicability. Beyond functional extensions, there are opportuni-ties for more optimization, such as sharing computation across join patterns; delayed evaluation of ⊕ and ⊗ in count map expressions (and adapting ComputeCounts to take advantage); more intelligent selection of tree-based execution plans; aggressive “short-cutting” of all FK-PK edges; caching and more sophisticated parallelization. Finally, new applications and additional optimizations will likely require models beyond the current Hybrid to enable cost-based selection of processing methods. 
+
+## ACKNOWLEDGMENTS 
+
+This work of J.Y., P.A., and Y.L. was partially supported by NSF Grant IIS-2402823. P.A. was also supported by NSF Grant CCF-2223870 and a US-Israel Binational Science Foundation Grant 2022131. This work of X.H. was supported by the Natural Sciences and Engineering Research Council of Canada Discovery Grant. REFERENCES 
+
+[1] PostgreSQL 17. 2025. Extending SQL: C-Language Functions. https://www. postgresql.org/docs/current/xfunc-c.html [2] Christopher R. Aberger, Andrew Lamb, Susan Tu, Andres Nötzli, Kunle Oluko-tun, and Christopher Ré. 2017. EmptyHeaded: A Relational Engine for Graph Processing. ACM Trans. Database Syst. 42, 4, Article 20 (Oct. 2017), 44 pages. https://doi.org/10.1145/3129246 [3] Pankaj K. Agarwal, Junyi Xie, Jun Yang, and Hai Yu. 2006. Scalable continuous query processing by tracking hotspots. In Proceedings of the 32nd International Conference on Very Large Data Bases (Seoul, Korea) (VLDB ’06) . VLDB Endowment, 31–42. [4] Inc. Anaconda et al . 2025. Numba - a just-in-time compiler for Python that works best on code that uses NumPy arrays and functions, and loops. https: //numba.pydata.org/numba-doc/dev/index.html# [5] Michael Armbrust, Reynold S. Xin, Cheng Lian, Yin Huai, Davies Liu, Joseph K. Bradley, Xiangrui Meng, Tomer Kaftan, Michael J. Franklin, Ali Ghodsi, and Matei Zaharia. 2015. Spark SQL: Relational Data Processing in Spark. In Proceedings of the 2015 ACM SIGMOD International Conference on Management of Data (Mel-bourne, Victoria, Australia) (SIGMOD ’15) . Association for Computing Machinery, New York, NY, USA, 1383–1394. https://doi.org/10.1145/2723372.2742797 [6] Albert Atserias, Martin Grohe, and Dániel Marx. 2017. Size bounds and query plans for relational joins. arXiv:1711.03860 [cs.DB] https://arxiv.org/abs/1711. 03860 [7] Nurzhan Bakibayev, Tomáš Kočiský, Dan Olteanu, and Jakub Závodný. 2013. Aggregation and ordering in factorised databases. Proc. VLDB Endow. 6, 14 (Sept. 2013), 1990–2001. https://doi.org/10.14778/2556549.2556579 [8] Nurzhan Bakibayev, Dan Olteanu, and Jakub Závodný. 2012. FDB: a query engine for factorised relational databases. Proc. VLDB Endow. 5, 11 (July 2012), 1232–1243. https://doi.org/10.14778/2350229.2350242 [9] Surajit Chaudhuri and Kyuseok Shim. 1994. Including Group-By in Query Optimization. In Proceedings of the 20th International Conference on Very Large Data Bases (VLDB ’94) . Morgan Kaufmann Publishers Inc., San Francisco, CA, USA, 354–366. [10] Bailu Ding, Surajit Chaudhuri, Johannes Gehrke, and Vivek Narasayya. 2021. DSB: a decision support benchmark for workload-driven and traditional database systems. Proc. VLDB Endow. 14, 13 (Sept. 2021), 3376–3388. https://doi.org/10. 14778/3484224.3484234 [11] Bailu Ding, Surajit Chaudhuri, Johannes Gehrke, and Vivek Narasayya. 2021. DSB Initialization Files and Scripts. https://github.com/microsoft/dsb/tree/main/ scripts [12] Lyric Doshi, Vincent Zhuang, Gaurav Jain, Ryan Marcus, Haoyu Huang, Deniz Altinbüken, Eugene Brevdo, and Campbell Fraser. 2023. Kepler: Robust Learning for Parametric Query Optimization. Proc. ACM Manag. Data 1, 1, Article 109 (May 2023), 25 pages. https://doi.org/10.1145/3588963 [13] Anshuman Dutt, Chi Wang, Azade Nazi, Srikanth Kandula, Vivek Narasayya, and Surajit Chaudhuri. 2019. Selectivity estimation for range predicates using lightweight models. Proc. VLDB Endow. 12, 9 (May 2019), 1044–1057. https: //doi.org/10.14778/3329772.3329780 [14] Michael Freitag, Maximilian Bandle, Tobias Schmidt, Alfons Kemper, and Thomas Neumann. 2020. Adopting worst-case optimal joins in relational database systems. 
+
+Proc. VLDB Endow. 13, 12 (July 2020), 1891–1904. https://doi.org/10.14778/ 3407790.3407797 [15] Georgios Giannikis, Darko Makreshanski, Gustavo Alonso, and Donald Koss-mann. 2014. Shared workload optimization. Proc. VLDB Endow. 7, 6 (Feb. 2014), 429–440. https://doi.org/10.14778/2732279.2732280 [16] Georg Gottlob, Stephanie Tien Lee, Gregory Valiant, and Paul Valiant. 2012. Size and Treewidth Bounds for Conjunctive Queries. J. ACM 59, 3, Article 16 (June 2012), 35 pages. https://doi.org/10.1145/2220357.2220363 [17] Jim Gray, Surajit Chaudhuri, Adam Bosworth, Andrew Layman, Don Reichart, Murali Venkatrao, Frank Pellow, and Hamid Pirahesh. 1997. Data Cube: A Relational Aggregation Operator Generalizing Group-By, Cross-Tab, and Sub-Totals. Data Min. Knowl. Discov. 1, 1 (Jan. 1997), 29–53. https://doi.org/10.1023/A: 1009726021843 [18] Yuxing Han, Ziniu Wu, Peizhi Wu, Rong Zhu, Jingyi Yang, Liang Wei Tan, Kai Zeng, Gao Cong, Yanzhao Qin, Andreas Pfadler, Zhengping Qian, Jingren Zhou, Jiangneng Li, and Bin Cui. 2021. Cardinality estimation in DBMS: a comprehensive benchmark evaluation. Proc. VLDB Endow. 15, 4 (Dec. 2021), 752–765. https://doi.org/10.14778/3503585.3503586 [19] Yuxing Han, Ziniu Wu, Peizhi Wu, Rong Zhu, Jingyi Yang, Liang Wei Tan, Kai Zeng, Gao Cong, Yanzhao Qin, Andreas Pfadler, Zhengping Qian, Jingren Zhou, Jiangneng Li, and Bin Cui. 2023. job-light-join.sql. https://github.com/Nathaniel-Han/End-to-End-CardEst-Benchmark/ blob/master/workloads/job-light/sub_plan_queries/job_light_sub_query.sql [20] Yuxing Han, Ziniu Wu, Peizhi Wu, Rong Zhu, Jingyi Yang, Liang Wei Tan, Kai Zeng, Gao Cong, Yanzhao Qin, Andreas Pfadler, Zhengping Qian, Jingren Zhou, Jiangneng Li, and Bin Cui. 2023. job-light-single.sql. https://github.com/ Nathaniel-Han/End-to-End-CardEst-Benchmark/blob/master/workloads/job-light/sub_plan_queries/job_light_single_table_sub_query.sql [21] Yuxing Han, Ziniu Wu, Peizhi Wu, Rong Zhu, Jingyi Yang, Liang Wei Tan, Kai Zeng, Gao Cong, Yanzhao Qin, Andreas Pfadler, Zhengping Qian, Jin-gren Zhou, Jiangneng Li, and Bin Cui. 2023. STATS Initialization Files and Scripts. https://github.com/Nathaniel-Han/End-to-End-CardEst-Benchmark/ tree/master/scripts/sql [22] Yuxing Han, Ziniu Wu, Peizhi Wu, Rong Zhu, Jingyi Yang, Liang Wei Tan, Kai Zeng, Gao Cong, Yanzhao Qin, Andreas Pfadler, Zhengping Qian, Jingren Zhou, Jiangneng Li, and Bin Cui. 2023. stats_ceb_join.sql. https://github.com/Nathaniel-Han/End-to-End-CardEst-Benchmark/blob/ master/workloads/stats_CEB/sub_plan_queries/stats_CEB_sub_queries.sql [23] Yuxing Han, Ziniu Wu, Peizhi Wu, Rong Zhu, Jingyi Yang, Liang Wei Tan, Kai Zeng, Gao Cong, Yanzhao Qin, Andreas Pfadler, Zhengping Qian, Jin-gren Zhou, Jiangneng Li, and Bin Cui. 2023. stats_ceb_single.sql. https: //github.com/Nathaniel-Han/End-to-End-CardEst-Benchmark/blob/master/ workloads/stats_CEB/sub_plan_queries/stats_CEB_single_table_sub_query.sql [24] Yuxing Han, Ziniu Wu, Peizhi Wu, Rong Zhu, Jingyi Yang, Liang Wei Tan, Kai Zeng, Gao Cong, Yanzhao Qin, Andreas Pfadler, Zhengping Qian, Jingren Zhou, Jiangneng Li, and Bin Cui. 2023. stats_ceb.sql. https://github.com/Nathaniel-Han/End-to-End-CardEst-Benchmark/blob/ master/workloads/stats_CEB/stats_CEB.sql [25] Mike Heddes, Igor Nunes, Tony Givargis, and Alex Nicolau. 2024. Convolution and Cross-Correlation of Count Sketches Enables Fast Cardinality Estimation of Multi-Join Queries. Proc. ACM Manag. Data 2, 3, Article 129 (May 2024), 26 pages. https://doi.org/10.1145/3654932 [26] Xiao Hu. 2025. Output-Optimal Algorithms for Join-Aggregate Queries. Proc. ACM Manag. Data 3, 2, Article 104 (June 2025), 27 pages. https://doi.org/10.1145/ 3725241 [27] Xiao Hu, Yuxi Liu, Haibo Xiu, Pankaj K. Agarwal, Debmalya Panigrahi, Sudeepa Roy, and Jun Yang. 2022. Selectivity Functions of Range Queries are Learnable. In SIGMOD (Philadelphia, PA, USA) (SIGMOD ’22) . 959–972. [28] Andreas Kipf, Thomas Kipf, Bernhard Radke, Viktor Leis, Peter Boncz, and Alfons Kemper. 2018. job-light.sql. https://github.com/andreaskipf/learnedcardinalities/ blob/master/workloads/job-light.sql [29] Andreas Kipf, Thomas Kipf, Bernhard Radke, Viktor Leis, Peter Boncz, and Alfons Kemper. 2018. Learned cardinalities: Estimating correlated joins with deep learning. arXiv preprint arXiv:1809.00677 (2018). [30] Andreas Kipf, Thomas Kipf, Bernhard Radke, Viktor Leis, Peter Boncz, and Alfons Kemper. 2018. scale.sql. https://github.com/andreaskipf/learnedcardinalities/ blob/master/workloads/scale.sql [31] Andreas Kipf, Thomas Kipf, Bernhard Radke, Viktor Leis, Peter Boncz, and Alfons Kemper. 2018. synthetic.sql. https://github.com/andreaskipf/ learnedcardinalities/blob/master/workloads/synthetic.sql [32] Meghdad Kurmanji and Peter Triantafillou. 2023. Detect, Distill and Update: Learned DB Systems Facing Out of Distribution Data. Proc. ACM Manag. Data 1, 1, Article 33 (May 2023), 27 pages. https://doi.org/10.1145/3588713 [33] Matthias Lanzinger, Reinhard Pichler, and Alexander Selzer. 2025. Avoiding Materialisation for Guarded Aggregate Queries. Proc. VLDB Endow. 18, 5 (Jan. 2025), 1398–1411. https://doi.org/10.14778/3718057.3718068 [34] Viktor Leis, Andrey Gubichev, Atanas Mirchev, Peter Boncz, Alfons Kemper, and Thomas Neumann. 2013-2019. IMDB Initialization Files and Scripts. https: //event.cwi.nl/da/job/ [35] Viktor Leis, Andrey Gubichev, Atanas Mirchev, Peter Boncz, Alfons Kemper, and Thomas Neumann. 2015. How good are query optimizers, really? Proc. VLDB Endow. 9, 3 (Nov. 2015), 204–215. https://doi.org/10.14778/2850583.2850594 [36] Viktor Leis, Andrey Gubichev, Atanas Mirchev, Peter Boncz, Alfons Kemper, and Thomas Neumann. 2015. IMDB Relational Schema by JOB. https://event.cwi.nl/ da/job/ [37] Beibin Li, Yao Lu, and Srikanth Kandula. 2022. Warper: Efficiently Adapting Learned Cardinality Estimators to Data and Workload Drifts. In Proceedings of the 2022 International Conference on Management of Data (Philadelphia, PA, USA) (SIGMOD ’22) . Association for Computing Machinery, New York, NY, USA, 1920–1933. https://doi.org/10.1145/3514221.3526179 [38] Beibin Li, Yao Lu, Chi Wang, and Srikanth Kandula. 2021. Car-dinality Estimation: Is Machine Learning a Silver Bullet?. In AIDB .https://www.microsoft.com/en-us/research/publication/cardinality-estimation-is-machine-learning-a-silver-bullet/ [39] Pengfei Li, Wenqing Wei, Rong Zhu, Bolin Ding, Jingren Zhou, and Hua Lu. 2023. ALECE: An Attention-based Learned Cardinality Estimator for SPJ Queries on Dynamic Workloads. Proc. VLDB Endow. 17, 2 (Oct. 2023), 197–210. https: //doi.org/10.14778/3626292.3626302 [40] Jie Liu, Wenqian Dong, Qingqing Zhou, and Dong Li. 2021. Fauce: fast and accurate deep ensembles with uncertainty for cardinality estimation. Proc. VLDB Endow. 14, 11 (July 2021), 1950–1963. https://doi.org/10.14778/3476249.3476254 [41] Yuxi Liu, Xiao Hu, Pankaj Agarwal, and Jun Yang. 2026. dsb_grasp_20k.sql. https://github.com/louisja1/bacon/blob/main/workload/dsb_grasp_20k.sql [42] Yuxi Liu, Xiao Hu, Pankaj Agarwal, and Jun Yang. 2026. [Full Version] BaCon: Efficient Batch Processing of Counting Queries. https://github.com/louisja1/ bacon/blob/main/fullversion.pdf [43] Yuxi Liu, Xiao Hu, Pankaj Agarwal, and Jun Yang. 2026. Github Repository of BaCon. https://github.com/louisja1/bacon [44] Yuxi Liu, Xiao Hu, Pankaj Agarwal, and Jun Yang. 2026. Script for generating dsb_grasp_20k.sql. https://github.com/louisja1/bacon/blob/main/workload/ raw/dsb_grasp_csv_to_sql.py [45] Samuel Madden, Mehul Shah, Joseph M. Hellerstein, and Vijayshankar Raman. 2002. Continuously adaptive continuous queries over streams. In Proceedings of the 2002 ACM SIGMOD International Conference on Management of Data (Madison, Wisconsin) (SIGMOD ’02) . Association for Computing Machinery, New York, NY, USA, 49–60. https://doi.org/10.1145/564691.564698 [46] Ryan Marcus, Parimarjan Negi, Hongzi Mao, Nesime Tatbul, Mohammad Al-izadeh, and Tim Kraska. 2021. Bao: Making Learned Query Optimization Practical. In Proceedings of the 2021 International Conference on Management of Data (Vir-tual Event, China) (SIGMOD ’21) . Association for Computing Machinery, New York, NY, USA, 1275–1288. https://doi.org/10.1145/3448016.3452838 [47] Ryan Marcus, Parimarjan Negi, Hongzi Mao, Chi Zhang, Mohammad Alizadeh, Tim Kraska, Olga Papaemmanouil, and Nesime Tatbul. 2019. Neo: a learned query optimizer. Proc. VLDB Endow. 12, 11 (July 2019), 1705–1718. https://doi. org/10.14778/3342263.3342644 [48] Amine Mhedhbi and Semih Salihoglu. 2019. Optimizing subgraph queries by combining binary and worst-case optimal joins. Proc. VLDB Endow. 12, 11 (July 2019), 1692–1704. https://doi.org/10.14778/3342263.3342643 [49] Microsoft. [n.d.]. Microsoft SQL Server: Common Language Runtime (CLR) Integration. https://learn.microsoft.com/en-us/sql/relational-databases/clr-integration/common-language-runtime-integration-overview?view=sql-server-ver17 [50] Magnus Müller, Lucas Woltmann, and Wolfgang Lehner. 2023. Enhanced Fea-turization of Queries with Mixed Combinations of Predicates for ML-based Cardinality Estimation. In Proceedings 26th International Conference on Extending Database Technology, EDBT 2023, Ioannina, Greece, March 28-31, 2023 , Julia Stoy-anovich, Jens Teubner, Nikos Mamoulis, Evaggelia Pitoura, Jan Mühlig, Katja Hose, Sourav S. Bhowmick, and Matteo Lissandrini (Eds.). OpenProceedings.org, 273–284. https://doi.org/10.48786/EDBT.2023.22 [51] Parimarjan Negi, Ryan Marcus, Andreas Kipf, Hongzi Mao, Nesime Tatbul, Tim Kraska, and Mohammad Alizadeh. 2021. Flow-loss: learning cardinality estimates that matter. Proc. VLDB Endow. 14, 11 (July 2021), 2019–2032. https://doi.org/10. 14778/3476249.3476259 [52] Parimarjan Negi, Ziniu Wu, Andreas Kipf, Nesime Tatbul, Ryan Marcus, Sam Madden, Tim Kraska, and Mohammad Alizadeh. 2023. Robust Query Driven Cardinality Estimation under Changing Workloads. Proc. VLDB Endow. 16, 6 (Feb. 2023), 1520–1533. https://doi.org/10.14778/3583140.3583164 [53] Hung Q. Ngo. 2018. Worst-Case Optimal Join Algorithms: Techniques, Results, and Open Problems. In Proceedings of the 37th ACM SIGMOD-SIGACT-SIGAI Symposium on Principles of Database Systems (Houston, TX, USA) (PODS ’18) .Association for Computing Machinery, New York, NY, USA, 111–124. https: //doi.org/10.1145/3196959.3196990 [54] Hung Q. Ngo, Ely Porat, Christopher Ré, and Atri Rudra. 2012. Worst-case Optimal Join Algorithms. arXiv:1203.1952 [cs.DB] https://arxiv.org/abs/1203. 1952 [55] Hung Q Ngo, Christopher Ré, and Atri Rudra. 2014. Skew strikes back: new developments in the theory of join algorithms. SIGMOD Rec. 42, 4 (Feb. 2014), 5–16. https://doi.org/10.1145/2590989.2590991 [56] Dan Olteanu and Jakub Zavodny. 2012. Factorised representations of query results: size bounds and readability. In 15th International Conference on Database Theory, ICDT ’12, Berlin, Germany, March 26-29, 2012 , Alin Deutsch (Ed.). ACM, 285–298. https://doi.org/10.1145/2274576.2274607 [57] Oracle. [n.d.]. Oracle Database: External Procedures. https://docs.oracle.com/en/ database/oracle/oracle-database/19/ntqrf/external-procedures-overview.html [58] Y. Park, S. Zhong, and B. Mozafari. 2020. Quicksel: Quick selectivity learning with mixture models. In Proc. 39th ACM SIGMOD Int. Conf. Management Data, .1017–1033. [59] Mark Raasveldt. 2022. DuckDB - A Modern Modular and Extensible Database System. In CDMS@VLDB . https://api.semanticscholar.org/CorpusID:252384081 [60] Silvan Reiner and Michael Grossniklaus. 2023. Sample-Efficient Cardinality Estimation Using Geometric Deep Learning. Proc. VLDB Endow. 17, 4 (Dec. 2023), 740–752. https://doi.org/10.14778/3636218.3636229 [61] Wolfgang Scheufele and Guido Moerkotte. 1997. On the complexity of generating optimal plans with cross products. In Proceedings of the Sixteenth ACM SIGACT-SIGMOD-SIGART Symposium on Principles of Database Systems . 238–248. [62] Maximilian Schleich, Dan Olteanu, Mahmoud Abo Khamis, Hung Q. Ngo, and XuanLong Nguyen. 2019. A Layered Aggregate Engine for Analytics Workloads. In Proceedings of the 2019 International Conference on Management of Data (Ams-terdam, Netherlands) (SIGMOD ’19) . Association for Computing Machinery, New York, NY, USA, 1642–1659. https://doi.org/10.1145/3299869.3324961 [63] scikit-learn developers. 2007-2025. scikit-learn – RandomForestClassi-fier. https://scikit-learn.org/stable/modules/generated/sklearn.ensemble. RandomForestClassifier.html#randomforestclassifier [64] Patricia G. Selinger, Morton M. Astrahan, Donald D. Chamberlin, Raymond A. Lorie, and Thomas G. Price. 1979. Access Path Selection in a Relational Database Management System. In Proceedings of the 1979 ACM SIGMOD International Conference on Management of Data, Boston, Massachusetts, USA, May 30 - June 1 ,Philip A. Bernstein (Ed.). ACM, 23–34. https://doi.org/10.1145/582095.582099 [65] Timos K. Sellis. 1988. Multiple-query optimization. ACM Trans. Database Syst. 
+
+13, 1 (March 1988), 23–52. https://doi.org/10.1145/42201.42203 [66] The Psycopg Team. 2001-2021. Psycopg – Client-side Cursors. https://www. psycopg.org/docs/cursor.html [67] The Psycopg Team. 2001-2021. Psycopg – PostgreSQL database adapter for Python. https://www.psycopg.org/docs/# [68] The Psycopg Team. 2001-2021. Psycopg – Server-side Cursors. https://www. psycopg.org/docs/usage.html#server-side-cursors [69] Todd L. Veldhuizen. 2013. Leapfrog Triejoin: a worst-case optimal join algorithm. arXiv:1210.0481 [cs.DB] https://arxiv.org/abs/1210.0481 [70] Yisu Remy Wang, Max Willsey, and Dan Suciu. 2023. Free Join: Unifying Worst-Case Optimal and Traditional Joins. Proc. ACM Manag. Data 1, 2, Article 150 (June 2023), 23 pages. https://doi.org/10.1145/3589295 [71] Peizhi Wu and Gao Cong. 2021. A unified deep model of learning from both data and queries for cardinality estimation. In Proceedings of the 2021 International Conference on Management of Data . 2009–2022. [72] Peizhi Wu and Zachary G. Ives. 2024. Modeling Shifting Workloads for Learned Database Systems. Proc. ACM Manag. Data 2, 1, Article 38 (March 2024), 27 pages. https://doi.org/10.1145/3639293 [73] Peizhi Wu, Rong Kang, Tieying Zhang, Jianjun Chen, Ryan Marcus, and Zachary G. Ives. 2025. Data-Agnostic Cardinality Learning from Imperfect Workloads. Proc. VLDB Endow. 18, 8 (April 2025), 2519–2532. https://doi.org/10. 14778/3742728.3742745 [74] Peizhi Wu, Rong Kang, Tieying Zhang, Jianjun Chen, Ryan Marcus, and Zachary G. Ives. 2025. Original query workload of GRASP. https://github. com/shoupzwu/GRASP/blob/master/queries/dsb.csv [75] Peizhi Wu, Haoshu Xu, Ryan Marcus, and Zachary G. Ives. 2025. A Practical Theory of Generalization in Selectivity Learning. Proc. VLDB Endow. 18, 6 (Feb. 2025), 1811–1824. https://doi.org/10.14778/3725688.3725708 [76] Weipeng P. Yan and Per-Åke Larson. 1995. Eager Aggregation and Lazy Aggre-gation. In Proceedings of the 21th International Conference on Very Large Data Bases (VLDB ’95) . Morgan Kaufmann Publishers Inc., San Francisco, CA, USA, 345–357. [77] Zongheng Yang, Amog Kamsetty, Sifei Luan, Eric Liang, Yan Duan, Xi Chen, and Ion Stoica. 2020. NeuroCard: one cardinality estimator for all tables. Proc. VLDB Endow. 14, 1 (Sept. 2020), 61–73. https://doi.org/10.14778/3421424.3421432 [78] Zongheng Yang, Eric Liang, Amog Kamsetty, Chenggang Wu, Yan Duan, Xi Chen, Pieter Abbeel, Joseph M. Hellerstein, Sanjay Krishnan, and Ion Stoica. 2019. Deep unsupervised cardinality estimation. Proc. VLDB Endow. 13, 3 (Nov. 2019), 279–292. https://doi.org/10.14778/3368289.3368294 [79] Mihalis Yannakakis. 1981. Algorithms for acyclic database schemes. In Proceed-ings of the Seventh International Conference on Very Large Data Bases - Volume 7 
+
+(Cannes, France) (VLDB ’81) . VLDB Endowment, 82–94. [80] Haozhe Zhang, Christoph Mayer, Mahmoud Abo Khamis, Dan Olteanu, and Dan Suciu. 2025. LpBound: Pessimistic Cardinality Estimation Using 𝓁 p -Norms of Degree Sequences. Proc. ACM Manag. Data 3, 3 (2025), 184:1–184:27. https: //doi.org/10.1145/3725321 [81] Jingren Zhou, Per-Ake Larson, Johann-Christoph Freytag, and Wolfgang Lehner. 2007. Efficient exploitation of similar subexpressions for query processing. In 
+
+Proceedings of the 2007 ACM SIGMOD International Conference on Management of Data (Beijing, China) (SIGMOD ’07) . Association for Computing Machinery, New York, NY, USA, 533–544. https://doi.org/10.1145/1247480.1247540 [82] Rong Zhu, Lianggui Weng, Bolin Ding, and Jingren Zhou. 2024. Learned Query Optimizer: What is New and What is Next. In Companion of the 2024 International Conference on Management of Data (Santiago AA, Chile) (SIG-MOD ’24) . Association for Computing Machinery, New York, NY, USA, 561–569. https://doi.org/10.1145/3626246.3654692 A NOTATION TABLE 
+
+Table 6: Table of Notations. 
+
+Notation Description 
+
+D Database 
+
+R A (sub)set of tables in D
+
+𝑅 A table in D
+
+Attrs [𝑅 ] Set of attributes of table 𝑅 
+
+QQQ Set of all counting queries to evaluate over D
+
+𝑄 A counting query 
+
+Tables 𝑄 Set of tables referenced by 𝑄 
+
+Preds Z 
+
+> 𝑄
+
+𝑄 ’s join predicates 
+
+Preds 𝜎 𝑄 𝑄 ’s selection predicates 
+
+Preds 𝜎 𝑄 (𝐴 ) query range for selection attribute 𝐴 
+
+Attrs Z 
+
+> 𝑄
+
+Set of attributes referenced by 𝑄 ’s join predicates 
+
+Attrs Z 
+
+> 𝑄
+
+[R|R′ ] Subset of attributes of R used by 𝑄 to join with 
+
+R′, where R and R′ are a pair of disjoint subsets of tables in Tables 𝑄 
+
+Attrs 𝜎 𝑄 Set of attributes referenced by 𝑄 ’s selection pred-icates 
+
+Attrs 𝜎 𝑄 [R] Subset of attributes of R referenced by 𝑄 ’s selec-tion predicates, where R is a subset of tables in 
+
+Tables 𝑄 
+
+𝔍 = ⟨Tables 𝔍 , Preds Z 
+
+> 𝔍
+
+⟩ A join pattern characterized by a set tables 
+
+Tables 𝔍 joined by predicates Preds Z 
+
+> 𝔍
+
+(with no se-lection predicates) 
+
+QQQ[𝔍 ] Subset of queries in QQQ with join pattern 𝔍 
+
+Attrs 𝜎  
+
+> 𝔍
+
+Set of attributes involved in selection predicates in all queries of QQQ[𝔍 ]
+
+Preds 𝜎  
+
+> 𝔍
+
+(𝐴 ) Set of query ranges associated with selection at-tribute 𝐴 in all queries of QQQ[𝔍 ]
+
+𝔅 𝔍 The collection of all quantization scales for queries in QQQ𝔍 , one for each selection attribute in Attrs 𝜎  
+
+> 𝔍
+
+, inducing a grid over a ... 
+
+𝔅 𝔍 [𝑅 ] Subset of quantization scales for selection at-tributes in Attrs 𝜎  
+
+> 𝔍
+
+that belong to table 𝑅 
+
+𝔟 𝐴 ∈ 𝔅 𝔍 Quantization scale for attribute 𝐴 ∈ Attrs 𝜎 
+
+> 𝔍
+
+𝔟 𝐴 (𝑥 ) Serial integer id of the bucket containing 𝑥 (or 0
+
+if 𝑥 lies outside all buckets), where 𝑥 is a value from 𝐴 ’s domain 
+
+®𝑏 A grid coordinate, with one integer component per selection attribute 
+
+𝔐 A count map 
+
+𝔐 [ ®𝑏 ] The count of tuples falling within the grid cell with coordinate ®𝑏 𝛽 Parameter used by optimized BaConRecurse to batch ProcessTable calls (Section 4.2) 
+
+## B MORE DETAILS OF BASIC BACON 
+
+We present the detailed construction algorithm of 𝔟 𝐴 for a selection attribute 𝐴 in Section B.1. 
+
+## B.1 Construction of Buckets 
+
+Continuing from Section 3.2, we extract from QQQ[𝔍 ] the set Δ =
+
+{Preds 𝜎 𝑄 (𝐴 ) | ∃ 𝑄 ∈ QQQ[𝔍 ] : 𝐴 ∈ Preds 𝜎 𝑄 } of predicate ranges associ-ated with 𝐴 . We transform each range 𝐺 specified by Preds 𝜎 𝑄 (𝐴 ) to a left-closed, right-open interval. Concretely, a left-open boundary (𝑙 ) is converted to a left-closed boundary succ (𝑙 ), and a right-closed boundary ( 𝑟 ) is converted to a right-open boundary succ (𝑟 ), where 
+
+succ (·) advances the value by one unit at the attribute’s resolution  
+
+> 6
+
+. Next, we sort the boundaries in ascending order and remove du-plicates. The 𝑖 -th boundary and the (𝑖 + 1)-th one (if exists), where there are more left boundaries than right ones among the first 𝑖 
+
+boundaries, form a left-closed-right-open interval in the domain of 
+
+𝐴 that is of interest to at least one query. We refer to each of these intervals as a bucket, and all these buckets form 𝔟 𝐴 . As detailed in Section 3.2, a value 𝑣 is quantized into an integer, i.e., the id of the bucket containing 𝑣 , or 0 if 𝑣 lies outside all of the buckets in 𝔟 𝐴 .Note that if a query in 𝔍 has no selection predicates on 𝐴 , it still satisfies Theorem 3.2 by setting 𝑖 1 = 0 and 𝑖 2 = |𝔟 𝐴 |.We present an example of quantization in Example B.1. 
+
+Example B.1. Continuing from Listing 1, we have 
+
+𝔟 c.Score = {[ 0, 1)} 
+
+,
+
+𝔟 ph.PostHistoryTypeId = {[ 1, 2)} 
+
+, and 
+
+𝔟 ph.CreationDate = {[ 2010-09-14 11:59:07 , ∞)} 
+
+.By Theorem 3.2, the integer range associated with 𝑄 3 is [1, 1] for 
+
+c.Score , [1, 1] for ph.PostHistoryTypeId , and [0, 1] for ph.Creat -ionDate .Similarly, the integer range associated with 𝑄 4 is [0, 1] for c.Score ,
+
+[1, 1] for ph.PostHistoryTypeId , and [1, 1] for ph.Creat -ionDate .                 
+
+> 6For example, if 𝛼 is an integer, next (𝛼 )=𝛼 +1; if 𝛼 is a timestamp without time zone ,next (𝛼 )=𝛼 +1microsecond; and so on.
+
+Listing 4: SQL code for 𝛽 -ProcessTable (𝑅, 𝑈 , Ain & out ).                                                                                                                          
+
+> Input: Set 𝑈 of mappings, with each binds attributes 𝐽 in
+> 1, 𝐽 in
+> 2, . . . to specific values, and Ain & out ={𝐽 in
+> 1, 𝐽 in
+> 2, ..., 𝐽 out
+> 1, 𝐽 out
+> 2, . . . }specifies the set of attributes for partitioning result entries. The quantization scales are
+> 𝔅 𝔍 [𝑅 ]={𝔟 𝑆 1,𝔟 𝑆 2, . . . }.
+> Output: Result entries have the form ⟨𝑣, ®𝑏, 𝑐 ⟩, sorted by 𝑣 , where 𝑣 is a mapping from Ain & out to values, ®𝑏 is a grid coordinate for 𝔅 𝔍 [𝑅 ], and 𝑐 is the associated count.
+> SELECT 𝐽 in
+> 1,𝐽 in
+> 2, ..., 𝐽 out
+> 1,𝐽 out
+> 2, ..., B1, B2, ..., COUNT(*) FROM ( SELECT 𝐽 in
+> 1,𝐽 in
+> 2, ..., 𝐽 out
+> 1,𝐽 out
+> 2, ..., quantize( 𝑆 1,𝔟 𝑆 1) AS B1, quantize( 𝑆 2,𝔟 𝑆 2) AS B2, ... FROM 𝑅
+> WHERE 𝐽 in
+> 1BETWEEN min (𝑈 (𝐽 in
+> 1) ) AND max (𝑈 (𝐽 in
+> 1) )
+> 𝐽 in
+> 2BETWEEN min (𝑈 (𝐽 in
+> 2) ) AND max (𝑈 (𝐽 in
+> 2) ) AND ... ) AS TMP GROUP BY 𝐽 in
+> 1,𝐽 in
+> 2, ..., 𝐽 out
+> 1,𝐽 out
+> 2, ..., B1, B2, ... ORDER BY 𝐽 in
+> 1,𝐽 in
+> 2, ..., 𝐽 out
+> 1,𝐽 out
+> 2, ...;
+
+## C MORE DETAILS OF BACON 
+
+## IMPLEMENTATION 
+
+We present the details of 𝛽 -ProcessTable and 𝛽 -BaConRecurse 
+
+in Section C.1. 
+
+## C.1 Details of 𝛽 -ProcessTable and 
+
+## 𝛽 -BaConRecurse 
+
+In 𝛽 -ProcessTable (Listing 4), the second and third arguments differ from those of ProcessTable . Specifically, 𝛽 -ProcessTable 
+
+takes a set 𝑈 of bindings rather than a single binding 𝑢 , and it is passed both 𝐽 in  
+
+> 1
+
+, 𝐽 in  
+
+> 2
+
+, . . . and 𝐽 out  
+
+> 1
+
+, 𝐽 out  
+
+> 2
+
+, . . . to enable partition of result entries. Moreover, in the inner block, 𝐽 in  
+
+> 1
+
+, 𝐽 in  
+
+> 2
+
+, . . . are filtered using safe but potentially imprecise range bounds. Concretely, min 𝑈 (𝐽 in  
+
+> 𝑖
+
+)
+
+(resp. max 𝑈 (𝐽 in  
+
+> 𝑖
+
+)) denotes the minimum (resp. maximum) value in the set {𝑢 (𝐽 in  
+
+> 𝑖
+
+) | ∀ 𝑢 ∈ 𝑈 }. Finally, 𝛽 -ProcessTable also SELECT s
+
+𝐽 in  
+
+> 1
+
+, 𝐽 in  
+
+> 2
+
+, . . . and partitions (and orders) the result entries by these at-tributes, allowing the receiver, 𝛽 -BaConRecurse , to discard tuples that do not correspond to any binding in 𝑈 .We propose 𝛽 -BaConRecurse (Algorithm 3) by incorporating batching into BaConRecurse . Instead of producing a single count map, 𝛽 -BaConRecurse outputs a dictionary that maps each bind-ing 𝑢 ∈ 𝑈 to a corresponding count map, enabling batch processing of 𝛽 consecutive bindings. Lines 3-29 enumerate subsequences of result entries. Unlike BaConRecurse , these subsequences are not processed immediately; computation is deferred until either 𝛽 sub-sequences have been accumulated or the end of the returned entries is reached (Line 9). As discussed earlier, returned tuples may not be-long to 𝑈 . Therefore, a post-check filters tuples by testing whether 
+
+𝑣 ’s projection onto 𝐽 in  
+
+> 1
+
+, 𝐽 in  
+
+> 2
+
+, . . . is contained in 𝑈 (Lines 4-7). During batch processing (Lines 9-28), we first collect the set 𝑈 𝑖 of distinct bindings on the join attributes between the child table 𝑅 𝑖 and 𝑅 
+
+(Lines 12-16). We then recursively invoke 𝛽 -BaConRecurse for each pair ( 𝑅 𝑖 , 𝑈 𝑖 ). Finally, Lines 19-26 update the dictionary M by aggregating the contribution of each subsequence. The procedure for merging count maps largely follows BaConRecurse , with two key differences: 𝑅 𝑖 ’s count map is indexed by 𝑢 𝑖 and obtained from the returned dictionary; and the merged count maps are accumu-lated into the dictionary entry indexed by 𝜔 in . Note that 𝜔 in (and similarly 𝑣 in in Line 4) is empty for the root table, which has no 𝐽 in 
+
+attributes. 
+
+## C.2 Choosing among BaCon /IndProc /PostFilt 
+
+We introduce an approach called Hybrid for picking the appropriate method to use among the three for a given query pattern. As we 
+
+Algorithm 3 𝛽 -BaConRecurse (𝑅, 𝑈 )
+
+Input: Set 𝑈 of mappings, with each binds a subset of 𝑅 ’s attributes to specific values. Implicitly, the function also has access to D,
+
+𝔍 and its plan tree, and the quantization scales 𝔅 𝔍 .
+
+Output: Dictionary M maps each binding 𝑢 ∈ 𝑈 to a count map 
+
+𝔐 over subtree (𝑅 ); formally, M ≔ {𝑢 ↦ → 𝔐 | 𝑢 ∈ 𝑈 }. Each 𝔐 
+
+(or equivalently M[𝑢 ]) is complete w.r.t. result tuples of QQQ[𝔍 ]
+
+restricted to subtree (𝑅 ) and consistent with 𝑢 . 
+
+> 1:
+
+M ← { 𝑢 ↦ → an empty count map | ∀ 𝑢 ∈ 𝑈 }; 
+
+> 2:
+
+𝑛 subsequence ← 0; ⊲ counter for the number of subsequences to be processed  
+
+> 3:
+
+for each S[𝑣 ] of entries of the form ⟨𝑣, ·, ·⟩ with the same 
+
+𝑣 , returned by 𝛽 -ProcessTable  𝑅, 𝑈 , Attrs Z 
+
+> 𝔍
+
+(parent (𝑅 ) | 𝑅 ) ∪ 
+
+Attrs Z 
+
+> 𝔍
+
+(𝑅 | children (𝑅 ))  do  
+
+> 4:
+
+𝑣 in ← ⟨ 𝑣 [𝐽 in  
+
+> 1
+
+], ®[𝐽 in  
+
+> 2
+
+], . . . ⟩; 𝑣 out ← ⟨ 𝑣 [𝐽 out  
+
+> 1
+
+], ®[𝐽 out  
+
+> 2
+
+], . . . ⟩; 
+
+> 5:
+
+if 𝑣 in ∉ 𝑈 then ⊲ the false positive case mentioned in Section 4.2: join attribute values lie in [min (𝑈 ), max (𝑈 )] but are not contained in 𝑈  
+
+> 6:
+
+continue ; 
+
+> 7:
+
+end if  
+
+> 8:
+
+𝑛 subsequence ← 𝑛 subsequence + 1; 
+
+> 9:
+
+if 𝑛 subsequence =𝛽 or S[𝑣 ] is the last subsequence returned by 
+
+𝛽 -ProcessTable then ⊲ batch processing of 𝛽 subsequences; equivalently, batch processing a set 𝑉 of consecutive values of 
+
+𝑣  
+
+> 10:
+
+for each table 𝑅 𝑖 ∈ children (𝑅 ) do  
+
+> 11:
+
+𝑈 𝑖 ← ∅ ; 
+
+> 12:
+
+for each subsequence S[𝜔 ] in the batch do ⊲ each subsequence in the batch ended with S[𝑣 ] 
+
+> 13:
+
+𝜔 out ← ⟨ 𝜔 [𝐽 out  
+
+> 1
+
+], 𝜔 [𝐽 out  
+
+> 2
+
+], . . . ⟩; 
+
+> 14:
+
+𝑢 𝑖 ←
+
+
+
+𝐴 ′ ↦ → 𝜔 out (𝐴 )               
+
+> 𝐴 ∈Attrs Z
+> 𝔍 (𝑅 |𝑅 𝑖 )∧𝐴 ′∈Attrs Z
+> 𝔍 (𝑅 𝑖 |𝑅 )∧Preds Z
+> 𝔍 ⇒ ( 𝐴 =𝐴 ′)
+
+
+
+; 
+
+> 15:
+
+𝑈 𝑖 ← 𝑈 𝑖 ∪ 𝑢 𝑖 ; 
+
+> 16:
+
+end for  
+
+> 17:
+
+M𝑖 ← 𝛽 -BaConRecurse (𝑅 𝑖 , 𝑈 𝑖 ); 
+
+> 18:
+
+end for  
+
+> 19:
+
+for each subsequence S[𝜔 ] in the batch do  
+
+> 20:
+
+𝜔 in ← ⟨𝜔 [𝐽 in  
+
+> 1
+
+], 𝜔 [𝐽 in  
+
+> 2
+
+], . . . ⟩; 𝜔 out ←⟨𝜔 [𝐽 out  
+
+> 1
+
+], 𝜔 [𝐽 out  
+
+> 2
+
+], . . . ⟩; 
+
+> 21:
+
+𝔐 0 ← { ®𝑏 ↦ → 𝑐 | ⟨ 𝜔, ®𝑏, 𝑐 ⟩ ∈ S[𝜔 ]} ; 
+
+> 22:
+
+for each table 𝑅 𝑖 ∈ children (𝑅 ) do  
+
+> 23:
+
+𝔐 0 ← 𝔐 0 ⊗ M𝑖 [𝑢 𝑖 ]; ⊲ 𝑢 𝑖 as defined in Line 14  
+
+> 24:
+
+end for  
+
+> 25:
+
+M[𝜔 in ] ← M[𝜔 in ] ⊕ 𝔐 0; 
+
+> 26:
+
+end for  
+
+> 27:
+
+𝑛 subsequence ← 0; 
+
+> 28:
+
+end if  
+
+> 29:
+
+end for  
+
+> 30:
+
+return M;Figure 8: Features used by Hybrid , and their importance in a model trained as described in Section 5.4. will see in Section 5.4, BaCon performs well across our target work-loads, so Hybrid only serves to validate the robustness of BaCon .Nonetheless, we briefly describe Hybrid here for completeness. We train Hybrid from sample workloads as a classifier that pre-dicts, given a join pattern, one of three classes {0, 1, 2} representing 
+
+BaCon , IndProc , and PostFilt respectively. We use a lightweight model based on RandomForestClassifier [63 ] over a suite of fea-tures — the most important of which are illustrated in Figure 8. Features with prefixes sum_ , max_ , mean_ , and prod_ aggregate a collection of values: for example, prod_number_of_bucket is the prod-uct of the number of buckets across all quantization scales for a join pattern; mean_query_coverage_ratio is the average, taken per query, of the ratio between the number of grid cells queried and 
+
+prod_number_of_bucket . Features containing intermediate_join_size 
+
+are AGM bounds [ 6, 16 ] (i.e., overestimation) of intermediate re-sult sizes of join subplans chosen by PostgreSQL for joining all tables in the join pattern. Features with cost_of_scanning denote PostgresSQL’s estimated cost for enumerating a table ordered by join attributes that connects it to its descendant tables (if any), reflecting a key component of BaCon . In general, we include as features per-join-pattern statistics that are inexpensive to collect at runtime. However, we exclude more advanced selectivity estimates provided by PostgreSQL, because we have found them to be unreli-able and systematically underestimating the costs of baselines. To ensure a lightweight model and fast inference, we train our model with train_val_split =0.25, n_estimators =100, min_samples_le 
+
+-af =2, and class_weight ={“0”: 1, “1”: 2, “2”: 2}. The higher weights for classes 1 and 2 penalize mistakenly picking baseline approaches, because such mistakes cost much higher. To obtain class labels for training data, we measure and compare the running time for all three methods. We deem a baseline method safe if its running time is either (i) at least 1.5× faster than BaCon , or (ii) no less than 10 
+
+seconds faster than BaCon . We assign class 1 only when IndProc 
+
+is safe and PostFilt is either unsafe or slower; class 2 is assigned analogously; all remaining cases are labeled as class 0. For inference, rather than selecting the class with the highest posterior probabil-ity, we require the predicted probability of choosing IndProc or 
+
+PostFilt to exceed a precision threshold ( 0.9 by default), calibrated to guarantee minimum precision on held-out validation data. If no probability threshold can guarantee the required precision, the one with highest precision is selected. This robust thresholding strategy deliberately trades recall for safety, selecting baselines only under high confidence. Table 8: Multi-threaded mode: end-to-end running times (in sec-onds, rounded) and relative speedups. +: lower-bound values, as 
+
+IndProc is capped at 900s per query and PostFilt at 3,600s per join pattern.                                                         
+
+> Query Workload IndProc
+> (parallel)
+> PostFilt
+> (parallel)
+> BaCon
+> (parallel) Speedup vs. IndProc
+> synthetic 5,271 2,565 531 ↑9.92 ×
+> scale 11,003+ 14,715+ 1,097 ↑10.03+ ×
+> job-light 540 8,046 273 ↑1.98+ ×
+> job-light-single 66 311 ↑5.83 ×
+> job-light-join 2,595 11,198+ 510 ↑5.09 ×
+> stats-ceb 3,390+ 43,661+ 19 ↑180.79+ ×
+> stats-ceb-single 17 22↑8.48 ×
+> stats-ceb-join 32,384+ 51,120+ 54 ↑598.48+ ×
+> dsb-grasp-20k 6,241 913 359 ↑17.37 ×
+
+## D MORE DETAILS OF EXPERIMENTS 
+
+We present the results of materialized-view-based postfiltering in Section D.1, the results of multi-threaded execution in Section D.2, and the results of varying 𝛽 in Section D.3. We present the per-join-pattern results of both the remaining real workloads and scalability workloads in Section D.4. Additionally, the most detailed result of BaCon and PostFilt can be found in the log files of the form 
+
+results/*.print in our repository [43]. 
+
+## D.1 Experiments of Materialized-View-Based Postfiltering 
+
+An alternative implementation of PostFilt materializes the unfil-tered join for each join pattern and performs aggregations over it. However, this approach is impractical for join patterns with very large unfiltered join sizes, plus this information is not free, due to prohibitive storage overhead. Therefore, we evaluate the materialized-view-based variant only on DSB’s dsb-grasp-20k 
+
+and JOB’s synthetic , where the materialized view cardinalities remain manageable and PostFilt outperforms IndProc (as shown in Table 2). The result is presented in Table 7. 
+
+Table 7: End-to-end running times (in seconds, rounded) of the materialized-view-based algorithm, compared to PostFilt .               
+
+> Query Workload View Cardinalities PostFilt Materialized-view -based Postfiltering dsb-grasp-20k <6·10 64,211 4,356 synthetic <5·10 811,329+ 12,264+
+
+## D.2 Experiments of Multi-threaded Execution 
+
+We reports results for IndProc , PostFilt , and BaCon under multi-threaded execution. For the baselines, IndProc and PostFilt , we en-able PostgreSQL’s parallel execution by setting max_parallel_workers 
+
+to 8 and max_parallel_workers_per_gather to 4. Since all their com-putation is performed within the database server, they can fully exploit this parallelism. In contrast, without an elaborate paral-lelization design, BaCon uses 4 processes, each handling a subset of join patterns assigned in a round-robin manner, while keeping the PostgreSQL server in single-threaded mode. The results are presented in Table 8. While we adopt this simple, join-pattern-level parallelization, more sophisticated strategies for BaCon are pos-sible (e.g., parallel merging of count maps from descendants or cost-based partitioning of join patterns), while we leave as future work. 
+
+## D.3 Experiments of Various 𝛽 
+
+We report results for 𝛽 = 5,000, 50,000 and 500,000 respectively, with 
+
+𝛽 = 50,000 as the default setting used throughout Section 5. The cor-responding end-to-end running times are shown in Table 9. Overall, increasing 𝛽 reduces the end-to-end running time, at the cost of higher space overhead (e.g., larger M𝑖 in Line 17 of Algorithm 3). As indicated by the last two columns of Table 9, the primary source of performance differences lie in the number of SQLs issued to the underlying database and the time spent fetching their results. With larger 𝛽 s, BaCon issues fewer SQLs and incurs lower result-fetching overhead, resulting in more savings on the end-to-end running times. 
+
+Table 9: job-light : end-to-end running times (in seconds, rounded), together with the total number of SQLs executed on the underlying database and the total time spent fetching their re-sults, for different values of 𝛽 . The default configuration in Section 5 (𝛽 = 50,000) is shown in bold.             
+
+> 𝛽 E2E running time Total # of SQLs Total result-fetching overhead 5,000 922 19,427 639
+> 50,000 728 1,974 497
+> 500,000 584 243 288
+
+## D.4 More Per-Join-Pattern Results Figure 9: Log-scale running time per join pattern in synthetic .
+
+Figure 10: Log-scale running time per join pattern in job_light_single .
+
+Figure 11: Log-scale running time per join pattern in job_light_join .
+
+Figure 12: Log-scale running time per join pattern in stats_ceb .
+
+Figure 13: Log-scale running time per join pattern in stats_ceb_single .
+
+Figure 14: Log-scale running time per join pattern in stats_ceb_join .Figure 15: Log-scale running time per join pattern in dsb_grasp_20k .
+
+Figure 16: Log-scale running time per join pattern in job_light_1k .
+
+Figure 17: Log-scale running time per join pattern in job_light_2k .
+
+Figure 18: Log-scale running time per join pattern in job_light_4k .E MORE DETAILS OF RELATED WORK 
+
+Select-Join-Aggregate Query Processing. Counting the join results (with selection predicate on the base tables) is a special class of select-join-aggregate queries (intuitively, applying an aggregate function on top of the select-join queries) with the output size as 
+
+1. Processing such queries usually first push down the selection predicate to the base table, and ends up with processing join-count queries, which is the focus below. The previous works have achieved two flavors of results: worst-case optimal and output-sensitive. Namely, worst-case optimal al-gorithms work only on pathological instances with huge outputs, which are rare in practice. In contrast, output-sensitive algorithms express the runtime as a function of the input size and output size, which are more practically meaningful, especially for queries where the aggregation (such as count) may significantly reduce the output size. The classical Yannakakis algorithm [ 79 ] can compute 
+
+free-connex join-count queries in 𝑂 (𝑁 ) time, where 𝑁 is the total number of tuples in the database. Very recently, Hu [26] exploits the hybrid strategy of Yannakakis algorithms, which can compute acyclic join-count queries in 𝑂 (𝑁 ·OUT 1− 1 
+
+> fnfhtw
+
++OUT ) time, where 
+
+OUT is the size of the projection of the join results onto the count-ing columns, and fnfhtw is the free-connex fractional hypertree width of the query. For general join-count queries, the state-of-the-art approach is to convert the query into a free-connex one using the tree decomposition technique and the worst-case optimal join algorithm [ 53 – 55 , 69 ], and then run the hybrid Yannakakis algorithm on the tree decomposition. Our work is also inspired by some ideas in these works. The instantiations of worst-case optimal join algorithms [ 2, 14 , 48 , 70 ]motivate BaCon to decompose computation via child recursions and combine multiple coordinate-to-count maps during backtrack-ing. Cost-based optimizers in these systems, such as Free Join’s [ 70 ], together with the AGM bound [ 6 , 16 ], further inform our initial exploration of cost-based hybrid mechanism. However, achieving more accurate cost estimates for BaCon may conversely require more accurate (pessimistic) cardinality estimation at a higher cost, such as LpBound [ 80 ], and/or specialized data storages and execu-tion engines, such as Free Join’s COLT [ 70 ] and its integration to DuckDB [59]. 
+
+Aggregation Push-down. Early works explore aggregation push-down in query plans to reduce intermediate result sizes. Eager ag-gregation and lazy aggregation [ 76 ] introduce rules for early or de-ferred partial aggregation based on algebraic properties, while Chaud-huri and Shim [9] integrate GROUP BY into cost-based optimization; both focus on intra-query optimization via query rewriting. More re-cently, GuAo [ 33 ] identifies aggregate queries that can be evaluated without materializing any joins and introduces a corresponding physical operator for SparkSQL [ 5 ]. GuAo targets single-query ex-ecution and assumes selection push-down at table scans. For the case without GROUP BY , its propagation of frequencies grouped by join attributes resembles BaCon ’s bucketization when reduced to a single-query join pattern. Unlike BaCon , however, GuAo merges frequencies via standard binary joins in SparkSQL rather than sup-porting multi-way combination during count-map merging. 
+
+Factorizations. Factorized databases (FDBs) propose the factor-ized representations of query results [ 8] to eliminate tuple-level redundancy and boost the relational processing performance [ 56 ], supporting aggregations beyond COUNT [7]. These works focus on intra-query redundancy in query output and are different but com-plementary to our approach. Moreover, they assume storage layout different from traditional relational databases, like PostgreSQL. 
+
+Optimized Batch Processing of Aggregate Queries. LMFAO [ 62 ] is a framework proposed to efficiently compute a batch of group-by ag-gregates over shared joins without fully materializing intermediate results. It decomposes queries into views, groups them according to a join tree, and evaluates each view group using a multi-output plan. Similar to PostFilt , LMFAO supports selection predicates by en-coding them as conditional expressions inside aggregate functions. In contrast to BaCon , LMFAO does not analyze or pre-process over-laps among cross-query predicates (e.g., via bucket construction), but instead focuses on sharing computation at the level of join tree traversal and attribute-ordered evaluation, reusing identical conditional expressions and partial products within a view group. Moreover, LMFAO is implemented as a standalone engine, rather than being integrated into a traditional DBMS. 
+
+Multi-Query Optimization & Shared Workload Optimization. Multi-query optimization (MQO) [ 65 ] identifies shared or similar subex-pressions across queries and performs inter-query optimization by executing the common subexpressions jointly or by rewriting query plans with a boarder subquery. Along this line, Zhou et al. [ 81 ] propose a practical common subexpression manager inte-grated into Microsoft SQL Server and its cost-based query opti-mizer, demonstrating improvements on workloads of a few tens of queries. As the search space for identifying common subplans grow rapidly with the number of queries, Shared Workload Optimization (SWO) [ 15 ] optimizes an entire workload – often comprising hun-dreds or thousands of concurrent queries – by identifying shared operators instead. This typically requires specialized or substan-tially modified execution engines (e.g., shared work systems) to support shared physical operators and coordinated execution. Both lines of work target more general queries and require accurate cost estimates, which motivates future extensions of BaCon toward tighter, cost-based integration with DBMSs. 
+
+Continuous Query Processing. Related works on continuous query processing [ 3 , 45 ] in stream systems explore shared computations by maintaining data summaries or predicate indices over evolving streams. These approaches are designed for workloads with large numbers of continuous queries or filters (e.g., on the order of 100k), usually exceeding the workload sizes considered in our setting, and rely on specialized structures to efficiently support updates. Nevertheless, they offer complementary insights that could inform strategies for handling workloads at different scales as future work. 
+
+Learned Cardinality Estimation. As the main motivation of Ba-Con , query-aware CE models [ 13 , 27 , 29 , 37 , 39 , 40 , 50 , 51 , 58 , 71 ]learns to predict cardinalities from a training set of query-count pairs. Training is typically performed either in a single-shot man-ner, where a model is (re-)trained from scratch on a collected batch of queries [ 13 , 27 , 37 , 38 , 40 ], or in multiple rounds, where the model is incrementally updated as new query-count pairs occur (e.g., via fine-tuning) [ 25 , 39 , 58 ]. The required input information varies across approaches. Pure data-driven CE models [ 77 , 78 ] learn data distributions directly from the tables and do not require query-count pairs for training, although query workloads are still used for evaluation. Some hybrid models [ 29 , 39 ] additionally require data statistics, such as samples or histograms. Beyond model design, recent work has focused on model robustness [ 32 , 75 ], training effi-ciency [ 60 ], and adaptivity to updates and drifts [ 25 , 37 , 39 , 52 , 72 ], which further increases the demand for diverse query workloads.
