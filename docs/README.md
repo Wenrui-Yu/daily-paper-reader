@@ -6,32 +6,37 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-14
-- 运行时间：2026-07-14 21:39:06 UTC
+- 最新运行日期：2026-07-15
+- 运行时间：2026-07-15 21:24:01 UTC
 - 运行状态：成功
-- 本次总论文数：4
+- 本次总论文数：5
 - 精读区：3
-- 速读区：1
+- 速读区：2
 
 ### 今日简报（AI）
-今日精读2篇9分论文与速读1篇7分论文，聚焦医疗联邦学习生产化、隐私感知贝叶斯优化及差分隐私计数查询。最值得关注的是医疗联邦学习从实验室到生产所需的隐私、编排与治理全栈方案，以及分布式贝叶斯优化中的隐私保护机制。建议后续深入阅读《Differentially Private Consistent Release of Counting Queries》以理解查询结果的差分隐私一致发布技术。
-- 详情：[/202607/14/README](/202607/14/README)
+今日精读两篇高分论文，聚焦联邦微调的安全性与大模型隐私保护。  
+重点关注“对抗性非鲁棒特征导致隐私泄露”与“合成图像预训练提升联邦微调效率”两个核心方向。  
+建议普通读者优先阅读《Reducing information dependency does not cause training data privacy》，理解隐私风险的真正根源。
+- 详情：[/202607/15/README](/202607/15/README)
 
 ### 精读区论文标签
-1. [Toward Production-Ready Federated Learning in Healthcare: Privacy, Orchestration, and Governance in MLOps](/202607/14/2607.10467v1-toward-production-ready-federated-learning-in-healthcare-privacy-orchestration-and-governance-in-mlops)  
-   标签：评分：9.0/10、query:daily
-   evidence：医疗领域生产级联邦学习的隐私、编排与治理
-2. [Privacy-Aware Collaborative and Distributed Bayesian Optimization](/202607/14/2607.11600v1-privacy-aware-collaborative-and-distributed-bayesian-optimization)  
-   标签：评分：9.0/10、query:daily
-   evidence：分布式贝叶斯优化中的隐私保护
-3. [PromptGraph: Graph-Guided Prompt Sanitization for Balancing Privacy and Utility in LLM Inference](/202607/14/2607.10709v1-promptgraph-graph-guided-prompt-sanitization-for-balancing-privacy-and-utility-in-llm-inference)  
+1. [Reducing information dependency does not cause training data privacy. Adversarially non-robust features do](/202607/15/2607.12354v1-reducing-information-dependency-does-not-cause-training-data-privacy-adversarially-non-robust-features-do)  
    标签：评分：8.0/10、query:daily
-   evidence：通过提示清洗实现隐私保护的LLM推理
+   evidence：机器学习训练数据隐私
+2. [Scaling Synthetic-Image Pre-Training for Federated Fine-Tuning of Large Vision Models](/202607/15/2607.12583v1-scaling-synthetic-image-pre-training-for-federated-fine-tuning-of-large-vision-models)  
+   标签：评分：8.0/10、query:daily
+   evidence：联邦微调用于隐私敏感的分布式设备
+3. [Privacy Attacks on Stable Marriage](/202607/15/2607.13015v1-privacy-attacks-on-stable-marriage)  
+   标签：评分：8.0/10、query:daily
+   evidence：针对盖尔-沙普利稳定婚姻算法的隐私攻击揭示私有偏好
 
 ### 速读区论文标签
-1. [Differentially Private Consistent Release of Counting Queries](/202607/14/2607.10952v1-differentially-private-consistent-release-of-counting-queries)  
+1. [Policy-Conditioned Constrained Decoding for Column-Level Access Control in Text-to-SQL](/202607/15/2607.12341v1-policy-conditioned-constrained-decoding-for-column-level-access-control-in-text-to-sql)  
    标签：评分：7.0/10、query:daily
-   evidence：计数查询的差分隐私机制，可用于分布式机器学习
+   evidence：针对文本到SQL的列级访问控制确保策略合规与隐私保护
+2. [$\mathrm{P}^{3}$CDA: Privacy-Preserving and Provably Secure Cross Domain Authentication Scheme for Internet of Drones](/202607/15/2607.12288v1-mathrmp3cda-privacy-preserving-and-provably-secure-cross-domain-authentication-scheme-for-internet-of-drones)  
+   标签：评分：6.0/10、query:daily
+   evidence：隐私保护认证
 
 
 <div class="dpr-home-promo-card">

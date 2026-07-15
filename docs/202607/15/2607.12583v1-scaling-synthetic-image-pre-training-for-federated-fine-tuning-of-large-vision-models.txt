@@ -1,0 +1,1146 @@
+Title: Scaling Synthetic-Image Pre-Training for Federated Fine-Tuning of Large Vision Models
+
+URL Source: https://arxiv.org/pdf/2607.12583v1
+
+Published Time: Wed, 15 Jul 2026 12:01:32 GMT
+
+Number of Pages: 11
+
+Markdown Content:
+# Scaling Synthetic-Image Pre-Training for Federated Fine-Tuning of Large Vision Models 
+
+## Qianpiao Ma 
+
+Nanjing University of Science and Technology Nanjing, Jiangsu, China maqianpiao@njust.edu.cn 
+
+## Xiaozhu Song 
+
+Nanjing University of Science and Technology Nanjing, Jiangsu, China songxiaozhu@njust.edu.cn 
+
+## Junlong Zhou ∗
+
+Nanjing University of Science and Technology Nanjing, Jiangsu, China jlzhou@njust.edu.cn 
+
+## Yue Zeng 
+
+Nanjing University of Science and Technology Nanjing, Jiangsu, China zengyue@njust.edu.cn 
+
+## Jianchun Liu 
+
+University of Science and Technology of China Hefei, Anhui, China jcliu17@ustc.edu.cn 
+
+## Huaqing Tu 
+
+Zhejiang Gongshang University Hangzhou, Zhejiang, China thq@mail.zjgsu.edu.cn 
+
+## Abstract 
+
+Federated fine-tuning (FedFT) enables adapting pre-trained large vision models (LVMs) on distributed, privacy-sensitive devices, while its practical deployment is hindered by three critical chal-lenges: resource constraints, system heterogeneity, and non-IID data. While prior studies partially address these issues, e.g. , by pre-training initial models on synthetic images to mitigate the ad-verse effects of non-IID data, or leveraging parameter-efficient fine-tuning (PEFT) methods like low-rank adaptation (LoRA) to reduce resource consumption, they remain inadequate and fragmented. Specifically, existing synthetic image generation methods fail to cap-ture device-specific feature distributions, while current PEFT-based FedFT methods often undervalue weaker devices that may provide critical information. More importantly, the separate optimization of pre-training and FedFT neglects their inherent connection, lacking a holistic perspective to maximize training efficiency. To overcome these limitations, we propose FeDiSyn, a unified framework that holistically considers the interplay between pre-training and FedFT to minimize the overall LVM training time. Specifically, FeDiSyn introduces: (i) a scaling law for FedFT pre-training to determine the optimal number of synthetic images, balancing pre-training benefit against generation/pre-training cost, (ii) diffusion-based synthetic image generation that captures device-specific feature distributions for pre-training to tackle non-IID data, and (iii) a contribution-aware LoRA configuration and bandwidth allocation algorithm for FedFT to ensure that informative devices are effectively utilized while addressing system heterogeneity. Experimental results on the real-world testbed demonstrate that FeDiSyn reduces completion  
+
+> ∗Corresponding author. Permission to make digital or hard copies of all or part of this work for personal or classroom use is granted without fee provided that copies are not made or distributed for profit or commercial advantage and that copies bear this notice and the full citation on the first page. Copyrights for components of this work owned by others than the author(s) must be honored. Abstracting with credit is permitted. To copy otherwise, or republish, to post on servers or to redistribute to lists, requires prior specific permission and/or a fee. Request permissions from permissions@acm.org.
+> ICPP ’26, Singapore
+> ©2026 Copyright held by the owner/author(s). Publication rights licensed to ACM. ACM ISBN 978-1-4503-XXXX-X/2018/06 https://doi.org/XXXXXXX.XXXXXXX
+
+time by over 52.5% and communication cost by over 97.2%, while achieving comparable accuracy to state-of-the-art solutions. 
+
+## CCS Concepts 
+
+• Computing methodologies → Distributed artificial intelli-gence ; • Human-centered computing → Mobile computing .
+
+## Keywords 
+
+Federated fine-tuning, Synthetic image, Pre-training, Scaling law, Large vision models 
+
+ACM Reference Format: 
+
+Qianpiao Ma, Xiaozhu Song, Junlong Zhou, Yue Zeng, Jianchun Liu, and Huaqing Tu. 2026. Scaling Synthetic-Image Pre-Training for Federated Fine-Tuning of Large Vision Models. In Proceedings of 55th International Conference on Parallel Processing (ICPP ’26). ACM, New York, NY, USA, 11 pages. https://doi.org/XXXXXXX.XXXXXXX 
+
+## 1 Introduction 
+
+Since the landmark success of AlexNet in 2012 [ 16 ], deep learning powered by large-scale labeled datasets has revolutionized the field of image classification. Initially, most vision models are trained via supervised learning on relatively small datasets. More recently, however, a two-stage paradigm has emerged for training large vision models (LVM): first pre-training on massive datasets, then fine-tuning on downstream task-specific data. In particular, pure transformer-based architectures such as the vision transformer (ViT) [ 5] have demonstrated more outstanding performance than the convolutional networks when pre-trained at scale. In parallel, the Internet of Things (IoT) [ 48 ] has grown explo-sively, generating massive amounts of data from edge devices that offers a rich source for training LVMs. However, centralized training on large-scale datasets is increasingly limited by privacy regula-tions ( e.g. , GDPR) and by bandwidth bottlenecks when accessing local data. This motivates the adoption of federated fine-tuning (FedFT) [ 46 ], a technique that integrates model fine-tuning into the federated learning (FL) framework [ 24 ]. In a typical FedFT setting, a parameter server first broadcasts a pre-trained global model to a set of distributed devices. Each device fine-tunes the model on its local data and sends the updated parameters back to the server for arXiv:2607.12583v1 [cs.DC] 14 Jul 2026 ICPP ’26, September 28–October 1, 2026, Singapore Ma et al. 
+
+aggregation. This cycle of local fine-tuning and global aggregation repeats until the model converges or reaches a target accuracy. 
+
+Challenges of FedFT for LVMs. Although FedFT offers a promising solution for fine-tuning LVMs leveraging distributed data, it still faces several practical challenges: (1) Resource Con-straints. Modern LVMs like ViT and SwinT [ 21 ], usually contain bil-lions of parameters, requiring significant computation/communication resources for fine-tuning/transmission. For example, ViT-L/16 re-quires roughly 3.1GB of traffic per communication and over 2,900 TFLOPs of computation. In contrast, device resources are typically limited [ 37 ]. For example, devices like the NVIDIA Jetson TX2 offer less than 2TFLOPs of computation capacity, while network band-width often falls below 100Mbps, rendering full-parameter FedFT infeasible on devices. (2) System Heterogeneity. Devices differ widely in hardware capabilities and network conditions. For example, the computational power of an iPhone 16 amounts to only about 12% of that of an RTX 3090 desktop GPU [ 18 ], while network condition varies significantly, ranging from 4G ( ∼ 100Mbps), 5G ( ∼ 500Mbps) to fiber connections ( ∼ 1Gbps). As a result, the time required for fine-tuning and transmitting parameters can differ substantially across devices. Faster devices may idle while waiting for slower ones, leading to a straggler problem [ 22 ] that reduces overall FedFT efficiency. (3) Non-IID Data. Local data on devices are often non-independent and non-identically distributed [ 24 ], which involves two aspects. First, the label distribution varies across devices, e.g. ,some classes may be overrepresented or missing entirely on certain devices. Second, even for the same label, the feature distributions 
+
+may differ due to variations in style or domain, e.g. , cartoon vs. natural images [40]. 
+
+Status Quo and Limitations. To address resource constraints in FedFT, some studies [ 8 , 28 , 29 , 33 , 34 , 38 , 39 ] have deployed the parameter-efficient fine-tuning (PEFT) methods ( e.g. , Adapter tuning, LoRA and Prompt tuning). PEFT inserts lightweight train-able modules into the LVM while keeping the pre-trained model frozen. Since these modules typically account for less than 5% of the pre-trained model’s parameters, PEFT significantly reduces the computation and communication overhead. However, most of these works [ 8, 28 , 34 , 38 , 39 ] simply transplant centralized PEFT methods into distributed settings without accounting for system heterogeneity across devices. A few studies [ 29 , 33 ] attempt to mit-igate heterogeneity by assigning varying LoRA depths based on devices’ capabilities. This strategy, however, overlooks the potential importance of weaker devices in FedFT [ 2 ]: assigning them smaller LoRA depths can significantly degrade fine-tuning performance. Moreover, these FedFT approaches are typically initialized with off-the-shelf pre-trained models without synthetic data augmen-tation, indicating that convergence performance could be further improved [15]. Recent theoretical work [ 12 ] has shown that a carefully initial-ized pre-trained global model can mitigate the adverse effects of non-IID data and accelerate convergence in FedFT. However, mod-els pre-trained on public datasets ( e.g. , ImageNet [ 4 ]) may not reflect the device-specific data distributions [ 3 ], making them suboptimal as initialization points for FedFT. Several studies [ 43 , 45 ] have in-troduced diffusion models (DM) [ 32 ] to generate synthetic images that approximate the label distribution on each device. These syn-thetic images are then used to pre-train a global model, serving as the initialization for FedFT. However, these approaches rely solely on text-conditioned synthesis ( e.g. , labels or text embeddings) and may fail to capture the unique feature distribution of each device [ 47 ], leading to a style gap between synthetic and real data that diminishes the effectiveness of augmentation. Overall, none of these approaches adequately addresses the chal-lenges outlined above, summarized in Table 1. More importantly, these approaches treat synthetic pre-training and FedFT as iso-lated stages, and ignore their synergy: insufficient images weaken pre-training effectiveness for FedFT, whereas excessive images in-troduce substantial computation overhead, thereby prolonging gen-eration and pre-training time. Therefore, the key challenge lies in determining the optimal number of generated images, so as to balance pre-training benefit for FedFT against generation/pre-training cost .
+
+Overview of the Proposed Approach. To this end, we pro-pose FeDiSyn, a unified framework that holistically considers pre-training and FedFT to minimize the overall completion time for LVM training, which is built upon “one law, two optimizations”. First , we introduce a scaling law for synthetic pre-training under FedFT set-ting, which captures the relationship among accuracy, total training time, and the synthetic data scaling factor, providing quantitative guidance for determining the optimal number of generated images. 
+
+Second , for pre-training optimization, each device extracts features by encoding local images into latents, which are then uploaded to the server. By combining these latents with semantically enhanced labels via a DM, the server generates synthetic images to pre-train a global model. Since the synthetic images capture cross-device label and feature distributions, the pre-trained model yields a superior initialization for FedFT, effectively addressing both label and feature distribution skews. Third , for FedFT optimization, FeDiSyn intro-duces a contribution-aware LoRA configuration and bandwidth allocation algorithm. By configuring potentially important devices sufficient LoRA depth and balancing completion times via band-width allocation, the FedFT performance can be further improved while addressing system heterogeneity. Our main contributions are summarized as follows. 
+
+• We propose FeDiSyn, a unified framework that holistically considers the close interplay between pre-training and FedFT to reduce the overall LVM training time. To our knowledge, this is the first work to explore the scaling law for synthetic pre-training under FedFT setting, and systematically opti-mize these two stages in a unified manner. 
+
+• We develop a synthetic pre-training method that tackles non-IID data from both label and feature distribution perspectives. In addition, we design a contribution-aware LoRA configura-tion and bandwidth allocation algorithm to improve FedFT performance while addressing system heterogeneity. 
+
+• We implement the proposed FeDiSyn framework and related algorithms on a real-world testbed. Experimental results on various models and datasets show that the proposed solution outperforms the state-of-the-art solutions. 
+
+## 2 Background and Motivation 2.1 Pre-Training Model Initialization for FedFT 
+
+The Importance of Pre-Training and Initialization. As a cen-tral challenge in FedFT, non-IID data is typically addressed through Scaling Synthetic-Image Pre-Training for Federated Fine-Tuning of Large Vision Models ICPP ’26, September 28–October 1, 2026, Singapore 
+
+Table 1: Comparison of FedFT methods for LVMs.                                                                    
+
+> Method Synthetic Image for Pre-training PEFT Method Handling Resource Constraints Handling System Heterogeneity Handling Label Distribution Skew Handling Feature Distribution Skew PerAda [39] No Adapter ✓×××
+> pFedSeq [28] No Adapter ✓×××
+> CaFPT [8] No Prompt ✓×××
+> FedPrefix [34] No Prompt ✓×××
+> SFLF [38] No LoRA ✓×××
+> FedRA [33] No LoRA ✓✓××
+> CAFF[29] No LoRA ✓✓××
+> FPS [3] Yes -××✓×
+> GPT-FL [45] Yes -××✓×
+> FGL [43] Yes -××✓×
+> FeDiSyn (Ours) Yes LoRA ✓✓✓✓
+
+various aspects, such as device sampling [ 2 ] and aggregation mech-anism [ 22 , 23 ], while the impact of model initialization is often overlooked in most studies. Several recent works have highlighted the critical importance of pre-training for the initial model in FedFT. Nguyen et al. [26 ] observe that models initialized with pre-trained weights typically exhibit significantly lower training loss values at initialization compared to those initialized randomly. Karimireddy 
+
+et al. [15 ] further demonstrate that this lower initial loss resulting from pre-training facilitates faster convergence during subsequent FedFT. Chen et al. [ 3] note that pre-training shapes a better con-ditioned loss surface and steers the model into a location closer to the optimal solution, enhancing the stability of model aggrega-tion. These phenomena are theoretically supported by [ 12 ], which proves that pre-training effectively reduces sensitivity to certain hyperparameters within FedFT by diminishing misaligned filters at initialization. 
+
+Synthetic Image for Pre-Training LVMs. Although pre-training initialization can enhance FedFT performance, models pre-trained on public datasets ( e.g. , ImageNet) show limited gains due to domain mismatch between the public data and the device-specific data. For example, in chest X-ray analysis, an ImageNet pre-trained model achieves only 0.2% accuracy improvement over random initializa-tion, whereas a domain-relevant synthetic image pre-trained model yields a 5.9% gain [ 3 ]. To address this, GPT-FL [ 45 ] and FGL [ 43 ]upload labels or text descriptions of device datasets to the server for synthetic image generation. However, these approaches rely solely on text-conditioned generation, which fails to capture device-specific feature distributions. As a result, the synthetic images may not align well with real local data, limiting their improvement for FedFT. In contrast, FeDiSyn uploads latents encoding local data features to generate synthetic images, as elaborated in Section 3. For ex-ample, generated images for Caltech-101 [ 7] in Fig. 1 show that FeDiSyn can obtain synthetic images that better align with the feature distributions of raw data compared to GPT-FL and FGL. 
+
+## 2.2 Scaling Law of Synthetic-Image Pre-Training for FedFT 
+
+Following the groundbreaking success of large-scale models, scal-ing laws have emerged as a critical framework for quantifying the power-law relationships between model/data scale and perfor-mance [ 14 ]. Prior studies have demonstrated that pre-training data Image 
+
+Raw 
+
+Chair  Cup  Ewer  Ferry  Ibis 
+
+Fig. 1: Comparison of FeDiSyn and other synthetic image generation methods on Caltech-101. 
+
+volume has a significant impact on model performance [ 27 , 42 ], which has motivated recent extensions of these principles to syn-thetic data, exploring how generative data scale influences con-vergence [ 6 , 13 ]. However, these investigations focus exclusively on centralized training paradigms and are therefore not directly applicable to the FedFT setting, where the capabilities of servers for pre-training and edge devices for fine-tuning jointly determine the overall training time. As illustrated in Fig. 2 on Caltech-101, the synthetic scaling factor 𝜆 introduces a trade-off in FedFT: increas-ing 𝜆 accelerates convergence but incurs substantial overhead in image generation and pre-training. Therefore, the total completion time follows a U-shaped curve, which, in this example, attains its minimum near 𝜆 = 0.5.To provide guidance for synthetic pre-training in the FedFT set-ting, we propose a novel scaling law that quantifies the relationship between synthetic volume, target accuracy, and total training time, enabling the analytical determination of the optimal scaling factor 
+
+𝜆 , as elaborated in Section 5. 
+
+## 2.3 Federated Fine-Tuning with LoRA for LVMs 
+
+LoRA [ 11 ] fine-tuning is a specific PEFT approach via low-rank matrix decomposition. In LoRA-based FedFT, each device only fine-tunes and uploads the lightweight inserted LoRA layers while keep-ing the pre-trained model frozen. The server aggregates the up-loaded LoRA parameters and then distributes them back to all ICPP ’26, September 28–October 1, 2026, Singapore Ma et al. 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 
+
+> Scaling factor
+> 0
+> 5
+> 10
+> 15
+> 20
+> Total time (×10 2s)  Generation
+> Pre-training
+> FedFT
+
+Fig. 2: The effect of different 
+
+𝜆 on total time to reach 70% accuracy on Caltech-101. LoRA depths 246810 12 
+
+> Fine-tuning time (×10s)
+> 20 40 60 80
+> Accuracy (%)
+> 76 78 80 82 84 86 88
+> Rich, powerful Rich, weak Poor, powerful Poor, weak
+
+Fig. 3: The tradeoff between heterogeneity and perfor-mance. 
+
+devices. Most existing LoRA-based FedFT approaches for LVMs [ 33 , 38 ] insert LoRA layers into all transformer layers, causing significant computation overhead. To reduce this burden, a few studies [ 19 , 29 ] insert LoRA only to a subset of layers, enabling more efficient fine-tuning on resource-constrained devices. Futher-more, these works typically address system heterogeneity by as-signing LoRA depths based solely on device capabilities: powerful devices receive deeper LoRA layers, while resource-constrained devices get smaller ones. However, weak devices may play a crit-ical role in FedFT, and assigning them shallow LoRA depths can significantly degrade performance. We conduct a case study with ViT-B/16 fine-tuned on CIFAR-10 [ 17 ] in Fig. 3, which compares accuracy and fine-tuning time across four device types: (i) rich-data/powerful-capability, (ii) rich-data/weak-capability, (iii) poor-data/powerful-capability, and (iv) poor-data/weak-capability. As shown, powerful but data-scarce devices (red line) gain little benefit from deeper LoRA depths, whereas data-rich devices with weak-capability (green line) achieve accuracy comparable to powerful ones (blue line) when given a deeper LoRA, albeit with longer fine-tuning time. These observations highlight a trade-off: It is worth setting a larger LoRA depth for resource-constrained yet critical devices, but these devices may become stragglers that delay the overall FedFT process. To this end, we propose a contribution-aware LoRA configura-tion and bandwidth allocation strategy in FeDiSyn. LoRA depth for each device is determined by its expected performance gain, while bandwidth is allocated to balance device completion times, effectively addressing system heterogeneity. Details are elaborated in Section 5. 
+
+## 3 System Design of FeDiSyn 3.1 Preliminaries 
+
+We consider a 𝐾 -class classification problem performed through FedFT with label space C = {𝑐 1, 𝑐 2, ..., 𝑐 𝐾 }. The system contains a centralized server with relatively abundant computational re-sources and a set of devices V = {𝑣 1, 𝑣 2, ..., 𝑣 𝑁 }. Each device 𝑣 𝑖 owns a local dataset D𝑖 , with size 𝐷 𝑖 = |D 𝑖 |. The global dataset across all devices is represented as D, with size 𝐷 = |D| = Í𝑣 𝑖 ∈ V 𝐷 𝑖 . The data labeled as 𝑐 𝑘 on 𝑣 𝑖 is denoted as D𝑘 𝑖 with size 𝐷 𝑘 𝑖 = |D 𝑘 𝑖 |, and it holds that Í𝑐 𝑘 ∈ C 𝐷 𝑘 𝑖 = 𝐷 𝑖 . The loss function of 𝑣 𝑖 is defined as 
+
+𝑓 𝑖 (w) ≜ 1
+
+> 𝐷 𝑖
+
+∑︁ 𝜉 ∈ D 𝑖 
+
+𝑓 𝑖 (w; 𝜉 ), (1) Device  1  
+
+> VAE
+> Scheduler
+> Latent Variable
+> Encode
+> Feature Extraction
+> Add Noise
+> Label
+> LLM
+> CLIP Text Encode
+> Diffusion
+> Model
+> Text
+> Embedding
+> Prompt
+> Synthetic
+> Images Server
+> ①Synthetic Image Generation
+> Images
+> ②Model Pre -Training
+> Loss
+> Function
+> Global Model
+> Label
+> Predict
+> ③Federated Fine -Tuning
+> ...
+> Pre -Trained Model
+> Parameters
+> LoRA
+> Parameters
+
+Fig. 4: Overview of FeDiSyn. 
+
+where w is the parameter vector, and 𝑓 𝑖 (w; 𝜉 ) is the loss over sample 
+
+𝜉 in D𝑖 . The global loss function on all the distributed datasets is 
+
+𝐹 (w) ≜∑︁ 𝑣 𝑖 ∈ V  
+
+> 𝐷 𝑖
+> 𝐷
+
+𝑓 𝑖 (w). (2) The learning problem is to find the optimal parameter vector w∗ so as to minimize 𝐹 (w), i.e. , w∗ = arg min w 𝐹 (w).
+
+## 3.2 System Overview 
+
+As shown in Fig. 4, the process of FeDiSyn consists of three steps. 
+
+1○ Synthetic image generation: Devices encode private images into low-dimensional latents using a lightweight variational au-toencoder (VAE). These latents are clustered to obtain class-specific centroids and a global average representation, which are then sent to the server with their labels. The server uses an large language model (LLM) to expand labels into diverse text prompts, encodes them via CLIP’s [ 30 ] text encoder, and feeds the resulting embed-dings along with the uploaded latents into a DM ( e.g. , Stable Diffu-sion) to generate synthetic images, where latents govern stylistic features ( e.g. , lighting, texture) and text embeddings condition se-mantics ( e.g. , class-specific details). 2○ Model pre-training: The server pre-trains a global model over synthetic images, yielding an initial model that captures cross-device features for subsequent FedFT. 3○ Federated fine-tuning: The initialized model is sent to devices for LoRA-based fine-tuning under the FedFT framework. Specifically, each device keeps the pre-trained model frozen and updates only LoRA parameters, which are aggregated by the server and redistributed until convergence. The following sections detail each step. 
+
+## 3.3 Synthetic Image Generation 
+
+Data Feature Extraction. To align synthetic images with device-specific styles while preserving privacy, each device 𝑣 𝑖 extracts the features of its raw images locally in the latent space. Specifically, each sample D𝑘 𝑖,𝑗 ∈ D 𝑘 𝑖 of class 𝑐 𝑘 on device 𝑣 𝑖 is encoded by a VAE E to obtain latents 𝑒 𝑘 𝑖,𝑗 = E (D 𝑘 𝑖,𝑗 ). Subsequently, for the same class 𝑐 𝑘 , device 𝑣 𝑖 clusters the latents 𝑒 𝑘 𝑖,𝑗 , ∀𝑗 into 𝑍 cluster centroids 
+
+e𝑘 𝑖,𝑧 , 𝑧 ∈ [ 1, 𝑍 ], and calculate their average representation as e𝑘 𝑖 . e𝑘 𝑖,𝑧 
+
+and e𝑘 𝑖 capture the style characteristics of the device distribution Scaling Synthetic-Image Pre-Training for Federated Fine-Tuning of Large Vision Models ICPP ’26, September 28–October 1, 2026, Singapore 
+
+[ 41 ]. Then the device uses a scheduler to add noise to the encoded latents at a randomly chosen diffusion timestep 𝑠 ∈ { 0, ..., 𝑆 } [ 31 ]as 
+
+¯e𝑘,𝑠 𝑖,𝑧 = √𝛼 𝑠 e𝑘 𝑖,𝑧 + √1 − 𝛼 𝑠 𝜖, 𝜖 ∼ N ( 0, 𝐼 ), 𝑧 ∈ [ 1, 𝑍 ],
+
+¯e𝑘,𝑠 𝑖 = √𝛼 𝑠 e𝑘 𝑖 + √1 − 𝛼 𝑠 𝜖, 𝜖 ∼ N ( 0, 𝐼 ), (3) where 𝛼 𝑠 controls noise intensity at timestep 𝑠 . The device retains the raw data locally and only uploads the cluster centroids ¯e𝑘,𝑆 𝑖,𝑧 , the average representation ¯e𝑘,𝑆 𝑖 , and its class label 𝑐 𝑘 to the server. 
+
+Label Collection and Prompt Engineering. The server col-lects the data volume 𝐷 𝑘 𝑖 labeled as 𝑐 𝑘 of each device 𝑣 𝑖 and cal-culates the total amount of data labeled as 𝑐 𝑘 across all devices by 𝐷 𝑘 = Í𝑣 𝑖 ∈ V 𝐷 𝑘 𝑖 . To enrich semantic variety, a deployed LLM expands each label into multiple descriptive prompts. It has been verified that language enhancement is an effective way for enlarg-ing synthetic image diversity for pre-training [ 9]. For example, for the label “dog”, the prompt can be semantically expanded as follows: Q: Write a sentence using the word “dog” to describe the charac-teristics and actions of the object. A: A golden retriever playing on the grass. These prompts are encoded into text embeddings via CLIP’s text encoder, ensuring semantic alignment between text and image latent spaces. To preserve the real data distribution, the synthetic image size for class 𝑐 𝑘 is set as ˆ𝐷 𝑘 = 𝜆𝐷 𝑘 . 𝜆 is the scaling fac-tor, which is determined according to our proposed scaling law in Section 5. 
+
+Synthetic Image Generated by Diffusion Model. On the server, for each class 𝑐 𝑘 , the received cluster centroids ¯e𝑘,𝑆 𝑖,𝑧 and average representation ¯e𝑘,𝑆 𝑖 are weighted as ¯𝐸 𝑘,𝑆 𝑖,𝑧 = 𝜌 ¯e𝑘,𝑆 𝑖,𝑧 +( 1−𝜌 )¯e𝑘,𝑆 𝑖 ,where 𝜌 is a factor with a value between 0 and 1. Next, each latent 
+
+¯𝐸 𝑘,𝑆 𝑖,𝑧 is paired with a text embedding and fed into a latent DM, where latents guide stylistic consistency and text embeddings enforce data diversity. At each reverse step, a PNDM scheduler [ 20 ] is employed for sampling, iteratively denoising ¯𝐸 𝑘,𝑆 𝑖,𝑧 over 𝑆 steps via 
+
+𝜙 ( ¯𝐸 𝑘,𝑆 𝑖,𝑧 , 𝜖 𝑠 , 𝑠, 𝑠 − 𝛿 ) =
+
+√𝛼 𝑠 −𝛿 
+
+> √𝛼 𝑠
+
+¯𝐸 𝑘,𝑆 𝑖,𝑧 − (𝛼 𝑠 −𝛿 −𝛼 𝑠 )√𝛼 𝑠 
+
+> 
+
+√(1−𝛼 𝑠 −𝛿 )𝛼 𝑠 +√(1−𝛼 𝑠 )𝛼 𝑠 −𝛿  
+
+> 
+
+𝜖 𝑠 ,
+
+(4) where 𝛿 is the step interval, and the gradient term 𝜖 𝑠 is computed using numerical methods such as the Runge-Kutta method or the linear multi-step method. Ultimately, all ¯𝐸 𝑘,𝑆 𝑖,𝑧 , ∀𝑖, 𝑘 undergo a certain number of denoising process to produce synthetic images ˆD with size ˆ𝐷 = Í𝑐 𝑘 ∈ C ˆ𝐷 𝑘 = 𝜆 Í𝑐 𝑘 ∈ C 𝐷 𝑘 at server side. 
+
+Remark 1 (Privacy Analysis) . Transmitting latent representations is a widely used strategy for data augmentation in FL. Considering the limited amount of latent information uploaded by each device, our approach introduces minimal privacy leakage. Furthermore, similar to [41], we generate images using DM from noise-added features. As a result, even when the original images contain sensitive content (e.g., text or faces), the generated images exhibit entirely different semantic details. Therefore, despite potential visual similarities, they do not reveal or compromise the underlying private information. 
+
+## 3.4 Model Pre-Training over Synthetic Image 
+
+With the generated synthetic images ˆD on the server, a global model is pre-trained in a standard supervised fashion. Similar to Eq. ① Global Model Initialization  ③ Local  LoRA  Assignment  
+
+> ④Local Model Fine -Tuning
+
+Device Server   
+
+> ⑤LoRA
+> Aggregation
+> ②LoRA
+> Configuration
+
+Fig. 5: Federated fine-tuning with LoRA. 
+
+(2) , we denote ˆ𝐹 (w) as the loss function over the synthetic images 
+
+ˆD for model parameters w. Starting from an initial parameter vector 
+
+ˆw0, the server performs ˆ𝑇 iterations of model pre-training by 
+
+ˆw𝑡 = ˆw𝑡 −1 − 𝜂 ∇ ˆ𝐹 ( ˆw𝑡 −1), (5) where 𝜂 is the learning rate, and ∇ is the gradient operator. The global model after ˆ𝑇 iterations of pre-training is denoted by w = ˆw ˆ𝑇 ,which acts as the initial model for the subsequent FedFT process. 
+
+## 3.5 Federated Fine-Tuning with LoRA 
+
+After the pre-training model w is obtained, FeDiSyn performs FedFT with LoRA for the LVM through the five phases shown in Fig. 5. 
+
+1○ Global Model Initialization. The server first injects the LoRA layers into the pre-trained model w, i.e. , embedding initial LoRA matrices ew0 = {ew0 
+
+> 𝑙
+
+, ∀𝑙 ∈ [ 0, 𝐿 − 1]} within 𝐿 transformer layers of the neural network. Then the embedded pre-trained model 
+
+w0 = {w, ew0 } is distributed to all devices in V.
+
+2○ LoRA Configuration. Prior studies [ 19 , 44 ] show that insert-ing LoRA into deeper layers yields better fine-tuning performance than shallow layers. Therefore, we define LoRA depth as the number of layers with LoRA modules, counted from the deepest output layer upward. At each round 𝑡 , the server assigns each device 𝑣 𝑖 a depth 
+
+𝑥 𝑡 𝑖 based on its heterogeneous resources, thus only the last 𝑥 𝑡 𝑖 layers 
+
+𝐿 𝑡 𝑖 = {𝑙 |𝐿 − 𝑥 𝑡 𝑖 ≤ 𝑙 < 𝐿 } are fine-tuned. The LoRA configuration strategy for all devices at round 𝑡 is denoted as X𝑡 = {𝑥 𝑡 𝑖 |𝑣 𝑖 ∈ V} ,which will be described in Section 5. 
+
+3○ Local LoRA Assignment. At each round 𝑡 , the server dis-tributes the configuration information X𝑡 and the global LoRA parameters ew𝑡 = {ew𝑡 𝑙 |∀ 𝑙 ∈ [ 0, 𝐿 − 1]} to all devices in V. The 𝑙 -th LoRA layer of device 𝑣 𝑖 ’s local model is assigned as 
+
+ew𝑡 𝑖,𝑙 = ew𝑡 𝑙 . (6) 
+
+4○ Local Model Fine-Tuning. After the local LoRA configura-tion, 𝑣 𝑖 fine-tunes the local model w𝑡 𝑖 = {w, ew𝑡 𝑖 } on its local dataset 
+
+D𝑖 . The update of each LoRA layer ew𝑡 𝑖,𝑙 at round 𝑡 is expressed as 
+
+ew𝑡 +1 
+
+> 𝑖,𝑙
+
+=
+
+(ew𝑡 𝑖,𝑙 − 𝜂 ∇𝑓 𝑖 (ew𝑡 𝑖,𝑙 ), 𝐿 − 𝑥 𝑡 𝑖 ≤ 𝑙 < 𝐿 
+
+ew𝑡 𝑖,𝑙 , otherwise . (7) 
+
+5○ LoRA Aggregation. After local fine-tuning, each device 𝑣 𝑖 
+
+uploads the fine-tuned LoRA parameters ew𝑡 +1 
+
+> 𝑖,𝑙
+
+, 𝐿 − 𝑥 𝑡 𝑖 ≤ 𝑙 < 𝐿 to the server. Upon receiving the updated LoRA parameters from all devices, for each layer 𝑙 , the server aggregates them as 
+
+ew𝑡 +1 
+
+> 𝑙
+
+=
+
+Í𝑣 𝑖 ∈ V [𝑙 ≥ 𝐿 − 𝑥 𝑡 𝑖 ]𝐷 𝑖 ew𝑡 +1
+
+> 𝑖,𝑙
+
+Í𝑣 𝑖 ∈ V [𝑙 ≥ 𝐿 − 𝑥 𝑡 𝑖 ]𝐷 𝑖 
+
+, (8) where [·] is the Iverson notation. As a result, the global LoRA parameters are updated as ew𝑡 +1 = {ew𝑡 +1 
+
+> 𝑙
+
+|∀ 𝑙 ∈ [ 0, 𝐿 − 1]} , and the server configures LoRA for the next round 𝑡 +1. The process repeats until the model converges or reaches satisfactory accuracy. ICPP ’26, September 28–October 1, 2026, Singapore Ma et al. 
+
+## 4 Convergence Analysis 
+
+We make the following assumptions on the loss functions 𝐹 (w) for convergence analysis, which are widely used in prior works [37]. 
+
+Assumption 1 (Lipschitz) . The loss function 𝐹 has a L-Lispschitzian gradient for ∀w1, w2, i.e., ∥∇ 𝐹 (w1) − ∇ 𝐹 (w2)∥ ≤ L∥ w1 − w2 ∥.
+
+Assumption 2 (Gradient Bounded) . The expected squared norm of gradients is uniformly bounded for ∀w𝑡 𝑖 , i.e., E∥∇ 𝐹 (w𝑡 𝑖 )∥ 2 ≤ 𝐺 2.
+
+For LoRA fine-tuning, each LoRA matrix is further decomposed as ew𝑡 𝑖 = B𝑡 𝑖 A𝑡 𝑖 , ∀𝑖, 𝑡 , where B𝑡 𝑖 and A𝑡 𝑖 are low-rank matrices. 
+
+Assumption 3 (LoRA Bounded) . There exist constants 𝐶 A, 𝐶 B > 0,such that ∥A 𝑡 𝑖 ∥2 ≤ 𝐶 A , ∥B 𝑡 𝑖 ∥2 ≤ 𝐶 B .
+
+Based on the above assumptions, we derive the convergence bound of FeDiSyn by the following theorem. 
+
+Theorem 1 (Convergence of FeDiSyn) . After 𝑇 rounds of fine-tuning in FeDiSyn, the expectation of the gradient of the LoRA matrices satisfies 
+
+1
+
+𝑇 𝑁 ∑︁ 
+
+> 𝑇 𝑡 =1
+
+∑︁ 𝑣 𝑖 ∈ V 
+
+ E∥∇ 𝐹 (A 𝑡 𝑖 )∥ 2 + E∥∇ 𝐹 (B 𝑡 𝑖 )∥ 2 
+
+≤ 1
+
+𝑁 ∑︁ 𝑣 𝑖 ∈ V 
+
+E[𝐹 (w0)] − E[𝐹 (w∗ 
+
+> 𝑖
+
+)] 
+
+𝜂𝑇 + 𝜅, (9) 
+
+where w∗ 
+
+> 𝑖
+
+denotes the optimal model on 𝑣 𝑖 , 𝜅 is a constant satisfying 
+
+[𝐺 3𝐶 A𝐶 B + 3L 
+
+> 2
+
+(𝐺 2𝐶 2 
+
+> A
+
++ 𝐺 2𝐶 2 
+
+> B
+
++ 𝜂 2𝐺 4𝐶 2
+
+> A
+
+𝐶 2 
+
+> B
+
+)] 𝜂 + 𝐺 2 
+
+> 2
+
+≤ 𝜅 .
+
+Due to limited space, we omit the proof of Theorem 1 here. 
+
+Remark 2 (LoRA-based FedFT Convergence) . It is noticed that, unlike prior convergence analyses for FedFT [ 19 , 38 ], which typically study the convergence behavior only at the level of the overall model parameter w, our analysis is developed specifically for LoRA-based FedFT and explicitly characterizes the convergence of the two low-rank matrices A and B. As a result, our convergence bound provides a fine-grained theoretical understanding of the training in LoRA-based FedFT, and better reveals how the low-rank decomposition influences convergence. 
+
+## 5 Problem Formulation and Algorithm Description 5.1 Problem Formulation 
+
+The total completion time of FeDiSyn includes the image generation, pre-training, and FedFT time. Let ˆℎ denote the time to generate one image on server, then the total image generation time is expressed as 𝐻 gene = ˆ𝐷 ˆℎ = 𝜆𝐷 ˆℎ. Next, the server pre-trains LVM on synthetic data for ˆ𝑇 rounds, and the pre-training time can be expressed as 
+
+𝐻 pre = 𝜆𝐷 ˜ℎ ˆ𝑇 , where ˜ℎ is the single round training time for one image on server. For FedFT, although deeper LoRA layers improve its performance, practical deployments are constrained by resource limitations such as computation, communication, and memory. Let ℎ𝑖 denote the time for data loading and performing a full forward pass through the LVM on 𝑣 𝑖 per sample, and ℎ𝑖 denote the additional time for backpropagating through per LoRA layer. Since the computation capacity of 𝑣 𝑖 is fixed, both ℎ𝑖 and ℎ𝑖 can be measured in advance. Therefore, the fine-tuning time on device 𝑣 𝑖 at round 𝑡 is given by 
+
+𝐻 𝑡, comp  
+
+> 𝑖
+
+= 𝐷 𝑖 (ℎ𝑖 + 𝑥 𝑡 𝑖 ℎ𝑖 ). The transmission time primarily arises from uploading LoRA parameters via FDMA, which allows simul-taneous transmissions from multiple devices [ 38 ]. Let 𝐵 𝑡 𝑖 denote the bandwidth allocated to 𝑣 𝑖 at round 𝑡 , then the uplink transmis-sion rate 𝑟 𝑡 𝑖 = 𝐵 𝑡 𝑖 log (1 + 𝑝 𝑖 ℎ𝑡 𝑖  
+
+> 𝜎 2
+
+) is modeled by the Shannon capacity, where 𝑝 𝑖 is the transmission power, ℎ𝑡 𝑖 is the channel gain, and 𝜎 2
+
+is the noise power. Therefore, the transmission time for 𝑣 𝑖 at round 
+
+𝑡 is 𝐻 𝑡, comm  
+
+> 𝑖
+
+= 𝜏𝑥 𝑡 𝑖 
+
+> 𝑟 𝑡 𝑖
+
+, where 𝜏 is the parameter size per LoRA layer. The duration of round 𝑡 is determined by the slowest device, i.e. ,
+
+𝐻 𝑡 = max 𝑣 𝑖 ∈ V {𝐻 𝑡, comp  
+
+> 𝑖
+
++ 𝐻 𝑡, comm  
+
+> 𝑖
+
+}. (10) For memory, let 𝑚 denote the fixed memory to load the LVM and store forward activations, and 𝑚 represent the extra memory in-curred by gradient storage per LoRA layer during backpropagation. Then, the total memory overhead for fine-tuning on 𝑣 𝑖 at round 𝑡 is 
+
+𝑚 𝑡 𝑖 = 𝑚 + 𝑥 𝑡 𝑖 𝑚. (11) Let the total completion time 𝐻 = 𝐻 gene + 𝐻 pre + Í𝑇 𝑡 =1 𝐻 𝑡 , we formulate the problem as follows: 
+
+(P1) : min 𝜆, X𝑡 ,B𝑡 𝐻 (12a) 
+
+s.t. 𝐹 (w𝑇 ) − 𝐹 (w∗) ≤ 𝜖 (12b) ∑︁   
+
+> 𝑣 𝑖 ∈ V
+
+𝐵 𝑡 𝑖 ≤ 𝐵 ∀𝑡 ∈ [ 0,𝑇 ] (12c) 
+
+𝑚 𝑡 𝑖 ≤ 𝑀 𝑖 ∀𝑖 ∈ [ 1, 𝑁 ] (12d) Constraint (12b) represents the global model converges after 𝑇 
+
+rounds, where 𝜖 is the convergence threshold. Constraint (12c) ensures the total allocated bandwidth does not exceed the budget 
+
+𝐵 in each round. Constraint (12d) ensures each device 𝑣 𝑖 ’s memory usage does not exceed its available memory 𝑀 𝑖 . Our objective is to decide the data scaling factor 𝜆 , the LoRA depth configuration 
+
+X𝑡 = {𝑥 𝑡 𝑖 |𝑣 𝑖 ∈ V} and bandwidth allocation B𝑡 = {𝐵 𝑡 𝑖 |𝑣 𝑖 ∈ V} for each round, minimizing the total completion time, i.e. , min 𝜆, X𝑡 ,B𝑡 𝐻 .
+
+## 5.2 Algorithm Description 
+
+In this section, we introduce the algorithm description for our FeDiSyn to solve problem P1 , as described in Alg. 1. 
+
+> 1
+
+○ Determining Scaling Factor. The key challenge of solving problem P1 is determining the scaling factor 𝜆 to balance the time required for synthetic image generation/pre-training and FedFT. From Section 5.1, the total time for generation and pre-training is 𝐻 gene + 𝐻 pre = 𝜆𝐷 ˆℎ + 𝜆𝐷 ˜ℎ ˆ𝑇 = 𝜆 ( ˆℎ + ˜ℎ ˆ𝑇 )𝐷 = 𝜆ℎ 0, where ℎ0 ≜
+
+( ˆℎ+ ˜ℎ ˆ𝑇 )𝐷 is defined as the unit time for generation and pre-training. Conversely, empirical analysis across multiple datasets suggests that the subsequent FedFT time is negatively correlated with 𝜆 and grows exponentially with the target accuracy 𝐴𝑐𝑐 . To quantify this relationship, we propose the following scaling law to describe the total completion time as 
+
+𝐻 (𝜆, 𝐴𝑐𝑐 ) = ℎ0𝜆 + 1 
+
+> 𝜅 1𝜆 𝜅 2
+
+𝑒 𝜅 3𝐴𝑐𝑐 + 𝜅 4, (13) where ℎ0𝜆 represents the linear growth of generation and pre-training time, and the remaining terms capture the diminishing returns of synthetic data on FedFT acceleration. The architecture-specific coefficients 𝜅 1-𝜅 4, which depend on the dataset, model and device capacity, can be estimated in a short calibration phase using a set of small-scale pilot runs, detailed in Section 6.2. To Scaling Synthetic-Image Pre-Training for Federated Fine-Tuning of Large Vision Models ICPP ’26, September 28–October 1, 2026, Singapore 
+
+Algorithm 1 Diffusion Model-Driven Synthetic Image Pre-Training for Federated Fine-Tuning (FeDiSyn) 
+
+Input: Data volume 𝐷 𝑖 , available memory 𝑀 𝑖 , bandwidth budget 
+
+𝐵  
+
+> 1:
+
+/* Step 1. Determining Scaling Factor. */  
+
+> 2:
+
+Conduct a set of small-scale experiments to measure 𝐻 (𝜆, 𝐴𝑐𝑐 ) 
+
+> 3:
+
+Fit coefficients 𝜅 1-𝜅 4 using nonlinear least squares method  
+
+> 4:
+
+Obtain optimal scaling factor 𝜆 ∗ = 𝜅 2+1√︃ 𝜅 2𝑒 𝜅 3𝐴𝑐𝑐  
+
+> ℎ0𝜅 1
+> 5:
+
+/* Step 2. Generating Synthetic Images and Pre-training. */  
+
+> 6:
+
+Obtain the centroids e𝑘 𝑖,𝑧 and average representation e𝑘 𝑖 on 𝑣 𝑖  
+
+> 7:
+
+Devices upload noisy latents ¯e𝑘,𝑠 𝑖,𝑧 , ¯e𝑘,𝑠 𝑖 and labels of each 𝑐 𝑘  
+
+> 8:
+
+Server expands the labels C into prompts  
+
+> 9:
+
+Server performs image generation with 𝜆 ∗ yields ˆD 
+
+> 10:
+
+Pre-train LVM over ˆD and distribute LoRA-inserted models  
+
+> 11:
+
+/* Step 3. Federated Fine-tuning. */  
+
+> 12:
+
+for each 𝑡 ∈ 𝑇 do  
+
+> 13:
+
+/* Contribution-aware LoRA configuration and bandwidth al-location algorithm (CLCBA). */  
+
+> 14:
+
+for each 𝑣 𝑖 ∈ V do  
+
+> 15:
+
+𝑥 𝑡 𝑖 ← 1 , 𝑥 max  
+
+> 𝑖
+
+← min (⌊( 𝑀 𝑖 − 𝑚 )/ 𝑚 }⌋ , 𝐿 ) 
+
+> 16:
+
+𝑅 𝑡  
+
+> max
+
+← 0 
+
+> 17:
+
+while true do  
+
+> 18:
+
+for each 𝑣 𝑖 ∈ V do  
+
+> 19:
+
+if 𝑥 𝑡 𝑖 < 𝑥 max  
+
+> 𝑖
+
+then  
+
+> 20:
+
+𝑥 𝑡 𝑖 ← 𝑥 𝑡 𝑖 + 1 
+
+> 21:
+
+Obtain B𝑡 under X𝑡 by water-filling based bandwidth allocation sub-algorithm (WFBA, Alg. 2)  
+
+> 22:
+
+Calculate completion time 𝐻 𝑡 by Eq. (10)  
+
+> 23:
+
+Calculate performance gain 𝑅 𝑡 by Eq. (14)  
+
+> 24:
+
+Δ𝑅 𝑡 𝑖 ← 𝑅 𝑡 − 𝑅 𝑡 
+
+> max
+
+, 𝑥 𝑡 𝑖 ← 𝑥 𝑡 𝑖 − 1 
+
+> 25:
+
+if ∃Δ𝑅 𝑡 𝑖 > 0 then  
+
+> 26:
+
+𝑖 ← argmax 𝑣 𝑖 ∈ V Δ𝑅 𝑡 𝑖 , 𝑅 𝑡  
+
+> max
+
+← 𝑅 𝑡  
+
+> max
+
++ Δ𝑅 𝑡 𝑖 , 𝑥 𝑡 𝑖 ← 𝑥 𝑡 𝑖 + 1 
+
+> 27:
+
+else  
+
+> 28:
+
+break  
+
+> 29:
+
+Obtain B𝑡 under X𝑡 by Alg. 2  
+
+> 30:
+
+After LoRA assignment, devices perform local fine-tuning  
+
+> 31:
+
+Server aggregates the LoRA matrices uploaded by devices  
+
+> 32:
+
+return The fine-tuned model w𝑇 
+
+find the optimal scaling factor 𝜆 ∗ that minimizes the total training time, we take the derivative of Eq. (13) with respect to 𝜆 as 𝐻 ′ 
+
+> 𝜆
+
+=
+
+ℎ0 − 𝜅 2 
+
+> 𝜅 1𝜆 𝜅 2+1
+
+𝑒 𝜅 3𝐴𝑐𝑐 . Taking 𝐻 ′ 
+
+> 𝜆
+
+= 0 yields the optimal scaling factor 
+
+𝜆 ∗ = 𝜅 2+1√︃ 𝜅 2𝑒 𝜅 3𝐴𝑐𝑐  
+
+> ℎ0𝜅 1
+
+. We derive the following key insights regarding 
+
+𝜆 ∗.
+
+Remark 3 (Impact of Server Capability) . As the server’s compu-tational capacity increases ( ℎ0 → 0), the optimal scaling factor 𝜆 ∗
+
+grows. When the server possesses plenty of computational capacity, it can rapidly generate a vast synthetic images. As a result, a larger 𝜆 
+
+accelerates FedFT without incurring a significant generation time. 
+
+Remark 4 (Impact of Target Accuracy) . The presence of 𝐴𝑐𝑐 in the exponent, 𝜆 ∗ ∝ 𝑒   
+
+> 𝜅 3
+> 𝜅 2+1𝐴𝑐𝑐
+
+, reveals that the demand for synthetic data grows exponentially with the target accuracy. For low-accuracy 
+
+Algorithm 2 Water-Filling based Bandwidth Allocation (WFBA) 
+
+Input: Bandwidth budget 𝐵 , depth configuration X𝑡 , transmission power 𝑝 𝑖 , and channel gain ℎ𝑡 𝑖 
+
+Output: Optimal bandwidth allocation B𝑡  
+
+> 1:
+
+for 𝑖 ← 1 to 𝑁 do  
+
+> 2:
+
+Calculate 𝐻 𝑡, comp  
+
+> 𝑖
+
+← 𝐷 𝑖 (ℎ𝑖 + 𝑥 𝑡 𝑖 ℎ𝑖 ) 
+
+> 3:
+
+𝛾 𝑡 𝑖 ← 𝜏𝑥 𝑡 𝑖 /log (1 + 𝑝 𝑖 ℎ𝑡 𝑖  
+
+> 𝜎 2
+
+) 
+
+> 4:
+
+𝐻 𝑡, comp max ← max 𝑖 𝐻 𝑡, comp  
+
+> 𝑖
+> 5:
+
+𝑞 ← 0, H𝑡 𝑞 ← 2𝐻 𝑡, comp max  
+
+> 6:
+
+while |Δ𝐻 𝑡 | > 𝜁 do  
+
+> 7:
+
+Φ(H 𝑡 𝑞 ) = Í𝑁 𝑖 =1 
+
+> 𝛾 𝑡 𝑖
+> H𝑡 𝑞 −𝐻 𝑡, comp
+> 𝑖
+
+− 𝐵  
+
+> 8:
+
+H𝑡 𝑞 +1 = H𝑡 𝑞 − Φ( H 𝑡 𝑞 )   
+
+> Φ′( H 𝑡 𝑞 )
+> 9:
+
+Δ𝐻 𝑡 ← H 𝑡 𝑞 +1 − H 𝑡 𝑞  
+
+> 10:
+
+𝑞 ← 𝑞 + 1 
+
+> 11:
+
+for 𝑖 ← 1 to 𝑁 do  
+
+> 12:
+
+𝐵 𝑡 𝑖 ← 𝛾 𝑡 𝑖 /(H 𝑡 𝑞 − 𝐻 𝑡, comp  
+
+> 𝑖
+
+) 
+
+> 13:
+
+return B𝑡 
+
+requirements, the overhead of large-scale synthesis outweighs its ben-efits. However, for high-accuracy requirements, the FedFT time in-creases so sharply that a massive synthetic pre-training for model initialization becomes essential to reduce the total training time. 
+
+2○ Generating Synthetic Images and Pre-Training. 
+
+After the optimal 𝜆 ∗ is determined, the server generates a corre-sponding number of synthetic images (Alg. 1, Lines 6-9) and pre-trains the LVM on the generated images dataset, then distributes LoRA-inserted model to devices (Alg. 1, Lines 10), as described in Section 3.3 and 3.4. 
+
+3○ Federated Fine-Tuning. The main idea of FedFT is to de-termine the LoRA configuration X𝑡 to maximize the performance gain, while balancing completion times across devices through a bandwidth allocation strategy B𝑡 . To handle device heterogene-ity in FedFT, we design a contribution-aware LoRA configuration and bandwidth allocation (CLCBA) algorithm (Alg. 1, Lines 12-31). Since the local gradient 𝑔 𝑖 (ew𝑡 𝑖,𝑙 ) = ∇𝑓 𝑖 (ew𝑡 𝑖,𝑙 ) captures the contribu-tion of 𝑙 -th layer to the loss function [ 18 , 35 ], we use the L2 norm 
+
+𝐺 𝑡 𝑖 = Í𝑙 ∈𝐿 𝑡 𝑖 || 𝑔 𝑖 (ew𝑡 −1 
+
+> 𝑖,𝑙
+
+)|| 22 of the last round 𝑡 − 1 to quantify the contribution of 𝑣 𝑖 at round 𝑡 . The performance gain is defined as the sum of all devices’ contributions divided by current round’s duration 
+
+𝑅 𝑡 ≜   
+
+> Í𝑣 𝑖 ∈V 𝐺 𝑡 𝑖
+> 𝐻 𝑡
+
+=        
+
+> Í𝑣 𝑖 ∈V
+> Í
+> 𝑙 ∈𝐿 𝑡 𝑖 | | 𝑔 𝑖 (ew𝑡 −1
+> 𝑖,𝑙 ) | | 22
+> 𝐻 𝑡
+
+. (14) We first initialize the depths of all devices as 1, i.e. , set 𝑥 𝑡 𝑖 = 1
+
+for all 𝑣 𝑖 ∈ V (Line 15). In each iteration, we choose a device that obtains the maximum performance gain among all devices to add one LoRA layer. This process continues until the maximum perfor-mance gain is less than its value in the last iteration (Alg. 1, Line 17-28). Meanwhile, in each iteration of the process of Alg. 1, we call the water-filling based bandwidth allocation sub-algorithm (WFBA) to balance completion times across devices, which minimizes the completion time 𝐻 𝑡 in Eq. (14). The WFBA sub-algorithm is shown in Alg. 2. First, WFBA calcu-lates the maximum computation time 𝐻 𝑡, comp max of all devices (Alg. 2, ICPP ’26, September 28–October 1, 2026, Singapore Ma et al. …
+
+Computation time at depth  𝑥 𝑖  
+
+> 𝑡
+
+Communication time 
+
+Computation time after depth increase to  𝑥 𝑖  
+
+> 𝑡
+
++ 1                           
+
+> 𝐻 𝑡
+> 11111
+> 12345
+> 21111211121
+> 073681
+> 07468
+
+# ×                           
+
+> 𝑅 𝑡 =0.0015 𝑅 𝑡 =0.0026 𝑅 𝑡 =0.0034
+> 𝑅 𝑡 =0.0102 𝑅 𝑡 =0.0097
+> 12345123451234512345
+
+Fig. 6: An example of CLCBA. Initially, devices 𝑣 1 −𝑣 5 have 𝑥 𝑡 𝑖 = 1.In the first iteration, increasing the depth of 𝑣 1 yields 𝑅 𝑡 = 0.0026, and further increasing 𝑣 5’s depth raises 𝑅 𝑡 to 0.0034. This continues until the maximum 𝑅 𝑡 = 0.0102. Further increasing the depth of other devices will decrease 𝑅 𝑡 to 0.0097, so CLCBA terminates and returns the LoRA configuration X𝑡 . In this process, WFBA is invoked to obtain B𝑡 , balancing the completion time of all devices. Lines 1-4). Since the waterline must exceed the maximum computa-tion time 𝐻 𝑡, comp max , WFBA initializes the waterline as H𝑡  
+
+> 0
+
+= 2𝐻 𝑡, comp max 
+
+and iteratively solve its optimal value using Newton’s method [ 25 ](Alg. 2, Lines 5-10). Finally, WFBA calculates the optimal bandwidth allocation 𝐵 𝑡 𝑖 for each device 𝑣 𝑖 based on the converged waterline and returns the bandwidth configuration B𝑡 (Alg. 2, Lines 11-13). The intuitive diagram of CLCBA to obtain X𝑡 and B𝑡 are shown in Fig. 6. 
+
+## 6 Performance Evaluation 6.1 System Setup 
+
+Environment Settings. We implement a FedFT experimental testbed comprising one server and 10 heterogeneous devices, as shown in Fig. 7. The server is equipped with an NVIDIA GeForce RTX 4090 GPU with 48GB GDDR6X. We use 1 Jetson AGX Xavier kit, 5 Jetson Orin NX kits, 3 Jetson AGX Orin kits, and 1 Jetson AGX Thor kit as heterogeneous devices. Particularly, we simulate more practical wireless communication in an edge environment instead of high-bandwidth laboratory networks, where communication time is typically negligible compared to computation time. Similar to [ 38 ], the server is at (0, 0), and each device is uniformly distributed within a circular area of 50 meters radius centered at coordinates 
+
+(300 , 0). The large-scale fading is represented as (𝑑 /𝑑 0)−3.5, where 
+
+𝑑 0 = 10 meters is the reference distance. The noise power is set as 
+
+𝜎 2 = 10 −11 W, with a total system bandwidth of 𝐵 = 10 MHz. Devices  Server 
+
+Fig. 7: Hardware devices of our testbed. Models and Datasets. We train ViT-B/16 [ 5] on CIFAR-10 [ 17 ]and Caltech-101 [ 7 ] datasets, and train ViT-L/16 [ 5] on Food-101 0 4 8 12        
+
+> Time (×10 3s)
+> 0
+> 25
+> 50
+> 75
+> Accuracy (%)
+> FeDiSyn CAFF SFLF FGL GPT-FL 0510 15 20
+> Time (×10 2s)
+> 0
+> 25
+> 50
+> 75
+> Accuracy (%)
+> FeDiSyn CAFF SFLF FGL GPT-FL 015 30 45
+> Time (×10 3s)
+> 0
+> 25
+> 50
+> 75
+> Accuracy (%)
+> FeDiSyn CAFF SFLF FGL GPT-FL
+
+Fig. 8: The test accuracy over different datasets (IID). Left :CIFAR-10; Middle : Caltech-101; Right : Food-101. 
+
+[ 1] dataset. ViT-B/16 and ViT-L/16 consist of 86 and 307 million parameters, respectively. 
+
+• CIFAR-10 [ 17 ] is composed of 60,000 color images, which are divided into 10 classes, each containing 6,000 images. The dataset is further split into 50,000 training images and 10,000 test images. 
+
+• Caltech-101 [ 7 ] comprises 101 classes objects, totaling 9,144 samples. The number of samples per category ranges from 40 to 800 images, with each category averaging approximately 50 samples. We divide it into a 4:1 training-test split ratio. 
+
+• Food-101 [ 1] contains a series of food datasets divided into 101 classes with high inter-class similarity. It comprises 101,000 samples, with each class including 750 training and 250 test samples. We analyze FedFT performance under both IID and non-IID data among devices. For the non-IID data case, we adopt the Dirichlet distribution [ 10 ] with 𝛼 dir = 0.3 to partition the dataset. In addi-tion, we deploy the LLaMa-7B [ 36 ] to enrich prompts and Stable-Diffusion-v1-5 [ 31 ] to generate synthetic images as described in Section 3.3. 
+
+Benchmarks. We compare FeDiSyn against two solutions with synthetic image pre-training (GPT-FL [ 45 ], FGL [ 43 ]) and two solu-tions deploying LoRA-based FedFT (SFLF [ 38 ], CAFF [ 29 ]). Specifi-cally, GPT-FL and FGL generate images based on uploaded labels or text embeddings from devices, while SFLF and CAFF determine each device’s LoRA depth based on its capacity. For a fair comparison, FeDiSyn, SFLF, and CAFF adopt the same LoRA rank. 
+
+• GPT-FL[ 45 ] is a synthetic image pre-training based approach that expands device-uploaded labels into prompts and generates images for pre-training LVM, while using FedAvg [ 24 ] for FedFT. 
+
+• FGL[ 43 ] is a synthetic image pre-training based approach where devices use BLIP to generate prompts for local images, and the server employs these prompts to generate images for pre-training LVM, while utilizing FedAvg for FedFT. 
+
+• SFLF[ 38 ] is a LoRA-based approach for FedFT, where the LVM is initialized with ImageNet parameters, and all devices fine-tune all transformer layers of the LVM. 
+
+• CAFF[ 29 ] is an advanced LoRA-based approach that initializes LVM with ImageNet parameters, and assigns appropriate LoRA depths to each device to address system heterogeneity. 
+
+## 6.2 Evaluation Results 
+
+Training Performance. We evaluate the FedFT process of our FeDiSyn method and the benchmarks on the CIFAR-10, Caltech-101 and Food-101 datasets under both IID and non-IID data dis-tributions, as illustrated in Figs. 8 and 9. Overall, FeDiSyn consis-tently achieves the fastest convergence and highest accuracy on all datasets under both IID and non-IID data. For example, as shown in the third plot of Fig. 8, under IID data on Food-101, FeDiSyn reaches Scaling Synthetic-Image Pre-Training for Federated Fine-Tuning of Large Vision Models ICPP ’26, September 28–October 1, 2026, Singapore 0 5 10 15        
+
+> Time (×10 3s)
+> 0
+> 25
+> 50
+> 75
+> Accuracy (%)
+> FeDiSyn CAFF SFLF FGL GPT-FL 0510 15 20
+> Time (×10 2s)
+> 0
+> 25
+> 50
+> 75
+> Accuracy (%)
+> FeDiSyn CAFF SFLF FGL GPT-FL 020 40 60
+> Time (×10 3s)
+> 0
+> 25
+> 50
+> 75
+> Accuracy (%)
+> FeDiSyn CAFF SFLF FGL GPT-FL
+
+Fig. 9: The test accuracy over different datasets (non-IID). 
+
+Left : CIFAR-10; Middle : Caltech-101; Right : Food-101. 0 25 50 75       
+
+> Accuracy (%)
+> 0
+> 50
+> 100
+> 150
+> Network traffic (MB)
+> FeDiSyn CAFF SFLF FGL GPT-FL 025 50 75
+> Accuracy (%)
+> 0
+> 100
+> 200
+> 300
+> Network traffic (MB)
+> FeDiSyn CAFF SFLF FGL GPT-FL 025 50 75
+> Accuracy (%)
+> 0
+> 100
+> 200
+> 300
+> 400
+> 500
+> Network traffic (MB)
+> FeDiSyn CAFF SFLF FGL GPT-FL
+
+Fig. 10: The network traffic over different datasets (IID). Left :CIFAR-10; Middle : Caltech-101; Right : Food-101. 0 25 50 75       
+
+> Accuracy (%)
+> 0
+> 50
+> 100
+> 150
+> Network traffic (MB)
+> FeDiSyn CAFF SFLF FGL GPT-FL 025 50 75
+> Accuracy (%)
+> 0
+> 100
+> 200
+> 300
+> Network traffic (MB)
+> FeDiSyn CAFF SFLF FGL GPT-FL 020 40 60
+> Accuracy (%)
+> 0
+> 100
+> 200
+> 300
+> 400
+> 500
+> Network traffic (MB)
+> FeDiSyn CAFF SFLF FGL GPT-FL
+
+Fig. 11: The network traffic over different datasets (non-IID). 
+
+Left : CIFAR-10; Middle : Caltech-101; Right : Food-101. 
+
+80% accuracy in 17,584s, while CAFF, SFLF, FGL, and GPT-FL re-quire 31,905s, 41,885s, 44,783s, and 45,383s, respectively, meaning FeDiSyn reduces 44.9%, 58.0%, 60.7%, and 61.3% completion time compared to these benchmarks. Moreover, under non-IID data, FeDiSyn’s advantage becomes even more pronounced compared to other solutions. As shown in the third plot of Fig. 9, under non-IID data, FeDiSyn reduces 62.0%, 70.5%, 52.5%, and 56.2% time for reaching 65% accuracy compared to CAFF, SFLF, FGL, and GPT-FL, respectively. This is because FeDiSyn pre-training over synthetic images that enhances the generalization ability of initial model, alleviating the impact of non-IID data [12]. 
+
+Network Traffic Consumption. In Fig. 10 and 11, we compare the network traffic consumption by different solutions to achieve certain accuracies on CIFAR-10 Caltech-101 and Food-101, respec-tively. By the results, FeDiSyn significantly reduces the network traffic compared with the benchmarks. For example, under non-IID data on Food-101, the consumed network traffic of FeDiSyn, CAFF, SFLF, FGL, and GPT-FL is 7.4MB, 262.1MB, 399.5MB, 12,002.8MB, and 13,676.3MB, respectively. FeDiSyn can reduce network traffic by 97.2%, 98.1%, 99.9%, and 99.9% compared with these methods. Compared with the LoRA-based methods CAFF and SFLF, FeDiSyn adopts a more efficient LoRA configuration strategy, thereby reduc-ing network traffic when achieving the target accuracy. In addition, FGL and GPT-FL rely on full parameter FedFT, which incurs ex-tremely high communication overhead. The complete experimental results of FedFT performance and network traffic consumption are provided in Table 2. 
+
+Impact of Synthetic Image Volume. To estimate the values of coefficients 𝜅 1 − 𝜅 4 in Eq. (13) , we fit this equation in a short calibration phase using a set of small values of 𝜆 via nonlinear least-squares ( e.g. , Levenberg-Marquardt method). Fig. 12 shows that Eq. (13) well describes the relationship among total training 
+
+Table 2: The fine-tuning time ( 10 2s) and network traffic (MB) to reach target accuracy. 
+
+Dataset Metric GPT-FL FGL SFLF CAFF FeDiSyn 
+
+CIFAR-10 (IID, 85%) Time 232.5 220.3 103.5 73.3 55.1 
+
+Traffic 23243.5 21798.8 172.7 99.8 50.3 
+
+CIFAR-10 (Non-IID, 80%) Time 348.6 341.3 203.7 161.1 92.3 
+
+Traffic 31051.5 29840.5 254.0 146.0 93.5 
+
+Caltech-101 (IID, 70%) Time 113.7 96.4 14.6 10.3 6.8 
+
+Traffic 14547.6 12198.6 226.2 150.1 15.7 
+
+Caltech-101 (Non-IID, 65%) Time 147.5 116.7 18.9 14.5 6.3 
+
+Traffic 18564.2 14755.1 279.5 177.8 10.1 
+
+Food-101 (IID, 80%) Time 453.8 447.8 418.9 319.1 175.8 
+
+Traffic 30763.4 30375.9 457.3 290.1 42.5 
+
+Food-101 (Non-IID, 65%) Time 284.9 262.2 423.1 328.4 124.7 
+
+Traffic 13676.3 12002.8 399.5 262.1 7.4 20 30 40 50                           
+
+> Accuracy (%)
+> 0
+> 2
+> 4
+> 6
+> 8
+> Time (×10 2s)
+> 1= 2.452, 2= 2.025,
+> 3= 0.191, 4= 0.471
+> =0.005
+> =0.01
+> =0.015
+> =0.02 10 20 30 40
+> Accuracy (%)
+> 0
+> 1
+> 2
+> 3
+> Time (×10 2s)
+> 1= 8.780, 2= 1.743,
+> 3= 0.159, 4= 0.748
+> =0.025
+> =0.05
+> =0.075
+> =0.1 35 40 45 50 55
+> Accuracy (%)
+> 0
+> 2
+> 4
+> 6
+> Time (×10 2s)
+> 1= 2.083, 2= 0.576,
+> 3= 0.445, 4=0.017
+> =0.005
+> =0.01
+> =0.015
+> =0.02
+
+Fig. 12: Fitting Eq. (13) with small 𝜆 . Left : CIFAR-10; Middle :Caltech-101; Right : Food-101. 0.5 1.0 1.5 2.0             
+
+> Scaling factor /*
+> 0
+> 3
+> 6
+> 9
+> Time (×10 3s)  Generation Pre-training FedFT 0.5 1.0 1.5 2.0
+> Scaling factor /*
+> 0
+> 5
+> 10
+> 15
+> 20
+> Time (×10 2s)  Generation Pre-training FedFT 0.5 1.0 1.5 2.0
+> Scaling factor /*
+> 0
+> 10
+> 20
+> 30
+> 40
+> Time (×10 3s)  Generation Pre-training FedFT
+
+Fig. 13: The time to reach target accuracy under different scaling factor 𝜆 . Left : CIFAR-10 (85%); Middle : Caltech-101 (70%); Right : Food-101 (75%). 
+
+time, accuracy and the volume of generated data. Then we obtain the optimal 𝜆 ∗ = 𝜅 2+1√︃ 𝜅 2𝑒 𝜅 3𝐴𝑐𝑐 
+
+ℎ0𝜅 1 by the estimated coefficients. Fig. 13 shows the time to reach target accuracy under different scaling factor 𝜆 = 0.5𝜆 ∗, 𝜆 ∗, 1.5𝜆 ∗ and 2𝜆 ∗ on CIFAR-10, Caltech-101 and Food-101. 𝐴𝑐𝑐 is set as 85%, 70% and 80% for CIFAR-10, Caltech-101 and Food-101, respectively. We observe that the generation and pre-training time increase linearly with 𝜆 . For example, for Food-101, the generation times are 5,050s, 10,100s, 15,150s, and 20,200s for 
+
+𝜆 = 0.5𝜆 ∗, 𝜆 ∗, 1.5𝜆 ∗, and 2𝜆 ∗, respectively. However, when the value of 𝜆 is too large or too small, the total completion time to achieve the target accuracy will be relatively long. For example, for Food-101, when 𝜆 increases from 0.5𝜆 ∗ to 2𝜆 ∗, the time required to achieve 80% accuracy is 36,351.0s, 17,583.9s, 22,671.1s, and 27,943.9s, re-spectively. This is because insufficiently generated images weaken pre-training effectiveness for FedFT, whereas excessive images in-troduce substantial computational overhead, thereby prolonging image generation. The experimental results in Figs. 12-13 show that the values of 𝜆 ∗ obtained by the empirical model have the shortest completion time compared to other values. 
+
+Ablation Study. FeDiSyn comprises two primary modules: 1) a feature-guided (FG) synthetic generation module with a diffusion model (DM), 2) a LoRA-based FedFT module deploying contribution-aware LoRA configuration (CLC) and water-filling bandwidth al-location (WFBA). We conduct fine-grained ablation experiments ICPP ’26, September 28–October 1, 2026, Singapore Ma et al. 0 4 8 12        
+
+> Time (×10 3s)
+> 40
+> 60
+> 80
+> Accuracy (%)
+> FeDiSyn FeDiSyn w/o FG FeDiSyn w/o DM FeDiSyn w/o CLC FeDiSyn w/o WFBA 5913 17
+> Time (×10 2s)
+> 20
+> 40
+> 60
+> 80
+> Accuracy (%)
+> FeDiSyn FeDiSyn w/o FG FeDiSyn w/o DM FeDiSyn w/o CLC FeDiSyn w/o WFBA 10 20 30 40 50
+> Time (×10 3s)
+> 30
+> 50
+> 70
+> Accuracy (%)
+> FeDiSyn FeDiSyn w/o FG FeDiSyn w/o DM FeDiSyn w/o CLC FeDiSyn w/o WFBA
+
+Fig. 14: Ablation study on accuracy. Left : CIFAR-10; Middle :Caltech-101; Right : Food-101. 40 60 80       
+
+> Accuracy (%)
+> 0
+> 50
+> 100
+> 150
+> Network traffic (MB)
+> FeDiSyn FeDiSyn w/o FG FeDiSyn w/o DM FeDiSyn w/o CLC FeDiSyn w/o WFBA 20 40 60 80
+> Accuracy (%)
+> 0
+> 50
+> 100
+> 150
+> 200
+> Network traffic (MB)
+> FeDiSyn FeDiSyn w/o FG FeDiSyn w/o DM FeDiSyn w/o CLC FeDiSyn w/o WFBA 20 40 60 80
+> Accuracy (%)
+> 0
+> 100
+> 200
+> 300
+> 400
+> Network traffic (MB)
+> FeDiSyn FeDiSyn w/o FG FeDiSyn w/o DM FeDiSyn w/o CLC FeDiSyn w/o WFBA
+
+Fig. 15: Ablation study on Bandwidth. Left : CIFAR-10; Middle :Caltech-101; Right : Food-101. 
+
+on CIFAR-10, Caltech-101, and Food-101 in Figs. 14 and 15 to evaluate the individual contribution of each sub-module. FeDiSyn consistently outperforms all variants, including those without FG, CLC, WFBA, or those utilizing GANs instead of DMs. For example, on CIFAR-10, FeDiSyn achieves 74% accuracy with 42.4%, 61.4%, 22.8%, and 41.7% time reduction and reduces network traffic usage by 47.0%, 65.6%, 12.5%, and 51.7%, compared to FeDiSyn w/o FG, FeDiSyn w/o DM, FeDiSyn w/o CLC, and FeDiSyn w/o WFBA, re-spectively. We also observe that the relative importance of synthetic pre-training grows with model scale. For example, for ViT-B/16 training on CIFAR-10 and Caltech-101, the performance gaps among different variants are relatively small, but for ViT-L/16 training on Food-101, FeDiSyn w/o CLC and w/o WFBA significantly outper-form FeDiSyn w/o FG and w/o DM, even approaching the perfor-mance of FeDiSyn. This is because larger models possess a higher degree of representational complexity, making a high-quality pre-training for initialization far more critical than fine-tuning stage. 
+
+## 7 Conclusion 
+
+In this paper, we propose FeDiSyn, a unified framework that holisti-cally considers both pre-training and federated fine-tuning (FedFT) of large vision models to address resource constraints, system het-erogeneity, and non-IID data. FeDiSyn introduces a scaling law for synthetic pre-training under FedFT setting to determine the optimal number of synthetic images. A diffusion model is deployed on the server to generate synthetic images that align with the device’s local image label and feature distributions, thereby efficiently pre-training a superior initial global model for FedFT. During FedFT, we design a contribution-aware LoRA configuration and bandwidth al-location algorithm to enhance FedFT performance while addressing system heterogeneity. Experimental results indicate the superiority of our proposed framework compared with state-of-the-art solu-tions. 
+
+## Acknowledgments 
+
+The corresponding author of this paper is Junlong Zhou. This work was supported in part by the National Science Foundation of China (NSFC) under Grants 62402537, 62572244, 62402226 and U25A20442, in part by the Natural Science Foundation of Jiangsu Province under Grant BK20241453, and in part by the Fundamental Research Funds for the Central Universities under Grant 30925010408. 
+
+## References 
+
+[1] Lukas Bossard, Matthieu Guillaumin, and Luc Van Gool. 2014. Food-101 – Mining Discriminative Components with Random Forests. In European conference on computer vision . 446–461. [2] Huancheng Chen and Haris Vikalo. 2024. Heterogeneity-guided client sam-pling: Towards fast and efficient non-iid federated learning. Advances in Neural Information Processing Systems 37 (2024), 65525–65561. [3] Hong-You Chen, Cheng-Hao Tu, Ziwei Li, Han Wei Shen, and Wei-Lun Chao. 2023. On the Importance and Applicability of Pre-Training for Federated Learning. 
+
+International Conference on Learning Representations .[4] Jia Deng, Wei Dong, Richard Socher, Li-Jia Li, Kai Li, and Li Fei-Fei. 2009. Imagenet: A large-scale hierarchical image database. In 2009 IEEE conference on computer vision and pattern recognition . 248–255. [5] Alexey Dosovitskiy, Lucas Beyer, Alexander Kolesnikov, Dirk Weissenborn, Xi-aohua Zhai, Thomas Unterthiner, Mostafa Dehghani, Matthias Minderer, Georg Heigold, Sylvain Gelly, Jakob Uszkoreit, and Neil Houlsby. 2021. An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale. International Conference on Learning Representations (ICLR) (2021). [6] Lijie Fan, Kaifeng Chen, Dilip Krishnan, Dina Katabi, Phillip Isola, and Yonglong Tian. 2024. Scaling laws of synthetic images for model training... for now. In 
+
+Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition .7382–7392. [7] Li Fei-Fei, Rob Fergus, and Pietro Perona. 2004. Learning Generative Visual Models from Few Training Examples: An Incremental Bayesian Approach Tested on 101 Object Categories. Computer Vision and Pattern Recognition Workshop 
+
+(2004). [8] Tao Guo, Song Guo, and Junxiao Wang. 2024. Explore and Cure: Unveiling Sample Effectiveness With Context-Aware Federated Prompt Tuning. IEEE Transactions on Mobile Computing 23, 12 (2024), 14044–14054. [9] Ruifei He, Shuyang Sun, Xin Yu, Chuhui Xue, Wenqing Zhang, Philip Torr, Song Bai, and Xiaojuan Qi. 2023. Is synthetic data from generative models ready for image recognition? International Conference on Learning Representations (ICLR) 
+
+(2023). [10] Tzu-Ming Harry Hsu, Hang Qi, and Matthew Brown. 2019. Measuring the Effects of Non-Identical Data Distribution for Federated Visual Classification. arXiv preprint arXiv:1909.06335 (2019). [11] Edward J Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang, Weizhu Chen, et al . 2022. Lora: Low-rank adaptation of large language models. International Conference on Learning Representations (ICLR) 1, 2 (2022), 3. [12] Divyansh Jhunjhunwala, Pranay Sharma, Zheng Xu, and Gauri Joshi. 2025. Ini-tialization Matters: Unraveling the Impact of Pre-Training on Federated Learning. 
+
+arXiv preprint arXiv:2502.08024 (2025). [13] Feiyang Kang, Newsha Ardalani, Michael Kuchnik, Youssef Emad, Mostafa El-houshi, Shubhabrata Sengupta, Shang-Wen Li, Ramya Raghavendra, Ruoxi Jia, and Carole-Jean Wu. 2025. Demystifying Synthetic Data in LLM Pre-training: A Systematic Study of Scaling Laws, Benefits, and Pitfalls. In Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing . Association for Computational Linguistics, 10739–10758. [14] Jared Kaplan, Sam McCandlish, Tom Henighan, Tom B. Brown, Benjamin Chess, Rewon Child, Scott Gray, Alec Radford, Jeffrey Wu, and Dario Amodei. 2020. Scaling Laws for Neural Language Models. arXiv:2001.08361 [15] Sai Praneeth Karimireddy, Martin Jaggi, Satyen Kale, Mehryar Mohri, Sashank Reddi, Sebastian U Stich, and Ananda Theertha Suresh. 2021. Breaking the central-ized barrier for cross-device federated learning. Advances in Neural Information Processing Systems 34 (2021), 28663–28676. [16] Alex Krizhevsky et al . 2012. Imagenet classification with deep convolutional neural networks. Advances in neural information processing systems 25 (2012). [17] Alex Krizhevsky, Geoffrey Hinton, et al . 2009. Learning multiple layers of features from tiny images . Citeseer. [18] Rukuo Li, Jianchun Liu, Hongli Xu, and Liusheng Huang. 2025. FedQuad: Adaptive Layer-wise LoRA Deployment and Activation Quantization for Federated Fine-Tuning. arXiv preprint arXiv:2506.01001 (2025). [19] Jun Liu, Yunming Liao, Hongli Xu, Yang Xu, Jianchun Liu, and Chen Qian. 2025. Adaptive parameter-efficient federated fine-tuning on heterogeneous devices. 
+
+IEEE Transactions on Mobile Computing (2025). [20] Luping Liu, Yi Ren, Zhijie Lin, and Zhou Zhao. 2022. Pseudo Numerical Meth-ods for Diffusion Models on Manifolds. In International Conference on Learning Representations .[21] Ze Liu, Yutong Lin, Yue Cao, Han Hu, Yixuan Wei, Zheng Zhang, Stephen Lin, and Baining Guo. 2021. Swin Transformer: Hierarchical Vision Transformer using Shifted Windows. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) .Scaling Synthetic-Image Pre-Training for Federated Fine-Tuning of Large Vision Models ICPP ’26, September 28–October 1, 2026, Singapore 
+
+[22] Qianpiao Ma, Yang Xu, Hongli Xu, Zhida Jiang, Liusheng Huang, and He Huang. 2021. FedSA: A Semi-Asynchronous Federated Learning Mechanism in Hetero-geneous Edge Computing. IEEE Journal on Selected Areas in Communications 39, 12 (2021), 3654–3672. [23] Qianpiao Ma, Yang Xu, Hongli Xu, Jianchun Liu, and Liusheng Huang. 2024. FedUC: A Unified Clustering Approach for Hierarchical Federated Learning. 
+
+IEEE Transactions on Mobile Computing 23, 10 (2024), 9737–9756. [24] Brendan McMahan, Eider Moore, Daniel Ramage, Seth Hampson, and Blaise Aguera y Arcas. 2017. Communication-Efficient Learning of Deep Net-works from Decentralized Data. In Proceedings of Machine Learning Research ,Vol. 54. 1273–1282. [25] Jorge J Moré and Danny C Sorensen. 1982. Newton’s method . Technical Report. Argonne National Lab.(ANL), Argonne, IL (United States). [26] John Nguyen, Kshitiz Malik, Maziar Sanjabi, and Michael Rabbat. 2023. Where to begin? exploring the impact of pre-training and initialization in federated learning. International Conference on Learning Representations (ICLR) .[27] Tim Pearce, Tabish Rashid, Dave Bignell, Raluca Georgescu, Sam Devlin, and Katja Hofmann. 2024. Scaling Laws for Pre-training Agents and World Models. arXiv:2411.04434 [28] Danni Peng, Yuan Wang, Huazhu Fu, Jinpeng Jiang, Yong Liu, Rick Siow Mong Goh, and Qingsong Wei. 2025. Look Back for More: Harnessing Historical Sequential Updates for Personalized Federated Adapter Tuning. In Proceedings of the AAAI Conference on Artificial Intelligence , Vol. 39. 19857–19865. [29] Kilian Pfeiffer, Mohamed Aboelenien Ahmed, Ramin Khalili, and Jörg Henkel. 2024. Efficient Federated Finetuning of Tiny Transformers with Resource-Constrained Devices. arXiv preprint arXiv:2411.07826 (2024). [30] Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sand-hini Agarwal, Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, et al .2021. Learning Transferable Visual Models From Natural Language Supervision. In Proceedings of the 38th International Conference on Machine Learning (PMLR) ,Vol. 139. 8748–8763. [31] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer. 2022. High-resolution image synthesis with latent diffusion models. In 
+
+Proceedings of the IEEE/CVF conference on computer vision and pattern recognition .10684–10695. [32] Jascha Sohl-Dickstein, Eric Weiss, Niru Maheswaranathan, and Surya Ganguli. 2015. Deep unsupervised learning using nonequilibrium thermodynamics. In 
+
+International conference on machine learning . pmlr, 2256–2265. [33] Shangchao Su, Bin Li, and Xiangyang Xue. 2024. Fedra: A random allocation strategy for federated tuning to unleash the power of heterogeneous clients. In 
+
+European Conference on Computer Vision . Springer, 342–358. [34] Guangyu Sun, Matias Mendieta, Jun Luo, Shandong Wu, and Chen Chen. 2023. FedPerfix: Towards Partial Model Personalization of Vision Transformers in Federated Learning. In Proceedings of the IEEE/CVF International Conference on Computer Vision . 4988–4998. [35] Yuchang Sun, Yuexiang Xie, Bolin Ding, Yaliang Li, and Jun Zhang. 2025. Ex-ploring Selective Layer Fine-Tuning in Federated Learning. In IEEE International Symposium on Information Theory (ISIT) .[36] Hugo Touvron, Thibaut Lavril, Gautier Izacard, Xavier Martinet, Marie-Anne Lachaux, Timothée Lacroix, Baptiste Rozière, Naman Goyal, Eric Hambro, Faisal Azhar, et al . 2023. Llama: Open and efficient foundation language models. arXiv preprint arXiv:2302.13971 (2023). [37] Shiqiang Wang, Tiffany Tuor, Theodoros Salonidis, Kin K Leung, Christian Makaya, Ting He, and Kevin Chan. 2019. Adaptive Federated Learning in Re-source Constrained Edge Computing Systems. IEEE Journal on Selected Areas in Communications 37, 6 (2019), 1205–1221. [38] Zixin Wang, Yong Zhou, Yuanming Shi, and Khaled B. Letaief. 2025. Federated Fine-Tuning for Pre-Trained Foundation Models Over Wireless Networks. IEEE Transactions on Wireless Communications 24, 4 (2025), 3450–3464. [39] Chulin Xie, De-An Huang, Wenda Chu, Daguang Xu, Chaowei Xiao, Bo Li, and Anima Anandkumar. 2024. Perada: Parameter-Efficient Federated Learn-ing Personalization with Generalization Guarantees. In IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) . 23838–23848. [40] Yunlu Yan and Lei Zhu. 2023. A simple data augmentation for feature distribution skewed federated learning. arXiv preprint arXiv:2306.09363 (2023). [41] Mingzhao Yang, Shangchao Su, Bin Li, and Xiangyang Xue. 2024. Exploring one-shot semi-supervised federated learning with pre-trained diffusion models. In 
+
+Proceedings of the AAAI conference on artificial intelligence , Vol. 38. 16325–16333. [42] Biao Zhang, Zhongtao Liu, Colin Cherry, and Orhan Firat. 2024. When Scaling Meets LLM Finetuning: The Effect of Data, Model and Finetuning Method. In 
+
+The Twelfth International Conference on Learning Representations .[43] Jie Zhang, Xiaohua Qi, and Bo Zhao. 2023. Federated generative learning with foundation models. arXiv preprint arXiv:2306.16064 (2023). [44] Qingru Zhang, Minshuo Chen, Alexander Bukharin, Pengcheng He, Yu Cheng, Weizhu Chen, and Tuo Zhao. 2023. Adaptive Budget Allocation for Parameter-Efficient Fine-Tuning. In The Eleventh International Conference on Learning Rep-resentations (ICLR) .[45] Tuo Zhang, Tiantian Feng, Samiul Alam, Dimitrios Dimitriadis, Sunwoo Lee, Mi Zhang, Shrikanth S Narayanan, and Salman Avestimehr. 2025. Gpt-fl: Generative pre-trained model-assisted federated learning. In Proceedings of the Computer Vision and Pattern Recognition Conference . 1761–1770. [46] Zhuo Zhang, Yuanhang Yang, Yong Dai, Qifan Wang, Yue Yu, Lizhen Qu, and Zenglin Xu. 2023. FedPETuning: When federated learning meets the parameter-efficient tuning methods of pre-trained language models. In Association for Com-putational Linguistics . 9963–9977. [47] Tianfei Zhou, Ye Yuan, Binglu Wang, and Ender Konukoglu. 2024. Federated Feature Augmentation and Alignment. IEEE Transactions on Pattern Analysis and Machine Intelligence 46, 12 (2024), 11119–11135. [48] Guangxu Zhu, Dongzhu Liu, Yuqing Du, Changsheng You, Jun Zhang, and Kaibin Huang. 2018. Towards an intelligent edge: Wireless communication meets ma-chine learning. arXiv preprint arXiv:1809.00343 (2018).
