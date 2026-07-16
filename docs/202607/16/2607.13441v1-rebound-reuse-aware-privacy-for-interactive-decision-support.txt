@@ -1,0 +1,309 @@
+Title: ReBound: Reuse-Aware Privacy For Interactive Decision Support
+
+URL Source: https://arxiv.org/pdf/2607.13441v1
+
+Published Time: Thu, 16 Jul 2026 00:33:16 GMT
+
+Number of Pages: 5
+
+Markdown Content:
+# ReBound: Reuse-Aware Privacy For Interactive Decision Support 
+
+# Nada Lahjouji 
+
+nlahjouj@uci.edu University of California, Irvine Irvine, USA 
+
+# Shufan Zhang 
+
+shufan.zhang@uwaterloo.ca University of Waterloo Waterloo, Canada 
+
+# Xi He 
+
+xi.he@uwaterloo.ca University of Waterloo Waterloo, Canada 
+
+# Sharad Mehrotra 
+
+sharad@ics.uci.edu University of California, Irvine Irvine, USA 
+
+## Abstract 
+
+Differentially private decision support frameworks answer com-plex aggregate threshold queries with formal bounds on false neg-ative and false positive rates, but treat each query independently with no memory of past results. In practice, analysts work inter-actively, issuing sequences of related queries that refine bounds, adjust thresholds, or derive new functions from previous ones. We propose ReBound , a framework that reuses cached results from previous queries to answer new queries at reduced or zero addi-tional privacy cost while maintaining formal utility guarantees. 
+
+ReBound introduces a reuse framework for multiple refinement types, a cache graph structure for efficient lookup of reusable re-sults, and a negotiation mechanism for when requested bounds cannot be met within budget. 
+
+## 1 Introduction 
+
+Complex decision support (DS) queries with multiple aggregate conditions underpin many analytical applications, including clinical diagnosis [ 17 , 19 ], building management [ 5], and KPI evaluation [ 4]. They commonly arise in online analytical processing (OLAP) [ 2 ], where analysts compute group-level aggregates and compare them to thresholds to drive decisions. However, such data sources of-ten contain sensitive individual information, meaning aggregate releases can cause serious privacy leaks [ 3 , 8]. Differential privacy (DP) [ 6 , 7] addresses this by limiting any single record’s influence on the output, but introduces noise that can harm decision quality. In DS settings, mechanisms must therefore provide formal utility 
+
+guarantees: noisy answers can induce false positives (FP), where predicates are incorrectly accepted, and false negatives (FN), where true predicates are missed. This motivates a “utility-first” line of work [ 9, 10 , 13 –15 ] that specifies target utility and maximizes pri-vacy subject to that requirement, rather than fixing a privacy budget and optimizing utility. Prior work has made significant progress on accuracy-first dif-ferential privacy for decision support. APEx [ 9 ] introduced the par-adigm but leaves errors unbounded near thresholds; MIDE [ 10 ] pro-vides one-sided FNR guarantees for simple queries; and ProBE [ 13 ]achieves dual (𝛼, 𝛽 ) guarantees for complex queries with minimal privacy loss. However, all three treat each query independently and do not exploit the natural overlap in interactive analyst sessions. In practice analysts rarely issue queries in isolation. The nature of decision support is inherently interactive : an analyst issues an initial query, inspects the results, and then refines their analysis by tightening accuracy bounds, adjusting thresholds, changing logical operators, or combining previously queried metrics. Under the current paradigm, each such refinement incurs the full privacy cost as if it were an entirely new query, causing the cumulative privacy budget to grow linearly with the number of interactions even when successive queries are closely related. Consider, for instance, the following sequence over a medical dataset: 
+
+Table 1: Example query sequence ( 𝑄 1, 𝑄 2, 𝑄 3) treated as inde-pendent with privacy budget 𝜖 1, 𝜖 2, 𝜖 3 respectively. 
+
+Query 𝜷 Cumulative Privacy Cost Q1: COUNT(Flu) > 100 AND AVG(Temp) > 101 0.1 𝜖 1
+
+Q2: ≡ Q1 (same query, tighter 𝛽 ) 0.05 𝜖 1 + 𝜖 2
+
+Q3: COUNT(Flu) > 120 AND AVG(Temp) > 103 
+
+(same predicates, different thresholds) 0.05 𝜖 1 + 𝜖 2 + 𝜖 3
+
+Yet the noisy aggregate values computed for Q1 already contain information that could be leveraged to answer Q2 (the same query with a tighter bound) and Q3 (which only differs in the thresholds) at a significantly reduced cost. This observation motivates the cen-tral question of this work: how can we systematically reuse cached results from previous differentially private queries to answer new, related queries while maintaining formal FNR and FPR guarantees? 
+
+Answering this question introduces several challenges. First, different types of query refinements admit fundamentally different reuse strategies. Tightening the accuracy bound 𝛽 on the same query, shifting the threshold 𝑐 , changing the logical structure (AND ↔ OR), and deriving new aggregate functions from cached ones each require distinct derivation with different privacy cost implications. A systematic framework to identify when reuse is possible and how to exploit it for each type of refinement is thus needed. Second, the cache must store not only final query answers but also intermediate results at the right granularity to maximize reuse opportunities. For instance, caching the results of composed sub-expressions (e.g., 𝑄 1 ∩ 𝑄 2) in addition to individual atomic sub-query results enables reuse even when the overall query structure changes. The design of this multi-layered cache structure, including what to store and how to efficiently identify maximal overlap with incoming queries, is a non-trivial design problem. Third, when a requested query cannot fully be answered within the remaining privacy budget, the system should be able to propose alternative queries (e.g., with relaxed bounds or adjusted thresholds) that can be answered at lower cost, presenting the analyst with meaningful trade-offs rather than simply denying the query. 
+
+> 1arXiv:2607.13441v1 [cs.CR] 15 Jul 2026 Interactive Privacy for Utility-Aware Decision Support
+
+In this paper, we propose ReBound , a framework for differen-tially private interactive decision support that addresses the three challenges above. At its core, ReBound proposes a reuse frame-work that supports multiple types of query changes, including threshold changes, bound tightening, logical structure modifica-tions, and linear combinations of cached aggregate functions, with minimal additional privacy loss while maintaining formal FNR and FPR guarantees. To do so, ReBound uses a cache graph structure that stores not only atomic sub-query results but also composed sub-expressions, enabling efficient lookup of maximal reusable subgraphs when a new query arrives and fast insertion of new results upon execution. Finally, ReBound supports a privacy ne-gotiation mechanism wherein queries requesting accuracy bounds that cannot be met within the remaining privacy budget result in a counteroffer with relaxed bounds or adjusted parameters that can be satisfied at lower cost, allowing the analyst to accept an alternative rather than receiving an outright denial. 
+
+## 2 Background 
+
+Let 𝐷 ∈ D denote a sensitive dataset. Two datasets 𝐷, 𝐷 ′ ∈ D are 
+
+neighbors , written 𝐷 ∼ 𝐷 ′, if they differ in one tuple. We consider the following ex-post differential privacy notion. 
+
+Definition 2.1 (Ex-Post Differential Privacy). Let M : D → O be a randomized mechanism and E : O → [ 0, ∞] be an outcome-dependent privacy bound. For an output 𝑜 ∈ O , define the ex-post privacy loss as 
+
+E ( 𝑜 ) ≜ max  
+
+> 𝐷 ∼𝐷 ′
+
+ln Pr [M ( 𝐷 ) = 𝑜 ]
+
+Pr [M ( 𝐷 ′) = 𝑜 ] .
+
+We say M satisfies E ( 𝑜 )-ex-post DP if for all 𝑜 ∈ O , 𝜀 (𝑜 ) ≤ E ( 𝑜 ).
+
+A complex decision-support (DS) query 𝑄 Λ,𝐹 is an expression over atomic queries 𝑄 𝑎 1 , . . . , 𝑄 𝑎 𝑛 that share the same predicate set Λ but may have different filters 𝐹 = {𝑓 1, . . . , 𝑓 𝑛 }, aggregates 
+
+𝐺 = {𝑔 1, . . . , 𝑔 𝑛 }, and thresholds 𝐶 = {𝑐 1, . . . , 𝑐 𝑛 }, combined using 
+
+∩ (AND) and ∪ (OR). Equivalently: 
+
+𝑄 Λ,𝐹 :: = 𝑄 𝑎 | 𝑄 Λ,𝐹 1 ∩ 𝑄 Λ,𝐹 2 | 𝑄 Λ,𝐹 1 ∪ 𝑄 Λ,𝐹 2 .
+
+Each atomic aggregate threshold query is defined as follows. 
+
+Definition 2.2 (Atomic Aggregate-Threshold Query [ 9 , 13 ]). 
+
+Given (Λ, 𝑓 , 𝑔, 𝐶 ), the atomic decision-support query returns the set of predicates whose group-wise aggregate exceeds the threshold: 
+
+𝑄 𝑎 (𝐷 ; Λ, 𝑓 , 𝑔, 𝐶 ) ≜ 𝜆 ∈ Λ : 𝑔 (𝐷 𝑓 ,𝜆 ) > 𝑐 𝜆 .
+
+The accuracy constraints for DS queries are specified as predicate-wise false negative rates (FNRs) and false positive rates (FPRs). 
+
+Definition 2.3 (FNR/FPR Bounds). Let b𝐴 ⊆ Λ denote the (ran-dom) output returned by a DP mechanism. For each 𝜆 ∈ Λ, define 
+
+FN 𝜆 ≜ 1[𝜆 ∈ 𝐴 ∧ 𝜆 ∉ b𝐴 ], FP 𝜆 ≜ 1[𝜆 ∉ 𝐴 ∧ 𝜆 ∈ b𝐴 ].
+
+A DS request specifies utility parameters (𝛼, 𝛽 ) ∈ [ 0, 1]2 requiring 
+
+∀𝜆 ∈ Λ : Pr [FN 𝜆 = 1] ≤ 𝛼 and Pr [FP 𝜆 = 1] ≤ 𝛽. 
+
+## 3 Problem Setup 
+
+We consider an interactive decision-support workflow where an analyst adaptively issues DS queries, possibly depending on prior answers. At each round, the system minimizes incremental privacy cost while meeting (𝛼, 𝛽 ) under a budget cap 𝜀 max ; if infeasible, it proposes a minimal relaxation of (𝛼, 𝛽 ). Under this interactive setting, several interesting research questions arise. 
+
+RQ1: Designing DP Caches for DS Queries. Existing work [ 11 ,16 , 21 ] on DP caching all focus on linear/counting workloads, and store historical noisy answers/parameters to reuse them under post-processing. Their target accuracy notions are primarily nu-merical error bounds. However, DS query workloads [ 9 , 10 , 13 ] are threshold-classification queries where the utility is often defined as predicate-wise FNRs and/or FPRs. The outputs of DS queries are sets rather than numerical results, making it insufficient to just store the noisy answers and recheck the bounds when analysts change the query thresholds or demand different FNR/FPR guarantees. Our goal is to design efficient DP caches for DS queries that capture not only answers to existing queries, but an indexed re-gion of future DS queries for which the answers can be reused and composed. We would like to develop a novel hierarchical structure that organizes domain information, query metadata, decomposed predicates, and historical query answers, alongside algorithms to ef-ficiently look up and update the cache when answering DS queries. 
+
+RQ2: Cache-Aware Privacy Optimization under Budget Con-straints. Given the nature of uncertainty in the online/interactive query systems, an arriving complex DS query may partially over-lap with historical queries yet differ in several ways, e.g., tighter FNR/FPR requirements, modified logical structure, shifted predicate thresholds, or even newly introduced predicates not present in the cache. When the cache cannot fully answer the request, how can the system acquire only the missing information and combine it with cached DP results to satisfy (𝛼, 𝛽 ) with minimal incremen-tal privacy cost, or else compute a minimal feasible utility bound relaxation under 𝜀 max ?Prior work [ 12 , 20 , 21 ] on refining accuracy guarantees by cal-ibrating correlated noise and adaptive reuse is largely tailored to numerical error metrics and fixed query semantics, and therefore does not directly extend to DS queries. APEx [ 9] optimizes the per-query budget for DS queries, but it treats each arriving query as fresh (no cache); moreover, the uniform privacy apportionment assumptions (across predicates) of its mechanism can be misaligned with heterogeneous cached uncertainties, leading to suboptimal “top-ups” when only parts of a query can be answered from cached results. In this paper, we design cache-aware DP mechanisms that certify reusable sub-structures under new utility constraints and minimize incremental privacy cost via structure-aware allocation. When infeasible under 𝜀 max , the mechanisms should return a mini-mal (𝛼, 𝛽 ) relaxation as a counteroffer. 
+
+## 4 Framework Overview 
+
+Interactive DP workloads exhibit natural query overlap: analysts refine predicates, adjust thresholds, and explore related aggregates over time. ReBound maintains a structured cache of prior DP re-leases and derives new answers from cached results when possible, negotiating with analysts when budget constraints conflict with ac-curacy requirements (Figure 1). Our design follows three principles: 
+
+> 2ReBound: Reuse-Aware Privacy For Interactive Decision Support
+
+Figure 1: System Overview of ReBound .post-processing reuse , where computations over prior DP outputs incur no additional privacy cost; utility propagation , where de-rived results have computable (𝛼, 𝛽 ) bounds that are verified before returning reused answers; and budget-aware negotiation , where the system and analyst negotiate acceptable tradeoffs when reuse is insufficient under a constrained budget. We build on ProBE [ 13 ] as a base mechanism, which guarantees (𝛼, 𝛽 ) bounds at a minimal pri-vacy loss, but treats each query independently. It first decomposes complex queries into atomic sub-queries and optimally apportions 𝛽 
+
+across them [ 10 ] to guarantee the overall 𝛽 -bound, then enforces 𝛼 
+
+in a data-dependent step that estimates false positives and tightens the error region around the threshold when needed. The remainder of this section describes reuse strategies, cache structure, and query processing; formal proofs are deferred to the full paper. 
+
+## 4.1 Reuse Strategies 
+
+ReBound treats reuse as a candidate derivation from cached DP releases and returns an answer at Δ𝜀 = 0 only when the requested utility bounds are met. For each HAVING atom (𝜙, F , 𝜏 ) ∈ A , it traverses cached predicate nodes {𝑃 𝑖 } and scalar nodes {𝐴 𝑖 } to derive a candidate by post-processing, propagates a 𝛽 bound from the contributing releases, and then checks whether the induced false-positive guarantee satisfies 𝛼 . If the 𝛼 check fails, ReBound 
+
+runs ProBE [ 13 ]’s 𝛼 -guarantee step, spending incremental cost 
+
+𝜀 ′ > 0 to tighten the uncertainty region. We defer proofs of the propagation procedure and associated parameters to the full paper. 
+
+Exact Match. If the cache contains a release for the same atom 
+
+(𝜙, F , 𝜏 ), ReBound reuses the corresponding scalar node 𝑆 𝑖 and its noisy value e𝐺 by post-processing. The candidate inherits 𝛽 from the cached release, after which ReBound checks whether the induced 
+
+𝛼 meets the requested bound. If so, reuse is returned with Δ𝜀 = 0;otherwise, ReBound runs [ 13 ]’s 𝛼 -step starting from the cached state, incurring incremental cost 𝜀 ′ to satisfy 𝛼 .
+
+Threshold Change. For the same (𝜙, F ) but a different threshold 
+
+𝜏 ′, ReBound reuses the cached noisy scalar e𝐺 and recomputes the decision I[ e𝐺 > 𝜏 ′] by post-processing. The propagated 𝛽 bound transfers from the cached release (since it depends on the uncer-tainty region rather than the threshold), but the false-positive bound must be re-checked for 𝜏 ′. If the 𝛼 requirement is not met, ReBound 
+
+again spends incremental budget 𝜀 ′ to satisfy 𝛼 (or reuse is rejected). 
+
+Predicate Decomposition. If a requested predicate 𝜙 can be ex-pressed using cached predicate nodes {𝑃 𝑖 } via set operations (e.g., union, intersection, set difference), ReBound derives the corre-sponding aggregate by combining the relevant cached scalars. For additive functions ( COUNT , SUM ), these set operations induce linear combinations of noisy scalars (e.g., disjoint unions sum). ReBound 
+
+propagates 𝛽 conservatively across the contributing releases and then checks whether the derived decision satisfies the requested 𝛼 ,after which it may again incur an incremental cost 𝜀 ′ to ensure the final FPR is bounded by 𝛼 .
+
+Linear Combination. If a requested aggregate can be expressed as a deterministic function of cached scalar nodes {𝑆 𝑖 } (e.g., linear forms for additive aggregates like COUNT(x) +COUNT(y) , or rewrit-ing ratios like AVG = SUM /COUNT ), ReBound derives the candidate value by post-processing and propagates 𝛽 from its inputs by en-suring the combined aggregate uses the appropriate derived pa-rameters (e.g. sensitivity and error region). The 𝛼 bound is then enforced on the combined aggregate result as a single threshold test, not on individual sub-queries. 
+
+## 4.2 Cache Structure 
+
+To efficiently identify reuse opportunities, the cache organizes prior releases as a three-layer DAG (Figure 2) reflecting query anatomy. 
+
+Layer 1: Predicate Index. Column nodes represent GROUP BY 
+
+attributes; predicate nodes store intervals (numeric) or value sets (categorical). A boundary registry enables predicate decomposition. 
+
+Layer 2: Scalar Aggregates. Each scalar node (e.g., 𝑎 1, 𝑎 2, 𝑎 3)corresponds to a (predicate, function) pair and maintains releases under different (𝑐, 𝛽, 𝛼, 𝜀 ) parameters. Derived nodes (e.g., 𝑎 4 =
+
+𝑎 1 + 𝑎 2) store derivation expressions and source references. 
+
+Layer 3: Boolean Composition. Represents compound HAVING 
+
+clauses ( AND /OR ), enabling reuse under composition changes. 
+
+Definition 4.1 (Cache Structure). The cache C = (𝑉 , 𝐸, 𝑅 ) is a three-layer DAG where 𝑉 = 𝑉 𝐶 ∪ 𝑉 𝑃 ∪ 𝑉 𝑆 ∪ 𝑉 𝐵 are column, predicate, scalar, and boolean nodes; 𝐸 encodes cross-layer derivability; and 
+
+𝑅 : 𝑉 𝑆 → 2R maps scalar nodes to privacy releases 𝑟 = ( ˜𝐺, 𝑐, 𝛽, 𝛼, 𝜀 )
+
+representing previously released noisy values.                              
+
+> Layer 1
+> Layer 2
+> Layer 3
+> age loc [0,5),(5,10 ){NYC, LA}
+> 𝑝 1:[0,5)𝑝 2:(5,10 )𝑝 3: NYC
+> 𝑎 1:COUNT (𝑝 1)𝑎 2:COUNT (𝑝 2)𝑎 3:SUM (𝑝 3)
+> 𝑟 1:˜𝐺 1, 𝑐 1, 𝛽 1=.1, 𝛼 1=.15 , 𝜀 1𝑟 2:˜𝐺 2, 𝑐 2, 𝛽 2=.1, 𝛼 2=.12 , 𝜀 2𝑟 3:˜𝐺 3, 𝑐 3, 𝛽 3=.1, 𝛼 3=.15 , 𝜀 3
+> 𝑎 4:𝑎 1+𝑎 2(derived)
+> 𝑟 4:˜𝐺 4, 𝑐 4, 𝛽 4=.2, 𝛼 4=.25 , 𝜀 4=0
+> used: 𝑎 1.𝑟 1, 𝑎 2.𝑟 2
+> ∧
+
+Figure 2: Cache structure with example nodes/releases. 
+
+## 4.3 Query Processing 
+
+Algorithm 1 outlines query processing. Given an incoming query 
+
+𝑄 with utility requirements 𝑈 = (𝛼, 𝛽 ) and budget limit 𝜀 max , Re-Bound first parses 𝑄 into a canonical form capturing the GROUP BY key, a predicate set Φ = {𝜙 𝑖 }, and a set of aggregate atoms 
+
+A = {( 𝜙 𝑖 , F , 𝜏 )} used in the HAVING clause (lines 1–2), where 𝜙 𝑖 is a (group-level) selection predicate, F denotes an aggregate function (e.g., COUNT ), and 𝜏 is the corresponding threshold. It then selects 
+
+> 3Interactive Privacy for Utility-Aware Decision Support
+
+Algorithm 1 Query Processing in ReBound 
+
+Require: Query 𝑄 , utility 𝛼, 𝛽 , budget limit 𝜀 max  
+
+> 1:
+
+(Φ, A, 𝐵 ) ← Decompose (𝑄 ) ⊲ Φ = {𝜙 𝑖 } predicates; 
+
+A = { ( 𝜙 𝑖 , F, 𝜏 ) } aggregates; 𝐵 is boolean nodes  
+
+> 2:
+
+𝑆 ∗ ← ChooseStrategy (Φ, A, 𝐵, C, 𝛽, 𝛼, 𝜀 max ) 
+
+> 3:
+
+if ReuseOnly (𝑆 ∗ ) then  
+
+> 4:
+
+return DeriveFromCache (Φ, A, 𝐵, 𝑆 ∗ ) ⊲ 𝜀 = 0 
+
+> 5:
+
+end if  
+
+> 6:
+
+(𝑎𝑛𝑠, 𝜀 actual ) ← PROBE (Φ, A, 𝐵, 𝑆 ∗, 𝛽, 𝛼 ) 
+
+> 7:
+
+if 𝜀 actual ≤ 𝜀 max then  
+
+> 8:
+
+CacheInsert (𝑎𝑛𝑠 ); return 𝑎𝑛𝑠  
+
+> 9:
+
+else  
+
+> 10:
+
+return Negotiate (𝑄, 𝛽, 𝛼, 𝜀 actual , 𝜀 max ) 
+
+> 11:
+
+end if 
+
+a reuse strategy 𝑆 ∗ by traversing the cache DAG layer-by-layer (line 3). At the predicate layer, for each 𝜙 ∈ Φ, the strategy checks whether its record set can be expressed using cached predicate nodes {𝑃 𝑖 } via set operations (e.g., union or set difference), and records a concrete decomposition when possible. At the scalar-aggregate layer, for each requested atom in A, the strategy checks whether the required noisy scalar can be derived from cached ag-gregate nodes {𝐴 𝑖 } by post-processing (e.g., AVG = SUM /COUNT ). If the traversal yields a complete derivation, ReBound returns the an-swer via post-processing at 𝜀 = 0 (lines 4–5); otherwise it executes 
+
+PROBE [13 ] for only the unresolved components according to 𝑆 ∗,returning the final answer and realized cost 𝜀 actual (line 6). 
+
+Negotiation. If 𝜀 actual > 𝜀 max , negotiation is triggered: the system offers relaxed accuracy bounds (either through minimal relaxation of 𝛽 or through an effective upper bound 𝛼 ) yielding lower 𝜀 , which the analyst can accept or deny. Negotiation may also handle partial reuse : queries not fully matching any reuse case but partially deriv-able from the cache. We leave the formalization of the negotiation mechanism to the full paper. 
+
+Guarantee. ReBound guarantees that every query answer satisfies 
+
+𝜀 max -DP with a 𝛽 -bound on FNR and 𝛼 -bound on FPR when possible. When the requested bounds cannot be achieved under 𝜀 max -DP, the negotiation framework suggests next best bounds 𝛽 and 𝛼 .
+
+## 5 Preliminary Results 
+
+Table 2: Analyst session queries used over the NYC Taxi dataset. Each pattern contains 10 queries total.                                  
+
+> Phase Query Example Change
+> Pattern A: Drill-and-Tighten
+> Seed (Q1) CNT(*) ∧AVG(tip) ,𝛽 =0.10 ,𝛼 =0.20 –Bound (Q2–Q7) Same query, progressively tighten 𝛽, 𝛼 𝛽 /𝛼
+> Thresh. (Q8–Q10) Same, threshold ×1.10 ,×1.15 ,×1.20 Threshold
+> Pattern B: Exploratory Branching
+> Seed (Q1) AVG(tip) ,𝛽 =0.05 ,𝛼 =0.15 –Pred. (Q2, Q4) AVG(tolls) ;AVG(congestion) Predicate Sum (Q3, Q5, Q9) AVG(tip) + AVG(tolls) ;AVG(tip) + AVG(congestion) Linear comb. Conj. (Q6–Q8, Q10) CNT(fare>10) ∧AVG(tip) ;CNT(fare<5) ∧AVG(tip) Agg./Pred.
+
+To evaluate ReBound , we construct analyst sessions inspired by OLAP session templates [ 18 ], where each query incrementally refines the previous one (e.g., drill-down, slice, or measure change). We instantiate two 10-query session patterns over the NYC Taxi dataset [ 1] ( ∼3 million trips from March 2020), grouping by hashed pickup location and using COUNT and AVG aggregates under vary-ing predicates, thresholds, and utility targets. Table 2 summarizes 
+
+Figure 3: Cumulative privacy loss over query sessions. Dashed orange lines show baseline (no reuse); solid purple lines show ReBound .
+
+the patterns: Pattern A (Drill-and-Tighten) progressively tightens 
+
+(𝛼, 𝛽 ) and then adjusts thresholds, while Pattern B (Exploratory Branching) pivots across predicates, aggregates, and linear com-binations. We compare cumulative privacy cost under ReBound 
+
+against a cache-less baseline using sequential composition, averag-ing results over 10 runs to account for Laplace noise. 
+
+Privacy Savings. Figure 3 shows cumulative privacy loss over each query session. ReBound achieves substantial savings by reusing cached releases: 75% reduction for Pattern A and 70% for Pattern B. The gap widens as sessions progress, proving that later queries benefit from richer cache state built by earlier queries. More im-portantly, these savings translate into longer interactive analysis sessions under fixed privacy budgets: under fixed session budgets, the baseline answers only 4 and 3 queries, respectively, while Re-Bound completes all 10 in both cases. 
+
+Table 3: Queries completed under fixed privacy budgets. 
+
+Pattern Baseline ReBound 
+
+A ( 𝜀 max = 10 ) 4 / 10 10 / 10 
+
+B ( 𝜀 max = 15 ) 3 / 10 10 / 10 
+
+Negotiation. We evaluate bound-based negotiation (relaxing 𝛼 or 
+
+𝛽 ); partial reuse negotiation is left for future work. Without nego-tiation, Pattern A resulted in 12 query denials across 10 runs: Q7 was denied in 9/10 runs and Q9 in 3/10 runs, both requesting tight bounds ( 𝛽 = 0.005 , 𝛼 = 0.05 ) with all denials happening due to the 𝛼 bound. With negotiation enabled, all queries succeeded. The system offered relaxed 𝛼 bounds of 0.063 (Q7) and 0.054 (Q9), sug-gesting minor relaxations from the requested 0.05, while 𝛽 remained effectively unconstrained under a 𝜀 max = 9 budget. 
+
+## 6 Concluding Remarks 
+
+We presented ReBound , a cache-aware framework for interac-tive differentially private decision support. ReBound maintains a structured cache of prior DP releases and applies formally defined reuse conditions to answer follow-on queries via post-processing when possible, reducing incremental privacy loss and enabling more queries under a fixed budget; when reuse is insufficient, it negotiates accuracy-budget tradeoffs to maximize the answered workload. In future work, ReBound will be implemented as a fully fledged system with complete formal proofs for all reuse cases, optimized cache operations, and a complete negotiation framework. We also plan to extend ReBound to richer forms of partial reuse and negotiation, and to extend it to support different query types. 
+
+> 4
+
+ReBound: Reuse-Aware Privacy For Interactive Decision Support 
+
+## References 
+
+[1] 2020. TLC Trip Record Data. https://www1.nyc.gov/site/tlc/about/tlc-trip-record-data.page. Accessed: 2026-2-16. [2] Surajit Chaudhuri and Umeshwar Dayal. 1997. Data Warehousing and OLAP for Decision Support. In Proceedings of the ACM SIGMOD International Conference on Management of Data . 507–508. [3] Irit Dinur and Kobbi Nissim. 2003. Revealing Information While Preserving Privacy. In Proceedings of the 22nd ACM SIGACT-SIGMOD-SIGART Symposium on Principles of Database Systems (PODS) . 202–210. [4] Uwe Dombrowski, David Ebentreich, and Karl Schmidtchen. 2013. Balanced Key Performance Indicators in Product Development. International Journal of Materials, Mechanics and Manufacturing 1, 1 (2013), 27–31. [5] Haris Doukas, Konstantinos D. Patlitzianas, Konstantinos Iatropoulos, and John Psarras. 2007. Intelligent Building Energy Management System Using Rule Sets. 
+
+Building and Environment 42, 10 (2007), 3562–3569. [6] Cynthia Dwork, Frank McSherry, Kobbi Nissim, and Adam Smith. 2006. Cali-brating Noise to Sensitivity in Private Data Analysis. In Proceedings of the 3rd Theory of Cryptography Conference (TCC) . 265–284. [7] Cynthia Dwork and Aaron Roth. 2014. The Algorithmic Foundations of Differ-ential Privacy. Foundations and Trends in Theoretical Computer Science 9, 3–4 (2014), 211–407. [8] Cynthia Dwork and Sergey Yekhanin. 2008. New Efficient Attacks on Statistical Disclosure Control Mechanisms. In Advances in Cryptology – CRYPTO 2008 .Springer, 469–480. [9] Chang Ge, Xi He, Ihab F. Ilyas, and Ashwin Machanavajjhala. 2019. APEx: Accuracy-Aware Differentially Private Data Exploration. In Proceedings of the ACM SIGMOD International Conference on Management of Data .[10] Sameera Ghayyur, Debabrata Ghosh, Xi He, and Sharad Mehrotra. 2022. MIDE: Accuracy Aware Minimally Invasive Data Exploration for Decision Support. 
+
+Proceedings of the VLDB Endowment 15, 11 (2022), 2653–2665. [11] Kelly Kostopoulou, Pierre Tholoniat, Asaf Cidon, Roxana Geambasu, and Mathias Lécuyer. 2023. Turbo: Effective Caching in Differentially-Private Databases. In 
+
+Proceedings of the 29th Symposium on Operating Systems Principles, SOSP 2023, Koblenz, Germany, October 23-26, 2023 . ACM, 579–594. doi:10.1145/3600006. 3613174 [12] Fragkiskos Koufogiannis, Shuo Han, and George J. Pappas. 2015. Gradual Re-lease of Sensitive Data under Differential Privacy. CoRR abs/1504.00429 (2015). arXiv:1504.00429 http://arxiv.org/abs/1504.00429 [13] Nada Lahjouji, Sameera Ghayyur, Xi He, and Sharad Mehrotra. 2024. ProBE: Proportioning Privacy Budget for Complex Exploratory Decision Support. In 
+
+Proceedings of the ACM SIGSAC Conference on Computer and Communications Security (CCS) . 1924–1938. [14] Katrina Ligett, Seth Neel, Aaron Roth, Bo Waggoner, and Zhiwei Steven Wu. 2017. Accuracy First: Selecting a Differential Privacy Level for Accuracy-Constrained ERM. Journal of Privacy and Confidentiality 9, 2 (2017). [15] Elisabet Lobo-Vesga, Alejandro Russo, and Marco Gaboardi. 2020. A Program-ming Framework for Differential Privacy with Accuracy Concentration Bounds. In Proceedings of the 2020 IEEE Symposium on Security and Privacy (S&P) . 411–428. [16] Miti Mazmudar, Thomas Humphries, Jiaxiang Liu, Matthew Rafuse, and Xi He. 2022. Cache Me If You Can: Accuracy-Aware Inference Engine for Differentially Private Data Exploration. Proceedings of the VLDB Endowment 16, 4 (2022), 574–586. [17] Mark A. Musen, Blackford Middleton, and Robert A. Greenes. 2021. Clinical Decision-Support Systems. In Biomedical Informatics . Springer, 795–840. [18] Stefano Rizzi and Enrico Gallinucci. 2014. CubeLoad: A Parametric Generator of Realistic OLAP Workloads. In Proceedings of the 26th International Conference on Advanced Information Systems Engineering (CAiSE) . Springer, 610–624. [19] Reed T. Sutton, David Pincock, Daniel C. Baumgart, Daniel C. Sadowski, Richard N. Fedorak, and Karen I. Kroeker. 2020. An Overview of Clinical Decision Support Systems: Benefits, Risks, and Strategies for Success. npj Digital Medicine 
+
+3, 17 (2020). [20] Justin Whitehouse, Aaditya Ramdas, Zhiwei Steven Wu, and Ryan M. Rogers. 2022. Brownian Noise Reduction: Maximizing Privacy Subject to Accuracy Constraints. In Advances in Neural Information Processing Systems 35: Annual Conference on Neural Information Processing Systems 2022, NeurIPS 2022, New Orleans, LA, USA, November 28 - December 9, 2022 .[21] Shufan Zhang and Xi He. 2023. DProvDB: Differentially Private Query Processing with Multi-Analyst Provenance. Proc. ACM Manag. Data 1, 4 (2023), 267:1–267:27. doi:10.1145/3626761 5
