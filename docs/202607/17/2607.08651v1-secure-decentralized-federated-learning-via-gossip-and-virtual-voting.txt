@@ -1,0 +1,1219 @@
+Title: Secure Decentralized Federated Learning via Gossip and Virtual Voting
+
+URL Source: https://arxiv.org/pdf/2607.08651v1
+
+Published Time: Fri, 10 Jul 2026 01:08:15 GMT
+
+Number of Pages: 14
+
+Markdown Content:
+# Secure Decentralized Federated Learning via Gossip and Virtual Voting 
+
+Amirhossein Taherpour , and Xiaodong Wang , Fellow, IEEE 
+
+Abstract— Decentralized federated learning (DFL) removes the central server by letting nodes exchange model updates through peer-to-peer gossip, but existing gossip-based methods often lack provenance finality and resilience to Byzantine or lazy participants. Ledger-assisted federated learning (FL) improves auditability, yet blockchains, shards, or settlement committees can reintroduce global coordination costs that conflict with DFL locality. This paper proposes gspDAG-FL, a secure DFL framework that derives consensus from the same gossip history used to disseminate models. Nodes exchange model payloads only with neighbors, while full nodes collect event certificates and receiver-endorsed accepted gossip proofs, reconstruct a compact Topology directed acyclic graph (DAG), and run Hashgraph-style virtual voting followed by compact full-node certificates. Finality is over unique model-origin tuples, not identical local parameter states. To improve resilience, gspDAG-FL combines payload validation, accepted-proof validation, and private semantic audit before aggregation. We formalize the adversarial setting, prove safety and condi-tional liveness of the control plane, and give a convergence guarantee for certified perturbed gossip under time-varying effective mixing. Experiments on MNIST classification and Penn Treebank language modeling, using fair held-out vali-dation/audit data and networks up to N = 100 , show that gspDAG-FL achieves learning quality close to validation-based ledger FL while reducing coordination bottlenecks, improving throughput, and maintaining high invalid-origin detection under mixed Byzantine and lazy participation. Index Terms—Decentralized federated learning (DFL), gos-sip, Hashgraph, directed acyclic graph (DAG), Byzantine fault tolerance (BFT), virtual voting, federated learning security, auditability. 
+
+I. Introduction Federated learning (FL) trains a model across dis-tributed devices or institutions while keeping raw data local and exchanging only model-side information [1]– [3]. In the standard architecture, a central server coordi-nates local training, aggregation, and model redistribution, often through federated averaging and secure aggrega-tion [4]. This architecture is effective, but it concentrates coordination, trust, and failure modes at the server. It may also amplify privacy risk, since gradients and model updates can leak sensitive information even when raw data are never shared [5]. A natural alternative is decentralized federated learning (DFL), where peers exchange updates directly through a communication graph. Randomized gossip and decentral-ized stochastic optimization show that repeated neighbor 
+
+Amirhossein Taherpour and Xiaodong Wang are with the Depart-ment of Electrical Engineering, Columbia University, New York, NY, USA (e-mails: at3532@columbia.edu, xw2008@columbia.edu). 
+
+averaging can converge at a rate controlled by topology and mixing quality [6], [7]. Asynchronous push–pull, push-sum, and compressed gossip variants improve wall-clock efficiency or communication cost under heterogeneous links [8]–[10]. Recent systems such as GossipFL, FedDual, and semi-decentralized optimization further show that neighbor-to-neighbor communication can reduce central bottlenecks [11]–[14]. However, most serverless gossip-based methods assume benign participation. They usually do not provide a system-wide record of update provenance, nor do they define which model origins are final and eligible for aggregation when some nodes are Byzantine, lazy, or behaviorally malicious. Robust aggregation addresses part of this problem by limiting the effect of abnormal updates during aggrega-tion. Byzantine-resilient rules and coordinate-wise robust methods improve resilience under bounded adversarial fractions [15]–[17]. Sybil-aware defenses reduce the impact of multiple colluding identities [18]. Backdoor attacks show, however, that malicious clients may preserve clean accuracy while inducing attacker-chosen behavior on trig-gered inputs [19], [20]. Post-hoc and input-level backdoor detectors, including Neural Cleanse, STRIP, and spectral signatures, study complementary forms of behavioral inspection [21]–[23]. These defenses are important, but they are not a complete substitute for finality in DFL: a node also needs to know whether an update origin has sufficient provenance and whether the network agrees that it should be eligible for aggregation. A second line of work introduces distributed ledgers [24], [25] into FL. Blockchain-assisted FL systems use tamper-evident records, smart contracts, or consensus mechanisms to reduce reliance on a trusted coordinator [26]–[32]. DAG and sharded ledgers reduce some serialization costs by allowing concurrent approvals or shard-level process-ing, as in ChainFL, DAG-FL, DAG-EnseFL, and DAG-BFL [33]–[36]. IronForge further studies open and fair decentralized FL through committee-based validation and settlement [37]. These systems improve auditability, but in most cases the ledger remains a separate coordination layer: model updates are submitted to a block, shard, DAG ledger, or committee, and that external mechanism decides admission. The gap is therefore not simply the absence of aDAG ledger. The gap is the lack of a gossip-native consensus layer for DFL. In serverless FL, scalability comes from locality: each node exchanges information with a small neighborhood. If finality requires broad model arXiv:2607.08651v1 [cs.LG] 9 Jul 2026 2                                             
+
+> TABLE I: Feature-level positioning of gspDAG-FL relative to representative decentralized and ledger-assisted FL systems. Here
+> △denotes partial support.
+> System family Local payload Gossip-derived finality Finality object Vote type Validation Bottleneck Serverless gossip: D-PSGD, AD-PSGD, GossipFL, FedDual [7], [8], [11], [12]
+> 37None None Local / none No finality Blockchain FL: BLADE-FL [29]
+> 77Block update PoW Public Blocks DAG /sharded ledger FL: ChainFL, DAG-FL, DAG-EnseFL, DAG-BFL [33]–[36]
+> △7Ledger update Ledger /shard Public Shard sync Committee-based open FL: IronForge [37]
+> △7Committee model Committee Public / PoL Settlement gspDAG-FL 33Origin tuple Virtual +cert. Local/private Proof metadata
+
+dissemination, complete ledger visibility at all nodes, or a separate global committee decision for every update, then the protocol partially reintroduces the coordination bottleneck that gossip was meant to avoid. Hashgraph-style consensus suggests a different direction: the com-munication history itself can form a DAG, and virtual voting can infer local confirmation from gossip-about-gossip metadata [38]. Classical Byzantine fault-tolerant consensus relies on quorum intersection for safety [39]; Hashgraph adapts this principle to a gossip DAG. The question is how to adapt this principle to FL so that the control plane certifies provenance-admissible model origins while the data plane remains local and peer-to-peer. This paper proposes gspDAG-FL, a secure DFL frame-work that derives finality from the same gossip history used to disseminate models. Nodes exchange model pay-loads only through one-hop neighbor gossip. In parallel, compact signed event certificates and receiver-endorsed accepted gossip proofs are forwarded to full nodes, which reconstruct a Topology DAG and run virtual voting over communication history. The resulting finality is over unique model-origin tuples, not over identical local parameter states. Each node aggregates only the certified models that it has locally observed and stored, so locality is preserved while invalid origins are filtered through a global provenance-admissibility decision. The key distinction is the source of finality. Existing ledger-assisted FL systems finalize submitted updates through block, shard, DAG-ledger, or committee state. In contrast, gspDAG-FL finalizes model-origin tuples from signed gossip-history proofs. Thus, model tensors remain on local peer-to-peer data paths, while full nodes run virtual voting over compact topology metadata and exchange only compact confirmation certificates. The contributions are as follows. 1) We introduce a gossip-native DFL architecture in which the data plane and control plane are separated. Model tensors remain on local neighbor-to-neighbor paths, while full nodes process event certificates and accepted-proof metadata. Consensus is therefore de-rived from observed gossip history rather than imposed by a separate global block, shard, or committee proto-col. 2) We formalize the adversarial setting for decentralized FL with learning-clean, lazy, Byzantine, and control-correct nodes. We derive the local update rule from a consensus-constrained optimization view, state the required mixing and smoothness assumptions, and clarify that global finality concerns unique origin tuples rather than identical per-node parameters. 3) We design a multi-stage admission pipeline. Payload validation rejects stale, abnormally large, or direction-ally inconsistent updates before forwarding; accepted-proof validation prevents forged topology edges and equivocation; and post-consensus private semantic au-dit removes behaviorally anomalous confirmed models before aggregation. 4) We establish theoretical properties of the control and learning planes. Under stated quorum and delivery assumptions, virtual voting is well-defined, full-node certificates satisfy safety, and termination follows once enough valid origins are disseminated. We also give a convergence statement for certified perturbed gossip under time-varying effective mixing. 5) We evaluate gspDAG-FL on image classification and language modeling under Byzantine and lazy participa-tion. The experiments use the same effective training budget for all methods, include network sizes up to 
+
+N = 100 , and report learning quality, detection rates, ripple dynamics, latency, throughput, and convergence rounds. The remainder of the paper is organized as follows. Sec. II reviews centralized, decentralized gossip-based, and ledger-assisted FL protocols, and introduces the adversar-ial and optimization setting. Sec. III presents the gspDAG-FL architecture, including light-node and full-node roles, the Topology DAG, and the epoch workflow. Sec. IV specifies validation, virtual voting, finality, robustness, complexity, and the learning guarantee. Sec. V reports the simulation setup and results. Sec. VI concludes the paper. The appendices contain the technical proofs. 3
+
+II. Federated Learning Protocols A. Conventional FL Suppose that N nodes participate in FL. Node i holds local data Di and defines 
+
+Fi(θ) ≜ Ex∼D i [Li(x; θ)] , (1) where θ is the model parameter. In the benign setting, the goal is 
+
+min  
+
+> θ
+
+F (θ) ≜ 1
+
+N
+
+> N
+
+∑
+
+> i=1
+
+Fi(θ). (2) We distinguish learning behavior from control-plane behavior. Let HL, Z, and B denote the learning-clean, lazy, and Byzantine node sets, respectively. Learning-clean nodes perform fresh local training and follow the pro-tocol. Lazy nodes are control-correct but may replay stale updates. Byzantine nodes may send arbitrary payloads or equivocate, subject only to cryptographic authentication. The control-correct set is 
+
+Cctrl = {1, . . . , N } \ B .
+
+The learning target is the learning-clean objective 
+
+min  
+
+> θ
+
+FHL (θ) ≜ 1
+
+|H L|
+
+∑
+
+> i∈H L
+
+Fi(θ). (3) The protocol does not know these sets. Its validation and consensus layers aim to certify enough fresh, non-Byzantine origins while excluding stale or inconsistent origins. In conventional FL [1], [4], as shown in Fig. 1(a), a central server coordinates all nodes. At epoch t, node 
+
+i starts from the current global model θt, 0 
+
+> i
+
+= θt−1 and performs K local stochastic-gradient steps: 
+
+θt,k +1  
+
+> i
+
+= θt,k i − η∇L i
+
+(
+
+xt,k i ; θt,k i
+
+)
+
+, k = 0 , . . . , K − 1. (4) The server aggregates 
+
+θt =
+
+> N
+
+∑
+
+> i=1
+
+wiθt,K i , wi > 0,
+
+> N
+
+∑
+
+> i=1
+
+wi = 1 , (5) and broadcasts θt to all nodes. B. Gossip-based Decentralized FL Gossip-based DFL removes the central server by allow-ing each node to exchange models only with a neighbor set. Let G = ( V, E) be the communication graph, Ni the neighbors of node i, and N + 
+
+> i
+
+= Ni ∪ { i}.The consensus-constrained optimization form underly-ing decentralized training is 
+
+min 
+
+> {θi}Ni=1
+> N
+
+∑
+
+> i=1
+
+Fi(θi) s.t. θi = θj , ∀(i, j ) ∈ E . (6) The update used below can be interpreted as a linearized proximal primal–dual step for (6). At epoch t, node i
+
+approximately minimizes 
+
+Fi(θ) − ⟨ ˆgt−1 
+
+> i
+
+, θ ⟩ + 12λ ∥θ − θt−1 
+
+> i
+
+∥22, (7) where ˆgt−1 
+
+> i
+
+is a local dual/tracking variable and λ > 0
+
+controls the proximal consensus pull. Node i initializes θt, 0 
+
+> i
+
+= θt−1 
+
+> i
+
+and performs 
+
+θt,k +1  
+
+> i
+
+= θt,k i − η
+
+(
+
+∇L i
+
+(xt,k i ; θt,k i
+
+) − ˆgt−1
+
+> i
+
++ 1
+
+λ
+
+(θt,k i − θt−1
+
+> i
+
+))
+
+,k = 0 , . . . , K − 1.
+
+(8) After K local steps, 
+
+ˆgti = ˆ gt−1 
+
+> i
+
+− 1
+
+λ
+
+(θt,K i − θt−1
+
+> i
+
+), (9) and 
+
+zti = θt,K i − λˆgt−1 
+
+> i
+
+. (10) A one-hop gossip aggregation would then take the form 
+
+θti = ∑ 
+
+> j∈N +
+> i
+
+wij ztj , wij ≥ 0, ∑ 
+
+> j∈N +
+> i
+
+wij = 1 . (11) For nominal decentralized convergence, the graph is connected, wij = 0 if j / ∈ N + 
+
+> i
+
+, and W = [ wij ] is doubly stochastic: 
+
+W 1 = 1, 1⊤W = 1⊤. (12) Its disagreement factor satisfies 
+
+ρ ≜
+
+∥∥∥∥W − 1
+
+N 11 ⊤
+
+∥∥∥∥2
+
+< 1. (13) We also assume that learning-clean losses are L-smooth, stochastic gradients have bounded variance, and data heterogeneity is bounded: 
+
+1
+
+|H L|
+
+∑
+
+> i∈H L
+
+∥∇ Fi(θ) − ∇ FHL (θ)∥22 ≤ ζ2. (14) In gspDAG-FL, the final aggregation matrix is time-varying because certified and post-audit origin sets differ across nodes; this is handled explicitly in Sec. IV-D. C. FL over Blockchain Blockchain integration provides a tamper-evident ledger for recording updates and a consensus mechanism for selecting accepted updates [28], [29]. In each epoch, after local training using (4), node i signs and broadcasts 
+
+θt,K i as a transaction. Other nodes or miners validate received updates, often using a public validation set. Accepted updates are included in a block, and the block records both accepted transactions and an aggregate. This improves auditability relative to a trusted server, but global propagation, block construction, and confirmation delay introduce latency and throughput bottlenecks that are restrictive for gossip-native DFL.     
+
+> (a) Traditional cen-tralized FL
+> (b) Gossip-based DFL
+> (c) Blockchain-based FL
+
+Fig. 1: Communication protocols for different FL approaches. 4
+
+III. Gossip-based FL Over Hashgraph DAG (gspDAG-FL) A. System Architecture In gspDAG-FL, all nodes train and gossip as light nodes, while a subset F ⊆ { 1, . . . , N } also act as full nodes. Full nodes reconstruct a Topology DAG from compact certificates and run virtual voting over that DAG. The data channel carries model payloads between neighbors. The control channel carries event certificates, accepted gossip proofs, equivocation reports, confirmation vectors, and termination certificates. The control plane certifies provenance-admissible origin tuples. It does not certify that a model is semantically safe, and it does not force all local parameters to be identical. Semantic safety is checked locally after finality; aggrega-tion eligibility is therefore the result of both control-plane certification and private post-consensus audit. 1) Events, origin tuples, and edge convention: Each epoch t is divided into ripples r = 0 , 1, . . . , R t. Node i
+
+creates one signed event certificate per ripple: 
+
+χti(r) = Sig i
+
+(i, t, r, h ti(r − 1) , type , meta ),
+
+where hti(r − 1) = h(eti(r − 1)) is the receiver self-parent hash. This certificate is sent to full nodes every ripple, including empty ripples. Thus, full nodes can reconstruct both non-empty events and empty heartbeat events. Empty events have a self-parent but no gossip parent. The genesis event eti(0) contains the corrected model zti .Its unique model-origin tuple is 
+
+ωti ≜ (i, t, h (eti(0)) , h (zti )). (15) All finality decisions are over tuples ω, not over bare node IDs. If full nodes observe two conflicting genesis tuples with the same origin node and epoch, that origin is marked equivocated for epoch t, and all conflicting tuples from that origin are excluded from certification. For an accepted transmission from sender a to receiver 
+
+i in ripple r, the sender first signs a send proof 
+
+πt, send  
+
+> a→i
+
+(r)
+
+binding sender, receiver, epoch, ripple, sender-parent hash 
+
+h(eta(r − 1)) , receiver self-parent hash h(eti(r − 1)) , origin tuple ω, and model hash. If node i verifies the proof, validates the payload, and has not already observed ω, it signs a receiver endorsement 
+
+σt, recv  
+
+> i
+
+(r)
+
+over the same metadata and an acceptance flag. The accepted proof is 
+
+Πta→i(r) = (πt, send  
+
+> a→i
+
+(r), σ t, recv  
+
+> i
+
+(r), χ ti(r)).
+
+A duplicate origin tuple is not counted again for readi-ness; the receiver creates a heartbeat event instead of a new origin-observation event. If the same receiver signs multiple distinct event certificates for the same epoch and ripple, full nodes mark the receiver as equivocating and discard the conflicting event certificates for that decision instance. node 1 node 2 node 3 node 4  
+
+> Ripple 0
+
+e1(0) e2(0) e3(0) e4(0)  
+
+> Ripple 1
+
+e1(1) e2(1) e3(1) e4(1)  
+
+> Ripple 2
+
+e1(2) e2(2) e3(2) e4(2)  
+
+> Ripple 3
+
+e1(3) e2(3) e3(3) e4(3)  
+
+> Ripple 4
+
+e1(4) e2(4) e3(4) e4(4)            
+
+> 1
+> Fig. 2: Illustration of the proposed Topology DAG with
+> N= 4 nodes over five ripples. Cross-column solid edges denote accepted gossip-parent links; same-column dashed edges denote self-predecessor links. Colors indicate moment values. Red-outlined events are voting events, and dashed circles denote empty heartbeat events.
+
+We use the parent-to-child edge convention. A self edge is 
+
+eti(r − 1) −→ eti(r),
+
+and an accepted gossip-parent edge is 
+
+eta(r − 1) −→ eti(r).
+
+Hence, all DAG edges increase the ripple index, so the graph is acyclic. Virtual voting uses ancestor reachability: event e sees event u if there is a directed path u →⋆ e,equivalently if one reaches u by following parent links backward from e.B. Light-node Duties 1) Storage: Each light node stores its own event chain, accepted payloads, observed origin tuples, and received parent payloads needed for validation, forwarding, audit, and aggregation. It does not store the full Topology DAG. Model tensors therefore remain distributed along data-plane paths rather than being replicated at every node. 2) Communication: At ripple r ≥ 1, if node i has a non-empty event eti(r − 1) , it selects a neighbor j ∈ N i,sends the stored model payload and a fresh send proof, and then creates its own event certificate. If it has no payload to forward, it still creates and sends a heartbeat event certificate to full nodes. A receiver accepts at most 5
+
+one incoming payload per ripple under a deterministic tie rule. It rejects invalid, stale, duplicate, or conflicting payloads and creates a heartbeat event in that ripple. C. Full-node Duties Full nodes verify event certificates, send proofs, receiver endorsements, self-parent hashes, gossip-parent hashes, origin tuples, and duplicate/equivocation rules. Valid event certificates add vertices and self edges to the Topology DAG. Valid accepted proofs add gossip-parent edges. Invalid messages are ignored and, if equivocation is detected, the conflicting creator or origin is marked invalid for the corresponding epoch. Full nodes run virtual voting locally over their re-constructed DAG prefixes. They then exchange compact signed confirmation vectors and termination certificates. Thus, virtual voting is used to infer local confirmation from DAG structure, while the full-node certificate ex-change provides quorum finality. D. Workflow of gspDAG-FL Each epoch t has three stages. Stage 1: Local model update Node i initializes θt, 0 
+
+> i
+
+= θt−1 
+
+> i
+
+, performs (8)–(10), obtains 
+
+zti , creates genesis event eti(0) , and defines ωti from (15). Stage 2: Gossip over ripples Step 1: Data-channel gossip: Each node with a non-empty previous event sends one payload and proof to one selected neighbor. The receiver checks the proof, payload hash, duplicate rule, equivocation rule, and payload-validation tests. If accepted, it signs a receiver endorsement and records the origin tuple; otherwise it records only a heartbeat event. Step 2: Control-channel topology sync: Every node sends its event certificate to full nodes. If it accepted a payload, it also sends the accepted proof. Full nodes verify the messages and update the Topology DAG. Step 3: Termination check: Full nodes run virtual voting over provenance-admissible origin tuples. Let Ct(r) be the set of control-plane certified origin tuples by the end of ripple r. If enough nodes are ready, full nodes broadcast termination certificates. A termination certificate matches on the tuple (t, r, C t(r)) . DAG-prefix digests may be included for audit but are not required to match for termination, since honest full nodes can have different extra non-decisive proofs. Stage 3: Semantic audit and model aggregation Let Oti (r) be the set of origin tuples observed and stored by node i. After termination, node i forms the certified-and-observed set 
+
+Ati = Ct(r) ∩ O ti (r).
+
+It then applies the semantic audit in Sec. IV-C3, produc-ing 
+
+˜Ati ⊆ A ti.
+
+For each ω ∈ ˜Ati, let zω denote the corresponding stored payload. Aggregation uses weights over certified observed origin tuples, not one-hop neighbor weights: 
+
+θti = ∑ 
+
+> ω∈˜Ati
+
+˜wtiω zω , ˜wtiω = αtiω 
+
+∑ 
+
+> ω′∈˜Ati
+
+αtiω ′
+
+. (16) Here αtiω > 0 may encode trust, freshness, validation score, or uniform weighting; the simulations use uniform αtiω = 1 .If ˜Ati = ∅, node i keeps θti = θt−1 
+
+> i
+
+. This avoids reusing the one-hop matrix W for multi-hop certified origins. IV. Model Validation and Consensus A. Consensus Process by Full Nodes Consensus is performed over origin tuples ω, not over node IDs or unconstrained model names. For notational simplicity, the epoch index is suppressed when clear. Let 
+
+NF = |F| . Define 
+
+τN =
+
+⌊ 2N
+
+3
+
+⌋
+
++ 1 , τF =
+
+⌊ 2NF
+
+3
+
+⌋
+
++ 1 . (17) The control-plane model assumes authenticated channels, deterministic verification, fewer than NF /3 Byzantine full nodes, and at most ⌊(N − 1) /3⌋ Byzantine nodes. Lazy nodes are learning-invalid but control-correct unless explicitly stated otherwise. 1) Definitions: For an event e, let s(e) be its self-parent and P{ e} its gossip parent if one exists. Since the stored edge direction is parent-to-child, u ⪯ e means u is an ancestor of e, i.e., u →⋆ e. At genesis, M{ ei(0) } = 1 . For an empty heartbeat event, M{ ei(r)} = M{ s(ei(r)) }, but the event is non-voting and is not included in a reachable voting set. For a non-empty event ej (r), let 
+
+M = max (M{ s(ej (r)) }, M{P{ ej (r)}} ). (18) The set R{ ej (r)} contains the earliest reachable eligible events of moment M , with at most one event per creator. An eligible event is a genesis event if M = 1 , and a non-empty voting event if M > 1. If multiple reachable eligible events of moment M are created by the same node, the one with the smallest ripple index is retained. A non-empty event is a voting event if 
+
+|R{ ej (r)}| ≥ τN . (19) Its moment is 
+
+M{ ej (r)} =
+
+{
+
+M + 1 , if ej (r) is voting ,M, otherwise . (20) For a voting event ej (r), its virtual vote on origin tuple 
+
+ω is defined in (21), where g(ω) is the genesis event associated with ω. The intermediate confirmation vote is defined in (22). Let Oj (r) be the set of origin tuples observed by node 
+
+j up to ripple r. Duplicates do not enlarge Oj (r).6
+
+2) Local confirmation and certificate exchange: Let 
+
+C(r) be the certified set by the end of ripple r, with 
+
+C(0) = ∅. A full node locally confirms ω / ∈ C(r − 1) if there exists a voting event ej (r) with 
+
+U(ej (r), ω ) = 1 .
+
+Full nodes exchange compact local-confirmation vectors. An origin tuple ω enters C(r) if at least τF full nodes locally confirm it. Node j is ready if 
+
+|C(r) ∩ O j (r)| ≥ Q. (23) If at least τN nodes are ready, a full node signs a termi-nation certificate for (t, r, C (r)) . A light node terminates after receiving at least τF matching certificates. This step is a compact full-node certificate exchange; virtual voting itself is the local inference of confirmation from the Topology DAG. B. Consensus Properties The next results concern provenance finality over origin tuples. They do not assert semantic validity, and they do not assert identical local model parameters after every epoch. Proofs are in Appendix A. Lemma 1 (Well-defined virtual voting). For any finite Topology DAG constructed from valid event certificates and accepted proofs, the quantities M{ e}, R{ e}, V(e, ω ),and U(e, ω ) are uniquely defined for every event e and every non-equivocated origin tuple ω.Theorem 1 (Quorum-intersection safety). Assume authen-ticated communication, deterministic verification, τF =
+
+⌊2NF /3⌋ + 1 , and fewer than NF /3 Byzantine full nodes. Then two control-correct nodes cannot accept two differ-ent termination certificates for the same epoch. Theorem 2 (Virtual-voting consistency). Consider two control-correct full nodes whose Topology DAG prefixes contain the same valid event-certificate and accepted-proof set up to ripple r. Then their locally computed 
+
+M, R, V, U, and local-confirmation vectors at ripple r
+
+are identical. Theorem 3 (Conditional liveness). Assume eventual de-livery of valid control messages, bounded control-correct processing delay, connected control-correct gossip paths, and fewer than NF /3 Byzantine full nodes. Suppose there exists a finite ripple r⋆ at which at least τN
+
+control-correct nodes have each observed at least Q non-equivocated origin tuples that pass payload validation and are confirmable from the valid Topology DAG. Then every control-correct node eventually receives a valid termination certificate and exits the gossip stage. C. Robustness, Complexity, and Validation Corrupted control messages are rejected because sender signatures, receiver endorsements, self-parent hashes, gossip-parent hashes, origin tuples, model hashes, epoch/ripple indices, and duplicate/equivocation rules must all verify. Lost data messages create heartbeat events and may increase the number of ripples. Lost control messages delay Topology-DAG reconstruction but cannot create false edges. Thus, loss and delay affect latency and liveness, while certificate safety follows from Theorem 1. In each ripple, each node sends at most one model payload over the data channel, giving O(N ) local payload transmissions. Each node also sends one event certificate to full nodes, and accepted payloads add accepted proofs; this costs O(N N F ) control messages per ripple. Full-node confirmation exchange costs O(N 2 
+
+> F
+
+N ) bits per ripple. With cached reachability bitsets, moment computation and virtual voting cost O(N 2) bit operations per full node per ripple. The Topology DAG stores O(N R t) event metadata per epoch. 1) Payload validation: If node i receives zω , it first computes 
+
+f1(zω ) = ∥zω − θt−1 
+
+> i
+
+∥2. (24) If f1(zω ) < ϵ stale , the update is rejected as stale before any directional normalization. Otherwise, using the previously post-audit set, node i computes μ1 
+
+> i
+
+, σ 1 
+
+> i
+
+and rejects if 
+
+f1(zω ) < L 1 
+
+> i
+
+or f1(zω ) > U 1 
+
+> i
+
+,
+
+where 
+
+L1 
+
+> i
+
+= max( ϵstale , μ 1 
+
+> i
+
+− 3σ1 
+
+> i
+
+), U 1 
+
+> i
+
+= μ1 
+
+> i
+
++ 3 σ1 
+
+> i
+
+.
+
+For direction, define the valid previous direction pool by excluding updates with displacement below ϵstale . If this pool is too small or if the mean direction norm is below ϵdir , the directional filter is skipped for the current epoch and only the magnitude rule is used. Otherwise, 
+
+f2(zω ) = ⟨zω − θt−1 
+
+> i
+
+, ¯dt−1 
+
+> i
+
+⟩∥zω − θt−1 
+
+> i
+
+∥2
+
+, (25) where 
+
+¯dt−1 
+
+> i
+
+= dt−1
+
+> i
+
+∥dt−1 
+
+> i
+
+∥2
+
+,
+
+and dt−1 
+
+> i
+
+is the average normalized direction over the valid previous pool. Node i rejects if f2(zω ) < L 2 
+
+> i
+
+= μ2 
+
+> i
+
+− 3σ2 
+
+> i
+
+.
+
+V(ej (r), ω ) = 
+
+
+
+1, M{ ej (r)} = 2 and g(ω) ∈ R{ ej (r)},
+
+1, M{ ej (r)} > 2 and ∑ 
+
+> e∈R{ ej(r)}
+
+V(e, ω ) > |R{ ej (r)}| /2,
+
+0, otherwise .
+
+(21) 
+
+U(ej (r), ω ) = 
+
+
+
+1, M{ ej (r)} > 2 and ∑ 
+
+> e∈R{ ej(r)}
+
+V(e, ω ) ≥ τN ,
+
+0, otherwise .
+
+(22) 7
+
+These filters are first-stage screens inspired by trust and asynchronous robust validation [40], [41], not universal Byzantine detectors. Proposition 1 (False-rejection control under concentrated honest statistics). Fix node i and statistic fm, m ∈ { 1, 2}.Suppose learning-clean values of fm are sub-Gaussian with mean ¯μm and scale ¯σm, and suppose the empirical estimates satisfy 
+
+|μmi − ¯μm| ≤ εμ, |σmi − ¯σm| ≤ εσ
+
+with probability at least 1 − δn. Then the false-rejection probability is bounded by 
+
+Pr {clean rejection } ≤ δn+cm exp 
+
+(
+
+− (3¯ σm − 3εσ − εμ)2+
+
+2¯ σ2
+
+> m
+
+)
+
+,
+
+with c1 = 2 for the two-sided magnitude test and c2 = 1 
+
+for the one-sided directional test. 2) Accepted-proof validation: Each node has a signing key and a public verification key. Full nodes insert an event only if the event certificate χti(r) is valid and its self-parent is consistent. A gossip-parent edge is inserted only if the accepted proof Πta→i(r) verifies both the sender proof and receiver endorsement. Duplicate event certifi-cates from the same creator in the same epoch/ripple trigger an equivocation mark. Conflicting genesis tuples from the same origin and epoch also trigger an equivoca-tion mark and are excluded from certification. Standard Ed25519 signatures can implement these checks [44], [45]. 3) Semantic consistency audit: After control-plane fi-nality, node i audits each locally stored zω ∈ A ti using a private trigger-free validation set Di. Let o(x; z) denote the output vector of model z. Node i computes 
+
+di(zω ) = max 
+
+> x∈Di
+
+∥∥o(x; zω ) − o(x; θt−1 
+
+> i
+
+)∥∥2 . (26) It removes updates whose score exceeds median + 3 MAD ,following robust outlier practice [42], [43]. If |A ti| < 4,pruning is skipped. If all models exceed the threshold, the model with the smallest di is retained. This audit assumes the previous local reference has not already drifted beyond the audit tolerance; under persistent reference poisoning, the audit becomes empirical. Proposition 2 (Semantic separation). Let Hti and Bti be the learning-clean and Byzantine tuples in Ati. Suppose 
+
+|B ti | < |A ti|/2, and there exist ati < b ti such that 
+
+di(zω ) ≤ ati, ω ∈ H ti , di(zω ) ≥ bti, ω ∈ B ti .
+
+If bti > med ti +3 MAD ti ≥ ati, then the MAD audit removes all Byzantine tuples in Bti and retains all learning-clean tuples in Hti .D. Learning Effect of Certified and Filtered Aggregation Let H = |H L| and ¯θt = H−1 ∑ 
+
+> i∈H L
+
+θti . Let W eff  
+
+> t
+
+be the row-stochastic effective aggregation matrix induced by the certified observed set and the post-audit weights in (16), restricted to learning-clean nodes and with invalid residual influence represented as a perturbation. We assume the effective mixing condition 
+
+E
+
+[∥∥P W eff 
+
+> t
+
+∥∥22
+
+∣∣∣Ft
+
+]
+
+≤ ρ2 < 1, (27) where P = I − H−111 ⊤ and Ft is the training-history filtration before aggregation at epoch t. This assumption replaces the fixed-matrix condition in ordinary DFL and matches the filtered, time-varying aggregation used by gspDAG-FL. We also assume the primal–dual tracking error is bounded: 
+
+1
+
+HK 
+
+∑
+
+> i∈H L
+> K−1
+
+∑
+
+> k=0
+
+E
+
+[∥∥∥E[gt,k i | Ft] − ∇ Fi(θt,k i )
+
+∥∥∥22
+
+]
+
+≤ cλ(Ω t + δ2 
+
+> t
+
+),
+
+(28) where gt,k i is the stochastic gradient including the primal– dual correction, Ωt is the learning-clean disagreement energy defined in Appendix B, and cλ < ∞. Let ξti = ηKb ti
+
+be the parameter-space aggregation perturbation, with 
+
+1
+
+H
+
+∑
+
+> i∈H L
+
+E∥bti∥22 ≤ δ2 
+
+> t
+
+.
+
+Theorem 4 (Stationarity under certified time-varying gossip). Assume learning-clean losses are L-smooth and lower bounded, stochastic gradients have variance at most 
+
+σ2 
+
+> g
+
+, heterogeneity is bounded by ζ2, (27) holds, and the tracking condition (28) holds. For sufficiently small η,
+
+1
+
+T 
+
+> T−1
+
+∑
+
+> t=0
+
+E
+
+[∥∥∇FHL (¯θt)∥∥22
+
+]
+
+≤ O
+
+( FHL (¯θ0) − Finf 
+
+ηKT 
+
+)
+
++ O(ησ 2 
+
+> g
+
+)+ O
+
+( ηKζ 2
+
+(1 − ρ)2
+
+)
+
++ O
+
+(
+
+1
+
+T 
+
+> T−1
+
+∑
+
+> t=0
+
+δ2
+
+> t
+
+)
+
+. (29) Thus, with η = Θ( T −1/2) and bounded average perturba-tion, gspDAG-FL converges to a stationary neighborhood of FHL .V. Simulation Results This section evaluates gspDAG-FL in terms of learning quality, robustness, detection effectiveness, ripple dynam-ics, and ledger scalability. The experiments test whether gspDAG-FL preserves model quality under invalid par-ticipation, whether the validation stages remove different attack types, and whether the DAG control plane scales better than block-centric coordination. A. Simulation Setup 1) Experimental environment and baselines: For gspDAG-FL, the ledger layer is implemented by ex-tending the dagsim Hashgraph simulator [46] in Kotlin with JDK 17+ and Gradle. We augment events with origin tuples, payload hashes, event certificates, and ac-cepted proofs. Full-node Topology-DAG processing uses JGraphT [47], and signature verification uses Ed25519 primitives from BouncyCastle [48]. Local learning and validation use Python 3.10, PyTorch [49], and NumPy [50]. Data and control channels are bidirectional gRPC streams using gRPC-Kotlin, grpcio, and Protocol Buffers [51]– [53]. Experiments are orchestrated with Docker Compose, logged to CSV, and visualized using matplotlib [54]. 8
+
+TABLE II: Baseline adaptation.                
+
+> Method Topology Finality Validation AD-PSGD same gossip graph none none/local averaging BLADE-FL ledger broadcast PoW block public held-out set ChainFL shard/main ledger shard+DAG commit public held-out set gspDAG-FL local gossip origin certificate local/private audit
+
+Large parameter sweeps and ripple-process stress tests use a trace-driven simulator with the same event tran-sition, proof verification, duplicate, equivocation, and certification rules. Random seeds are fixed in each script. AD-PSGD uses the public stochastic_gradient_push im-plementation [55]. BLADE-FL uses its public implemen-tation [56] over a local Ganache Ethereum testnet [57]. ChainFL uses the public ChainsFL implementation [58]. Table II summarizes the adaptation of baselines. 2) Data, tasks, and fairness: Task 1 is MNIST image classification [59], using a lightweight CNN based on MobileNetV2 [60]; performance is clean test accuracy. Se-mantic attacks use a 3 × 3 white square trigger and target class 0. Task 2 is Penn Treebank language modeling [61], using a GRU next-word predictor; performance is clean test perplexity. Semantic attacks insert a fixed rare two-word trigger and force a target token. All methods use the same effective training budget. The training pool is common to all methods. Public validation data for BLADE-FL and ChainFL and private audit data for gspDAG-FL are drawn from held-out samples and are not used for training. AD-PSGD does not use validation data. Final metrics use the same disjoint test split. 3) Fault model, topology, and metrics: Unless oth-erwise stated, the default setting is N = 15 , target adversarial ratio μ = 0 .15 , target lazy ratio γ = 0 .10 ,full-node ratio 0.40 , Q = ⌊2N/ 3⌋ + 1 , and Rmax  
+
+> t
+
+= Q + 2 .Integer assignment uses 
+
+B = min {⌊ μN ⌋, ⌊(N − 1) /3⌋} , Z = ⌊γN ⌋,
+
+with disjoint Byzantine and lazy sets. Lazy nodes are control-correct unless explicitly marked otherwise. In high-fault sweeps, the labels μ, γ denote target ratios after this integer assignment. For N = 5 , the 0.40 full-node ratio gives NF = 2 , so the full-node Byzantine bound permits no Byzantine full node; the simulation enforces this by sampling full nodes from the control-correct set. For gspDAG-FL and AD-PSGD, the communication graph is a connected Watts–Strogatz small-world graph generated with NetworkX [62]. The degree is k = 8 for 
+
+N ≤ 20 , k = 10 for 21 ≤ N ≤ 30 , and k = 12 for N ≥ 50 .The rewiring probability is p = 0 .25 for N < 10 , p = 0 .20 
+
+for 10 ≤ N ≤ 30 , and p = 0 .18 for larger networks. BLADE-FL and ChainFL use their native complete or shard-level communication structures. Local learning uses B = 50 , K = 5 , η = 0 .01 , and 
+
+λ = 100 . Node bandwidths are sampled between 10 and 
+
+50 Mbps, and latencies between 50 and 200 ms. Detection trials use 20 independent runs. Convergence is declared when |L t − L t−1|Lt−1 < 10 −3 (30) for five consecutive epochs, where Lt is the trimmed mean 
+
+TABLE III: Simulation configuration.                                        
+
+> Parameter Default / sweep value Tasks MNIST; Penn Treebank Baselines AD-PSGD, BLADE-FL, ChainFL Default nodes N= 15
+> Network-size sweep 5,10 ,15 ,20 ,25 ,30 ,50 ,75 ,100
+> Target Byzantine ratio μ= 0 .15 default Target lazy ratio γ= 0 .10 default Full-node ratio 0.40
+> Readiness threshold Q=⌊2N/ 3⌋+ 1
+> Ripple cap Rmax
+> t=Q+ 2
+> Local SGD B= 50 , K = 5 , η = 0 .01 , λ = 100
+> Network heterogeneity 10 –50 Mbps, 50 –200 ms Invalid-origin types magnitude, directional, semantic, lazy replay
+
+of node-local losses after removing the highest and lowest 
+
+10% . Latency is time for update exchange plus finality. Throughput is the number of correctly validated learning-clean updates included per consensus round. B. Results and Analysis 1) Learning behavior and robustness: Fig. 3 shows representative training-loss trajectories of gspDAG-FL. Higher Byzantine participation raises the final loss floor because Byzantine updates perturb direction or seman-tics. Higher lazy participation mainly slows convergence because stale replays reduce origin freshness but do not necessarily push the model in a malicious direction. Table IV reports learning performance as N increases. gspDAG-FL stays close to ChainFL and BLADE-FL because all three schemes include update-admission mech-anisms. AD-PSGD is weaker because it has no finality layer; once a poisoned or stale update is locally averaged, later gossip can propagate its effect. At larger N , gspDAG-FL benefits from a larger pool of learning-clean origins while the Topology DAG prevents most invalid origins from becoming control-plane certified. Table V separates adversarial and lazy effects. In-creasing μ causes sharper degradation than increasing γ,especially for Task 2. BLADE-FL and ChainFL remain robust, but their validation is tied to public-set admis-sion and heavier ledger coordination. gspDAG-FL retains comparable learning quality while preserving local payload paths. 2) Validation pipeline and ripple dynamics: Table VI reports end-to-end detection rates and false alarms. The false-alarm rate stays below 0.4% , so robustness is not obtained by discarding many learning-clean updates. Ta-ble VII shows how stages contribute over time: magnitude filtering dominates early, directional detections rise after the direction reference stabilizes, and semantic detections become more important after finality. Fig. 4 shows the per-epoch ripple count Rt. Clean regimes stay close to the useful receive-opportunity lower bound Q − 1. Adversary-heavy regimes need more ripples because invalid origins are rejected before contributing to readiness. Lazy-heavy regimes also increase Rt, but less sharply, because control-correct forwarders can still carry fresh origins. 3) System scaling: Table IX reports normalized latency, throughput, and convergence rounds. Each value is nor-90 50 100 150 
+
+00.2 0.4 0.6 0.8 1
+
+(a) Task 1. 0 20 40 60 80 100 120 140 160 180 
+
+2468 (b) Task 2. 
+
+Fig. 3: Training-loss dynamics of gspDAG-FL under different Byzantine and lazy-node compositions. TABLE IV: Learning performance versus network size under fixed target μ = 0 .15 and γ = 0 .10 . Best values are bolded. 
+
+Task Method Number of nodes N
+
+5 10 15 20 25 30 50 75 100 Task 1 Acc. ↑
+
+gspDAG-FL 0.935 0.958 0.972 0.976 0.979 0.981 0.984 0.986 0.987 AD-PSGD 0.900 0.915 0.930 0.940 0.945 0.950 0.954 0.957 0.959 BLADE-FL 0.932 0.954 0.969 0.973 0.977 0.978 0.980 0.982 0.983 ChainFL 0.936 0.957 0.973 0.975 0.980 0.980 0.983 0.984 0.985 Task 2 PPL. ↓
+
+gspDAG-FL 152.0 140.0 134.0 131.0 128.0 126.0 121.4 117.6 115.3 AD-PSGD 180.0 170.0 164.0 160.0 158.0 156.0 154.2 152.8 151.6 BLADE-FL 156.0 143.0 137.0 135.0 131.0 129.0 124.7 122.3 120.8 ChainFL 153.0 139.0 133.0 132.0 129.0 127.0 122.6 119.4 118.1 
+
+TABLE V: Robustness under adversarial and lazy participation at N = 15 . Best values are bolded. 
+
+Task Method Target adversarial ratio μ, fixed γ = 0 .10 Target lazy ratio γ, fixed μ = 0 .15 
+
+0.05 0.10 0.15 0.20 0.25 0.30 0 0.05 0.10 0.15 0.20 0.25 0.30 Task 1 Acc. ↑
+
+gspDAG-FL 0.982 0.977 0.972 0.966 0.958 0.946 0.975 0.973 0.972 0.970 0.968 0.966 0.963 AD-PSGD 0.945 0.938 0.930 0.918 0.900 0.870 0.938 0.934 0.930 0.925 0.920 0.915 0.910 BLADE-FL 0.980 0.976 0.971 0.965 0.957 0.944 0.973 0.971 0.969 0.967 0.964 0.962 0.959 ChainFL 0.981 0.978 0.971 0.967 0.959 0.945 0.974 0.972 0.971 0.969 0.967 0.965 0.962 Task 2 PPL. ↓
+
+gspDAG-FL 128.0 131.0 134.0 140.0 148.0 160.0 132.0 133.0 134.0 135.0 136.0 138.0 139.0 AD-PSGD 150.0 157.0 164.0 176.0 192.0 215.0 160.0 162.0 164.0 167.0 170.0 173.0 176.0 BLADE-FL 130.0 132.0 136.0 141.0 150.0 162.0 134.0 135.0 136.0 138.0 140.0 142.0 144.0 ChainFL 129.0 130.0 135.0 139.0 149.0 159.0 133.0 133.0 134.0 136.0 137.0 139.0 140.0 10 20 30 40 50 60 70 80 90 100 
+
+> 10 11 12 13
+
+(a) Task 1. 10 20 30 40 50 60 70 80 90 100  
+
+> 10 11 12 13
+
+(b) Task 2. 
+
+Fig. 4: Ripple dynamics of gspDAG-FL for N = 15 , Q = 11 , and Rmax  
+
+> t
+
+= 13 .TABLE VI: End-to-end defense-pipeline summary under N =15 , target μ = 0 .15 , and target γ = 0 .10 . Counts are mean ±
+
+standard deviation over 20 runs. 
+
+Task Detection rate False alarm Detected / flawed Task 1 96 .1% 0.35% 432 .6 ± 13 .3 / 450 
+
+Task 2 95 .7% 0.34% 502 .6 ± 14 .6 / 525 
+
+malized by the same method’s value at N = 5 , so the table reports scaling trend rather than absolute hardware-specific latency. gspDAG-FL keeps model tensors on local gossip paths and sends only metadata through the full-node control plane. BLADE-FL globally propagates trans-actions and waits for block confirmation. ChainFL reduces the bottleneck through sharding, but shard consensus and main-chain commitment still add synchronization overhead. The throughput trend is the clearest system-level effect. Increasing N increases the number of local model origins available per epoch. In gspDAG-FL, these origins do 10 
+
+TABLE VII: Cumulative invalid-origin detection by validation stage.                                                                         
+
+> Quantity Stage Task 1 epochs Task 2 epochs 20 40 60 80 100 24 48 72 96 120 Cumulative count Magnitude 38 72 101 128 150 50 94 134 164 180 Direction 16 34 54 72 88 18 40 62 86 104 Semantic 3817 30 50 1412 24 61 Undetected 36810 12 36814 15 Detected total 57 114 172 230 288 69 138 208 274 345 Invalid origins 60 120 180 240 300 72 144 216 288 360
+
+TABLE VIII: Ripple statistics for N = 15 , Q = 11 , and Rmax  
+
+> t
+
+=13 .                               
+
+> Regime Task 1 Task 2 med. mean cap med. mean cap
+> μ= 0 , γ = 0 11 10.84 3.7% 12 11.13 8.6%
+> μ= 0 .20 , γ = 0 .10 12 11.91 12.4% 13 12.28 24.7%
+> μ= 0 .10 , γ = 0 .20 11 11.27 7.3% 12 11.62 13.9%
+
+not become all-to-all tensor broadcasts; only their signed provenance enters the control plane. Hence, more partici-pants increase useful update diversity without creating the same confirmation bottleneck as block-centric ledgers. The results support four conclusions. First, gspDAG-FL achieves learning quality comparable to validation-based ledger FL while preserving gossip-level model exchange. Second, Byzantine faults are more damaging than lazy faults because they alter update direction and seman-tics, not only freshness. Third, the validation stages are complementary. Fourth, the Topology DAG gives global provenance finality over origin tuples without forcing all nodes to hold identical model tensors in every epoch. VI. Conclusion This paper introduced gspDAG-FL, a secure decentral-ized federated learning framework that derives finality from gossip history rather than from a separate block, shard, or committee layer. Model payloads remain on local peer-to-peer paths, while full nodes use event cer-tificates and receiver-endorsed accepted gossip proofs to reconstruct a Topology DAG and run virtual voting over provenance-admissible origin tuples. This gives global finality over which origins may be considered for aggrega-tion without requiring identical local model states at all nodes. The framework combines payload validation, accepted-proof validation, and private semantic audit to limit stale, malformed, and behaviorally abnormal updates. We proved well-definedness, quorum-intersection safety, virtual-voting consistency, conditional liveness, and aconvergence guarantee under time-varying certified aggre-gation. Simulations on image classification and language modeling show that gspDAG-FL preserves learning qual-ity close to validation-based ledger FL while improving latency, throughput, and scalability under Byzantine and lazy participation in the tested range up to N = 100 .Future work will study dynamic churn, adaptive full-node selection, stronger privacy for proof and audit meta-data, and deployment under real edge-network traces. Appendix A Proofs of Consensus Properties For an event e, let cr( e) denote its creator and rip( e) its ripple. With the parent-to-child edge convention, u ⪯ e
+
+means u →⋆ e. Thus u is an ancestor visible from 
+
+e by following parent links backward. Since all stored edges increase ripple index, the DAG is acyclic. Validity of event certificates and accepted proofs includes all signatures, endorsements, hashes, identities, origin tuples, and duplicate/equivocation checks. A. Proof of Lemma 1 At ripple 0, all genesis moments and reachable sets are fixed. Assume all quantities are uniquely defined up to ripple r−1. For any event ej (r), its self-parent and possible gossip parent lie in earlier ripple r − 1, so their moments are unique. For a non-empty event, the base moment M
+
+in (18) is therefore unique. The ancestor relation ⪯ is determined by the verified DAG. For each creator q, the set of reachable eligible events of moment M is finite; if it is nonempty, the event with smallest ripple index is unique because a control-correct node creates at most one valid event certificate per ripple and equivocations are excluded. Hence the earliest-per-creator rule uniquely defines R{ ej (r)}. The voting test and moment update are deterministic, so M{ ej (r)} is unique. For an empty heartbeat event, the inherited moment from the self-parent is unique and the event is non-voting. Virtual votes are defined by induction over moment. Moment-2 votes are determined directly by whether 
+
+g(ω) ∈ R{ e}. For moment m > 2, the vote of avoting event depends only on reachable eligible events of moment m − 1, whose votes have already been uniquely defined. The intermediate vote is a deterministic threshold function of these lower-moment votes. Therefore V and 
+
+U are uniquely defined for every voting event and non-equivocated origin tuple. This proves the lemma. B. Proof of Theorem 1 Let BF < N F /3 be the number of Byzantine full nodes. Any accepted certificate has at least 
+
+τF =
+
+⌊ 2NF
+
+3
+
+⌋
+
++ 1 
+
+signatures. Suppose two different termination certificates for the same epoch are accepted, with signer sets Q1 and 
+
+Q2. Then 
+
+|Q 1 ∩ Q 2| ≥ |Q 1| + |Q 2| − NF ≥ 2τF − NF .11 
+
+TABLE IX: Normalized system scaling under fixed target μ = 0 .15 and γ = 0 .10 . Values are normalized to each method’s value at N = 5 . Best values are bolded.                                                                                                                                                                                     
+
+> Task Metric Method Number of nodes N
+> 510 15 20 25 30 50 75 100 Task 1 Lat. ↓
+> gspDAG-FL 1.000 1.194 1.297 1.456 1.538 1.624 2.071 2.637 3.118 ChainFL 1.000 1.319 1.642 1.836 2.027 2.476 3.691 5.183 6.742 BLADE-FL 1.000 1.397 1.743 2.108 2.493 2.897 4.582 6.914 9.227 Thr. ↑
+> gspDAG-FL 1.000 1.704 2.427 3.012 3.449 4.013 5.674 7.386 8.832 ChainFL 1.000 1.486 1.932 2.286 2.617 2.803 3.548 4.213 4.762 BLADE-FL 1.000 0.982 0.921 0.832 0.731 0.653 0.514 0.407 0.342 Rounds ↓
+> gspDAG-FL 1.000 0.887 0.826 0.798 0.731 0.648 0.557 0.509 0.476 ChainFL 1.000 0.981 0.969 0.958 0.979 0.991 1.048 1.116 1.184 BLADE-FL 1.000 1.071 1.163 1.257 1.382 1.553 2.036 2.571 2.924 Task 2 Lat. ↓
+> gspDAG-FL 1.000 1.263 1.428 1.639 1.774 1.905 2.413 3.021 3.587 ChainFL 1.000 1.492 2.083 2.314 2.579 2.981 4.381 6.128 7.943 BLADE-FL 1.000 1.512 2.119 2.553 3.107 3.654 5.786 8.971 12.236 Thr. ↑
+> gspDAG-FL 1.000 1.518 2.083 2.571 2.962 3.301 4.764 6.137 7.124 ChainFL 1.000 1.331 1.527 2.004 2.118 2.347 3.093 3.671 4.138 BLADE-FL 1.000 0.987 0.869 0.801 0.648 0.569 0.447 0.353 0.284 Rounds ↓
+> gspDAG-FL 1.000 0.941 0.898 0.869 0.842 0.819 0.771 0.731 0.704 ChainFL 1.000 1.032 1.018 1.041 1.073 1.103 1.182 1.268 1.354 BLADE-FL 1.000 1.052 1.129 1.231 1.421 1.704 2.247 2.768 3.164
+
+For NF = 3 k, 3k + 1 , 3k + 2 , direct substitution gives 
+
+2τF − NF > NF
+
+3 .
+
+Hence |Q 1 ∩ Q 2| > NF /3 > BF , so the intersection contains at least one control-correct full node. A control-correct full node signs at most one termination certificate per epoch. Therefore two different certificates for the same epoch cannot both gather valid quorums. This proves safety. C. Proof of Theorem 2 If two control-correct full nodes have the same valid event-certificate and accepted-proof set up to ripple r,deterministic verification gives the same vertices, self edges, gossip-parent edges, and equivocation exclusions. Therefore, the two full nodes hold the same Topology DAG prefix. By the induction argument in Lemma 1, the same DAG prefix gives identical moment values and reachable eligible sets. Since the vote and intermediate-confirmation rules are deterministic functions of these sets, the two full nodes compute identical V, U, and local-confirmation vectors at ripple r.D. Proof of Theorem 3 Because fewer than NF /3 full nodes are Byzantine, at least τF full nodes are control-correct. By assumption, at ripple r⋆, at least τN control-correct nodes have each observed at least Q non-equivocated payload-valid origin tuples that are confirmable from the valid DAG. Eventual delivery ensures that all event certificates and accepted proofs needed for these observations eventually reach every control-correct full node. Bounded processing delay ensures that they are verified and inserted into each control-correct full node’s DAG prefix in finite time. By Theorem 2, control-correct full nodes with the same decisive proof prefix compute the same confirmations for the relevant origin tuples. Once at least τF matching confirmation vectors are exchanged, the same certified set 
+
+C(r) is derived at control-correct full nodes. Since at least 
+
+τN nodes satisfy 
+
+|C(r) ∩ O j (r)| ≥ Q, 
+
+control-correct full nodes sign termination certificates for 
+
+(t, r, C (r)) . Eventual delivery of those certificates gives every control-correct node τF matching certificates, so it terminates. The proof is conditional: if the dissemination event never occurs because too many valid payloads are lost, rejected, or withheld, no protocol can force this readiness condition. Appendix B Proofs of Validation and Learning Statements A. Proof of Proposition 1 Let X = fm(z) for a learning-clean update. Let 
+
+En = {| μmi − ¯μm| ≤ εμ, |σmi − ¯σm| ≤ εσ }.
+
+By assumption, Pr( En) ≥ 1 − δn. On En, upper rejection implies 
+
+X − ¯μm > 3¯ σm − εμ − 3εσ .
+
+For the two-sided magnitude test, lower rejection similarly implies 
+
+¯μm − X > 3¯ σm − εμ − 3εσ .
+
+Let 
+
+am = (3¯ σm − εμ − 3εσ
+
+)
+
+> +
+
+.
+
+The sub-Gaussian tail inequality gives 
+
+Pr {X − ¯μm > a m} ≤ exp 
+
+(
+
+− a2
+
+> m
+
+2¯ σ2
+
+> m
+
+)
+
+,
+
+and the same bound holds for the lower tail. Therefore, by the union bound, 
+
+Pr {clean rejection for f1} ≤ δn + 2 exp 
+
+(
+
+− a21
+
+2¯ σ21
+
+)
+
+.
+
+For the directional statistic, only the lower tail is used: 
+
+Pr {clean rejection for f2} ≤ δn + exp 
+
+(
+
+− a22
+
+2¯ σ22
+
+)
+
+.
+
+This gives the proposition. 12 
+
+B. Proof of Proposition 2 Let T ti = med ti + 3 MAD ti. The audit removes exactly those tuples with di(zω ) > T ti . If ω ∈ H ti , then 
+
+di(zω ) ≤ ati ≤ T ti ,
+
+so it is retained. If ω ∈ B ti , then 
+
+di(zω ) ≥ bti > T ti ,
+
+so it is removed. The honest-majority condition ensures that the median is not controlled by Byzantine scores; exact separation follows from the displayed threshold inequality. C. Proof of Theorem 4 Let H = |H L|, stack the learning-clean parameters as 
+
+Θt = [ θt
+
+> 1
+
+, . . . , θ tH ]⊤ ∈ RH×d,
+
+and define 
+
+J = H−111 ⊤, P = I − J, Ωt = H−1E∥P Θt∥2 
+
+> F
+
+.
+
+The effective aggregation matrix W eff  
+
+> t
+
+is row-stochastic and satisfies (27). Let gt,k i be the stochastic gradient including the primal–dual correction. The tracking con-dition is (28). After K local steps and certified aggregation, the learning-clean average obeys 
+
+¯θt+1 = ¯θt − η
+
+> K−1
+
+∑
+
+> k=0
+
+¯gt,k + ηK ¯bt,
+
+where 
+
+¯gt,k = H−1 ∑
+
+> i∈H L
+
+gt,k i , ¯bt = H−1 ∑
+
+> i∈H L
+
+bti.
+
+By Jensen’s inequality, 
+
+E∥¯bt∥22 ≤ δ2 
+
+> t
+
+.
+
+The disagreement recursion follows from (27). Let ˜Θt+1 
+
+be the post-local-SGD, pre-aggregation stack. Since W eff 
+
+> t
+
+is row-stochastic, 
+
+P W eff  
+
+> t
+
+˜Θt+1 
+
+is the disagreement component after effective mixing. By (27), smoothness, bounded variance, bounded heterogene-ity, and the tracking condition, 
+
+Ωt+1 ≤ 1 + ρ
+
+2 Ωt + C1η2K2(σ2 
+
+> g
+
++ ζ2) + C2η2K2δ2 
+
+> t
+
+.
+
+Iterating the recursion gives 
+
+1
+
+T 
+
+> T−1
+
+∑
+
+> t=0
+
+Ωt ≤ O
+
+( Ω0
+
+(1 − ρ)T
+
+)
+
++ O
+
+( η2K2(σ2 
+
+> g
+
++ ζ2)1 − ρ
+
+)
+
++ O
+
+(
+
+η2K2
+
+(1 − ρ)T 
+
+> T−1
+
+∑
+
+> t=0
+
+δ2
+
+> t
+
+)
+
+.
+
+Define 
+
+Gt = K−1
+
+> K−1
+
+∑
+
+> k=0
+
+¯gt,k , et = Gt − ∇ FHL (¯θt).
+
+Using L-smoothness, gradient variance, heterogeneity, dis-agreement, local drift, and tracking, 
+
+E∥et∥22 ≤ C3
+
+( σ2
+
+> g
+
+HK + L2Ωt + η2K2L2(σ2 
+
+> g
+
++ ζ2) + δ2
+
+> t
+
+)
+
+.
+
+By L-smoothness of FHL ,
+
+FHL (¯θt+1 ) ≤ FHL (¯θt) + 〈∇FHL (¯θt), −ηKG t + ηK ¯bt〉
+
++ L
+
+2
+
+∥∥−ηKG t + ηK ¯bt∥∥22 .
+
+Substituting Gt = ∇FHL (¯θt) + et, applying Young’s inequality, and choosing ηKL sufficiently small gives 
+
+EFHL (¯θt+1 ) ≤ EFHL (¯θt)
+
+− ηK 
+
+4 E
+
+[∥∥∇FHL (¯θt)∥∥22
+
+]
+
++ C4ηK E∥et∥22 + C5ηKδ 2 
+
+> t
+
+.
+
+Summing from 0 to T − 1, using the lower bound Finf ,and substituting the bounds on et and Ωt, yields 
+
+1
+
+T 
+
+> T−1
+
+∑
+
+> t=0
+
+E
+
+[∥∥∇FHL (¯θt)∥∥22
+
+]
+
+≤ O
+
+( FHL (¯θ0) − Finf 
+
+ηKT 
+
+)
+
++ O(ησ 2 
+
+> g
+
+) + O
+
+( ηKζ 2
+
+(1 − ρ)2
+
+)
+
++ O
+
+(
+
+1
+
+T 
+
+> T−1
+
+∑
+
+> t=0
+
+δ2
+
+> t
+
+)
+
+.
+
+The (1 − ρ)−2 factor is the standard amplification of local drift and heterogeneity through decentralized mix-ing. Taking η = Θ( T −1/2) gives the stated stationary-neighborhood conclusion. References 
+
+[1] H. B. McMahan, E. Moore, D. Ramage, S. Hampson, and B. Agüera y Arcas, “Communication-efficient learning of deep networks from decentralized data,” in Proc. 20th Int. Conf. Artif. Intell. Statist. (AISTATS), 2017, pp. 1273–1282. [2] P. Kairouz et al., “Advances and open problems in federated learning,” Found. Trends Mach. Learn., vol. 14, no. 1–2, pp. 1– 210, 2021, doi: 10.1561/2200000083. [3] A. Taherpour and X. Wang, “ZK-HybridFL: Zero-knowledge proof-enhanced hybrid ledger for federated learning,” IEEE Trans. Neural Netw. Learn. Syst., early access, pp. 1–15, Feb. 2026, doi: 10.1109/TNNLS.2026.3658993. [4] K. Bonawitz et al., “Practical secure aggregation for privacy-preserving machine learning,” in Proc. ACM SIGSAC Conf. Comput. Commun. Secur. (CCS), 2017, pp. 1175–1191, doi: 10.1145/3133956.3133982. [5] L. Zhu, Z. Liu, and S. Han, “Deep leakage from gradients,” in Proc. Adv. Neural Inf. Process. Syst. (NeurIPS), 2019, pp. 14747–14756. [6] S. Boyd, A. Ghosh, B. Prabhakar, and D. Shah, “Randomized gossip algorithms,” IEEE Trans. Inf. Theory, vol. 52, no. 6, pp. 2508–2530, Jun. 2006, doi: 10.1109/TIT.2006.874516. [7] X. Lian, C. Zhang, H. Zhang, C.-J. Hsieh, W. Zhang, and J. Liu, “Can decentralized algorithms outperform centralized algorithms? A case study for decentralized parallel stochastic gradient descent,” in Proc. Adv. Neural Inf. Process. Syst. (NeurIPS), 2017, pp. 5330–5340. [8] X. Lian, W. Zhang, C.-J. Hsieh, C. Zhang, and J. Liu, “Asyn-chronous decentralized parallel stochastic gradient descent,” in Proc. Int. Conf. Mach. Learn. (ICML), 2018, pp. 3043–3052. [9] M. Assran, N. Loizou, N. Ballas, and M. G. Rabbat, “Stochastic gradient push for distributed deep learning,” in Proc. Int. Conf. Mach. Learn. (ICML), 2019, pp. 344–353. [10] A. Koloskova, S. Stich, and M. Jaggi, “Decentralized stochastic optimization and gossip algorithms with compressed commu-nication,” in Proc. Int. Conf. Mach. Learn. (ICML), 2019, pp. 3478–3487. [11] Z. Tang, S. Shi, B. Li, and X. Chu, “GossipFL: A decentralized federated learning framework with sparsified and adaptive com-munication,” IEEE Trans. Parallel Distrib. Syst., vol. 34, no. 3, pp. 909–922, Mar. 2023, doi: 10.1109/TPDS.2022.3230938. [12] Q. Chen, Z. Wang, H. Wang, and X. Lin, “FedDual: Pair-wise gossip helps federated learning in large decentralized networks,” IEEE Trans. Inf. Forensics Security, vol. 18, pp. 335–350, 2023, doi: 10.1109/TIFS.2022.3222935. [13] H. Wang and Y. Chi, “Communication-efficient federated optimization over semi-decentralized networks,” IEEE Trans. Signal Inf. Process. Netw., vol. 11, pp. 147–160, 2025, doi: 10.1109/TSIPN.2025.3539004. 13 
+
+[14] A. Taherpour and X. Wang, “SPID-Chain: A smart contract-enabled, polar-coded interoperable DAG chain,” arXiv:2501.11794, Jan. 2025, doi: 10.48550/arXiv.2501.11794. [15] P. Blanchard, E. M. El Mhamdi, R. Guerraoui, and J. Stainer, “Machine learning with adversaries: Byzantine tolerant gradient descent,” in Proc. Adv. Neural Inf. Process. Syst. (NeurIPS), 2017, pp. 119–129. [16] D. Yin, Y. Chen, R. Kannan, and P. Bartlett, “Byzantine-robust distributed learning: Towards optimal statistical rates,” in Proc. Int. Conf. Mach. Learn. (ICML), 2018, pp. 5650–5659. [17] K. Pillutla, S. M. Kakade, and Z. Harchaoui, “Robust aggre-gation for federated learning,” IEEE Trans. Signal Process., vol. 70, pp. 1142–1154, 2022, doi: 10.1109/TSP.2022.3153135. [18] C. Fung, C. J. M. Yoon, and I. Beschastnikh, “Mitigating sybils in federated learning poisoning,” arXiv:1808.04866, 2018, doi: 10.48550/arXiv.1808.04866. [19] E. Bagdasaryan, A. Veit, Y. Hua, D. Estrin, and V. Shmatikov, “How to backdoor federated learning,” in Proc. Int. Conf. Artif. Intell. Statist. (AISTATS), 2020, pp. 2938–2948. [20] H. Wang et al., “Attack of the tails: Yes, you really can backdoor federated learning,” in Proc. Adv. Neural Inf. Process. Syst. (NeurIPS), 2020, pp. 16070–16084. [21] B. Wang, Y. Yao, S. Shan, H. Li, B. Viswanath, H. Zheng, and B. Y. Zhao, “Neural Cleanse: Identifying and mitigating back-door attacks in neural networks,” in Proc. IEEE Symp. Secur. Privacy (S&P), 2019, pp. 707–723, doi: 10.1109/SP.2019.00031. [22] Y. Gao, C. Xu, D. Wang, S. Chen, D. C. Ranasinghe, and S. Nepal, “STRIP: A defence against Trojan attacks on deep neural networks,” in Proc. 35th Annu. Com-put. Secur. Appl. Conf. (ACSAC), 2019, pp. 113–125, doi: 10.1145/3359789.3359790. [23] B. Tran, J. Li, and A. Madry, “Spectral signatures in backdoor attacks,” in Proc. Adv. Neural Inf. Process. Syst. (NeurIPS), 2018, pp. 8011–8021. [24] A. Taherpour and X. Wang, “A high-throughput and secure coded blockchain for IoT,” IEEE Trans. Dependable Secure Comput., vol. 22, no. 4, pp. 3561–3579, Jul.–Aug. 2025, doi: 10.1109/TDSC.2025.3532850. [25] A. Taherpour and X. Wang, “HybridChain: Fast, accurate, and secure transaction processing with distributed learning,” IEEE Trans. Parallel Distrib. Syst., vol. 35, no. 6, pp. 968–982, Jun. 2024, doi: 10.1109/TPDS.2024.3381593. [26] H. Kim, J. Park, M. Bennis, and S.-L. Kim, “Blockchained on-device federated learning,” IEEE Commun. Lett., vol. 24, no. 6, pp. 1279–1283, Jun. 2020, doi: 10.1109/LCOMM.2019.2921755. [27] S. Warnat-Herresthal et al., “Swarm learning for decentralized and confidential clinical machine learning,” Nature, vol. 594, no. 7862, pp. 265–270, Jun. 2021, doi: 10.1038/s41586-021-03583-3. [28] Y. Qu et al., “Decentralized privacy using blockchain-enabled federated learning in fog computing,” IEEE Inter-net Things J., vol. 7, no. 6, pp. 5171–5183, Jun. 2020, doi: 10.1109/JIOT.2020.2977383. [29] J. Li et al., “Blockchain assisted decentralized federated learn-ing (BLADE-FL): Performance analysis and resource alloca-tion,” IEEE Trans. Parallel Distrib. Syst., vol. 33, no. 10, pp. 2401–2415, Oct. 2022, doi: 10.1109/TPDS.2021.3138848. [30] Z. Cai, J. Chen, Y. Fan, Z. Zheng, and K. Li, “Blockchain-empowered federated learning: Benefits, challenges, and solu-tions,” IEEE Trans. Big Data, vol. 11, no. 5, pp. 2244–2263, Oct. 2025, doi: 10.1109/TBDATA.2025.3541560. [31] Z. Peng et al., “VFChain: Enabling verifiable and auditable federated learning via blockchain systems,” IEEE Trans. Netw. Sci. Eng., vol. 9, no. 1, pp. 173–186, Jan.–Feb. 2022, doi: 10.1109/TNSE.2021.3050781. [32] A. P. Kalapaaking, I. Khalil, X. Yi, K.-Y. Lam, G.-B. Huang, and N. Wang, “Auditable and verifiable federated learning based on blockchain-enabled decentralization,” IEEE Trans. Neural Netw. Learn. Syst., vol. 36, no. 1, pp. 102–115, Jan. 2025, doi: 10.1109/TNNLS.2024.3407670. [33] S. Yuan, B. Cao, Y. Sun, Z. Wan, and M. Peng, “Secure and efficient federated learning through layer-ing and sharding blockchain,” IEEE Trans. Netw. Sci. Eng., vol. 11, no. 3, pp. 3120–3134, May–Jun. 2024, doi: 10.1109/TNSE.2024.3361458. [34] M. Cao, L. Zhang, and B. Cao, “Toward on-device federated learning: A direct acyclic graph-based blockchain approach,” IEEE Trans. Neural Netw. Learn. Syst., vol. 34, no. 4, pp. 2028– 2042, Apr. 2023, doi: 10.1109/TNNLS.2021.3105810. [35] J. Chen, D. Wu, S. Guo, F. Qi, and X. Qiu, “DAG-EnseFL: DAG-based asynchronous federated learning with ensemble distillation,” IEEE Trans. Big Data, vol. 11, no. 6, pp. 3342– 3355, Dec. 2025, doi: 10.1109/TBDATA.2025.3594244. [36] Q. Wang, S. Xu, R. Xu, and B. Ai, “A DAG-blockchain-assisted federated learning framework in wireless networks: Learning performance and throughput optimization schemes,” IEEE Trans. Veh. Technol., vol. 74, no. 3, pp. 5097–5113, Mar. 2025, doi: 10.1109/TVT.2024.3502444. [37] G. Yu et al., “IronForge: An open, secure, fair, decen-tralized federated learning,” IEEE Trans. Neural Netw. Learn. Syst., vol. 36, no. 1, pp. 354–368, Jan. 2025, doi: 10.1109/TNNLS.2023.3329249. [38] L. Baird, “The Swirlds Hashgraph consensus algorithm: Fair, fast, Byzantine fault tolerance,” Swirlds, Tech. Rep. SWIRLDS-TR-2016-01, 2016. [Online]. Available: https://www.swirlds. com/downloads/SWIRLDS-TR-2016-01.pdf. Accessed: Jul. 9, 2026. [39] M. Castro and B. Liskov, “Practical Byzantine fault tolerance,” in Proc. 3rd Symp. Operating Syst. Design Implement. (OSDI), 1999, pp. 173–186. [40] X. Cao, M. Fang, J. Liu, and N. Z. Gong, “FLTrust: Byzantine-robust federated learning via trust bootstrapping,” in Proc. Netw. Distrib. Syst. Secur. Symp. (NDSS), 2021, doi: 10.14722/ndss.2021.24434. [41] C. Xie, O. Koyejo, and I. Gupta, “Zeno++: Robust fully asynchronous SGD,” in Proc. Int. Conf. Mach. Learn. (ICML), ser. Proc. Mach. Learn. Res., vol. 119, 2020, pp. 10495–10503. [42] B. Iglewicz and D. C. Hoaglin, How to Detect and Handle Outliers. Milwaukee, WI, USA: ASQC Quality Press, 1993. [43] C. Leys, C. Ley, O. Klein, P. Bernard, and L. Licata, “De-tecting outliers: Do not use standard deviation around the mean, use absolute deviation around the median,” J. Exp. Soc. Psychol., vol. 49, no. 4, pp. 764–766, Jul. 2013, doi: 10.1016/j.jesp.2013.03.013. [44] S. Josefsson and I. Liusvaara, “Edwards-Curve Digital Sig-nature Algorithm (EdDSA),” RFC 8032, Jan. 2017, doi: 10.17487/RFC8032. [45] D. J. Bernstein, N. Duif, T. Lange, P. Schwabe, and B.-Y. Yang, “High-speed high-security signatures,” J. Cryptographic Eng., vol. 2, no. 2, pp. 77–89, Sep. 2012, doi: 10.1007/s13389-012-0027-1. [46] B. Schachenhofer, “dagsim: Hashgraph simulator,” GitHub repository. [Online]. Available: https://github.com/ BSchachenhofer/dagsim. Accessed: Jul. 9, 2026. [47] D. Michail, J. Kinable, B. Naveh, and J. V. Sichi, “JGraphT— A Java library for graph data structures and algorithms,” ACM Trans. Math. Softw., vol. 46, no. 2, Art. no. 16, May 2020, doi: 10.1145/3381449. [48] The Legion of the Bouncy Castle Inc., “Bouncy Castle Crypto APIs,” [Online]. Available: https://www.bouncycastle.org/. Ac-cessed: Jul. 9, 2026. [49] A. Paszke et al., “PyTorch: An imperative style, high-performance deep learning library,” in Proc. Adv. Neural Inf. Process. Syst. (NeurIPS), 2019, pp. 8024–8035. [50] C. R. Harris et al., “Array programming with NumPy,” Nature, vol. 585, no. 7825, pp. 357–362, Sep. 2020, doi: 10.1038/s41586-020-2649-2. [51] The gRPC Authors, “gRPC-Kotlin,” GitHub repository. [Online]. Available: https://github.com/grpc/grpc-kotlin. Ac-cessed: Jul. 9, 2026. [52] The gRPC Authors, “grpcio: gRPC for Python,” PyPI. [Online]. Available: https://pypi.org/project/grpcio/. Accessed: Jul. 9, 2026. [53] Google, “Protocol Buffers documentation,” [Online]. Available: https://protobuf.dev/. Accessed: Jul. 9, 2026. [54] J. D. Hunter, “Matplotlib: A 2D graphics environment,” Com-put. Sci. Eng., vol. 9, no. 3, pp. 90–95, May–Jun. 2007, doi: 10.1109/MCSE.2007.55. [55] Facebook Research, “stochastic_gradient_push: PyTorch im-plementation of Stochastic Gradient Push,” GitHub reposi-tory. [Online]. Available: https://github.com/facebookresearch/ stochastic_gradient_push. Accessed: Jul. 9, 2026. [56] Y.-M. Shao, “BLADE-FL: Blockchain Assisted Decentralized Federated Learning,” GitHub repository. [Online]. Available: 14 
+
+https://github.com/ElvisShaoYumeng/BLADE-FL. Accessed: Jul. 9, 2026. [57] Truffle Suite, “Ganache,” [Online]. Available: https://archive. trufflesuite.com/ganache/. Accessed: Jul. 9, 2026. [58] S. Yuan, “ChainsFL: A blockchain-based federated learning implementation,” GitHub repository, 2021. [Online]. Available: https://github.com/shuoyuan/ChainsFL-implementation. Ac-cessed: Jul. 9, 2026. [59] Y. LeCun, C. Cortes, and C. J. C. Burges, “The MNIST database of handwritten digits,” [Online]. Available: http:// yann.lecun.com/exdb/mnist/. Accessed: Jul. 9, 2026. [60] M. Sandler, A. Howard, M. Zhu, A. Zhmoginov, and L.-C. Chen, “MobileNetV2: Inverted residuals and linear bottlenecks,” in Proc. IEEE/CVF Conf. Comput. Vis. Pattern Recognit. (CVPR), 2018, pp. 4510–4520, doi: 10.1109/CVPR.2018.00474. [61] M. P. Marcus, B. Santorini, and M. A. Marcinkiewicz, “Building a large annotated corpus of English: The Penn Treebank,” Comput. Linguistics, vol. 19, no. 2, pp. 313–330, 1993. [62] A. A. Hagberg, D. A. Schult, and P. J. Swart, “Exploring network structure, dynamics, and function using NetworkX,” in Proc. Python Sci. Conf. (SciPy), 2008, pp. 11–15.
