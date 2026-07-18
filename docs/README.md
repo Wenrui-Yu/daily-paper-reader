@@ -6,29 +6,38 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-17
-- 运行时间：2026-07-17 21:11:36 UTC
+- 最新运行日期：2026-07-18
+- 运行时间：2026-07-18 21:08:33 UTC
 - 运行状态：成功
-- 本次总论文数：3
-- 精读区：1
-- 速读区：2
+- 本次总论文数：6
+- 精读区：3
+- 速读区：3
 
 ### 今日简报（AI）
-今日研读3篇论文，重点精读了《Secure Decentralized Federated Learning via Gossip and Virtual Voting》（9.0/10）。最值得关注的是去中心化联邦学习中的Gossip协议与虚拟投票安全机制，以及异构数据下基于截断二次损失函数的拜占庭鲁棒联邦学习方法。建议优先精读高分论文，并关注联邦学习安全与隐私保护的最新进展。
-- 详情：[/202607/17/README](/202607/17/README)
+今日精读聚焦节点隐私社区估计与医疗联邦学习MLOps两大高分研究，速读覆盖隐私复用、政策偏差及移动端RAG系统。建议优先阅读9.0分的社区估计和医疗联邦学习论文，并关注隐私理论与MLOps实践的结合方向。
+- 详情：[/202607/18/README](/202607/18/README)
 
 ### 精读区论文标签
-1. [Secure Decentralized Federated Learning via Gossip and Virtual Voting](/202607/17/2607.08651v1-secure-decentralized-federated-learning-via-gossip-and-virtual-voting)  
+1. [Near-optimal node-private community estimation in polynomial-time](/202607/18/2607.09441v1-near-optimal-node-private-community-estimation-in-polynomial-time)  
    标签：评分：9.0/10、query:daily
-   evidence：利用八卦协议和虚拟投票实现安全的去中心化联邦学习，抵御拜占庭攻击
+   evidence：节点私有社区估计随机块模型
+2. [Toward Production-Ready Federated Learning in Healthcare: Privacy, Orchestration, and Governance in MLOps](/202607/18/2607.10467v2-toward-production-ready-federated-learning-in-healthcare-privacy-orchestration-and-governance-in-mlops)  
+   标签：评分：9.0/10、query:daily
+   evidence：联邦学习隐私医疗MLOps
+3. [Score-Only Distillation for Compact Dense Retrieval](/202607/18/2607.11465v1-score-only-distillation-for-compact-dense-retrieval)  
+   标签：评分：9.0/10、query:daily
+   evidence：专注于从教师到学生的蒸馏用于紧凑密集检索
 
 ### 速读区论文标签
-1. [Enhanced Byzantine-Robust Federated Learning Via Truncated-Quadratic Loss for Heterogeneous Data](/202607/17/2607.10970v1-enhanced-byzantine-robust-federated-learning-via-truncated-quadratic-loss-for-heterogeneous-data)  
+1. [ReBound: Reuse-Aware Privacy For Interactive Decision Support](/202607/18/2607.13441v1-rebound-reuse-aware-privacy-for-interactive-decision-support)  
    标签：评分：7.0/10、query:daily
-   evidence：拜占庭鲁棒的联邦学习与分布式机器学习中的隐私相关
-2. [Is External Database Protection Static in Retrieval-Augmented Generation? Rethinking Privacy Preservation under Dynamic Queries](/202607/17/2607.14811v1-is-external-database-protection-static-in-retrieval-augmented-generation-rethinking-privacy-preservation-under-dynamic-queries)  
-   标签：评分：6.0/10、query:daily
-   evidence：隐私保护的动态查询RAG，与隐私和动态方面相关
+   evidence：具有查询重用的差分隐私决策支持
+2. [Disclosure Divergence: Measuring Privacy Policy and Data Safety Misalignment at Scale](/202607/18/2607.14442v1-disclosure-divergence-measuring-privacy-policy-and-data-safety-misalignment-at-scale)  
+   标签：评分：7.0/10、query:daily
+   evidence：隐私政策数据安全标签不一致
+3. [SmartRAG: Native Graph-Based RAG for Mobile Device](/202607/18/2607.14661v1-smartrag-native-graph-based-rag-for-mobile-device)  
+   标签：评分：7.0/10、query:daily
+   evidence：设备端RAG隐私LLM移动
 
 
 <div class="dpr-home-promo-card">
