@@ -1,0 +1,416 @@
+Title: tidysynthesis: a Meta-Package for Synthetic Data Generation
+
+URL Source: https://arxiv.org/pdf/2607.12611v1
+
+Published Time: Wed, 15 Jul 2026 11:57:33 GMT
+
+Number of Pages: 23
+
+Markdown Content:
+# tidysynthesis: a Meta-Package for Synthetic Data Generation 
+
+Aaron R. Williams 
+
+Urban Institute 
+
+Jeremy Seeman 
+
+Urban Institute 
+
+Gabriel Morrison 
+
+Urban Institute 
+
+Abstract 
+
+Synthetic data generation enables data curators to more easily share datasets that limits the potential for disclosive inferences about data subjects in confidential datasets. Generating synthetic data requires navigating numerous design choices; however, most existing open source software fails to provide common software infrastructure for making such design choices efficiently. In this paper, we introduce tidysynthesis , a meta-package for synthetic data generation that enables better interoperability between existing mod-eling frameworks and statistical data privacy methods. tidysynthesis allows users more flexibility to specify and iterate on synthetic data algorithms by providing a common syntax to easily create and modify synthetic data generation pipelines. We demonstrate the features and extensibility of tidysynthesis , as well as provide end-to-end examples for synthetic data generation using data from the American Community Survey. 
+
+Keywords : synthetic data, data privacy, R. 
+
+# 1. Introduction 
+
+1.1. Synthetic Data and Statistical Data Privacy 
+
+Access to high-quality data is essential for building knowledge and making evidence-based decisions. However, many useful data sets are generally inaccessible because of disclosure concerns. For example, Chetty, Hendren, Kline, and Saez (2014) use hundreds of millions of confidential tax returns to understand inter-generational mobility in the United States; this high-impact research was only possible through privileged access to confidential data. Conversely, many existing publicly available datasets pose substantial disclosure risk concerns, raising questions about how to improve these processes (Henriksen-Bulmer and Jeary 2016). To safely expand access to confidential data, many practitioners are turning to synthetic data. The term “synthetic data” refers to datasets that imitate the statistical properties of a confidential datasets while limiting inferences that could be made about confidential data subjects (Raghunathan 2021). Synthetic data techniques use generative modeling to draw new synthetic data samples from models trained on confidential data. When used effectively, arXiv:2607.12611v1 [stat.CO] 14 Jul 2026 2 tidysynthesis: a Meta-Package for Synthetic Data Generation 
+
+synthetic data offers an alternative data access mechanism for making more confidential information accessible to researchers or mitigating disclosure risk for existing data products. For the purposes of this paper and software, we focus on tabular synthetic data as used in quantitative social sciences. Data synthesis has grown in popularity in recent years because it can leverage randomization to help limit membership inferences, i.e., whether an adversary can infer the presence or absence of a particular record in the confidential data. With increasing computing power, third-party data availability, and auxiliary information, traditional techniques like suppression, swapping, and bottom- and top-coding suffer from exposure to membership inference with certainty (Machanavajjhala, Kifer, Gehrke, and Venkitasubramaniam 2007; Cohen 2022). Moreover, these same traditional techniques make it harder for data users to produce accurate inferences, as the mechanisms use to modify the confidential data cannot be easily corrected (Fienberg and McIntyre 2004). Organizations like the U.S. Census Bureau (Benedetto, Stinson, and Abowd 2013; Kinney, Reiter, Reznek, Miranda, Jarmin, and Abowd 2011) and the Internal Revenue Service (Bowen, Bryant, Burman, Czajka, Khitatrakun, MacDonald, McClelland, Mucciolo, Pickens, Ueyama, Williams, Wissoker, and Zwiefel 2022) are adopting synthetic data products to address these challenges. Data curators considering synthetic data products must navigate the unavoidable trade-off between privacy (i.e., the degree to which disclosure risks are mitigated) and utility (i.e., the degree to which the resulting data products are useful for statistical analyses) (Dinur and Nissim 2003). We will refer to this as the “privacy-utility trade-off.” Synthetic data methods and their implementations span the full spectrum of this trade-off, because as an umbrella term, “synthetic data” can refer to any generative model output that imitates the structural or schematic properties of a confidential dataset. Some synthetic data techniques may overfit to the confidential data, posing disclosure risk concerns. Alternatively, other synthetic data techniques may underfit to the confidential data, diminishing the usefulness of the synthetic data. 
+
+1.2. Contributions 
+
+Effective synthetic data implementations require exploring diverse methodologies and frame-works for synthetic data generation. However, there’s little common infrastructure in R’s open-source software ecosystem to support this exploration. We developed tidysynthesis , a meta-package for synthetic data generation, to address precisely this problem. In this paper, we outline the following contributions: 1. In Section 2, we provide background information about synthetic data methodology and discuss the need for standardizing common synthetic data design decisions in the current software environment. 2. In Section 3, we introduce tidysynthesis , our meta-package. We discuss its design principles and outline a subset of its features. 3. In Section 4, we use tidysynthesis to generate a synthetic sample from the American Community Survey (United States Department of Commerce. Bureau of the Census 2019). Aaron R. Williams, Jeremy Seeman, Gabriel Morrison 3
+
+# 2. Methodological Background and Motivation 
+
+2.1. Synthetic Data Generation and Design Decisions 
+
+Responsible quantitative research about people or organizations aims to make inferences about populations and subpopulations without enabling disclosive inferences about the subjects contributing sensitive data. Enabling population-level inferences while limiting unit-level inferences is the core problem of “statistical data privacy” (SDP) (Slavković and Seeman 2023), which encompasses many data privacy interventions and measurement techniques from theoretical and applied computer science, statistics, and other related fields. Frameworks like “statistical disclosure control or limitation” (Hundepool, Domingo-Ferrer, Franconi, Giessing, Nordholt, Spicer, and De Wolf 2012) and “differential privacy” (Dwork, Roth et al. 2014) are all associated with SDP, and each has different methods for generating and evaluating synthetic data. For example, differentially private synthetic data requires the algorithmic form of any randomization injected into the data generating process to have specific mathematical properties (Dwork et al. 2014). Practitioners must be able to make comparisons based on different SDP frameworks and implementations to understand how different synthetic data methods have different privacy and utility implications. For the purposes of this paper and this software, we focus on fully conditional specifications (FCS) for generating synthetic data (Reiter 2005). FCS uses a sequential approach to model the joint distribution of a confidential data set as a sequence of univariate conditional distributions. This approach enables sequential modeling of confidential data variables with a high level of user-specified variability in model properties across conditional distributions while remaining mathematically equivalent with the full joint generative models. FCS also serves a pragmatic purpose by breaking down memory-intensive model fitting processes into sequential processing steps, ultimately decreases memory demands while increasing total computation time. To illustrate FCS, suppose we want to generate a synthetic dataset with p tabular variables. Let Xk refer to the kth random variable that describes the kth tabular variable, and let X1: k
+
+refer to the joint random variable of the first k tabular variables. Recall that by the classical definition of conditional probability, for any s in {1, 2, . . . , p − 1},
+
+P (X1: p) = P (X1: s)P (Xs+1 | X1: s) P (Xs+2 | X1: s+1 ) . . . P (Xp | X1: p−1)
+
+FCS operates under this decomposition principle by using the following general-purpose algorithm for generating synthetic data. To generate n synthetic data records with FCS, we use the following steps. Let ˆθ1: k refer to modeling parameters for the first k tabular variables (with conditional notation defined similarly). Implementing the generic algorithm above requires making the following decisions: 
+
+• Visit sequence : what tabular variables correspond to which column-wise indices in all the steps above? In other words, what is s, which variables get synthesized in the initial batch of s variables, and in what order do the remaining variables get synthesized? 
+
+• Models : how do we determine ˆθk and ˆθk|1:( k−1) for each k ∈ { s + 1 , s + 2 , . . . , n }? In other words, how do we fit models that characterize the distributions for each component of the FCS? 4 tidysynthesis: a Meta-Package for Synthetic Data Generation 
+
+Algorithm 1: Fully Conditional Synthetic Data Algorithm 
+
+Input : Confidential data: X
+
+Input : Starting Model Parameters: ˆθ1: s
+
+Input : Starting Probability Model: Pˆθ1: s
+
+Input : Sequential Model Parameters: ˆθk|1:( k−1) , k ∈ { s + 1 , s + 2 , . . . , p }
+
+Input : Sequential Probability Models: Pˆθk|1:( k−1) , k ∈ { s + 1 , s + 2 , . . . , p }
+
+Output: Synthetic data: Y1,1: p, . . . , Y n, 1: p
+
+Compute ˆθ1: s(X);Sample Y1,1: s, . . . , Y n, 1: s ∼ Pˆθ1: s (·) ;
+
+for k ∈ { s + 1 , s + 2 , . . . , p } do 
+
+Compute ˆθk|1:( k−1) (X) ;Sample Y1,k , . . . , Y n,k ∼ Pˆθk (· | Y1,1: k−1, . . . , Y n, 1: k−1) ;
+
+end 
+
+• Samplers : how do we determine Pˆθk and Pˆθk|1:( k−1) for each k ∈ { s + 1 , s + 2 , . . . , n }?In other words, how do we sample new synthetic values from each modeled distribution? Generative models that navigate the privacy-utility trade-off require making numerous design choices outlined in Algorithm 1 above, and the number of design choices can quickly become untenable in higher-dimensional settings. Responsible synthetic data usage necessarily requires some degree of empirical experimentation that compares synthetic data implementations against one another, regardless of which metrics are used to evaluate the synthetic data. 
+
+2.2. Related Work: Common Infrastructure for Synthetic Data Generation 
+
+Users would ideally be able to modify one of these many design decisions and easily see how their synthetic data changes. However, the existing R package ecosystem fails to support this necessary experimentation for two main reasons. First, most synthetic data generation packages are tied to specific generative model methodologies that are inflexible by design. These packages are typically issued by the authors of papers proposing the methodology, meaning each is a priori opinionated about the “best” way to synthesize data. Second, many popular synthetic data packages are not easily interoperable with common data science workflows for generative model fitting and sampling. To demonstrate these issues, we look at all packages currently hosted on CRAN that enable tabular synthetic data generation. We filter CRAN results based on those which explicitly mention “synthetic data” in their description, and we exclude packages which use domain-knowledge-based simulation (for example, climate data simulated from mechanical models), synthetic control methods in causal inference (for example, synthesizing treatment comparison groups), or non-tabular data (for example, synthesizing graph data). The following packages are displayed in Table 1. This list is by no means exhaustive, as there are many synthetic data tools which may not be hosted on CRAN or do not explicitly mention synthetic data. Aaron R. Williams, Jeremy Seeman, Gabriel Morrison 5Package URL General.Method.Type arf https://cran.r-project.org/web/packages/arf/index.html Black-Box Optimization conjurer https://cran.r-project.org/web/packages/conjurer/index.html Parametric Models FakeDataR https://cran.r-project.org/web/packages/FakeDataR/index.html Black-Box Optimization humanleague https://cran.r-project.org/web/packages/humanleague/index.html Resampling LikertMakeR https://cran.r-project.org/web/packages/LikertMakeR/index.html Parametric Models modgo https://cran.r-project.org/web/packages/modgo/index.html Parametric Models PopulateR https://cran.r-project.org/web/packages/PopulateR/index.html Resampling RealSurvSim https://cran.r-project.org/web/packages/RealSurvSim/index.html Nonparametric Models RGAN https://cran.r-project.org/web/packages/RGAN/index.html Black-Box Optimization simPop https://cran.r-project.org/web/packages/simPop/index.html Parametric Models synMicrodata https://cran.r-project.org/web/packages/synMicrodata/index.html Nonparametric Models synthesis https://cran.r-project.org/web/packages/synthesis/index.html Parametric Models synthesizer https://cran.r-project.org/web/packages/synthesizer/index.html Resampling synthpop https://cran.r-project.org/web/packages/synthpop/index.html Black-Box Optimization Table 1: A list of CRAN synthetic data packages. 
+
+> Source: Article Notebook
+
+Each package in Table 1 prescribes either one specific model implementation or a limited family of model implementations. These implementations span a wide variety of methodologies with different parameterization assumptions, estimation procedures, and probability interpretations. With few exceptions, most of these packages require the prescribed modeling approach to be applied to all variables simultaneously and in-memory. This limits the ability for users to customize synthesis models for specific variables or iteratively build large synthetic datasets when memory is limited. Moreover, there are countless implementations for conditional models that are not interoperable with these libraries. FCS enables using discriminative models for generative purposes, where predictions generated from discriminative models form the basis for new generative samples. By specifying how one samples from discriminative models, they can behave like generative models by iteratively adding new variables to synthetic records. Many existing CRAN packages 6 tidysynthesis: a Meta-Package for Synthetic Data Generation 
+
+support simplistic integrations with base R functionality like stats::glm , but only a small handful of modern techniques are supported. Notably, these packages exclude broader modeling ecosystems like those in tidymodels .
+
+# 3. Our Proposed Solution: tidysynthesis 
+
+For these reasons, we developed tidysynthesis as a meta-package to support synthetic data generative modeling experimentation with interoperability with tidyverse packages (and, consequentially, any modeling pipeline that can be represented using tidymodels syntax). 
+
+tidysynthesis reflects a design philosophy informed by the tidy tools manifesto 1, tidymodels design document 2, and popular “tidy” open-source R packages. We highlight a few major design decisions that the rest of this paper will explain and demonstrate. 1. tidysynthesis is built on top of the tidymodels framework (Kuhn and Wickham 2023). tidymodels is a “collection of packages for modeling and statistical analysis that share the underlying design philosophy, grammar, and data structures of the tidyverse.” 
+
+tidymodels provides a common interface to most predictive models in R and complete tools for feature and target engineering. Sequential synthesis is only as good as the models used to predict values for each variable, and tidymodels offers a complete predictive modeling framework. 2. tidysynthesis is open architecture software. The package is modular and transparent such that users can create their own functions and plug them into existing functions to extend or change the functionality of tidysynthesis .3. tidysynthesis embraces small, clear functions over large functions with many arguments. These functions are like building blocks that users can put together into many different synthesis specifications. This design decision was directly motivated by changes made between caret (Kuhn, Wing, Weston, Williams, Keefer, Engelhardt, Cooper, Mayer, Kenkel, Benesty, Lescarbeau, Ziem, Scrucca, Tang, Candan, and Hunt 2023) and its successor package tidymodels .4. tidysynthesis aims to separate the specification and computation of a synthesis. This makes it easier to reuse objects. More importantly, it makes it easier to catch mistakes before computation, which can be computationally expensive. For example, the goal is to catch the mismatch between a variable type and a model type during specification instead of in middle of a computationally expensive synthesis. Additionally, tidysynthesis includes functionality not available in other popular synthesis packages like synthpop . The package contains robust tools for feature and target engineering, hyperparameter tuning, interfaces for a broader range of generative models, a novel framework for injecting additional noise into sampled values, and the ability to add and enforce mid-synthesis constraints. We believe these design decisions make tidysynthesis the most flexible and powerful tool for sequential synthesis. 
+
+tidysynthesis offers a simple interface to design, compare, and iterate on synthetic data model specifications. Instead of writing separate code to fit each model and use each model to generate samples, tidysynthesis provides a meta-syntax to specify sequences of these actions 
+
+> 1https://cran.r-project.org/web/packages/tidyverse/vignettes/manifesto.html
+> 2https://tidymodels.github.io/model-implementation-principles/
+
+Aaron R. Williams, Jeremy Seeman, Gabriel Morrison 7with the flexibility to change the behavior for any subset of variables. Most importantly, each required and optional component of a synthesis is fully extensible, so innovations in data synthesis can be added to the package as the field matures. 
+
+3.1. Obtaining the Software 
+
+tidysynthesis is available on CRAN here, and the source code is available on GitHub here. 
+
+# installing `tidysynthesis ` from CRAN install.packages("tidysynthesis") # installing `tidysynthesis ` from GitHub pak::pak("UrbanInstitute/tidysynthesis") 
+
+> Source: Article Notebook
+
+3.2. Basic Functionality 
+
+Syntheses with tidysynthesis are organized with a series of functions that create objects using R’s S3 object system. Each object has an associated constructor of the same name; for example, the function roadmap(...) produces a object of class roadmap .Figure 1 shows the two primary objects in tidysynthesis , roadmap and the synth_spec .These are the required inputs to presynth , which contains everything necessary to run a synthesis without actually executing the process. By calling the synthesize() function on a presynth object, tidysynthesis returns a postsynth object containing the resulting synthetic data and runtime properties. Note that presynth objects perform extensive error checking when they are created. For example, presynth() ensures that every variable in the visit sequence has an appropriate model and sampler. This aims to mitigate downstream errors in syntheses, which can be time-consuming to correct. 
+
+Figure 1: A diagram of the mains tidysynthesis components. 
+
+> Source: Article Notebook
+
+8 tidysynthesis: a Meta-Package for Synthetic Data Generation 
+
+The roadmap object describes input data sources and macroscopic properties about the synthesis order of operations. roadmap instances require two arguments, the confidential data conf_data and starting data start_data (used for the initial generative model). All remaining arguments are optional and described in more detail below and are included in Figure 2. 
+
+Figure 2: A diagram of roadmap components. Objects in blue are required while objects in magenta are optional. 
+
+> Source: Article Notebook
+
+synth_spec specifies the generative modeling and sampling procedures needed for different conditional models in the sequential synthesis. synth_spec instances require models (specified using the parsnip::model_spec convention) and samplers (functions with a shared signature defined in the package). We distinguish between modeling and sampling steps because in either stage, we may deviate from traditional generative modeling techniques (for example, using additional privacy-preserving randomization at the modeling or sampling stage). Models and samplers can be specified based on output type (numeric or categorical) as well as through custom mappings between variable names and model or sampler objects. All remaining arguments are optional and described in more detail below and are included in Figure 3. 
+
+Figure 3: A diagram of synth_spec components. Objects in blue are required while objects in magenta are optional. 
+
+> Source: Article Notebook
+
+3.3. Additional Functionality 
+
+tidysynthesis includes additional functionality for generating synthetic data. The following arguments can be optionally supplied to roadmap or synth_spec .
+
+start_method : by default, the start_data object is used unmodified as the initial variables in the resulting synthetic data. If start_data contains exact confidential records, this would pose disclosure risks. The start_method object lets users supply a (typically randomized) function that modifies the starting data. This allows users to specify generative modeling Aaron R. Williams, Jeremy Seeman, Gabriel Morrison 9procedures for the starting data, from simple approaches like resampling to more complex approaches like self-contained generative modeling calls. 
+
+schema : by default, information about variables (i.e., tabular data columns) are inferred from 
+
+conf_data . Users may optionally specify schema objects which contain information about variable types, missingness specifications, factor level definitions, and modes for enforcing these properties both on confidential data and resulting synthetic data. 
+
+visit_sequence : the visit sequence determines the order in which variables are included in the sequential synthesis model. By default, the visit_sequence is pre-specified using the order in which variables appear in the confidential data. However, this is seldom an optimal approach, since variables placed later in the visit sequence are able to use more previous variables as predictors. In addition to letting users specify custom visit_sequence instances, we provide helper functions to modify the visit sequence based on empirical metrics from the confidential data (examples below). 
+
+replicates : by default, a postsynth contains only one synthetic data replicate. Alternatively, users can specify a replicates object which allows users to repeat part or all of the synthesis process multiple times. This can help users perform empirical uncertainty quantification, either end-to-end or isolating different points in the synthesis process. 
+
+constraints : by default, synthesized numeric variables can take any real value, and synthe-sized categorical values can take any value in the variable’s support. However, it’s common for synthesized variables to obey constraints on allowed values, such as those that globally apply (for example, certain numeric variables are strictly non-negative) or conditionally apply (for example, variables that must take specific values contingent on other synthesized values). The constraints object lets users specify these constraints for both numeric and categorical variables. Following Drechsler (2011), constraints may be enforced either by rejection sam-pling (i.e., drawing new synthetic values and only accepting those which conform to specified constraints), and/or by explicit post-processing (i.e., projecting numeric variables to the upper or lower bounds of specified constraints, should rejection sampling fail to produce acceptable records after a fixed number of attempts). More details are available in the examples below. 
+
+steps : by default, each generative model will use each predictor variable available to it “as-is”; the available predictor variables will be defined in an automatically populated recipe .Users may want to specify feature engineering procedures, variable inclusion criteria, or other preprocessing steps prior to modeling. To do this, users can specify steps which perform these pre-processing tasks within the library(recipes) framework. 
+
+noise : by default, each sample from the generative model is returned as-is when appended to the working synthetic data. Users may choose to inject additional randomization to further modify these samples (for example, if the “samples” are actually conditional predicted values). The noise function lets users specify data-dependent and data-independent noise mechanisms for increasing the variability of synthesized values. 
+
+tuners : by default, each model uses the default hyperparameter settings supplied to it from the original parsnip specification. Some modeling procedures may have hyperparameters that users may wish to set in a data-dependent manner. Users can specify tuning arguments here for use in library(tune) , allowing certain hyperparameters of the underlying parsnip 
+
+models to be empirically optimized. 10 tidysynthesis: a Meta-Package for Synthetic Data Generation 
+
+extractors : by default, no generative model fitting outputs are accessible once a synthesis has been completed. However, users may provide optional extractor functions to return specific information from models once they’ve been fit. 
+
+tidysynthesis supports user-friendly and iterative development of synthetic data. The package is designed to catch errors before time- and compute-intensive sequential synthesis operations begin. Even so, calls to synthesize() may still fail mid-synthesis either due to users mis-specifying some component of the synthesis process or as a result of failures in the compute environment unrelated to tidysynthesis . This can pose challenges for package users, especially when working with large data or in compute-constrained environments. To mitigate this, synthesize() optionally allow users to save all synthetic data generated up to the variable on which the synthesis fails. In addition, the package includes two functions 
+
+postsynth_to_roadmap() and postsynth_to_synth_spec() that take a partially completed 
+
+postsynth object, update it based on which variables were synthesized successfully, and return a new roadmap or synth_spec to be used in subsequent syntheses. Using these functions may make reproducing exact synthetic data-sets difficult and are therefore ill-suited to creation a “final” version of synthetic data. Nonetheless, they can reduce the time it takes to test specifications and resolve bugs, import parts of the synthetic data generation process in practice. 
+
+# 4. Examples 
+
+The following section uses tidysynthesis to generate synthetic datasets based on a public use microdata sample from the American Community Survey. The extract is accessed through IPUMS (Ruggles 2025) and generated using library(ipumsr) ; the data is available in tidysynthesis .
+
+4.1. Data 
+
+The American Community Survey (ACS) is an essential source of demographic and economic information in the United States. We select a disjoint sample from the 2019 1-year ACS responses, one with 1500 samples ( acs_conf ). The table below lists the available variables: VariableName VariableType Description 
+
+county categorical County of residence 
+
+gq categorical Kind of residence (single family, group quarters, etc.) 
+
+sex categorical Head-of-household sex 
+
+marst categorical Head-of-household marital status 
+
+empstat categorical Head-of-household employment status 
+
+age numeric Head-of-household age 
+
+famsize numeric Number of residents in household 
+
+transittime numeric Minutes of transit time for head-of-household to work 
+
+inctot numeric Total annual household income Aaron R. Williams, Jeremy Seeman, Gabriel Morrison 11 
+
+> Source: Article Notebook
+
+4.2. Basic Examples 
+
+First we load the necessary packages and data. 
+
+library(tidyverse) library(tidysynthesis) # load ACS data and select confidential data variables acs_conf_data <- tidysynthesis::acs_conf |> select(county, gq, sex, marst, empstat, age, famsize, transit_time, inctot) glimpse(acs_conf_data) Rows: 1,500 Columns: 9 $ county <fct> Other, Other, Other, Other, Douglas, Lancaster, Other, Sa~ $ gq <fct> Household, Household, Household, Household, Household, Ho~ $ sex <fct> Female, Male, Male, Female, Male, Female, Male, Male, Mal~ $ marst <fct> Single, Married, Single, Single, Married, Divorced, Marri~ $ empstat <fct> NA, Employed, NA, NA, Employed, Employed, NA, NA, NA, Emp~ $ age <dbl> 0, 41, 10, 12, 46, 36, 49, 5, 22, 31, 5, 55, 74, 50, 37, ~ $ famsize <dbl> 5, 4, 3, 6, 5, 3, 5, 5, 4, 1, 4, 2, 2, 2, 4, 1, 1, 4, 5, ~ $ transit_time <dbl> 0, 30, 0, 0, 15, 15, 0, 0, 0, 5, 0, 7, 0, 15, 10, 0, 0, 0~ $ inctot <dbl> NA, 68000, NA, NA, 91000, 26200, 6000, NA, 0, 37000, NA, ~ 
+
+> Source: Article Notebook
+
+For this example, we will use the first four categorical variables as our starting data. This illustration will use the same data as above, but tidysynthesis supports any start data whose names and data types match a subset of confidential data variables. 
+
+# select starting variables acs_start_data <- acs_conf_data |> select(county, gq, sex, marst) glimpse(acs_start_data) Rows: 1,500 Columns: 4 $ county <fct> Other, Other, Other, Other, Douglas, Lancaster, Other, Sarpy, O~ $ gq <fct> Household, Household, Household, Household, Household, Househol~ $ sex <fct> Female, Male, Male, Female, Male, Female, Male, Male, Male, Fem~ $ marst <fct> Single, Married, Single, Single, Married, Divorced, Married, Si~ 
+
+> Source: Article Notebook
+
+We supply these two datasets as required arguments to create a roadmap instance. For the rest of this paper, we will manipulate this roadmap using other tidysynthesis functionality. 12 tidysynthesis: a Meta-Package for Synthetic Data Generation 
+
+# create a minimal `roadmap ` instance roadmap_acs <- roadmap( conf_data = acs_conf_data, # confidential data (matches synthetic data) start_data = acs_start_data # start data (for first generative model) )roadmap_acs Roadmap: conf_data: 1500 observations, 9 variables start_data: 1500 observations, 4 variables 
+
+> Source: Article Notebook
+
+Next, we will demonstrate ways in which we can update our roadmap object. The current roadmap uses start_data as-is without modification (i.e., producing partially synthetic data). We can update the start_method to resample records with replacement from the original starting data: 
+
+# update start_method roadmap_acs <- roadmap_acs |> update_start_method( # update how start_data enters the synthesis process start_func = start_resample, # resample records with replacement n = 500 # modify our start_data to sample only 500 records )roadmap_acs[["start_method"]] Start Method: User-Specified Keyword Arguments: n: 500 
+
+> Source: Article Notebook
+
+Next, we look at the visit_sequence . By default, variables are synthesized in the order in which they appear in the confidential data: 
+
+roadmap_acs[["visit_sequence"]] Visit Sequence Method:Variable default:empstat default:age default:famsize default:transit_time default:inctot 
+
+> Source: Article Notebook
+
+We can build a visit_sequence using both manual specifications and data-driven specifica-tions. Below, we’ll specify the sequence by ordering numeric variables by decreasing proportion of non-zero values. 
+
+# update visit_sequence roadmap_acs <- roadmap_acs |> add_sequence_numeric( # update the visit_sequence for numeric variables dplyr::where(is.numeric), # for each numeric variable in the sequence... Aaron R. Williams, Jeremy Seeman, Gabriel Morrison 13 
+
+method = "proportion", # order by decreasing proportion of non-zero values... na.rm = TRUE # ...while ignoring NA values )roadmap_acs[["visit_sequence"]] Visit Sequence Method:Variable proportion:famsize proportion:age proportion:inctot proportion:transit_time default:empsta 
+
+> Source: Article Notebook
+
+Next, we create modeling algorithms from library(tidymodels) for synthesizing each variable. We’ll use classical CART-based synthesis, so decision trees for categorical variables and regression trees for numeric variables (Breiman, Friedman, Olshen, and Stone 2017). In both cases, we’ll use the rpart implementation (Therneau and Atkinson 2022) accessed through 
+
+library(parsnip) .
+
+# specify an example decision tree model for categorical variables rpart_mod_cat <- parsnip::decision_tree( cost_complexity = 0.0001, min_n = 20 ) |> parsnip::set_mode(mode = "classification") |> parsnip::set_engine(engine = "rpart") # specify an example decision tree model for regression variables rpart_mod_num <- parsnip::decision_tree( cost_complexity = 0.0001, min_n = 20 ) |> parsnip::set_mode(mode = "regression") |> parsnip::set_engine(engine = "rpart") 
+
+> Source: Article Notebook
+
+Additionally, we create a custom regression tree for the age variable with slightly different hyperparameters. 
+
+# specify a special example decision tree model for the `age ` variable rpart_mod_num_custom <- parsnip::decision_tree( cost_complexity = 0.01, min_n = 30 ) |> parsnip::set_mode(mode = "regression") |> parsnip::set_engine(engine = "rpart") 
+
+> Source: Article Notebook
+
+Next, we need to assign an algorithm to each variable. We’ll set rpart_mod_cat as the default model for classification and rpart_mod_num as the default model for regression. Additionally, 14 tidysynthesis: a Meta-Package for Synthetic Data Generation 
+
+we specify the custom model for the age variable. Finally, we will use the tidysynthesis 
+
+function sample_rpart() to draw new predicted values from each model. 
+
+# create a synthesis specification synth_spec_acs <- synth_spec( # default models by regression and classification default_regression_model = rpart_mod_num, default_classification_model = rpart_mod_cat, # associate `age ` with our custom model custom_models = list( list(vars = c("age"), model = rpart_mod_num_custom) ), # use tidysynthesis-provided sampler function for `rpart `
+
+default_regression_sampler = sample_rpart, default_classification_sampler = sample_rpart )synth_spec_acs Synthesis specification with user-specified components: * default_regression_model * default_classification_model * custom_models * default_regression_sampler * default_classification_sampler 
+
+> Source: Article Notebook
+
+We combine the roadmap and synth_spec above into a single presynth object, and then we can synthesize() the data: 
+
+# construct a `presynth ` with a `roadmap ` and `synth_spec `
+
+presynth1 <- presynth( roadmap = roadmap_acs, synth_spec = synth_spec_acs )# perform a basic synthesis result1 <- synthesize(presynth1, progress = TRUE) 
+
+> Source: Article Notebook
+
+glimpse(result1[["synthetic_data"]]) Rows: 500 Columns: 10 $ county <fct> Other, Sarpy, Other, Lancaster, Lancaster, Other, Other, ~ $ gq <fct> Household, Household, Household, Household, Household, Ho~ $ sex <fct> Male, Male, Female, Female, Female, Female, Female, Femal~ $ marst <fct> Married, Single, Married, Married, Married, Married, Divo~ $ famsize <dbl> 2, 4, 3, 5, 2, 3, 2, 2, 2, 1, 2, 1, 3, 3, 3, 4, 1, 3, 1, ~ Aaron R. Williams, Jeremy Seeman, Gabriel Morrison 15 
+
+$ age <dbl> 59, 40, 35, 38, 68, 51, 75, 24, 49, 19, 75, 45, 40, 4, 41~ $ inctot_NA <fct> nonmissing value, nonmissing value, nonmissing value, non~ $ inctot <dbl> 45000, 12000, 30000, 75000, 7000, 26180, 56000, 45000, 65~ $ transit_time <dbl> 5, 0, 15, 10, 0, 28, 20, 3, 10, 0, 0, 0, 0, 0, 20, 20, 20~ $ empstat <fct> Employed, NA, Employed, Employed, NA, Employed, Employed,~ 
+
+> Source: Article Notebook
+
+4.3. Additional Features 
+
+We briefly demonstrate a few additional features offered by tidysynthesis . First, our package supports library(recipes) -style preprocessing steps. To use these, users can specify preprocessing functions called steps , which can be associated with different variables. For example, below we apply a Yeo-Johnson transformation to inctot :
+
+# specify a basic recipe in `library(recipes) `-style syntax custom_recipe <- function(recipe) { recipe |> recipes::step_YeoJohnson( recipes::all_outcomes(), id = "outcome yj", skip = TRUE )}synth_spec_acs2 <- synth_spec_acs |> update_custom_steps( # update our custom preprocessing steps... list( vars = c("inctot"), # for the `inctot ` variable... steps = custom_recipe ) # use our custom recipe function )
+
+> Source: Article Notebook
+
+Next, our library supports additional randomization-based post-processing of samples drawn from sequential models. Each process is represented by a noise() object. Below, we define a function that adds Gaussian noise with a fixed variance to each element of a prediction vector: 
+
+# specify a `noise ` object reg_noise <- noise( add_noise = TRUE, noise_func = add_noise_gaussian, # add Gaussian noise to the selected variables variance = 10 # ... with variance = 10 )reg_noise 16 tidysynthesis: a Meta-Package for Synthetic Data Generation 
+
+Noise add_noise: TRUE 
+
+> Source: Article Notebook
+
+Noise mechanisms can also depend on the confidential data and can be defined in noise_func 
+
+with arbitrary user-defined functions. We can then associate any noise mechanism with individual variables or default behavior: 
+
+# add gaussian noise to all predicted numeric values synth_spec_acs2 <- synth_spec_acs2 |> update_synth_spec( # by default, use our noise mechanism for every regression variable default_regression_noise = reg_noise )
+
+> Source: Article Notebook
+
+We demonstrate the constraints() functionality in the snippet below. For each numeric variable we synthesize, we can enforce minima and maxima which may depend conditionally on other sequential attributes. To do this, constraints are defined by creating a data.frame which lists, one per row, variable names, numeric minima and maxima, and a string representing a 
+
+tidyselect -style data-masking expression. Below is an example constraint specification. 
+
+# specify a collection of numeric constraints numeric_constraints <- tibble::tribble( ~var, ~min, ~max, ~conditions, "age", 0, 95, "TRUE", # all `age ` values are between 0 and 95 "inctot", 0, Inf, "TRUE", # all `inctot ` values are non-negative )
+
+> Source: Article Notebook
+
+Similar behavior exists for constraining categorical values by specifying either allowed or forbidden categorical levels. To specify how constraints are enforced, users can specify max_z_num and max_z_cat , which work analogously. This parameter controls two different methods for enforcing constraints. When max_z_num > 0 , constraints are enforced via rejection sampling. If a newly sampled record fails to satisfy the constraints, new values are drawn until the constraints are satisfied; this rejection sampling loop occurs up to max_z_num times. After the max_z_num th attempt (or if max_z_num == 0 ), each synthetic value which fails to meet the constraints is automatically post-processed to conform to the constraint. For numeric variables, we set each failing record to the closest of either the minimum or maximum value for each constraint (an analogous process occurs with categorical variables). Below we show how to update an existing roadmap 
+
+instance to include constraints: 
+
+# add constraints to our `roadmap `
+
+roadmap_acs2 <- roadmap_acs |> update_constraints( constraints_df_num = numeric_constraints, # add constraint data.frame max_z_num = 0 # enforce constraints without rejection sampling Aaron R. Williams, Jeremy Seeman, Gabriel Morrison 17 
+
+)roadmap_acs2[["constraints"]] Numeric constraints specified per variable: age: 1 famsize: 1 transit_time: 1 inctot: 1 Categorical constraints specified per variable: empstat: 0 
+
+> Source: Article Notebook
+
+Finally, we use our new roadmap and synth_spec in a new synthesis. 
+
+# specify a new `presynth ` with our newly modified `roadmap ` and `synth_spec `
+
+presynth2 <- presynth( roadmap = roadmap_acs2, synth_spec = synth_spec_acs2 )
+
+> Source: Article Notebook
+
+# synthesize the new `presynth `
+
+set.seed(20251001) result2 <- synthesize(presynth = presynth2, progress = TRUE) 
+
+> Source: Article Notebook
+
+glimpse(result2[["synthetic_data"]]) Rows: 500 Columns: 10 $ county <fct> Lancaster, Sarpy, Other, Douglas, Other, Other, Other, Do~ $ gq <fct> Household, Household, Household, Household, Household, Ho~ $ sex <fct> Female, Female, Male, Male, Female, Female, Female, Male,~ $ marst <fct> Married, Separated, Married, Single, Married, Single, Sep~ $ famsize <dbl> 2.9870260, 6.2067210, 4.5708521, 1.8858135, -0.1791913, 7~ $ age <dbl> 84.936584, 39.736101, 47.861174, 0.000000, 19.879675, 4.2~ $ inctot_NA <fct> nonmissing value, nonmissing value, nonmissing value, mis~ $ inctot <dbl> 9.954765e+03, 7.500340e+04, 6.300023e+04, NA, 6.004683e+0~ $ transit_time <dbl> 2.6596791, 21.9907233, 4.0682338, 0.5552695, 8.2226767, 1~ $ empstat <fct> Employed, Employed, Employed, Employed, Employed, Employe~ 
+
+> Source: Article Notebook
+
+4.4. Graceful Error Handling 
+
+tidysynthesis catches many errors before running time-intensive synthesis operations. For example, in the code below, we introduce a data error and demonstrate how presynth() 18 tidysynthesis: a Meta-Package for Synthetic Data Generation 
+
+catches that error before a user can call the time-intensive synthesize() function. 
+
+# Introduce error: Assign variable famsize values that are # 1 (numeric) to "1" (character). This converts famsize to a # categorical variable which conflicts with synth_spec_acs. acs_conf_data_with_error <- acs_conf_data |> mutate(famsize = ifelse(famsize == 1, "1", famsize)) roadmap_with_error <- roadmap( conf_data = acs_conf_data_with_error, # confidential data with error start_data = acs_start_data # same start data as roadmap1 )
+
+> Source: Article Notebook
+
+# presynth catches error before synthesis presynth_with_error <- presynth( roadmap = roadmap_with_error, synth_spec = synth_spec_acs )Error in .validate_presynth(presynth): Variable types in visit_sequence do not match model types in synth_algorithms Problem variable(s): famsize 
+
+> Source: Article Notebook
+
+tidysynthesis also provides useful functionality to extract partially completed synthesis objects. This can be helpful for a user to debug a more complicated code-related error or continue running a job that failed for reasons unrelated to the code (e.g., a server crashed). The code below introduces a more subtle error not caught by the presynth() that causes the synthesis to fail. It assigns the age variable to be sampled using sample_ranger , a custom sampler associated with random forest models using the ranger package (Wright and Ziegler 2017). Since age was created using a decision tree from the rpart package (Therneau and Atkinson 2022), the correct sampler for it would be sample_rpart .
+
+# Create the erroneous synth_spec: synth_spec_with_error <- synth_spec( default_regression_model = rpart_mod_num, default_classification_model = rpart_mod_cat, default_regression_sampler = sample_rpart, default_classification_sampler = sample_rpart, # add a custom sampler associated with the ranger package # for the age variable. Age was synthesized using a # decision tree from rpart, so it should have a sample_rpart sampler. custom_samplers = list( list(vars = c("age"), sampler = sample_ranger) ))Aaron R. Williams, Jeremy Seeman, Gabriel Morrison 19 
+
+presynth_with_error <- presynth( roadmap = roadmap_acs, synth_spec = synth_spec_with_error )# synthesize fails but continues to run: result3 <- synthesize( presynth_with_error, # When set to TRUE (default is FALSE) keep roadmap, synth_spec, # and workflow objects. This must be TRUE to recover the roadmap # and synth_spec. keep_workflows = TRUE, # This also must be set to true for synthesize() to recover the # roadmap and synth_spec. keep_partial = TRUE )
+
+> Source: Article Notebook
+
+Now, we call postsynth_to_roadmap() and postsynth_to_synth_spec() to recover the partially completed roadmap and synth_spec objects. Both are updated so that the remaining variables to synthesize and the specifications to synthesize them only apply to variables that have not yet been synthesized. As an example, note how the new visit sequence does not include famsize , the first variable in the visit sequence which was synthesized correctly, and instead begins with age , the variable that caused an error in the synthesis. The objects returned from these functions can be used in subsequent synthesis operations and to explore issues that caused the failure. 
+
+recovered_roadmap <- postsynth_to_roadmap(result3) recovered_synth_spec <- postsynth_to_synth_spec(result3) recovered_roadmap Roadmap: conf_data: 1500 observations, 10 variables start_data: 500 observations, 5 variables recovered_roadmap$visit_sequence$visit_sequence [1] "age" "inctot_NA" "inctot" "transit_time" "empstat" recovered_synth_spec Synthesis specification with user-specified components: * default_regression_model * default_classification_model * default_regression_sampler * default_classification_sampler 20 tidysynthesis: a Meta-Package for Synthetic Data Generation 
+
+* custom_samplers 
+
+> Source: Article Notebook
+
+# 5. Conclusion 
+
+In this paper, we introduced tidysynthesis , an R package which enables users to perform generalized sequential synthesis on tabular data, filling a gap in the existing synthetic software generation landscape. It utilizes a modular approach to allow users to easily configure a variety of synthetic data specifications. As a meta-package, tidysynthesis users can harness the full range of features in the tidymodels and tidyverse data science library ecosystem, including feature- and target-engineering functions and predictive models from tidymodels . It also offers numerous synthetic-data-specific capabilities, like the ability to integrate mid-synthesis constraints and infuse estimates with randomized noise. We also demonstrated the power of 
+
+tidysynthesis by synthesizing a non-trivial set of data from the 2019 American Community Survey. 
+
+tidysynthesis is under continuous development and currently supports a wide variety of use cases, ranging from education and technical training to large-scale synthetic data generation projects. Interested readers can follow and contribute to the project on GitHub 3 and consult the tidysynthesis documentation website 4. As the data privacy and synthetic data research communities continue to produce synthesis generation methods, we hope these communities will both use and contribute to the package to enable effective implementation decision-making across methods. Overall, we see tidysynthesis as providing much-needed software infrastructure to bridge the gap between synthetic data methods research and the needs of practitioners. 
+
+> 3https://github.com/UrbanInstitute/tidysynthesis
+> 4https://ui-research.github.io/tidysynthesis-documentation/
+
+Aaron R. Williams, Jeremy Seeman, Gabriel Morrison 21 
+
+# Author Contributions 
+
+We used the CRediT taxonomy to indicate author contributions to this paper. See website to learn more about the CRediT taxonomy, https://credit.niso.org. 
+
+• ARW: Conceptualization, Funding acquisition, Investigation, Methodology, Project Administration, Software, Supervision, Validation, Visualization, Writing – original draft, Writing – review & editing 
+
+• JS: Data Curation, Investigation, Methodology, Project Administration, Resources, Software, Supervision, Validation, Visualization, Writing – original draft, Writing – review & editing 
+
+• GM: Investigation, Methodology, Software, Validation, Visualization, Writing - review and editing, Writing - original draft 
+
+# Acknowledgement 
+
+Kyle Ueyama, Maddie Pickens, Livia Mucciolo, Noah Zwiefel, Philip Stallworth, Ajjit Narayanan, Nikhita Airi, Elyse McFalls, and Claire Morton all made essential contribu-tions to tidysynthesis . Thanks to Claire McKay Bowen for securing financial support for the tidysynthesis package development and this publication. 
+
+tidysynthesis was funded by the Alfred P. Sloan Foundation [G-2022-17149 and G-2020-14024] and National Science Foundation National Center for Science and Engineering Statistics [49100422C0008]. 
+
+# References 
+
+Benedetto G, Stinson M, Abowd JM (2013). “The Creation and Use of the SIPP Synthetic Beta.” Publisher: U.S. Census Bureau, URL https://hdl.handle.net/1813/43924. Bowen CM, Bryant V, Burman L, Czajka J, Khitatrakun S, MacDonald G, McClelland R, Mucciolo L, Pickens M, Ueyama K, Williams AR, Wissoker D, Zwiefel N (2022). Synthetic Individual Income Tax Data: Methodology, Utility, and Privacy Implications , volume 13463, pp. 191–204. Springer International Publishing, Cham. Series Title: Lecture Notes in Computer Science DOI: 10.1007/978-3-031-13945-1_14, URL https://link.springer.com/10 .1007/978-3-031-13945-1_14. Breiman L, Friedman JH, Olshen RA, Stone CJ (2017). Classification And Regression Trees .1 edition. Routledge. ISBN 978-1-315-13947-0. doi:10.1201/9781315139470 . URL https://www.taylorfrancis.com/books/9781351460491. Chetty R, Hendren N, Kline P, Saez E (2014). “Where is the land of Opportunity? The Geography of Intergenerational Mobility in the United States *.” The Quarterly Journal of Economics , 129 (4), 1553–1623. doi:10.1093/qje/qju022 . URL https://academic.oup.c om/qje/article/129/4/1553/1853754. Cohen A (2022). “Attacks on deidentification’s defenses.” In 31st USENIX security symposium (USENIX Security 22) , pp. 1469–1486. 22 tidysynthesis: a Meta-Package for Synthetic Data Generation 
+
+Dinur I, Nissim K (2003). “Revealing information while preserving privacy.” In Proceedings of the twenty-second ACM SIGMOD-SIGACT-SIGART symposium on Principles of database systems , pp. 202–210. Drechsler J (2011). Synthetic Datasets for Statistical Disclosure Control: Theory and Implementation , volume 201 of Lecture Notes in Statistics . Springer New York, New York, NY. doi:10.1007/978-1-4614-0326-5 . DOI: 10.1007/978-1-4614-0326-5, URL https://link.springer.com/10.1007/978-1-4614-0326-5. Dwork C, Roth A, et al. (2014). “The algorithmic foundations of differential privacy.” Foun-dations and trends ® in theoretical computer science , 9(3–4), 211–407. Fienberg SE, McIntyre J (2004). “Data swapping: Variations on a theme by dalenius and reiss.” In International Workshop on Privacy in Statistical Databases , pp. 14–29. Springer. Henriksen-Bulmer J, Jeary S (2016). “Re-identification attacks—A systematic literature review.” International Journal of Information Management , 36 (6), 1184–1192. Hundepool A, Domingo-Ferrer J, Franconi L, Giessing S, Nordholt ES, Spicer K, De Wolf PP (2012). Statistical disclosure control . John Wiley & Sons. Kinney SK, Reiter JP, Reznek AP, Miranda J, Jarmin RS, Abowd JM (2011). “Towards Unrestricted Public Use Business Microdata: The Synthetic Longitudinal Business Database: Towards Unrestricted Public Use Business Microdata.” International Statistical Review ,
+
+79 (3), 362–384. doi:10.1111/j.1751-5823.2011.00153.x . URL https://onlinelibrary.wi ley.com/doi/10.1111/j.1751-5823.2011.00153.x. Kuhn M, Wickham H (2023). tidymodels: Easily Install and Load the ’Tidymodels’ Packages .URL https://cran.r-project.org/web/packages/tidymodels/index.html. Kuhn M, Wing J, Weston S, Williams A, Keefer C, Engelhardt A, Cooper T, Mayer Z, Kenkel Brenton CoreTeam R, Benesty M, Lescarbeau R, Ziem A, Scrucca L, Tang Y, Candan C, Hunt T (2023). caret: Classification and Regression Training . URL https://cran.r-project.org/web/packages/caret/index.html. Machanavajjhala A, Kifer D, Gehrke J, Venkitasubramaniam M (2007). “l-diversity: Privacy beyond k-anonymity.” Acm transactions on knowledge discovery from data (tkdd) , 1(1), 3–es. Raghunathan TE (2021). “Synthetic data.” Annual review of statistics and its application ,
+
+8(1), 129–140. Reiter JP (2005). “Using CART to generate partially synthetic public use microdata.” Journal of official statistics , 21 (3), 441. Ruggles Sea (2025). “IPUMS USA: Version 16.0.” Minneapolis, MN, URL https://www.ipum s.org/usa. Slavković A, Seeman J (2023). “Statistical data privacy: A song of privacy and utility.” Annual Review of Statistics and Its Application , 10 (1), 189–218. Aaron R. Williams, Jeremy Seeman, Gabriel Morrison 23 Therneau TM, Atkinson EJ (2022). “An Introduction to Recursive Partitioning Using the RPART Routines.” Technical report . URL https://cran.r-project.org/web/packages/rpart /vignettes/longintro.pdf. United States Department of Commerce Bureau of the Census (2019). “ACS 1-Year Estimates Public Use Microdata Sample (PUMS).” Technical report , U.S. Census Bureau. URL https://data.census.gov/mdat/#/search?ds=ACSPUMS1Y2019. Wright MN, Ziegler A (2017). “ranger: A Fast Implementation of Random Forests for High Dimensional Data in C++ and R.” Journal of Statistical Software , 77 (1), 1–17. 
+
+doi:10.18637/jss.v077.i01 .
+
+Affiliation: 
+
+Aaron R. Williams E-mail: awilliams@urban.org 
+
+Jeremy Seeman E-mail: jseeman@urban.org 
+
+Gabriel Morrison E-mail: gmorrison@urban.org

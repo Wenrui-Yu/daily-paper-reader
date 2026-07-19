@@ -6,38 +6,41 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-18
-- 运行时间：2026-07-18 21:08:33 UTC
+- 最新运行日期：2026-07-19
+- 运行时间：2026-07-19 20:24:43 UTC
 - 运行状态：成功
-- 本次总论文数：6
-- 精读区：3
+- 本次总论文数：7
+- 精读区：4
 - 速读区：3
 
 ### 今日简报（AI）
-今日精读聚焦节点隐私社区估计与医疗联邦学习MLOps两大高分研究，速读覆盖隐私复用、政策偏差及移动端RAG系统。建议优先阅读9.0分的社区估计和医疗联邦学习论文，并关注隐私理论与MLOps实践的结合方向。
-- 详情：[/202607/18/README](/202607/18/README)
+今天共推荐7篇论文，精读4篇、速读3篇，重点聚焦安全聚合与隐私保护。最值得关注的是《NFSA: Non-Forward Secure Aggregation with One Server via Two Layer Secret Sharing》和《Better Privacy Guarantees for Larger Groups》两篇精读论文。建议优先阅读这两篇精读论文，并关注Airbnb的冷启动个性化方案。
+- 详情：[/202607/19/README](/202607/19/README)
 
 ### 精读区论文标签
-1. [Near-optimal node-private community estimation in polynomial-time](/202607/18/2607.09441v1-near-optimal-node-private-community-estimation-in-polynomial-time)  
+1. [NFSA: Non-Forward Secure Aggregation with One Server via Two Layer Secret Sharing](/202607/19/2607.15052v1-nfsa-non-forward-secure-aggregation-with-one-server-via-two-layer-secret-sharing)  
+   标签：评分：10.0/10、query:daily
+   evidence：面向联邦学习的非前向安全聚合协议
+2. [Better Privacy Guarantees for Larger Groups](/202607/19/2607.14406v1-better-privacy-guarantees-for-larger-groups)  
    标签：评分：9.0/10、query:daily
-   evidence：节点私有社区估计随机块模型
-2. [Toward Production-Ready Federated Learning in Healthcare: Privacy, Orchestration, and Governance in MLOps](/202607/18/2607.10467v2-toward-production-ready-federated-learning-in-healthcare-privacy-orchestration-and-governance-in-mlops)  
+   evidence：直方图的隐私保证，使用zCDP
+3. [Auditing Fairness-Privacy Trade-offs: Subpopulation-Level Effects of Fairness-Enhancing Algorithms](/202607/19/2607.14607v1-auditing-fairness-privacy-trade-offs-subpopulation-level-effects-of-fairness-enhancing-algorithms)  
    标签：评分：9.0/10、query:daily
-   evidence：联邦学习隐私医疗MLOps
-3. [Score-Only Distillation for Compact Dense Retrieval](/202607/18/2607.11465v1-score-only-distillation-for-compact-dense-retrieval)  
-   标签：评分：9.0/10、query:daily
-   evidence：专注于从教师到学生的蒸馏用于紧凑密集检索
+   evidence：使用差分隐私和成员推理攻击审计公平-隐私权衡
+4. [Is External Database Protection Static in Retrieval-Augmented Generation? Rethinking Privacy Preservation under Dynamic Queries](/202607/19/2607.14811v1-is-external-database-protection-static-in-retrieval-augmented-generation-rethinking-privacy-preservation-under-dynamic-queries)  
+   标签：评分：8.0/10、query:daily
+   evidence：检索增强生成中的动态查询隐私保护
 
 ### 速读区论文标签
-1. [ReBound: Reuse-Aware Privacy For Interactive Decision Support](/202607/18/2607.13441v1-rebound-reuse-aware-privacy-for-interactive-decision-support)  
+1. [Proximity Features: Privacy-Compliant Cold-Start Personalization at Airbnb](/202607/19/2607.12246v1-proximity-features-privacy-compliant-cold-start-personalization-at-airbnb)  
    标签：评分：7.0/10、query:daily
-   evidence：具有查询重用的差分隐私决策支持
-2. [Disclosure Divergence: Measuring Privacy Policy and Data Safety Misalignment at Scale](/202607/18/2607.14442v1-disclosure-divergence-measuring-privacy-policy-and-data-safety-misalignment-at-scale)  
+   evidence：隐私合规的冷启动个性化通过邻近特征
+2. [tidysynthesis: a Meta-Package for Synthetic Data Generation](/202607/19/2607.12611v1-tidysynthesis-a-meta-package-for-synthetic-data-generation)  
    标签：评分：7.0/10、query:daily
-   evidence：隐私政策数据安全标签不一致
-3. [SmartRAG: Native Graph-Based RAG for Mobile Device](/202607/18/2607.14661v1-smartrag-native-graph-based-rag-for-mobile-device)  
+   evidence：用于隐私保护的合成数据生成
+3. [SmartRAG: Native Graph-Based RAG for Mobile Device](/202607/19/2607.14661v1-smartrag-native-graph-based-rag-for-mobile-device)  
    标签：评分：7.0/10、query:daily
-   evidence：设备端RAG隐私LLM移动
+   evidence：设备端RAG聚焦隐私
 
 
 <div class="dpr-home-promo-card">
