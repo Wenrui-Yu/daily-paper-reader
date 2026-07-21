@@ -1,0 +1,828 @@
+Title: Privacy Cost as Equity Input: A Group Fairness Criterion for Differentially Private Machine Learning
+
+URL Source: https://arxiv.org/pdf/2607.16620v1
+
+Published Time: Tue, 21 Jul 2026 00:24:06 GMT
+
+Number of Pages: 15
+
+Markdown Content:
+# Privacy Cost as Equity Input: A Group Fairness Criterion for Differentially Private Machine Learning 
+
+# Rakshit Naidu 
+
+Georgia Institute of Technology rakshitnaidu@gatech.edu 
+
+Abstract 
+
+Differential privacy (DP) is increasingly deployed to limit membership inference risk in machine-learning systems. Prior work has shown that DP-SGD can widen accuracy disparities across demographic groups, but this framing treats fairness as a purely outcome-side concern. In this paper, we argue that privacy cost (denoted as the information leakage borne by each group) is itself a form of harm, and adopt a compensatory-fairness framework in which a group that involuntarily bears greater privacy exposure is owed proportionally greater benefit from the system; we discuss this as one normative position among several (Section 3.2), not the unique correct standard. From this principle we derive the Privacy-Cost Equity Ratio 
+
+(PCER), a group fairness metric defined as a group’s positive prediction rate normalized by its per-group overfitting gap. By a standard membership inference bound, this overfitting gap upper-bounds each group’s vulnerability to inference attacks, making PCER a conservative measure of benefit relative to ex-posure. Crucially, PCER requires only per-group train and test accuracy (no shadow models required) making it a practical post-hoc audit tool. Here, we evaluate PCER alongside standard fairness metrics across six benchmark–attribute combinations spanning tabu-lar and NLP domains, under DP-SGD at a range of privacy budgets, and validate the overfitting-gap proxy against a direct per-group threshold membership-inference attack. The results reveal patterns that outcome-based metrics miss. On Adult Income (race), PCER inverts the fairness ranking relative to standard metrics: the privacy budget deemed most equitable by outcome gaps is least equitable by exposure-adjusted ones. On COMPAS, PCER uncovers a persistent double disadvan-tage: the protected group bears both greater privacy exposure and worse predictive outcomes, something demographic parity gap masks entirely. Sensitivity analysis further shows that very strong privacy guarantees collapse both groups’ overfitting to a numerical floor, rendering exposure-based audits uninforma-tive in that regime. Taken together, these findings argue that fairness audits of privacy-preserving systems must account for who bears the cost of protection, not only who benefits from its outcomes. 
+
+# 1 Introduction 
+
+As machine-learning systems increasingly inform high-stakes decisions (creditworthiness, criminal recidivism prediction, 
+
+Copyright © 2026, Association for the Advancement of Artificial Intelligence (www.aaai.org). All rights reserved. 
+
+income classification), practitioners face mounting pressure to ensure these systems are simultaneously fair and privacy-preserving . Fairness is typically audited through outcome metrics such as demographic parity gap (DP-Gap) or equal-ized odds (EO-Gap); privacy is enforced through differential privacy (DP) (Dwork et al. 2006), with DP-SGD (Abadi et al. 2016) the dominant training-time mechanism against mem-bership inference attacks (Shokri et al. 2017). The implicit assumption is that satisfying each demand independently suf-fices: a model passing a fairness audit and a certified DP budget is an acceptable deployment. We argue this is incom-plete: the critical question is not whether a system is fair or 
+
+private in isolation, but whether the distribution of privacy costs across groups is itself equitable. A growing literature documents that DP-SGD hurts minority-group accuracy more than majority-group accu-racy (Bagdasaryan, Poursaeed, and Shmatikov 2019; Uniyal et al. 2021; Tran, Fioretto, and Van Hentenryck 2021), typi-cally framed as a fairness problem because outcomes worsen unevenly. But this framing treats privacy as a design con-straint rather than a cost borne by individuals: when a mem-bership inference attack succeeds on a training-set member, that person pays an involuntary privacy cost they did not consent to, and if some groups are systematically more ex-posed, they bear a larger share of it. (Kulynych et al. 2019) confirm empirically that MIA success rates vary systemati-cally across groups under DP-SGD, so privacy exposure is a measurable, non-uniform quantity, not the uniform guarantee DP’s ε might suggest. Proportionality-based fairness criteria (Binns 2018) pro-vide one normative lens to make this precise, among several we contrast in Section 3.2 (including equality-of-treatment and Rawlsian maximin alternatives): a system is equitable when the ratio of prediction benefit to involuntary privacy cost is equal across groups, so that a group contributing more privacy exposure receives proportionally greater benefit as compensation. This is a substantive ethical commitment, not a mathematical necessity, and we adopt it because it is well suited to retroactive audits of already-incurred, involuntary harm; readers who favor a different normative starting point can still use the overfitting-gap measurements PCER pro-duces to instantiate their own criterion. Under this lens, un-equal benefit-to-cost ratios are invisible to standard fairness metrics, which check only whether outcome rates are equal, arXiv:2607.16620v1 [cs.LG] 18 Jul 2026 not whether they are proportional to involuntary exposure. The practical consequences of this audit gap are signifi-cant. Deployers certifying both a fairness audit (DP-Gap) and a privacy audit ( ε) may be unaware that one demographic group bears a systematically higher fraction of realized pri-vacy cost, invisible to either metric alone: DP-Gap ignores exposure asymmetry, and equalized odds treats privacy as a separate concern entirely. A budget ranking optimal under de-mographic parity can simultaneously impose a disproportion-ate privacy burden on a historically disadvantaged group. As regulation increasingly demands auditable fairness evidence (the EU AI Act mandates bias monitoring for high-risk sys-tems (National Institute of Standards and Technology 2025)), the absence of a privacy-cost equity metric leaves a concrete, actionable gap practitioners cannot currently fill. Figure 1 illustrates why these considerations matter in prac-tice. On Adult Income (race, panel a), choosing ε ∈ { 5, 10 }
+
+minimises DP-Gap, the standard fairness criterion, yet these are not the most equitable budgets by the proportionality-based metric we introduce, which is minimised at no-DP. The two metrics recommend different deployment decisions. On COMPAS (race, panel b), DP-Gap is nearly flat across all budgets, suggesting DP provides little additional fairness benefit at any ε. But the proportionality metric is persis-tently and significantly negative (95% bootstrap CI excludes zero at ε ≥ 1, 50 seeds), revealing a double-disadvantage that African-Americans bear higher membership-inference exposure and receive a lower benefit-to-cost ratio than the comparison group, something that DP-Gap misses entirely. In this paper, we close this gap by introducing the 
+
+Privacy-Cost Equity Ratio (PCER), a group fairness met-ric operationalizing harm-proportionality via Adams’ equity-ratio structure (Adams 1963): the ratio of a group’s posi-tive prediction rate to its per-group overfitting gap δg =max(0 , acc tr  
+
+> g
+
+− acc te  
+
+> g
+
+), which by the Yeom et al. (Yeom et al. 2018) bound upper-bounds per-group membership inference advantage, making it a theoretically grounded, shadow-model-free privacy-cost proxy. A system is PCER-equitable when this ratio is equal across groups. We evaluate PCER against standard metrics on four benchmark datasets (six benchmark-attribute combinations) under DP-SGD, val-idate the overfitting-gap proxy against a direct threshold membership-inference attack, provide a floor-constant sen-sitivity analysis, and package the procedure as a deployable post-hoc audit (Algorithm 1). Our contributions are as follows: 1. We formally define Privacy-Cost Equity Ratio (PCER) us-ing the per-group overfitting gap as the privacy-cost proxy, grounded in the Yeom et al. bound connecting overfitting to MIA advantage, and show PCER is normatively distinct from demographic parity and equalized odds (Section 3). 2. We establish three theoretical results that ground PCER’s uniqueness and structural properties (Section 3): an ax-iomatic characterization showing Rg /δ g is the unique benefit-to-cost mapping satisfying linearity in benefit and inverse linearity in cost (Proposition S1 (Appendix)); a 
+
+floor degeneracy theorem (Proposition 2) proving that PCER reduces to scaled DP-Gap precisely when both groups’ overfitting gaps fall below the floor; and a PCER– DP-Gap incompatibility theorem (Proposition 3) showing the two fairness criteria cannot hold simultaneously unless per-group overfitting gaps are equal, a condition DP-SGD does not guarantee. 3. We demonstrate empirically on Adult Income, COMPAS, ACS Income 2018, and Bias in Bios (NLP domain; 50 seeds each; six benchmark-attribute combinations) that PCER diverges from DP-Gap and EO-Gap at moderate DP budgets ( ε ∈ { 1, 5, 10 }), with ranking disagreements robust across floor choices and with bootstrap CIs exclud-ing zero (Section 4). 4. We conduct a floor-constant sensitivity analysis ( η ∈{10 −4, 10 −3, 10 −2, 10 −1}) that shows PCER findings at strong DP ( ε = 0 .1) are floor-dominated artifacts, while findings at ε ≥ 1 are robust to floor choice (Section 5). 5. We empirically validate the overfitting-gap proxy against a direct, per-group threshold membership-inference at-tack across all six benchmark-attribute combinations and DP budgets, finding strong directional agreement (Sec-tion 5.5). 
+
+Practical significance. Three properties make PCER a vi-able addition to existing audit pipelines. First, it requires only per-group train/test accuracy (no shadow models), so its marginal cost over an existing DP-SGD evaluation pipeline is negligible compared to LiRA (Carlini et al. 2022)-style approaches requiring hundreds of shadow-model trainings. Second, PCER is the only audit tool that detects double dis-advantage (a group bearing both higher privacy exposure 
+
+and worse predictive outcomes). DP-Gap cannot surface this because it has no denominator sensitive to differential memo-rization (Proposition 3). Third, Proposition 3 gives auditors a falsifiable claim: any system asserting compliance with both a DP-Gap and a PCER audit is implicitly claiming equal per-group overfitting, an assertion Algorithm 1 can confirm or refute with no additional data collection. 
+
+# 2 Background and Related Work 
+
+2.1 Adams’ Equity Theory and Proportionality-Based Fairness 
+
+Adams (Adams 1963) proposed that individuals evaluate fairness by comparing their own outcome-to-input ratio to a referent’s: outcome i
+
+input i
+
+= outcome j
+
+input j
+
+.
+
+Inequitable ratios produce tension motivating corrective ac-tion. The theory was originally framed around voluntary inputs (effort, skill), but (Binns 2018) observes that Adams’ proportionality structure motivates fairness criteria in which the “input” need not be voluntary: any systematic cost borne by a party can ground a proportionality claim. (Speicher et al. 2018) similarly propose a family of metrics unified by an “individual goodness” principle rewarding outcome-merit alignment. These accounts identify the proportionality requirement but stop short of specifying which cost should enter the denominator in an ML context; to our knowledge, 0.1 0.5 1 5 10 no-DP                         
+
+> DP budget (increasing less privacy)
+> 0.06
+> 0.08
+> 0.10
+> 0.12
+> 0.14
+> 0.16
+> DP-Gap
+> DP-Gap min
+> (= 10)
+> DP-Gap (left axis)
+> PCER (right axis)
+> 0
+> 100
+> 200
+> PCER
+> PCER min
+> (no-DP) (a) Adult Income (race), 50 seeds, 95% CI. DP-Gap (blue, left axis) is minimised at ε∈ { 5,10 }. Standard fairness criteria select these as the most equitable budgets. ∆PCER (red, right axis) is minimised at no-DP. The two metrics produce conflicting budget recommenda-tions. 0.1 0.5 1510 no-DP
+> DP budget (increasing less privacy)
+> 0.10
+> 0.15
+> 0.20
+> 0.25
+> 0.30
+> DP-Gap
+> DP-Gap
+> nearly flat
+> DP-Gap (left axis)
+> PCER (right axis) 300
+> 200
+> 100
+> 0
+> PCER
+> CI excludes 0
+> at 1
+> (b) COMPAS (race), 50 seeds, 95% CI. DP-Gap (blue) is nearly flat across all DP budgets. ∆PCER (red) is persistently negative with CI excluding zero at ε≥1: a double-disadvantage i.e. higher harmful-prediction rate and higher overfitting exposure for African-Americans. This is invisible to DP-Gap.
+
+Figure 1: Two findings that standard fairness metrics cannot detect. Each panel shows DP-Gap and ∆PCER (with 95% bootstrap CI) as a function of DP budget ε, with no-DP ( ε = ∞) on the right. Yellow shading marks the floor-dominated regime ( ε = 0 .1). PCER is the first to instantiate Adams’ broader reading with involuntary privacy exposure as that cost. 
+
+2.2 Differential Privacy and DP-SGD 
+
+A randomized mechanism M satisfies (ε, δ )-differential pri-vacy (Dwork et al. 2006) if for any neighboring datasets 
+
+D, D ′ and output set S:
+
+Pr[ M(D) ∈ S] ≤ eε Pr[ M(D′) ∈ S] + δ. 
+
+DP-SGD (Abadi et al. 2016) achieves DP for neural-network training by clipping per-sample gradients to norm C and adding Gaussian noise N (0 , σ 2C2I) at each step, with a privacy accountant tracking the cumulative (ε, δ ) budget. A growing literature documents that DP-SGD does not affect all groups equally: DP noise disproportionately degrades accuracy for underrepresented groups (Bagdasaryan, Pour-saeed, and Shmatikov 2019), motivating fair DP training that constrains equalized-odds violations within a budget (Tran, Fioretto, and Van Hentenryck 2021), and characterizations of the accuracy–fairness–privacy trilemma (Jagielski et al. 2019). These works treat fairness as an outcome-rate prop-erty; PCER instead asks whether DP budgets are equitable with respect to the costs DP imposes on different groups. 
+
+2.3 Membership Inference and Overfitting 
+
+A membership inference attack (MIA) (Shokri et al. 2017) determines whether a target record was in the training set. The canonical threshold attack (Yeom et al. 2018) scores by per-sample loss (low loss indicates memorization) and its advantage is bounded above by the generalization gap, con-necting overfitting directly to privacy leakage. We apply this bound per group, yielding an auditable, shadow-model-free bound on group-level MIA advantage. (Kulynych et al. 2019) provide complementary empirical evidence that DP mecha-nisms expose demographic groups to different membership inference risk under the same nominal ε, persisting across DP budgets, motivating a criterion that normalizes benefit by per-group privacy cost. We adopt the overfitting gap for this; stronger attacks such as LiRA (Carlini et al. 2022) can tighten the bound but require expensive shadow-model training not necessary for audit deployment. 
+
+2.4 Group Fairness Criteria and Their Limits 
+
+The two most widely used group fairness metrics are: • Demographic Parity Gap (DP-Gap): | Pr[ ˆY = 1 | A =0] − Pr[ ˆY = 1 | A = 1] |. Requires equal positive predic-tion rates (Dwork et al. 2012). • Equalized Odds Gap (EO-Gap): 
+
+max( TPR gap , FPR gap ). Requires equal true/false positive rates (Hardt, Price, and Srebro 2016). Both metrics evaluate outcome disparities without reference to costs borne by each group; EO-Gap additionally conditions on the true label, but neither captures whether outcome rates are proportional to involuntary privacy exposure. Chang and Shokri find a tension between enforced outcome-rate parity and membership inference risk (Chang and Shokri 2021); Cummings et al. study the formal compatibility of individual privacy and group fairness (Cummings et al. 2019). Our work is complementary: rather than studying how fairness constraints affect privacy, we study how DP budget choices affect a combined criterion sensitive to both. PCER operates at the group level and is orthogonal to the individual fairness of (Dwork et al. 2012). 
+
+# 3 Methodology 
+
+3.1 Formal Definitions 
+
+Let fθ : X → [0 , 1] be a probabilistic classifier trained on 
+
+Dtrain , and A ∈ { 0, 1} a binary protected attribute. Definition 1 (Group Positive Rate) . The positive prediction rate for group g on test set Dtest is 
+
+Rg = E1[fθ (X) ≥ 0.5] A = g, (X, Y ) ∼ Dtest 
+
+.
+
+Remark 1 (Positive rate as benefit proxy) . Rg approximates benefit delivery in beneficial-prediction domains and harm received in harmful-prediction domains (e.g. criminal re-cidivism); it reflects both base-rate differences and model-induced disparities (Section 6). 
+
+Definition 2 (Per-Group Overfitting Gap) . Let acc tr  
+
+> g
+
+=
+
+E[1[fθ (X)≥0.5 = Y ] | A = g, (X, Y ) ∼ Dtrain ] and 
+
+acc te  
+
+> g
+
+= E[1[fθ (X)≥0.5 = Y ] | A = g, (X, Y ) ∼ Dtest ].The per-group overfitting gap is 
+
+δg = max  0, acc tr  
+
+> g
+
+− acc te 
+
+> g
+
+.
+
+Proposition 1 (Yeom bound on per-group MIA advantage) .
+
+Fix the specific threshold-based membership inference at-tacker of Yeom et al. (Yeom et al. 2018), which decides mem-bership for record i in group g by thresholding its loss ℓi at (a group-specific estimate of) the expected training loss. Let 
+
+ˆμg denote this attacker’s accuracy-based advantage on group 
+
+g, i.e. 
+
+ˆμg = Pr[ attacker is correct ] − 12 ,
+
+evaluated on a balanced member/non-member set restricted to group g. Then 
+
+ˆμg ≤ δg .
+
+Proof. Yeom et al. (Yeom et al. 2018) prove that their thresh-old attacker achieves Pr[ correct ] ≤ 12 + 12 (Lte  
+
+> g
+
+− Ltr  
+
+> g
+
+), where 
+
+L· 
+
+> g
+
+is the expected 0-1 loss (error rate) on group g. Since 
+
+ˆμg = Pr[ correct ] − 12 and Lte  
+
+> g
+
+− Ltr  
+
+> g
+
+= acc tr  
+
+> g
+
+− acc te  
+
+> g
+
+, the result follows; max( ·, 0) clips at zero for non-overfit groups. This bound is specific to the fixed-threshold adversary eval-uated at accuracy, not to threshold-independent summaries such as ROC-AUC, and stronger attacks (e.g. LiRA (Carlini et al. 2022)) may achieve higher advantage not captured here. Section 5.5 reports AUC-based attack success as a comple-mentary empirical diagnostic without claiming it is bounded by δg in this same formal sense. 
+
+Definition 3 (Privacy-Cost Equity Ratio) . For group g with positive rate Rg and overfitting gap δg , the Privacy-Cost Equity Ratio is 
+
+PCER g = Rg
+
+max( δg , η ) ,
+
+where η > 0 is a small positive floor constant (default η =10 −3; see Section 10). 
+
+Remark 2 (Conservative lower bound on true PCER) . By Proposition 1, ˆμg ≤ δg , so max(ˆ μg , η ) ≤ max( δg , η ), giving 
+
+PCER g = Rg
+
+max( δg , η ) ≤ Rg
+
+max(ˆ μg , η ) .
+
+Using δg in the denominator underestimates the true benefit-to-exposure ratio: any detected inequity is genuine, not an artifact of overestimating privacy cost. 
+
+PCER’s ratio structure is not an arbitrary choice: it is the unique benefit-to-cost mapping satisfying linearity in bene-fit, inverse linearity in cost, and a scale-normalization con-vention (Proposition S1 in the Appendix gives the formal axiomatization and proof), ruling out alternatives such as an unnormalised difference Rg − δg or a super-linear cost penalty Rg /δ 2 
+
+> g
+
+.
+
+Proposition 2 (Floor Degeneracy) . Let η > 0 be fixed. If 
+
+δ0, δ 1 < η , then 
+
+∆PCER = R0 − R1
+
+η = DP -Gap (signed) 
+
+η .
+
+PCER provides no diagnostic information beyond a scaled version of DP-Gap in this regime. Proof. When δg < η , max( δg , η ) = η for both g ∈ { 0, 1}.Therefore ∆PCER = R0/η − R1/η = ( R0 − R1)/η .
+
+Remark 3 (Floor-dominated regime under strong DP) . Un-der DP-SGD, sufficiently strong noise ( ε ≪ 1) drives the model toward near-random predictions, collapsing per-group overfitting toward zero. Proposition 2 formalises the conse-quence: once δg < η for all g, a PCER audit is equivalent to a scaled DP-Gap audit and should be reported as such. The floor sensitivity analysis (Section 10) operationalises this check: if |∆PCER | scales proportionally with 1/η across or-ders of magnitude, the finding is floor-dominated. All findings at ε = 0 .1 in our experiments fall in this regime. 
+
+Definition 4 (PCER Disparity) . The signed PCER disparity for groups {0, 1} is 
+
+∆PCER = PCER 0 − PCER 1.
+
+A system is PCER-equitable when ∆PCER = 0 .
+
+Algorithm 1 requires only a held-out test set and evaluation of the already-trained model on the training set. No shadow models or no auxiliary attack infrastructure required which makes PCER deployable as a post-hoc audit step in any ex-isting DP-SGD pipeline. 
+
+3.2 Normative Justification 
+
+PCER operationalizes a harm-proportionality equity principle using Adams’ output-to-input ratio framework: • Output (benefit): positive prediction rate Rg , the benefit (or harm, in domains like criminal recidivism) the model delivers to group g.• Input (involuntary cost): overfitting gap δg , the degree to which the model has memorized group g’s training data beyond what is needed for generalization. By Proposi-tion 1, this directly bounds the privacy leakage group g is exposed to. The key distinction from Adams’ original formulation is that the “input” is not a voluntary contribution but an involuntary harm: data subjects cannot choose how much of their data the training process memorizes. Memorization is the mechanism of privacy leakage (Yeom et al. 2018); groups whose data is memorized more are at greater risk of membership infer-ence. The proportionality norm we invoke is therefore one of Algorithm 1: PCER Audit for DP Budget Selection 
+
+Part I — Trainer trains models; releases per-group statistics 
+
+Require: Data D, protected attribute A, candidate budgets 
+
+E 
+
+> 1:
+
+for each ε ∈ E do  
+
+> 2:
+
+Train f ε on Dtrain with DP-SGD at budget ε 
+
+> 3:
+
+for g ∈ { 0, 1} do  
+
+> 4:
+
+Release Rεg ← E1[f ε(X) ≥ 0.5] |
+
+A=g, (X, Y ) ∼ Dtest 
+
+ 
+
+> 5:
+
+Release acc tr  
+
+> g
+
+(f ε) and acc te  
+
+> g
+
+(f ε) 
+
+> 6:
+
+end for  
+
+> 7:
+
+end for Part II — Auditor uses only released statistics; no model or data access required 
+
+Require: Released Rεg , acc tr  
+
+> g
+
+, acc te  
+
+> gg,ε
+
+, floor grid H =
+
+{10 −4, 10 −3, 10 −2, 10 −1}
+
+Ensure: Per-floor equitable budget ε∗(η′); robustness ver-dict  
+
+> 8:
+
+for each ε, g ∈ { 0, 1} do  
+
+> 9:
+
+δεg ← max  0, acc tr  
+
+> g
+
+− acc te 
+
+> g
+
+ 
+
+> 10:
+
+end for  
+
+> 11:
+
+for each η′ ∈ H do  
+
+> 12:
+
+for each ε do  
+
+> 13:
+
+∆ε(η′) ← Rε
+
+> 0
+
+max( δε
+
+> 0
+
+, η ′) − Rε
+
+> 1
+
+max( δε
+
+> 1
+
+, η ′) 
+
+> 14:
+
+end for  
+
+> 15:
+
+ε∗(η′) ← arg min ε ∆ε(η′) 
+
+> 16:
+
+end for  
+
+> 17:
+
+if {ε∗(η′) : η′ ∈ H} = 1 then  
+
+> 18:
+
+Report ε∗ as the PCER-equitable budget ▷
+
+floor-robust  
+
+> 19:
+
+else  
+
+> 20:
+
+Flag : budget ranking is floor-sensitive; inspect 
+
+∆ε(η′) table  
+
+> 21:
+
+end if 
+
+compensatory fairness (Binns 2018): when a joint enterprise imposes unequal involuntary costs on different groups, those who bear more cost are owed proportionally more benefit as compensation. Formally, the principle requires PCER 0 = PCER 1, i.e. 
+
+R0/δ 0 = R1/δ 1. A PCER violation ( ∆PCER ̸ = 0 ) means the groups receive unequal benefit-to-memorization-cost ra-tios. The group with the lower ratio is doubly disadvantaged, bearing higher privacy risk for less outcome benefit. 
+
+Remark 4 (Domain-sensitive benefit interpretation) . In do-mains where positive prediction is harmful (e.g. predicted recidivism in COMPAS), Rg measures harm and PCER cap-tures the harm-to-cost ratio; the metric is well-defined but the normative interpretation of ∆PCER ’s sign is domain-specific. 
+
+Alternatives we considered. PCER’s compensatory-proportionality norm is one candidate among several; we do not claim it is the unique correct standard. Equality of treatment , the standard DP-Gap and EO-Gap operationalize (Section 3.3), holds a system fair once outcome rates are equalized regardless of how unevenly privacy cost fell on each group; it is not wrong, but silent on exposure asym-metry, which a compensatory view treats as morally rele-vant. A Rawlsian maximin criterion (maximise the worst-off group’s welfare) is designed for ex ante contract design un-der a veil of ignorance (Binns 2018); our setting is retroac-tive, so compensatory restitution fits better than a prospec-tive redistribution rule. Capability-based (Nussbaum 2011) and distributive-justice accounts would instead ask whether groups can achieve functionings they value, or prioritise equalising outcomes over compensating differential costs. Practitioners who reject the premise that involuntary cost grounds compensation will reasonably prefer DP-Gap alone and should read PCER as diagnostic rather than a corrected successor metric; its contribution is to make the exposure dimension measurable , whichever normative standard is ulti-mately applied. 
+
+Why compensation rather than equalization? If unequal memorization is the injustice, the remedy should be to equal-ize δg across groups directly. But DP-SGD provides only a mechanism-level guarantee on the aggregate budget ε, with no per-group memorization control: the overfitting dispar-ity arises from dataset statistics (group size, feature density, label separability) that cannot be corrected without altering the training distribution. Where equalization is infeasible, compensatory proportionality is the appropriate second-best norm, and PCER makes it auditable. Like demographic par-ity, PCER is a group criterion aggregating over individuals within each demographic group; it does not imply individual fairness in the sense of (Dwork et al. 2012). 
+
+3.3 Relationship to Demographic Parity Gap 
+
+DP-Gap measures |R0 − R1|; ∆PCER measures R0/δ 0 −
+
+R1/δ 1. The two coincide only when δ0 = δ1. Under DP-SGD, the overfitting gap is not group-invariant i.e. minority groups with fewer training samples may exhibit higher or lower δg than majority groups depending on the noise sched-ule and group-specific signal strength. This implies that the metrics can diverge in general. When both groups’ gaps are at floor η, ∆PCER reduces to DP-Gap /η (Proposition 2). Away from the floor, PCER and DP-Gap can disagree not only in magnitude but in direction , precisely when the group with the higher outcome rate bears a proportionally higher memorization cost (Proposition S2 in the Appendix); this requires genuinely unequal overfitting gaps, so at the floor the two metrics necessarily agree in direction (Proposition 2). 
+
+Proposition 3 (PCER–DP-Gap Incompatibility) . Assume 
+
+R0, R 1 > 0 and δ0, δ 1 ≥ η. Then PCER-equity ( ∆PCER =0) and DP-Gap-equity ( R0 = R1) hold simultaneously if and only if δ0 = δ1.Proof. (⇒) Suppose both equities hold. DP-Gap-equity re-quires R0 = R1 = R > 0. Since δ0, δ 1 ≥ η by assumption, 
+
+max( δg , η ) = δg for g ∈ { 0, 1}, so PCER g = R/δ g . Substi-tuting into ∆PCER = 0 gives R/δ 0 = R/δ 1. Because R > 0,the map x 7 → R/x is injective on x > 0, so this equality of images forces equality of the arguments: δ0 = δ1.(⇐) Suppose δ0 = δ1 =: δ and DP-Gap-equity holds (R0 = R1 = R). Then PCER 0 = R/ max( δ, η ) = PCER 1,so ∆PCER = 0 trivially. Combining both directions estab-lishes the claimed biconditional. 
+
+Remark 5 (Structural impossibility under DP-SGD) . DP-SGD offers no mechanism guarantee on the between-group overfitting differential: δg is governed by dataset statistics (sample size, label separability, feature density) outside the scope of ε. Consequently, whenever δ0̸ = δ1 (the typical case), Proposition 3 makes passing both a DP-Gap and a PCER audit structurally impossible; a system passing both is implicitly claiming equal per-group overfitting, a claim Algorithm 1 can directly verify. 
+
+Remark 6 (Per-group overfitting as a proxy for unequal ex-posure) . δg is an upper bound on ˆμg , not a measurement of realised attack success, so δ0̸ = δ1 formally shows only that our worst-case bound differs across groups. We nonetheless interpret persistent δ0̸ = δ1 as suggestive evidence of un-equal effective privacy protection under the shared nominal 
+
+ε: overfitting is the mechanism through which DP-SGD’s noise budget fails to protect a group uniformly. Section 5.5 tests this directly against a per-group empirical attack, which agrees on direction in most but not all settings, so this re-mark motivates the audit rather than establishing a formal equivalence. 
+
+# 4 Experiments 
+
+4.1 Datasets 
+
+UCI Adult Income. UCI Adult Income ( n = 46 ,033 after preprocessing) (Becker and Kohavi 1996) with protected attributes sex (Male/Female) and race (White/Non-White); binary outcome income > $50 K/year (beneficial). Features: age, education, occupation, hours worked, capital gain/loss; protected attributes excluded from features. 
+
+COMPAS. ProPublica COMPAS recidivism (n =6,172 ) (Angwin et al. 2014) with race as protected attribute (African-American vs. Other); outcome is two-year recidi-vism, a harmful prediction. Features: age, prior count, charge degree, juvenile offense counts. 
+
+ACS Income 2018. ACS 1-Year PUMS 2018 via folk-tables (Ding et al. 2021), states CA, TX, NY (combined 
+
+n ≈ 843 ,000 , subsampled to n = 50 ,000 ); task mirrors Adult Income (predict income > $50 K/year). Two pro-tected attributes evaluated independently: race (RAC1P =1 →White, else Non-White) and sex (SEX = 1 →Male, SEX = 2 →Female), excluded from features. 
+
+Bias in Bios. Bias in Bios (De-Arteaga et al. 2019) ( n =37 ,900 after filtering and class-balancing the professor/nurse task): online biographies with occupation labels and binary gender, predicting professor (y = 1 , beneficial) vs. nurse 
+
+(y = 0 ); gender (Male = 0 , Female = 1 ) is the protected attribute. We use the hard text field (name removed) to prevent name-to-gender shortcuts (Romanov et al. 2019), en-coded offline via TF-IDF (unigrams+bigrams, 15,000 vocab-ulary, sublinear TF) and Truncated SVD to 200 components, fed to the same MLP architecture as the tabular experiments. This tests whether PCER findings replicate in the NLP do-main, where the beneficial outcome is access to a high-status occupational label rather than a financial one. 
+
+4.2 Experimental Setup 
+
+We train a three-layer MLP (64–32–1 units, ReLU) using DP-SGD via Opacus 1.5 (Yousefpour et al. 2021), sweep-ing ε ∈ { 0.1, 0.5, 1.0, 5.0, 10 .0} with a non-private (no-DP) baseline. All runs use δ = 10 −5, max gradient norm C = 1 .0,batch size 256, SGD with learning rate 0.05 and momentum 0.9, and 25 training epochs. Features are standardised. We use a 70/30 stratified train/test split. All datasets use 50 inde-pendent seeds. Privacy cost is measured via the per-group overfitting gap δg = max(0 , acc tr  
+
+> g
+
+− acc te  
+
+> g
+
+), computed by evaluating the trained model on the train and test splits per group. No shadow models are required. Floor constant η = 10 −3 unless otherwise stated; sensitivity to η is analysed in Section 10. 
+
+Direct threshold-MIA validation protocol. To validate 
+
+δg against an actual attack rather than only its theoretical bound, we additionally run the classical per-group thresh-old membership-inference attack (Yeom et al. 2018) on ev-ery trained model above (same seeds, ε settings, and six benchmark-attribute combinations; no additional training re-quired). For each group g we score every train/test example by negative loss −ℓi, pool member/non-member scores, and report AUC g (area under the ROC curve; 0.5 = chance) as a threshold-free summary of attack success, kept deliber-ately separate from the accuracy-based ˆμg that Proposition 1 bounds (we make no formal claim δg bounds AUC g in the same sense). The empirical question: does the overfitting-gap proxy agree, directionally and in the PCER rankings it im-plies, with a real attacker’s success rate? Results appear in Section 5.5. 
+
+4.3 Evaluation Criteria 
+
+We assess divergence along three axes: 1. Ranking disagreement. Whether the two metrics order the ε settings differently in terms of which is “most fair.” 2. Directional disagreement. Whether the metrics disagree on which group is disadvantaged at any ε setting (Propo-sition S2 (Appendix)). 3. Floor sensitivity. Whether findings at ε = 0 .1 persist or vanish as η varies (Section 10). Pearson correlations between ∆PCER and ∆DP-Gap are computed across ε settings (5 data points for the full sweep, 4 for ε ≥ 1 only). These correlations have very limited statis-tical power and are reported as descriptive summaries rather than inferential results. 
+
+# 5 Results 
+
+Adult Income (sex and race) results are in Section 12 (Ap-pendix): both attributes show robust positive ∆PCER (CIs excluding zero at all ε ≥ 1), and race additionally shows a ranking reversal (DP-Gap prefers ε ∈ { 5, 10 }, PCER prefers no-DP) confirmed floor-robust at η = 10 −2.5.1 COMPAS: Race 
+
+Floor-dominated regime at ε = 0.1. DP-Gap identi-fies ε = 0 .1 as the most equitable budget (mean 0.127 ±
+
+0.059 ). PCER’s mean-based CI here technically excludes zero ( −64 ±220 , CI [−128 , −5] ), yet only 28/50 seeds (56%) are negative, indistinguishable from a fair coin ( p = 0 .82 ). The two tests disagree because ∆PCER = R/δ has a noisy, near-zero denominator at this budget ( δg ≈ .011 –.013 , std comparable to the mean), so a few outlier seeds pull the mean below zero without a consistent per-seed sign; we treat mean-CI and sign test as complementary, not interchange-able. Raising η makes the sign more consistent (36/50, then 48/50 negative), but per Proposition 2 only because ∆PCER 
+
+degenerates into a rescaled DP-Gap once δg ≪ η, not from a genuine effect: no η makes this budget informative (Re-mark 3). At ε ≥ 0.5 below, mean-CI and sign agree, so we report the mean-CI alone. 
+
+Robust findings at ε ≥ 0.5. PCER at ε ≥ 0.5 is stably and significantly negative, floor-robust, and in close agreement across budgets: African-Americans consistently bear a higher harm-to-cost ratio. The ε = 0 .5 estimate is most extreme because overfitting gaps there are smaller than at ε = 1 ,shrinking the denominator while outcome rates stay compara-ble. EO-Gap tracks DP-Gap closely and is nearly flat across 
+
+ε ≥ 1 (0.228 –0.229 ), while PCER remains stable at approx-imately −160 , indicating a persistent double-disadvantage DP noise does not reduce (most robust at ε = 5 : −169 , CI 
+
+[−229 , −106] ; floor-robust −19 .9 ± 11 .7 at η = 10 −2). 
+
+5.2 Floor-Constant Sensitivity 
+
+Full floor-constant sensitivity results are reported in Table S1 (Appendix). The key pattern: at ε = 0 .1, both magnitude and direction of ∆PCER are floor-sensitive, as predicted by Proposition 2 ( 10 × change in η scales |∆PCER | by ∼ 10 ×;positive-direction seeds shift 22/50 →14/50 →2/50). At ε ≥ 1,direction is stable across all η ∈ { 10 −4, . . . , 10 −1}, confirm-ing a genuine differential rather than a floor artifact. 
+
+5.3 ACS Income 2018 
+
+The ACS Income 2018 dataset (Table 2) provides a larger-scale replication ( n = 50 ,000 ) of the race and sex patterns observed on Adult. 
+
+ACS race. PCER has large standard deviation (all CIs cross zero) at all ε, reflecting small, similar overfitting gaps across groups ( δW ≈ 0.004 –0.007 , δNW ≈ 0.003 –0.006 ); direction alternates sign across ε (−13 at no-DP, +12 at ε = 0 .1, −14 
+
+at ε = 1 ). At η = 10 −2 direction is consistently positive (+5 .4 to +5 .7) but no estimate excludes zero at η = 10 −3.
+
+No robust PCER divergence from DP-Gap is established for ACS race. 
+
+ACS sex. DP-Gap on ACS is much smaller than on Adult sex ( 0.079 –0.097 vs. 0.184 –0.188 ). PCER is positive at all ε
+
+(sign consistent with Adult sex) but CIs cross zero throughout; at η = 10 −2 direction is positive and tighter ( +8 .2 to +9 .7), consistent with the Adult sex pattern but not statistically robust. No robust PCER finding is observed for ACS sex at any ε.
+
+5.4 Bias in Bios: Gender 
+
+Table 3 reports results for the NLP-domain benchmark. Bias in Bios exhibits a structural gender asymmetry (males pre-dicted professor at 86%, females at 33%), yielding a large DP-Gap ( >0.5) across ε ≥ 1 that reflects class imbalance inherited from the gender-skewed occupational distribution, not a model-induced artefact (De-Arteaga et al. 2019). 
+
+No-DP baseline: tightest CI in the study. At no-DP, 
+
+∆PCER = +22 .2 ± 3.4, CI [+21 .3, +23 .2] , the tightest inter-val across all six benchmarks, since both overfitting gaps are large and stable ( δM = 0 .029 ± 0.003 , δF = 0 .045 ± 0.002 ). Per-group PCER is RM/δ M ≈ 29 .3 vs. RF/δ F ≈ 7.5: al-though females’ records are memorised more ( δF > δ M), they also receive a lower professor-prediction rate, so males receive more benefit per unit of privacy cost, an inequity present even absent DP (50/50 seeds positive). 
+
+Floor-dominated at ε = 0 .1, robust positive at ε ≥ 0.5.
+
+At ε = 0 .1, both gaps collapse near zero and the model degrades to near-chance accuracy, yielding ∆PCER = +65 ±
+
+316 (CI [−17 , +152] ): floor-dominated and uninformative. At ε ≥ 0.5, PCER is consistently positive ( +349 down to 
+
++209 , all CIs excluding zero; ε = 0 .5 peaks from a smaller denominator than ε = 1 ), direction robust (43/50 to 50/50 seeds positive) and surviving at η = 10 −2 (Table S1). These findings replicate the Adult (sex) pattern in an NLP setting, including at no-DP, where the occupational disparity predates DP-SGD and is amplified as noise compresses the overfitting denominator. 
+
+5.5 Validation Against Direct Threshold-MIA Attacks 
+
+Proposition 1 and Remark 2 justify δg as a theoretical upper bound on attack advantage, but a bound is not a measurement. We therefore additionally run a direct per-group threshold membership-inference attack on every trained model (Sec-tion 4) and compare the PCER disparity it implies, ∆MIA PCER 
+
+(substituting max(AUC g − 0.5, η ) for max( δg , η )), against 
+
+∆δ
+
+> PCER
+
+; full results are in Table S5 (Appendix, split across two tables for two-column layout). 
+
+Direct attack success is weak; the proxy tracks it direc-tionally. Pooling all six combinations and six DP budgets (72 group-level observations), the threshold attack’s raw ad-vantage AUC g − 0.5 has mean 0.0013 and maximum 0.0118 ,only marginally better than guessing, the well-documented weakness of shadow-model-free threshold attacks relative to calibrated attacks such as LiRA (Carlini et al. 2022). De-spite this, δg correlates with AUC g − 0.5 at r = 0 .828 
+
+(p < 10 −18 ), consistent with the Yeom bound holding with room to spare (mean advantage 0.0013 ≪ mean δg ≈ 0.005 ). At the PCER-disparity level, ∆δ 
+
+> PCER
+
+and ∆MIA PCER agree in sign in 32/36 configurations (88.9%; 26/30 excluding 
+
+ε = 0 .1) and correlate at r = 0 .935 (p < 10 −16 ). All four disagreements occur on ACS, precisely the combinations Section 5.3 already flags as noise-dominated: the direct-MIA comparison reproduces, rather than adds, instability. Table 1: COMPAS, race attribute (Other=0, African-American=1). Mean ± std over 50 independent runs (seeds 0–49). δg :per-group overfitting gap; ∆PCER : PCER disparity (95% bootstrap CI in brackets). Positive prediction = predicted recidivism (harmful ). ∆PCER < 0 means African-Americans bear higher harm-to-cost ratio. Bold : minimum DP-Gap. The ε = 0 .1 row is floor-dominated and uninformative despite its CI excluding zero; see discussion below.                                                 
+
+> εAcc DP-Gap EO-Gap δOt δAA ∆PCER
+> no-DP .682 ±.008 .242 ±.018 .246 ±.030 .0074 ±.010 .0099 ±.012 −68 ±245 [ −135 ,−2]
+> 0.1 .590 ±.043 .127 ±.059 .134 ±.050 .0109 ±.011 .0127 ±.014 −64 ±220 [ −128 ,−5]
+> 0.5 .675 ±.007 .224 ±.020 .237 ±.029 .0063 ±.0084 .0060 ±.0097 −182 ±232 [ −245 ,−120]
+> 1.0 .678 ±.008 .228 ±.017 .239 ±.027 .0058 ±.008 .0068 ±.010 −155 ±240 [ −219 ,−90]
+> 5.0 .679 ±.008 .229 ±.018 .242 ±.030 .0065 ±.009 .0065 ±.011 −169 ±229 [ −230 ,−106]
+> 10.0 .679 ±.008 .229 ±.018 .242 ±.030 .0063 ±.009 .0061 ±.010 −172 ±231 [ −234 ,−109]
+
+Table 2: ACS Income 2018 ( n = 50 ,000 , CA+TX+NY), mean ± std over 50 seeds. Left half (Race): White=0, Non-White=1; positive prediction = income >$50K (beneficial). Right half (Sex): Male=0, Female=1. δg0/g 1: per-group overfitting gap means (g0/g1); ∆PCER : 95% bootstrap CI in brackets. All CIs cross zero; no robust PCER finding observed for ACS at any ε (sex direction is positive but not significant).                                                        
+
+> Race (White=0, Non-White=1) Sex (Male=0, Female=1)
+> εDP-Gap δW/δNW ∆PCER DP-Gap δM/δF∆PCER
+> no-DP .058 ±.009 .0065 /. 0056 −13 ±180 [ −62 ,+34] .097 ±.012 .0064 /. 0054 +15 ±187 [ −36 ,+66]
+> 0.1 .033 ±.026 .0040 /. 0038 +12 ±220 [ −49 ,+72] .079 ±.035 .0039 /. 0034 +2 ±185 [ −49 ,+53]
+> 0.5 .038 ±.008 .0032 /. 0035 +14 ±210 [ −43 ,+72] .094 ±.010 .0035 /. 0030 +33 ±204 [ −23 ,+90]
+> 1.0 .039 ±.007 .0037 /. 0033 −14 ±218 [ −71 ,+47] .095 ±.008 .0035 /. 0034 +30 ±192 [ −19 ,+83]
+> 5.0 .041 ±.007 .0037 /. 0034 +3 ±222 [ −56 ,+65] .096 ±.008 .0036 /. 0030 +5 ±203 [ −51 ,+61]
+> 10.0 .042 ±.007 .0037 /. 0034 −7±217 [ −64 ,+52] .096 ±.008 .0037 /. 0031 +13 ±205 [ −42 ,+70]
+
+The proxy is conservative, as predicted, and this is why it works. Remark 2 predicts |∆δ
+
+> PCER
+
+| ≤ | ∆MIA PCER |; this holds empirically in 69% of configurations (median ratio 1.25 ), confirming δg generally understates rather than overstates the disparity a direct attack would report. Together these results support, rather than undermine, using δg as the audit statistic: raw attack signal is too close to chance to serve as a stable denominator here, while the overfitting gap is stable, shadow-model-free, and tracks the direct attack’s PCER ranking in the large majority of informative settings. 
+
+# 6 Discussion 
+
+Why a proxy instead of a direct attack. Section 5.5 showed a real per-group threshold attack is only marginally better than chance here (mean AUC advantage 0.0013 ), yet still agrees directionally with δg -based PCER in most set-tings, which is the practical case for the proxy: cheaper and less noisy than the attack it bounds. Practitioners with budget for calibrated attacks such as LiRA (Carlini et al. 2022) can substitute a tighter estimate directly into the denominator; Algorithm 1 is agnostic to which cost proxy is used. 
+
+The apparent fairness of high DP noise. Deploying ε =0.1 because it minimises DP-Gap can be misleading: the metric improves not because the system is more equitable, but because heavy noise compresses outcome rates toward uniformity, and PCER reduces to scaled DP-Gap there. The genuine question is what happens at moderate budgets where both outcomes and privacy risk remain distinguishable. 
+
+Privacy cost as a legitimate, but contestable, fairness in-put. The norm that involuntary privacy costs should be proportional to prediction benefits is grounded in compen-satory fairness, not voluntary exchange, and is one motivated position rather than a conclusion forced by the data (Sec-tion 3.2 contrasts it with equality-of-treatment, distributive-justice, and Rawlsian alternatives). Under this norm, groups bearing greater involuntary risk who also receive fewer bene-fits are doubly disadvantaged, even when not disadvantaged by an equality-of-treatment standard. Neither NIST SP 800-226 (National Institute of Standards and Technology 2025) nor the EU AI Act’s Article 10 bias-monitoring requirements address this distributional dimension of privacy cost explic-itly; PCER operationalizes a concrete audit that both leave implicit, deployable with only train/test accuracy per group (Algorithm 1) and adding negligible overhead where it is informative ( ε ≥ 1, floor-robust at η = 10 −2), whichever normative standard a practitioner ultimately applies to the resulting measurement. 
+
+Relationship between DP-Gap, EO-Gap, and PCER. 
+
+DP-Gap and EO-Gap move together in most configurations here, while PCER diverges through the overfitting gap term. The Adult (race) ranking reversal ( ε ∈ { 5, 10 } best by DP-Gap/EO-Gap, no-DP best by PCER) illustrates the additional signal: standard metrics capture outcome-rate compression at ε = 1 .0, but PCER captures that overfitting is more evenly distributed across groups at no-DP. 
+
+Measurement limitations and extensions. Using Rg as a benefit proxy conflates base-rate differences (groups with Table 3: Bias in Bios, gender attribute (Male=0, Female=1). Mean ± std over 50 independent runs (seeds 0–49). δg : per-group overfitting gap; ∆PCER : PCER disparity (95% bootstrap CI in brackets). Positive prediction = professor (y = 1 , beneficial ). DP-Gap exceeds 0.48 at all ε ≥ 0.5; PCER is positive and CI excludes zero at no-DP and at ε ≥ 0.5.                                                
+
+> εAcc DP-Gap EO-Gap δMδF∆PCER
+> no-DP .960 ±.001 .523 ±.006 .070 ±.012 .0292 ±.0032 .0446 ±.0018 +22 ±3 [+21 ,+23]
+> 0.1 .560 ±.031 .079 ±.042 .078 ±.042 .0038 ±.006 .0035 ±.005 +65 ±316 [ −17 ,+152]
+> 0.5 .912 ±.005 .485 ±.013 .092 ±.023 .0036 ±.004 .0054 ±.004 +349 ±347 [+255 ,+444]
+> 1.0 .944 ±.003 .514 ±.008 .087 ±.016 .0051 ±.004 .0065 ±.004 +236 ±289 [+159 ,+317]
+> 5.0 .961 ±.002 .526 ±.007 .078 ±.014 .0053 ±.003 .0075 ±.003 +219 ±243 [+155 ,+290]
+> 10.0 .963 ±.002 .526 ±.006 .075 ±.014 .0053 ±.003 .0077 ±.003 +209 ±246 [+147 ,+279]
+
+genuinely higher income or criminal recidivism rates will have higher positive rates even from a perfectly calibrated model) with model-induced disparities; a more principled measure would condition on outcome (precision per group) or use a calibration-adjusted rate. ∆PCER ’s absolute mag-nitude similarly depends on both the positive-rate gap and the overfitting level and is not comparable across datasets; practitioners should focus on sign and floor-robustness rather than magnitude in isolation; a natural dimensionless normali-sation would divide ∆PCER by the mean PCER, which we leave to future calibration work. PCER as defined also treats the protected attribute as binary; extending to multi-class at-tributes (age brackets, multi-category race) is straightforward at the auditor level via a worst-case dispersion measure such as max g,g ′ |PCER g − PCER g′ |, requiring no change to the trainer’s released statistics. Although motivated by DP-SGD, PCER depends only on 
+
+δg and Rg , both computable for any training regime, so Algo-rithm 1 applies equally to federated learning, PATE (Papernot et al. 2016), or unprotected ERM. Practitioners outside the DP-SGD setting can therefore apply PCER as a general post-hoc equity audit without modification. 
+
+Affected communities. This work encodes sensitive demo-graphic attributes (sex, race, criminal justice outcomes) of people who did not consent to be subjects of algorithmic fair-ness research. The COMPAS dataset records predictions that influenced real bail and sentencing decisions. We acknowl-edge that the communities represented in these benchmarks bear the highest stakes of the questions we raise. Defini-tions of “benefit” and “proportional compensation” should ultimately be co-developed with affected communities in spe-cific deployment contexts; the PCER metric is a diagnostic tool, not a substitute for that engagement. 
+
+# 7 Conclusion 
+
+We have proposed the Privacy-Cost Equity Ratio (PCER), a group fairness criterion operationalizing harm-proportionality using Adams’ equity ratio structure: the ratio of prediction benefit to involuntary privacy exposure (proxied by δg ), grounded in the Yeom et al. bound ( Adv MIA (g) ≤ δg ) and requiring only train/test accuracy per group. Across Adult Income, COMPAS, ACS Income 2018, and Bias in Bios (six benchmark-attribute combinations) under DP-SGD at moderate budgets ( ε ≥ 1), PCER diverges from demographic parity gap in ways robust to floor-constant choice, capturing on COMPAS a persistent double-disadvantage that DP-Gap misses entirely. A direct per-group threshold membership-inference attack, run on every trained model as a validation check (Section 5.5), agrees in sign with the overfitting-gap proxy in 32/36 configurations and correlates with it at r = 0 .935 , with all four disagreements confined to ACS, which the sensitivity analysis already flags as noise-dominated. Algorithm 1 packages the procedure as a deployable post-hoc audit requiring no auxiliary infrastructure. A critical caveat: PCER degenerates under strong DP ( ε =0.1), where overfitting gaps collapse toward zero and ∆PCER 
+
+reduces to a scaled DP-Gap with no additional information. The apparent directional instability on COMPAS at ε = 0 .1
+
+is exactly this floor artifact. Practitioners should apply PCER only at DP budgets where group overfitting is reliably above the floor, verifying with Table S1. 
+
+7.1 Limitations 
+
+1. Floor-Dominated Regime. PCER is uninformative once both groups’ overfitting gaps are near zero ( ε = 0 .1 here); results at η = 10 −3 that do not persist across at least two decades of η (Table S1) should be treated with caution, since unstable findings are floor artifacts, not genuine inequity. 2. Statistical Power. Fifty seeds give reasonable precision, including on COMPAS ( n = 6 ,172 ); Pearson correla-tions between PCER and DP-Gap use only five ε settings and are descriptive, not inferential (bootstrap CIs: 5,000 resamples, percentile method). 3. Overfitting Gap as Privacy Proxy. The Yeom bound is an upper bound, so δg generally understates PCER’s mag-nitude relative to a direct attack; any detected inequity is genuine (Remark 2), confirmed empirically (Section 5.5: larger-magnitude disparity under direct threshold-MIA in 69% of configurations). LiRA (Carlini et al. 2022) could tighten estimates for non-trivial memorisation. 4. Positive Rate, Scope, and Future Work. Rg conflates base-rate with model-induced disparities; qualification-conditioned or precision-based measures could isolate the latter, and jointly minimising PCER disparity and DP-Gap during training is a natural extension. Our simple-MLP results replicate across modalities with offline features, but may not generalise to end-to-end fine-tuned language models. 8 Impact Statement 
+
+Ethical Considerations. This paper analyzes publicly available benchmark datasets (COMPAS, Adult Income, ACS Income, and Bias in Bios) that encode sensitive demographic attributes of individuals who did not consent to be subjects of algorithmic fairness research. COMPAS in particular records recidivism risk scores that influenced real pre-trial detention and sentencing decisions, over populations disproportionately Black and with limited capacity to contest algorithmic assess-ments of their futures; reusing these datasets, even for audit purposes, reproduces and circulates records of consequential harm. No new data collection or human-subjects research was conducted and IRB review was not required, but we go beyond formal requirements: framing privacy exposure as a cost implicitly treats membership inference risk as a back-ground condition of the technological landscape rather than a harm that could in principle be eliminated. This is a nor-mative choice reflecting the constraints of existing deployed systems, not an endorsement of them. 
+
+Researcher Positionality. The authors come to this work from a computer science and machine learning background i.e. training in formal fairness metrics, differential privacy theory, and empirical evaluation, not firsthand experience of the harms encoded in these datasets or the communities most affected by criminal-justice risk scoring or income prediction. Grounding our criterion in Adams’ equity theory reflects a tradition within Western organizational psychology that may not resonate with community-centered or reparative conceptions of justice; likewise, operationalizing privacy cost via the overfitting gap and binary demographic groups reflects pragmatic constraints on scalable auditing, not claims about the basis of demographic categories or the sufficiency of group-level analysis. Researchers with different backgrounds or lived experience might have asked different questions, or contested this framing before building on it. 
+
+Adverse Impact. PCER is a diagnostic tool, and we have tried to be precise about what it does and does not measure, but it could be misused once it leaves our hands. A deployer could cite a favorable PCER reading at one floor constant while omitting the floor-sensitivity analysis revealing the find-ing as unstable. Hence, our robustness check is advisory, and nothing prevents selective reporting. There is also a subtler risk where privacy exposure can be framed as a cost that par-tially offsets outcome disparity. This could be appropriated to argue a group receiving fewer positive predictions is compen-sated by lower membership inference risk; in the paper, we reject that interpretation but cannot prevent it. Publishing a quantitative audit methodology also risks compliance theater, where a single score substitutes for structural accountability, as accuracy-parity metrics have historically deflected substan-tive demands. PCER should always be reported alongside the floor-sensitivity table, bootstrap CIs, and a plain-language account for affected communities; qualitative and regulatory review remain necessary. 
+
+# References 
+
+Abadi, M.; Chu, A.; Goodfellow, I.; McMahan, H. B.; Mironov, I.; Talwar, K.; and Zhang, L. 2016. Deep Learn-ing with Differential Privacy. In Proceedings of the 2016 ACM SIGSAC Conference on Computer and Communications Security (CCS) , 308–318. ACM. Adams, J. S. 1963. Towards an Understanding of Inequity. 
+
+Journal of Abnormal and Social Psychology , 67(5): 422–436. Angwin, J.; Larson, J.; Kirchner, L.; and Mattu, S. 2014. Machine Bias — propublica.org. https://www.propublica.org/article/machine-bias-risk-assessments-in-criminal-sentencing. [Accessed 22-05-2026]. Bagdasaryan, E.; Poursaeed, O.; and Shmatikov, V. 2019. Differential Privacy Has Disparate Impact on Model Accu-racy. In Advances in Neural Information Processing Systems (NeurIPS) , volume 32. Curran Associates. Becker, B.; and Kohavi, R. 1996. Adult. UCI Machine Learn-ing Repository. DOI: https://doi.org/10.24432/C5XW20. Binns, R. 2018. Fairness in Machine Learning: Lessons from Political Philosophy. In Proceedings of the 1st Conference on Fairness, Accountability and Transparency (FAT*) , 149–159. PMLR. Carlini, N.; Chien, S.; Nasr, M.; Song, S.; Terzis, A.; and Tramer, F. 2022. Membership Inference Attacks From First Principles. In 2022 IEEE Symposium on Security and Privacy (S&P) , 1897–1914. IEEE. Chang, H.; and Shokri, R. 2021. On the Privacy Risks of Algorithmic Fairness. In 2021 IEEE European Symposium on Security and Privacy (EuroS&P) , 292–303. IEEE. Cummings, R.; Gupta, V.; Kimpara, D.; and Morgenstern, J. 2019. On the Compatibility of Privacy and Fairness. In 
+
+Adjunct Publication of the 27th ACM Conference on User Modeling, Adaptation and Personalization , 309–315. ACM. De-Arteaga, M.; Romanov, A.; Wallach, H.; Chayes, J.; Borgs, C.; Chouldechova, A.; Geyik, S.; Kenthapadi, K.; and Kalai, A. T. 2019. Bias in Bios: A Case Study of Se-mantic Representation Bias in a High-Stakes Setting. In 
+
+Proceedings of the Conference on Fairness, Accountability and Transparency (FAT*) , 120–128. ACM. Ding, F.; Hardt, M.; Miller, J.; and Schmidt, L. 2021. Retiring Adult: New Datasets for Fair Machine Learning. In Advances in Neural Information Processing Systems (NeurIPS) , vol-ume 34. Curran Associates. Dwork, C.; Hardt, M.; Pitassi, T.; Reingold, O.; and Zemel, R. 2012. Fairness Through Awareness. In Proceedings of the 3rd Innovations in Theoretical Computer Science (ITCS) ,214–226. ACM. Dwork, C.; McSherry, F.; Nissim, K.; and Smith, A. 2006. Calibrating Noise to Sensitivity in Private Data Analysis. In 
+
+Proceedings of the 3rd Theory of Cryptography Conference (TCC) , 265–284. Springer. Hardt, M.; Price, E.; and Srebro, N. 2016. Equality of Op-portunity in Supervised Learning. In Advances in Neural Information Processing Systems (NeurIPS) , volume 29. Cur-ran Associates. Jagielski, M.; Kearns, M.; Mao, J.; Oprea, A.; Roth, A.; Sharifi-Malvajerdi, S.; and Ullman, J. 2019. Differentially Private Fair Learning. In Proceedings of the 36th Interna-tional Conference on Machine Learning (ICML) , 3000–3008. PMLR. Kulynych, B.; Yaghini, M.; Cherubin, G.; Veale, M.; and Troncoso, C. 2019. Disparate Vulnerability to Membership Inference Attacks. Proceedings on Privacy Enhancing Tech-nologies , 2022: 460 – 480. National Institute of Standards and Technology. 2025. Guide-lines for Evaluating Differential Privacy Guarantees. Techni-cal Report SP 800-226, NIST. Nussbaum, M. C. 2011. Creating Capabilities: The Human Development Approach . Cambridge, MA and London, Eng-land: Harvard University Press. Papernot, N.; Abadi, M.; Erlingsson, ´U.; Goodfellow, I. J.; and Talwar, K. 2016. Semi-supervised Knowledge Trans-fer for Deep Learning from Private Training Data. ArXiv ,abs/1610.05755. Romanov, A.; De-Arteaga, M.; Wallach, H.; Chayes, J.; Borgs, C.; Chouldechova, A.; Geyik, S.; Kenthapadi, K.; Rumshisky, A.; and Kalai, A. T. 2019. What’s in a Name? Re-ducing Bias in Bios Without Access to Protected Attributes. In Proceedings of the 2019 Conference of the North Ameri-can Chapter of the Association for Computational Linguistics (NAACL) , 4187–4195. ACL. Shokri, R.; Stronati, M.; Song, C.; and Shmatikov, V. 2017. Membership Inference Attacks Against Machine Learning Models. In 2017 IEEE Symposium on Security and Privacy (S&P) , 3–18. IEEE. Speicher, T.; Heidari, H.; Grgic-Hlaca, N.; Gummadi, K. P.; Singla, A.; Weller, A.; and Zafar, M. B. 2018. A Unified Approach to Quantifying Algorithmic Unfairness: Measuring Individual & Group Unfairness via Inequality Indices. In 
+
+Proceedings of the 24th ACM SIGKDD International Confer-ence on Knowledge Discovery and Data Mining , 2239–2248. ACM. Tran, C.; Fioretto, F.; and Van Hentenryck, P. 2021. Differ-entially Private and Fair Deep Learning: A Lagrangian Dual Approach. In Proceedings of the 35th AAAI Conference on Artificial Intelligence , 9932–9939. AAAI Press. Uniyal, A.; Naidu, R.; Kotti, S.; Singh, S.; Kenfack, P. J.; Mireshghallah, F.; and Trask, A. 2021. DP-SGD vs PATE: Which Has Less Disparate Impact on Model Accuracy? 
+
+ArXiv , abs/2106.12576. Yeom, S.; Giacomelli, I.; Fredrikson, M.; and Jha, S. 2018. Privacy Risk in Machine Learning: Analyzing the Connec-tion to Overfitting. In 2018 IEEE 31st Computer Security Foundations Symposium (CSF) , 268–282. IEEE. Yousefpour, A.; Shilov, I.; Sablayrolles, A.; Testuggine, D.; Prasad, K.; Malek, M.; Nguyen, J.; Ghosh, S.; Bharadwaj, A.; Zhao, J.; Cormode, G.; and Mironov, I. 2021. Opa-cus: User-Friendly Differential Privacy Library in PyTorch. arXiv:2109.12298. 
+
+Appendix 
+
+# 9 Additional Theoretical Results 
+
+This section gives the formal statements and proofs of two structural properties of PCER that are stated informally in the main paper (Section 3) but moved here to keep the main text focused on the results most load-bearing for the paper’s cen-tral claims (the Yeom bound, the floor-degeneracy theorem, and the PCER–DP-Gap incompatibility theorem). 
+
+Proposition S1 (Axiomatic Characterization of PCER) . Let 
+
+F : R>0 × R>0 → R>0 map (benefit, involuntary cost) to a group equity score. Then F (Rg , δ g ) = Rg /δ g is the unique 
+
+such mapping satisfying: (A1) Linearity in benefit: F (cR, δ ) = c · F (R, δ ) for all 
+
+c > 0.(A2) Inverse linearity in cost: F (R, cδ ) = F (R, δ )/c for all 
+
+c > 0.(A3) Normalization: F (1 , 1) = 1 .Proof. By (A1): F (R, δ ) = R · F (1 , δ ). By (A2) with c = δ:
+
+F (1 , δ ) = F (1 , 1) /δ . By (A3): F (1 , 1) = 1 , so F (1 , δ ) = 1/δ . Therefore F (R, δ ) = R/δ .
+
+Remark 7 (Interpretation of axioms) . (A1) says doubling prediction benefit doubles the equity score: the metric is pro-portional to benefit delivery. (A2) says doubling involuntary cost halves the score: privacy exposure is penalised linearly. Together, (A1)–(A2) rule out alternatives such as Rg − δg
+
+(lacks ratio structure) or Rg /δ 2 
+
+> g
+
+(super-linear cost penalty without normative justification from harm-compensation the-ory). (A3) is a scale convention. Any benefit-to-cost equity mapping satisfying all three axioms is identical to PCER, making the operationalization unique given the normative commitments. 
+
+Proposition S2 (PCER and DP-Gap can disagree in direc-tion) . Assume R0, R 1, δ 0, δ 1 > 0. Then sign(∆ PCER ) = sign(∆ DP -Gap ) if and only if R0 δ1 and R1 δ0 agree in rela-tive magnitude. The two metrics disagree on direction when 
+
+R0 > R 1 but R0 δ1 < R 1 δ0, i.e. the group with the higher outcome rate bears a proportionally higher memorization cost. Proof. ∆PCER > 0 ⇔ R0 δ1 > R 1 δ0 and ∆DP -Gap >
+
+0 ⇔ R0 > R 1. The two conditions disagree whenever 
+
+δ0̸ = δ1: fix R0 > R 1 (so DP-Gap’s sign is positive) and choose δ0, δ 1 with δ0/δ 1 > R 0/R 1; then R0 δ1 < R 1 δ0, so 
+
+∆PCER < 0, the opposite sign. When δ0 = δ1, the cross-product condition reduces exactly to R0 > R 1, so the two metrics necessarily agree in direction whenever both groups’ overfitting gaps are equal, in particular whenever both are floor-clamped (the Floor Degeneracy proposition, Proposi-tion 2). 
+
+# 10 Floor-Constant Sensitivity 
+
+Table S1 reveals a clear dichotomy. At ε = 0 .1 on COMPAS, both magnitude and direction are floor-sensitive: scaling η
+
+by 10 × scales |∆PCER | by approximately 10 × (as predicted by Proposition 2), and the fraction of positive-direction seeds changes from 22/50 to 14/50 to 2/50 as η increases from 10 −3
+
+to 10 −2 to 10 −1. At ε ≥ 1, the direction ( ∆PCER < 0 for Table S1: Floor-constant sensitivity: ∆PCER mean ± std for selected configurations, recomputed from raw per-seed data at η ∈ { 10 −4, 10 −3, 10 −2, 10 −1}. n+: seeds with ∆PCER >
+
+0 (n = 50 for all datasets). Bold rows ( η = 10 −3) are values reported in the main tables. Findings at ε = 0 .1 are floor-dominated (magnitude scales ∼ 1/η ; direction unstable); findings at ε ≥ 1 are robust. For Bios gender at ε ≥ 1,
+
+δg < η at η = 10 −2 (floor-dominated at that level), but direction is 50/50 seeds positive.                                                                                                                
+
+> Config η∆PCER n+
+> COMPAS, ε= 0 .110 −4−582 ±2290 22/50
+> 10 −3−64 ±220 22/50
+> 10 −2−8.9±17 .914/50
+> 10 −1−1.3±0.62/50 COMPAS, ε= 5 .010 −4−1562 ±2527 11/50
+> 10 −3−169 ±229 10/50
+> 10 −2−19 .9±11 .73/50
+> 10 −1−2.3±0.20/50 Adult race, ε= 0 .110 −4+562 ±1564 —
+> 10 −3+84 ±126 —
+> 10 −2+9 .9±8.2—
+> 10 −1+0 .9±0.8—Adult race, ε= 1 .010 −4+196 ±1036 —
+> 10 −3+58 ±87 —
+> 10 −2+9 .6±1.8—
+> 10 −1+0 .9±0.1—Bios gender, ε= 0 .110 −4+1117 ±3416 34/50
+> 10 −3+65 ±316 34/50
+> 10 −2+7 .0±11 .040/50
+> 10 −1+0 .71 ±0.55 45/50 Bios gender, ε= 1 .010 −4+1379 ±3120 45/50
+> 10 −3+236 ±289 45/50
+> 10 −2+49 .8±7.850/50
+> 10 −1+5 .14 ±0.08 50/50
+
+COMPAS, > 0 for Adult race) is stable across all η choices, confirming that PCER captures a genuine differential in group overfitting that is not an artifact of the floor constant. For Adult race, the ε = 1 .0 finding at η = 10 −2 (+9 .6 ± 1.8)is essentially the same as at no-DP ( +11 .0 ± 2.5); all DP budgets yield similar floor-robust PCER gaps at η = 10 −2,confirming the ranking reversal is floor-robust across the entire budget range. 
+
+# 11 Cross-Dataset Summary 
+
+Table S2 summarises the floor-robust findings across all six dataset-attribute combinations. The most substantive diver-gence is on Adult (race): DP-Gap identifies ε ∈ { 5, 10 } as most equitable while PCER identifies no-DP, a robust ranking reversal with all five ε settings yielding CIs that exclude zero, and confirmed floor-robust at η = 10 −2 (+9 .6 ± 1.8 at ε = 1 ,
+
++11 .0 ± 2.5 at no-DP). On Adult (sex), both metrics agree in direction; PCER is significantly positive at every ε with CIs excluding zero (e.g. [+33 , +90] at no-DP, [+124 , +194] 
+
+at ε = 0 .1), and floor-robust at η = 10 −2 (+18 .2 to +18 .8
+
+across all ε, remarkably stable). On COMPAS at ε ≥ 1,PCER is stably negative with CI excluding zero at all three 
+
+ε settings ( [−219 , −90] to [−234 , −109] ), the most statisti-cally robust finding in the study. ACS yields no robust PCER finding at η = 10 −3.The Bias in Bios (gender) dataset provides NLP-domain replication of the Adult (sex) pattern. PCER is positive and tightly CI-robust at no-DP ( +22 .2, CI [+21 .3, +23 .2] , the tightest interval in the study), and positive with CI excluding zero at ε ≥ 1 (+209 to +236 ). The direction is preserved under all floor choices at ε ≥ 1 (50/50 seeds positive at 
+
+η = 10 −2), confirming the positive sign is genuine even though δg falls below η = 10 −2 at moderate budgets. The ranking reversal mirrors Adult (sex) and Adult (race): DP-Gap nominally prefers ε = 0 .1 (gap= 0.079 , floor-dominated), while PCER identifies no-DP as most equitable. The ε = 0 .1 regime requires a separate reading: strong DP noise drives both groups’ overfitting gaps toward zero, plac-ing PCER in the floor-dominated regime. What DP-Gap re-ports as “improved fairness” at ε = 0 .1 is noise-compression of outcome rates, while PCER at that budget simply mirrors DP-Gap divided by the floor constant. The genuine diagnostic value of PCER lies in the ε ∈ { 1, 5, 10 } range. 
+
+# 12 Adult Income Results 
+
+The UCI Adult Income dataset ( n = 46 ,033 after pre-processing) predicts income > $50 K/year from census at-tributes (Becker and Kohavi 1996). We evaluate two protected attributes: sex (Male=0, Female=1) and race (White=0, Non-White=1). Results are computed over 50 independent seeds; 95% bootstrap CIs use 5,000 resamples. 
+
+12.1 Adult Income: Sex 
+
+Positive-rate structure. Males are predicted to earn >
+
+$50 K at a rate of approximately 25 –26% ; females at 5–7% .The resulting DP-Gap ( ≈ 0.184 at no-DP) is large and stable across all ε settings. Per-group overfitting gaps are small and nearly equal ( δM ≈ δF ≈ 0.004 –0.005 at no-DP), so PCER amplifies the positive-rate gap rather than correcting for a differential privacy cost. 
+
+Robust positive PCER at all ε. ∆PCER is significantly positive across every budget setting, with 95% CIs exclud-ing zero throughout. At no-DP, ∆PCER = +61 ± 105 , CI 
+
+[+33 , +90] . Under DP-SGD, PCER rises, not because males gain more benefit, but because both groups’ overfitting gaps shrink toward the floor, amplifying the existing positive-rate disparity. At η = 10 −2, the floor dominates entirely and 
+
+∆PCER is flat at +18 –+19 across all ε, with 50/50 seeds positive at every setting. 
+
+No ranking reversal. DP-Gap is smallest at ε = 0.5
+
+(0.180 ); PCER is also smallest at no-DP before amplifica-tion by floor collapse. Both metrics agree that males enjoy a meaningfully larger share of positive predictions relative to their privacy exposure. PCER provides no qualitatively different signal from DP-Gap on this attribute: the sex-based disparity in Adult Income is driven by outcome rates, not differential overfitting. Table S2: Cross-dataset divergence summary. “Best ε” rows show which ε minimises each metric (most fair). The Floor-robust column indicates whether the finding survives η = 10 −2.                                                                      
+
+> Dataset Attr. Best ε(DP-Gap) Best ε(PCER) Floor-robust Adult sex no-DP no-DP Yes (all ε)Adult race ε∈ { 5,10 }no-DP Yes (all ε)COMPAS race ε= 0 .1N/A †Yes ( ε≥1)ACS race ε= 0 .1N/A ‡Tentative ( ε≥1)ACS sex ε= 0 .1N/A No (all floor) Bios gender ε= 0 .1no-DP §Yes (no-DP); direction-only ( ε≥1)
+> †PCER negative at all ε≥1(CI excludes zero); ε= 0 .1floor-dominated (std ≫mean).
+> ‡PCER direction positive at η= 10 −2but no εestimate excludes zero at η= 10 −3.
+> §PCER positive at ε≥1(CI excludes zero) but ovfit < η at η= 10 −2; direction 50/50 seeds positive.
+
+Table S3: Adult Income, sex attribute (Male=0, Female=1). Mean ± std over 50 independent runs (seeds 0–49). δg : per-group overfitting gap; ∆PCER : PCER disparity (95% bootstrap CI in brackets). Positive prediction = income >$50K ( beneficial ). 
+
+∆PCER > 0 means males enjoy higher benefit-to-cost ratio. Bold : minimum DP-Gap.                                                 
+
+> εAcc DP-Gap EO-Gap δMδF∆PCER
+> no-DP .829 ±.003 .184 ±.030 .136 ±.056 .0048 ±.0039 .0043 ±.0047 +61 ±105 [+33 ,+90]
+> 0.1 .751 ±.021 .187 ±.075 .253 ±.143 .0016 ±.0027 .0030 ±.0045 +159 ±133 [+124 ,+194]
+> 0.5 .822 ±.003 .180 ±.015 .222 ±.046 .0022 ±.0029 .0030 ±.0040 +121 ±93 [+96 ,+148]
+> 1.0 .825 ±.002 .185 ±.014 .216 ±.037 .0022 ±.0029 .0030 ±.0040 +125 ±90 [+100 ,+149]
+> 5.0 .826 ±.002 .188 ±.012 .209 ±.033 .0021 ±.0028 .0030 ±.0037 +130 ±88 [+105 ,+154]
+> 10.0 .826 ±.002 .188 ±.011 .209 ±.033 .0022 ±.0028 .0029 ±.0036 +128 ±90 [+104 ,+153]
+
+12.2 Adult Income: Race 
+
+Ranking reversal: PCER vs. DP-Gap. DP-Gap identifies 
+
+ε ∈ { 5, 10 } as the most equitable budget (minimum gap 
+
+0.091 ), with no-DP as the least equitable ( 0.104 ). PCER reverses this ranking: ∆PCER is smallest at no-DP ( +30 , CI 
+
+[+8 , +53] ) and larger at every DP budget ( +56 –+84 , CIs 
+
+[+33 , +80] –[+49 , +118] ). The explanation is asymmetric overfitting: at no-DP, Non-Whites have a meaningfully larger overfitting gap than Whites ( δNW ≈ .006 vs. δW ≈ .005 ), reducing the relative privacy cost ratio. Under DP-SGD both gaps shrink and converge ( ≈ .002 –.004 ), but the Non-White gap falls proportionally more , reducing δNW in the PCER denominator and enlarging ∆PCER .
+
+Floor-robust reversal. Table S1 confirms the reversal is not a floor artifact. At η = 10 −2, no-DP yields ∆PCER =+11 .0 ± 2.5 (largest, 50/50 seeds positive) while ε ≥ 0.5
+
+yields +9 .5–+9 .6 (50/50 seeds positive). The reversal sur-vives floor variation because the underlying asymmetry in overfitting gaps persists: DP-SGD compresses both gaps but does not eliminate the White-advantaged positive-rate struc-ture relative to privacy cost. 
+
+Floor-dominated regime at ε = 0 .1. At ε = 0 .1 the overfitting gaps collapse toward zero, and ∆PCER at η =10 −2 is +9 .9 ± 8.2 (42/50 seeds positive), less stable than at other budgets. Direction is still positive but the elevated std reflects partial floor domination. 
+
+All CIs exclude zero. At ε ≥ 0.5, all 95% bootstrap CIs ex-clude zero, confirming that Whites consistently enjoy a larger benefit-to-cost ratio than Non-Whites across all moderate DP budgets. The PCER signal is weaker (and its ranking inter-pretation opposite) relative to DP-Gap: auditors optimising for DP-Gap equity would choose ε ∈ { 5, 10 }, while auditors optimising for PCER equity would choose no-DP. 
+
+# 13 Direct Threshold-MIA Attack: Full Results 
+
+Section 5.5 (“Validation Against Direct Threshold-MIA Attacks”) summarises a per-group threshold membership-inference attack run on every trained model from the main sweep (protocol described in Section 4), comparing PCER computed with the overfitting-gap proxy ( ∆δ
+
+> PCER
+
+) against PCER computed with the direct attack’s AUC-based advan-tage in the denominator ( ∆MIA PCER = R0/ max(AUC 0 −
+
+0.5, η ) − R1/ max(AUC 1 − 0.5, η ), same η = 10 −3). Table S5 gives the complete breakdown across all six benchmark-attribute combinations and six DP budgets (36 configurations, mean over 50 seeds each). Across all 36 configurations, ∆δ 
+
+> PCER
+
+and ∆MIA PCER corre-late at Pearson r = 0 .935 (p < 10 −16 ) and agree in sign in 32/36 (88.9%) configurations; pooling per-group obser-vations (72 group-level points), δg correlates with the direct attack’s advantage AUC g − 0.5 at r = 0 .828 (p < 10 −18 ). All four sign disagreements (bold rows) occur on ACS, the dataset Section 5.3 already identifies as noise-dominated un-der the overfitting-gap proxy alone (all bootstrap CIs cross zero). We do not treat this table as establishing that δg tightly approximates realised attack success. Remark 2 (Conserva-tive lower bound on true PCER) already predicts, and this table confirms, that the proxy generally understates the dis-Table S4: Adult Income, race attribute (White=0, Non-White=1). Mean ± std over 50 independent runs (seeds 0–49). δg : per-group overfitting gap; ∆PCER : PCER disparity (95% bootstrap CI in brackets). Positive prediction = income >$50K ( beneficial ). 
+
+∆PCER > 0 means Whites enjoy higher benefit-to-cost ratio. Bold : minimum DP-Gap. Key finding: PCER ranks no-DP as most equitable ( +30 , CI [+8 , +53] ) while DP-Gap identifies ε ∈ { 5, 10 }, a floor-robust ranking reversal. 
+
+ε Acc DP-Gap EO-Gap δW δNW ∆PCER 
+
+no-DP .829 ±.003 .104 ±.019 .113 ±.041 .0045 ±.0033 .0062 ±.0065 +30 ±79 [+8 , +53] 
+
+0.1 .751 ±.021 .106 ±.063 .189 ±.118 .0016 ±.0021 .0038 ±.0057 +84 ±126 [+49 , +118] 
+
+0.5 .822 ±.003 .092 ±.018 .118 ±.057 .0022 ±.0025 .0035 ±.0050 +61 ±80 [+39 , +83] 
+
+1.0 .825 ±.002 .092 ±.013 .101 ±.038 .0023 ±.0027 .0032 ±.0053 +58 ±87 [+33 , +82] 
+
+5.0 .826 ±.002 .091 ±.009 .089 ±.030 .0023 ±.0026 .0036 ±.0055 +56 ±86 [+33 , +80] 
+
+10.0 .826 ±.002 .091 ±.009 .088 ±.030 .0024 ±.0026 .0037 ±.0056 +56 ±88 [+31 , +80] 
+
+Table S5: Overfitting-gap PCER vs. direct threshold-MIA PCER, full sweep (1/2: Adult and COMPAS). AUC g0/AUC g1: mean per-group threshold-attack ROC-AUC ( 0.5=chance). 
+
+Dataset ε δg0 δg1 AUC g0 AUC g1 ∆δ 
+
+> PCER
+
+∆MIA PCER Agree Adult (race) no-DP 0.0045 0.0062 0.502 0.501 +30 .3 +65 .0 Yes Adult (race) 0.1 0.0016 0.0038 0.500 0.500 +84 .0 +98 .5 Yes Adult (race) 0.5 0.0022 0.0035 0.500 0.500 +60 .8 +87 .5 Yes Adult (race) 1.0 0.0023 0.0032 0.501 0.500 +57 .5 +84 .6 Yes Adult (race) 5.0 0.0023 0.0036 0.501 0.500 +56 .3 +78 .7 Yes Adult (race) 10.0 0.0024 0.0037 0.501 0.500 +55 .9 +78 .6 Yes Adult (sex) no-DP 0.0048 0.0043 0.502 0.502 +61 .1 +111 .9 Yes Adult (sex) 0.1 0.0016 0.0030 0.500 0.501 +159 .3 +172 .0 Yes Adult (sex) 0.5 0.0022 0.0030 0.500 0.501 +121 .4 +149 .6 Yes Adult (sex) 1.0 0.0022 0.0030 0.500 0.501 +124 .7 +156 .5 Yes Adult (sex) 5.0 0.0021 0.0030 0.500 0.501 +130 .1 +159 .8 Yes Adult (sex) 10.0 0.0022 0.0029 0.500 0.501 +128 .3 +159 .4 Yes COMPAS (race) no-DP 0.0074 0.0099 0.501 0.504 −68 .2 −110 .5 Yes COMPAS (race) 0.1 0.0109 0.0127 0.503 0.504 −64 .0 −39 .1 Yes COMPAS (race) 0.5 0.0063 0.0060 0.499 0.501 −182 .1 −160 .9 Yes COMPAS (race) 1.0 0.0058 0.0068 0.499 0.501 −155 .0 −160 .5 Yes COMPAS (race) 5.0 0.0065 0.0065 0.499 0.501 −168 .9 −160 .0 Yes COMPAS (race) 10.0 0.0063 0.0061 0.499 0.501 −172 .3 −161 .6 Yes 
+
+parity a direct attack would report ( |∆MIA PCER | ≥ | ∆δ
+
+> PCER
+
+|
+
+in 69% of rows, median ratio 1.25 ); it only shows that it is directionally reliable everywhere our sensitivity analysis (Table S1, Table S2) independently flags as robust. Table S6: Overfitting-gap PCER vs. direct threshold-MIA PCER, full sweep (2/2: ACS and Bios in Bios). Bold rows mark the four sign disagreements, all on ACS. 
+
+Dataset ε δg0 δg1 AUC g0 AUC g1 ∆δ 
+
+> PCER
+
+∆MIA PCER Agree ACS (race) no-DP 0.0065 0.0056 0.504 0.502 −13 .2 −23 .5 Yes ACS (race) 0.1 0.0040 0.0038 0.501 0.500 +11 .6 +15 .6 Yes 
+
+ACS (race) 0.5 0.0032 0.0035 0.502 0.500 +13 .9 −9.6 No ACS (race) 1.0 0.0037 0.0033 0.502 0.501 −13 .5 +2.0 No 
+
+ACS (race) 5.0 0.0037 0.0034 0.502 0.501 +3 .3 +7 .8 Yes 
+
+ACS (race) 10.0 0.0037 0.0034 0.502 0.501 −6.9 +6.9 No ACS (sex) no-DP 0.0064 0.0054 0.504 0.502 +14 .7 −13 .0 No 
+
+ACS (sex) 0.1 0.0039 0.0034 0.501 0.500 +2 .2 +14 .2 Yes ACS (sex) 0.5 0.0035 0.0030 0.502 0.500 +33 .1 +27 .1 Yes ACS (sex) 1.0 0.0035 0.0034 0.502 0.500 +30 .0 +18 .0 Yes ACS (sex) 5.0 0.0036 0.0030 0.502 0.501 +4 .5 +24 .4 Yes ACS (sex) 10.0 0.0037 0.0031 0.502 0.501 +12 .7 +25 .6 Yes Bios (gender) no-DP 0.0292 0.0446 0.506 0.512 +22 .2 +283 .0 Yes Bios (gender) 0.1 0.0038 0.0035 0.500 0.501 +65 .3 +40 .6 Yes Bios (gender) 0.5 0.0036 0.0054 0.500 0.503 +349 .2 +408 .1 Yes Bios (gender) 1.0 0.0051 0.0065 0.501 0.503 +235 .8 +346 .1 Yes Bios (gender) 5.0 0.0053 0.0075 0.501 0.503 +219 .2 +369 .9 Yes Bios (gender) 10.0 0.0053 0.0077 0.501 0.503 +209 .1 +367 .2 Yes

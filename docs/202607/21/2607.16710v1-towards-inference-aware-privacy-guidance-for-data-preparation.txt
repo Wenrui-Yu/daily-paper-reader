@@ -1,0 +1,336 @@
+Title: Towards Inference-Aware Privacy Guidance for Data Preparation
+
+URL Source: https://arxiv.org/pdf/2607.16710v1
+
+Published Time: Tue, 21 Jul 2026 00:30:36 GMT
+
+Number of Pages: 6
+
+Markdown Content:
+# Towards Inference-Aware Privacy Guidance for Data Preparation 
+
+# Vishal Chakraborty 
+
+University of California, Irvine USA vchakrab@uci.edu 
+
+# Felix Naumann 
+
+Hasso Plattner Institute, University of Potsdam Germany felix.naumann@hpi.de 
+
+## ABSTRACT 
+
+Data preparation often begins with sensitive data and produces a releasable artifact for analysis, sharing, or model training. Existing workflows are primarily guided by utility: a curator drops attributes, coarsens values, filters populations, and suppresses tuples until the resulting dataset appears useful and safe. Privacy, when considered, is usually evaluated only on the final release. We propose privacy-aware data preparation as an interactive guidance problem. We model a preparation plan as a sequence of deterministic curation operators and ask how each step changes the evidence available to an observer with prior knowledge about a target. Our semantics is based on compatibility sets, which capture the source tuples still plausible for the target after a released repre-sentation is observed. This view separates operators that remove evidence from those that remove ambiguity, explains why privacy effects can be non-monotone, and supports prefix-level feedback under a disclosure budget. The result is an inference-aware foun-dation for guiding curators throughout data preparation, rather than judging privacy only after the final artifact is produced. We conclude by identifying the key challenges in building interactive, inference-aware data preparation systems. 
+
+VLDB Workshop Reference Format: 
+
+Vishal Chakraborty and Felix Naumann. Towards Inference-Aware Privacy Guidance for Data Preparation. VLDB 2026 Workshop: 15th International Workshop on Quality in Databases (QDB’26). 
+
+## 1 INTRODUCTION 
+
+Data preparation/curation has become a fundamental database workflow: transforming a "raw" dataset, often containing private or sensitive information, into a releasable artifact for analysis, shar-ing, model training, or public use [ 4 , 14 , 19 ]. This transformation is rarely a single operation. A curator drops attributes, coarsens values, selects populations, suppresses tuples, and repeats these choices until the release appears useful and safe. This operator view is central to interactive data preparation systems such as Potter’s Wheel and Wrangler [ 9, 18 ], to data-transformation-by-example systems [ 8], and to recent pipeline search and preparation frame-works [ 4 , 14 , 24 ]. In these settings, curation choices are primarily guided by utility: which attributes are needed, which values should be generalized, and which records should remain in scope. Privacy, when considered, is usually evaluated on the resulting release rather than on the sequence of operators that produced it. 
+
+> This work is licensed under the Creative Commons BY-NC-ND 4.0 International License. Visit https://creativecommons.org/licenses/by-nc-nd/4.0/ to view a copy of this license. For any use beyond those covered by this license, obtain permission by emailing info@vldb.org. Copyright is held by the owner/author(s). Publication rights licensed to the VLDB Endowment. Proceedings of the VLDB Endowment. ISSN 2150-8097.
+
+The same operators that shape utility also determine what ev-idence remains in the released artifact and how that evidence changes across curation steps. Dropping a sensitive column may not remove evidence for the sensitive fact, because retained attributes may still make the fact predictable. This concern is central to sta-tistical disclosure control and anonymization, where releases may remain identifying or revealing even after explicit identifiers are removed [ 21 , 23 ]. Refinements such as ℓ-diversity and 𝑡 -closeness address the fact that indistinguishability alone may still leave sen-sitive values predictable within an equivalence class [ 13 , 15 ]. More general privacy models and de-anonymization attacks show that auxiliary information and correlations can make a release revealing even when the sensitive attribute is absent [ 11 , 17 ]. Conversely, deleting a tuple may make a release more revealing by removing the record that made the target ambiguous. Thus privacy is not only a constraint to check after a useful release is found. A utility-driven search may miss another feasible plan that is both more useful and less revealing, because disclosure depends on operator-induced comparison classes, correlations, and ambiguity. 
+
+Example 1.1 (Running example). Consider the curation steps in Fig. 1(a)–(d). A curator preparing the data for a treatment-pattern study begins with the source relation 𝑅 in Fig. 1a, first drops Diag ,bucketizes Age , and, finally, shortens ZIP , producing 𝑅 1 (Fig. 1b). The release appears privacy-conscious because the diagnosis col-umn is absent. Yet an observer who knows that the target is a woman in her thirties in ZIP prefix 926 sees that the matching released records contain two tuples with Med =ART and one with 
+
+Med =None . If ART is strongly associated with HIV , then 𝑅 1 still supports the sensitive inference. Now consider two single-operator refinements. In 𝑅 2 (Fig. 1c), the curator also drops Med . This removes the visible indicator and restores the target to the larger prior group. In 𝑅 3 (Fig. 1d), the curator instead keeps Med but deletes 𝑡 3, the only matching tuple with Med =None . This makes the release smaller, but not necessarily safer: it removes ambiguity and leaves only ART records in the target’s visible profile. Thus two ordinary curation operators that look comparable from a data preparation perspective can have different privacy effects. Example 1.1 illustrates the central difficulty. Privacy under cu-ration is not determined only by which sensitive attributes are removed from the final release. It depends on how each operator changes the observer’s evidence. Projection may remove evidence. Generalization may weaken evidence. Selection and tuple deletion may either reduce or increase disclosure, depending on which tuples they remove and how those tuples affected ambiguity. A final-only privacy check cannot explain which operator caused the change, in what direction, or by how much. arXiv:2607.16710v1 [cs.DB] 18 Jul 2026 pid Age Sex ZIP Med Diagnosis                     
+
+> 𝑡 134 F92612 ART HIV
+> 𝑡 236 F92617 ART HIV
+> 𝑡 335 F92612 None Flu
+> 𝑡 461 M90024 Ins. Diab.
+
+(a) Source 𝑅 .               
+
+> Bkt Sex ZIP3 Med
+> 30–39 F926 ART
+> 30–39 F926 ART
+> 30–39 F926 None
+> 60–69 M900 Ins.
+
+(b) 𝑅 1: drop Diag .          
+
+> Bkt Sex ZIP3
+> 30–39 F926 30–39 F926 30–39 F926 60–69 M900
+
+(c) 𝑅 2: drop Med .            
+
+> Bkt Sex ZIP3 Med
+> 30–39 F926 ART
+> 30–39 F926 ART
+> 60–69 M900 Ins.
+
+(d) 𝑅 3: delete 𝑡 3.                                                              
+
+> Source relation and three prepared releases.
+> target 𝑡 1
+> secret 𝑠 HIV
+> prior profile 𝑄
+> (30 –39 , 𝐹, 926 )
+> 𝑅 𝑄 (𝑡 1)={𝑡 1, 𝑡 2, 𝑡 3}
+> rate =2/3
+> Common input Release →compatibility →disclosure
+> 𝑅 1
+> keep Med
+> 𝑅 2
+> drop Med
+> 𝑅 3
+> delete 𝑡 3
+> computed relative to 𝑅 𝑄 (𝑡 1)={𝑡 1, 𝑡 2, 𝑡 3}
+> 𝐶 1(𝑡 1)={𝑡 1, 𝑡 2}
+> 𝜌 𝑠 (𝐶 1)=1
+> 𝜖 1=log (3/2)
+> 𝐶 2(𝑡 1)={𝑡 1, 𝑡 2, 𝑡 3}
+> 𝜌 𝑠 (𝐶 2)=2/3
+> 𝜖 2=0
+> adds ambiguity
+> 𝐶 3(𝑡 1)={𝑡 1, 𝑡 2}
+> 𝜌 𝑠 (𝐶 3)=1
+> 𝜖 3=log (3/2)
+> removes ambiguity
+> 𝑅 2expands the comparison class, so disclosure returns to the prior.
+> 𝑅 3deletes the only non-ART tuple, so disclosure stays as in 𝑅 1.
+
+(e) Model interpretation for target 𝑡 1 and secret 𝑠 HIV .
+
+Figure 1: Running example. (a)–(d)Curation steps. (e) The prior profile identifies the comparison group 𝑅 𝑄 (𝑡 1); each release induces a compatibility set 𝐶 𝑖 (𝑡 1); disclosure compares the secret rate in 𝐶 𝑖 (𝑡 1) against the prior rate in 𝑅 𝑄 (𝑡 1). Gray denotes representation change, crimson tuple deletion, and green the privacy-improving outcome. 
+
+We adopt an operator-level view of privacy-aware data curation. Rather than asking only whether the final release satisfies a privacy test, we ask how each curation step changes the observer’s evidence about protected secrets. We model a curation plan as a sequence of deterministic operators over a source relation. The adversary observes the released data and has prior knowledge about a tar-get, such as a visible demographic profile. This is close in spirit to privacy definitions that reason about belief change under side infor-mation [ 5, 7, 10 , 11 ], but our mechanisms are ordinary deterministic curation operators rather than randomized query mechanisms. Our semantics uses compatibility sets: for a target tuple, the com-patibility set contains the source tuples that remain plausible after the adversary combines prior knowledge with the released repre-sentation. While alternative privacy semantics might be suitable, the compatibility sets expose the operator-level phenomenon. Col-umn and value operators change how source tuples appear in the release. Row operators change which tuples remain present. These effects are not interchangeable. In Example 1.1, dropping Med ex-pands the target’s compatible set and weakens the evidence for 
+
+HIV ; deleting 𝑡 3 removes contrary evidence and strengthens, or at least preserves, the inference. The usual vocabulary of “removing information” is therefore too coarse: what matters is whether an operator removes evidence, removes ambiguity, or changes the representation through which the target is compared to the source. Existing work does not directly address this setting. Data prepa-ration systems formalize, synthesize, and explain transformation sequences, but do not attach privacy semantics to individual prepa-ration operators [ 4, 8, 9, 14 , 18 , 22 , 24 ]. Statistical disclosure control and Bayesian privacy give semantics to released tables, but typ-ically evaluate the release as a single object rather than as the result of a step-indexed construction process [ 11 , 13 , 15 , 21 , 23 ]. Differential privacy provides powerful composition and account-ing principles, including systems for private data analysis [ 1 , 5–7, 16 , 20 , 25 ]. These frameworks, however, account for randomized mechanisms, whereas many curation pipelines are deterministic. PrivateClean brings differential privacy to data cleaning, but still treats privacy through randomized DP mechanisms rather than through the operator-specific evidential effects of deterministic curation steps [ 12 ]. What is missing is a framework that treats de-terministic curation operators themselves as privacy-relevant trans-formations. Our work is also related to inference-aware deletion, where the goal is to remove a value while limiting what remains inferable from dependencies in the retained database [ 2, 3 ]. In dele-tion, the request specifies a target value to remove. In curation, the analyst constructs a release through heterogeneous operators, and the privacy question is how those operators alter the evidence available to an observer during and after plan construction. We study privacy-aware curation as an interactive guidance prob-lem. Given a source relation, deterministic curation operators, pro-tected secrets, and an adversary with prior knowledge about a target, how can a curator construct a useful release while keeping evidential disclosure below a budget? The challenge is that disclo-sure is a property of plan prefixes, not only endpoints. A release that appears safe at the end may be reached through revealing inter-mediate states. A plan that was safe when committed may become unsafe when the source data evolves. And a curator choosing one operator at a time needs feedback before committing to an operator, not only after the release is complete. This paper makes three contributions. 
+
+• We define a curation and privacy framework in which for-mulate privacy-aware data curation as an operator-level inference problem (Sec. 2). 
+
+> 2
+
+• We characterize the disclosure effects of common curation operators and show how they support local guidance under a disclosure budget (Sec. 3) 
+
+• We outline research questions for interactive privacy-aware curation, including per-operator semantics, prefix-level ac-counting, budgeted guidance, re-execution under drift, and richer disclosure models (Sec. 4). 
+
+## 2 CURATION PLANS AND DISCLOSURE SEMANTICS 
+
+A curation workflow transforms a source relation into a release by applying ordinary preparation operators. Let 𝑅 be the source relation and let 𝑝 = 𝑜 ℓ ◦ · · · ◦ 𝑜 1 be a curation plan. Each 𝑜 𝑖 is a deterministic operator, such as projecting attributes, generalizing values, selecting a population, or deleting tuples. The prefix 𝑝 𝑖 =
+
+𝑜 𝑖 ◦ · · · ◦ 𝑜 1 produces the intermediate release 𝑅 𝑖 = 𝑝 𝑖 (𝑅 ), with 
+
+𝑅 0 = 𝑅 .The prefix view is essential. A curator constructs the release one operator at a time, and each prefix may be inspected, committed, shared, cached, or reused as part of a later pipeline. The privacy question is therefore not only what the final release reveals. It is also how much inferential support each prefix leaves for protected facts. 
+
+Observation and reasoning. A privacy-aware curation framework has three components. The curation component describes how a prefix 𝑝 𝑖 transforms 𝑅 into 𝑅 𝑖 . The observation component describes what the adversary sees. In the default regime, the adversary ob-serves the released relation 𝑅 𝑖 and has prior knowledge about a target, but does not observe the internal operator sequence. In a plan-aware regime, the adversary also observes a description of the curation process, such as a transformation script, exclusion criteria, metadata, or intermediate artifacts. This regime matters when plans are published for reproducibility, audit, or regulatory transparency. The reasoning component maps the adversary’s observation to disclosure about protected facts. In this paper, we instantiate this component using compatibility sets. This is a vehicle for making the operator-level problem concrete, not the only possible semantics. A dependency-explicit semantics could reason under a declared model Σ of dependencies or probabilistic rules; a Bayesian semantics could use richer priors; and a multi-release semantics could account for evidence accumulated across correlated outputs. The common requirement is that the semantics explain how each curation step changes the evidence available to the observer. 
+
+Secrets and prior visibility. A protected secret is a Boolean pred-icate over source tuples. For a tuple 𝑡 , 𝑠 (𝑡 ) = 1 means that the protected fact holds for 𝑡 . In Example 1.1, the secret 
+
+𝑠 HIV (𝑡 ) = 1 ⇐⇒ 𝑡 [Diagnosis ] = HIV 
+
+captures whether the target has diagnosis HIV . Other secrets may describe membership in a cohort, the presence of a treatment class, or any application-specific property of a tuple. The observer also has prior information about the target. We model this by a set 𝑄 of visible attributes. The observer knows 𝑡 [𝑄 ]
+
+before seeing the release. The corresponding prior group is 
+
+𝑅 𝑄 (𝑡 ) = {𝑢 ∈ 𝑅 : 𝑢 [𝑄 ] = 𝑡 [𝑄 ]} .
+
+For E.x. 1.1, take 𝑄 = {Bkt , Sex , ZIP3 }. For target 𝑡 1, the prior group consists of 𝑡 1, 𝑡 2, 𝑡 3: the women in their thirties in ZIP prefix 926. 
+
+Released representations. A curation prefix changes how a source tuple appears in the release. We write 𝜋 𝑖 (𝑢 ) for the representation of source tuple 𝑢 after prefix 𝑝 𝑖 . Projection removes fields from this representation. Generalization replaces values by coarser values. Row operators do not change the representation itself; they change whether the tuple is present in the released relation. Let 𝑆 𝑖 ⊆ 𝑅 be the source tuples that survive in 𝑅 𝑖 . The release can then be viewed as the multiset 
+
+{𝜋 𝑖 (𝑢 ) : 𝑢 ∈ 𝑆 𝑖 }.
+
+This separates two effects that are often conflated: representation-changing operators modify 𝜋 𝑖 , while presence-changing operators modify 𝑆 𝑖 .
+
+Compatibility-set instantiation. Under the compatibility-set se-mantics, the adversary compares the target with source tuples that agree with the prior profile and have the same released representa-tion. The compatibility set after prefix 𝑝 𝑖 is 
+
+𝐶 𝑖 (𝑡 ) = {𝑢 ∈ 𝑆 𝑖 : 𝑢 [𝑄 ] = 𝑡 [𝑄 ] and 𝜋 𝑖 (𝑢 ) = 𝜋 𝑖 (𝑡 )} .
+
+This is the set of source tuples still plausible as the target under the observer’s prior information and the visible release. Fig. 1 gives the intuition. The top panel shows the source and the three releases from Example 1.1; the bottom panel shows how the compatibility-set semantics reads the same releases for target 𝑡 1.Keeping Med visible in 𝑅 1 compares the target only with the two ART tuples. Dropping Med in 𝑅 2 restores the larger comparison group and adds ambiguity. Deleting 𝑡 3 in 𝑅 3 does the opposite: it removes the only non-ART tuple in the target profile, so the release is smaller but not less revealing for this target. 
+
+Evidential disclosure. The compatibility set induces an empirical belief update. For 𝑋 ⊆ 𝑅 , define 
+
+𝜌 𝑠 (𝑋 ) = |𝑋 ∩ 𝑠 −1 (1)| |𝑋 | .
+
+The prior support for the secret is 𝜌 𝑠 (𝑅 𝑄 (𝑡 )) . The support after observing prefix 𝑝 𝑖 is 𝜌 𝑠 (𝐶 𝑖 (𝑡 )) . We define evidential disclosure as 
+
+𝜖 𝑖 (𝑠, 𝑡 ) = log 𝜌 𝑠 (𝐶 𝑖 (𝑡 )) 
+
+𝜌 𝑠 (𝑅 𝑄 (𝑡 )) .
+
+A positive value means that the prefix increases support for the secret relative to the prior profile. A value of zero means that the release adds no support beyond the prior. A negative value means that the release weakens support for the secret. In the running example, the prior group for 𝑡 1 has HIV rate 2/3.Release 𝑅 1 raises the compatible secret rate to 1, so 𝜖 1 (𝑠 HIV , 𝑡 1) =
+
+log (3/2). Release 𝑅 2 returns the comparison class to the prior group, so disclosure returns to 0. Release 𝑅 3 again leaves only the ART tuples compatible with 𝑡 1, so disclosure remains the same as under 
+
+𝑅 1. The key point is not the arithmetic itself, but the direction of evidence: 𝑅 2 adds ambiguity, while 𝑅 3 removes it. 
+
+Dependencies as evidence. The compatibility-set instantiation does not require the curator to declare a dependency set. Depen-dencies enter through the secret rate inside the target’s compari-son class. If Med =ART is strongly associated with Diagnosis =HIV ,
+
+> 3
+
+then a release that leaves the target compatible only with ART records increases support for the HIV secret. Thus, the basic model treats dependencies as evidential regularities in the source rela-tion. A dependency-explicit version can replace the empirical rate 
+
+𝜌 𝑠 (𝐶 𝑖 (𝑡 )) by inference under a declared semantics model Σ.
+
+Plan-level disclosure. The marginal effect of operator 𝑜 𝑖 is 
+
+𝛿 𝑖 (𝑠, 𝑡 ) = 𝜖 𝑖 (𝑠, 𝑡 ) − 𝜖 𝑖 −1 (𝑠, 𝑡 ).
+
+This quantity tells us whether the next curation step removed evi-dence, added evidence, or left the inferential support unchanged. 
+
+Problem definition. A release is evaluated over a set S of pro-tected secrets and a set 𝑇 of target tuples. We write 
+
+𝛼 𝑖 = max    
+
+> 𝑠 ∈ S , 𝑡 ∈𝑇
+
+𝜖 𝑖 (𝑠, 𝑡 )
+
+for the disclosure of prefix 𝑝 𝑖 . A curation plan satisfies budget 𝜏 if every prefix remains below the budget: 
+
+𝛼 𝑖 ≤ 𝜏 for all 𝑖 ∈ { 1, . . . , ℓ }.
+
+The curation problem is to find a useful release without exceed-ing this disclosure budget: 
+
+max   
+
+> 𝑝 ∈ P
+
+𝑈 (𝑅 𝑝 ) s.t. 𝛼 𝑖 ≤ 𝜏 for every prefix 𝑝 𝑖 ⪯ 𝑝. 
+
+Here 𝑈 is a task-specific utility measure, such as retained attribute value, workload accuracy, or downstream model quality. The prefix constraint captures the interactive setting: the curator needs to know what the next operator does before committing to it. The next section analyzes this marginal effect under the compatibility-set instantiation. 
+
+## 3 OPERATOR EFFECTS AND CURATION GUIDANCE 
+
+Under the compatibility-set instantiation, the privacy effect of a curation operator becomes local. At prefix 𝑝 𝑖 , disclosure for a target 
+
+𝑡 is determined by two objects: the representation map 𝜋 𝑖 and the surviving tuple set 𝑆 𝑖 . A candidate operator can change one or both. Projection, generalization, and refinement act primarily on 
+
+𝜋 𝑖 : they change how source tuples appear in the release. Selection and deletion act primarily on 𝑆 𝑖 : they change which tuples remain present. This distinction gives one concrete explanation for why privacy under curation is non-monotone. Fig. 1 shows this distinction. Dropping Med in 𝑅 2 changes the representation of the target profile: tuples that were separated by medication now become comparable again, so the compatibility set for 𝑡 1 expands. Deleting 𝑡 3 in 𝑅 3 changes presence instead: it removes the only non-ART tuple in the target profile. The two operations are both ordinary curation steps, and both remove in-formation in an informal sense, but they have different effects on evidence. One adds ambiguity; the other removes it. Fig. 2 abstracts this example into the interactive setting. At a current prefix, the curator has a set Ω𝑖 of candidate actions. The missing primitive is not merely a final privacy test. It is a way to score each candidate before it is committed: which compatibility sets can it change, in which direction does it move disclosure, and what utility does it retain? 
+
+Representation-changing operators. If an operator changes 𝜋 𝑖 , it changes the comparison used by the observer to relate the target to source tuples. A projection or generalization merges representation classes. For a target 𝑡 , the new compatible set has the form 
+
+𝐶 𝑖 +1 (𝑡 ) = 𝐶 𝑖 (𝑡 ) ∪ 𝐴, 
+
+where 𝐴 is the set of newly indistinguishable tuples inside the same visible profile. The new secret rate is 
+
+𝜌 𝑠 (𝐶 𝑖 +1 (𝑡 )) = |𝐶 𝑖 (𝑡 )| 𝜌 𝑠 (𝐶 𝑖 (𝑡 )) + | 𝐴 |𝜌 𝑠 (𝐴 )|𝐶 𝑖 (𝑡 )| + | 𝐴 | .
+
+The direction of the privacy effect is therefore determined by the tuples that join the target’s comparison class. If the added tuples have lower secret rate than 𝐶 𝑖 (𝑡 ), the operator weakens evidence for the secret. If they have higher secret rate, it strengthens it. Refinement has the reverse form: it splits a class and may remove the tuples that were providing ambiguity. This is the case for 𝑅 2 in Fig. 1. Dropping Med merges the ART 
+
+and None representations inside the target’s visible profile. The compatible set for 𝑡 1 expands from {𝑡 1, 𝑡 2 } to {𝑡 1, 𝑡 2, 𝑡 3 }. Since the added tuple 𝑡 3 does not satisfy 𝑠 HIV , the secret rate falls from 1 to 
+
+2/3, and the disclosure returns to the prior level. The operator helps because it adds ambiguity. 
+
+Presence-changing operators. Selection and deletion behave dif-ferently. They change 𝑆 𝑖 , not the released representation itself. If a removed tuple 𝑑 is not in 𝐶 𝑖 (𝑡 ), then the target’s evidence does not change: 
+
+𝐶 𝑖 +1 (𝑡 ) = 𝐶 𝑖 (𝑡 ).
+
+If 𝑑 ∈ 𝐶 𝑖 (𝑡 ), then 
+
+𝐶 𝑖 +1 (𝑡 ) = 𝐶 𝑖 (𝑡 ) \ { 𝑑 }.
+
+The sign of the privacy effect depends on what 𝑑 contributed. If 
+
+𝑠 (𝑑 ) = 1, the operator removes supporting evidence and may re-duce disclosure. If 𝑠 (𝑑 ) = 0, it removes contrary evidence and may increase disclosure. Equivalently, for 𝐶 = 𝐶 𝑖 (𝑡 ),
+
+𝜌 𝑠 (𝐶 \ { 𝑑 }) = |𝐶 |𝜌 𝑠 (𝐶 ) − 𝑠 (𝑑 )|𝐶 | − 1 .
+
+Tuple deletion is therefore not inherently privacy-improving. It is protective when it removes evidence for the secret, and harmful when it removes the ambiguity that shielded the target. This is the case for 𝑅 3 in Fig. 1. Tuple 𝑡 3 is the only matching non-ART tuple in the target’s visible profile. Deleting it does not remove the visible ART evidence; it removes the tuple that made the profile mixed. The release becomes smaller, but the evidence for HIV remains concentrated on the two ART records. Hence 𝑅 3
+
+has the same disclosure for 𝑡 1 as 𝑅 1.
+
+Local guidance. The same local view gives the primitive needed for interactive curation. For each candidate next operator 𝑜 ∈ Ω𝑖 ,the framework should identify the targets whose compatibility sets can change. Representation-changing operators affect targets whose classes are merged or split. Presence-changing operators affect only targets whose compatibility sets contain removed tuples. All other targets have zero marginal change under the compatibility-set semantics. For affected targets, the candidate induces a marginal disclosure 
+
+𝛿 𝑜 𝑖 +1 (𝑠, 𝑡 ) = 𝜖 𝑜 𝑖 +1 (𝑠, 𝑡 ) − 𝜖 𝑖 (𝑠, 𝑡 ),                                       
+
+> 4candidate curator actions Ω𝑖
+> score candidates
+> local step
+> extensions
+> current prefix
+> 𝑝 𝑖 on 𝑅
+> (𝜋 𝑖 , 𝑆 𝑖 , 𝛼 𝑖 )
+> Project/drop
+> drop attributes
+> 𝜋 𝑖 changes
+> Generalize
+> coarsen values
+> 𝜋 𝑖 changes
+> Select/delete
+> filter/suppress tuples
+> 𝑆 𝑖 changes
+> Insert/impute
+> add/synthesize values extension
+> privacy
+> affected 𝐶 𝑖 (𝑡 )
+> 𝛿 𝑜 𝑖 +1
+> utility
+> candidate gain
+> Δ𝑈 (𝑜 )
+> feasible if
+> 𝛼 𝑜 𝑖 +1≤𝜏
+> choose 𝑜 ★
+> best feasible utility–privacy score
+> next prefix
+> 𝑝 𝑖 +1=𝑜 ★◦𝑝 𝑖
+> becomes new state
+> Problem: maximize 𝑈 (𝑅 𝑝 )subject to prefix budget 𝛼 𝑗 ≤𝜏 for every prefix 𝑝 𝑗 ⪯
+> 𝑝 . Exact global search is combinatorial; local candidate scoring is the interactive primitive.
+> re-execution under drift check 𝑝 on evolved 𝑅 ′
+> beyond the basic compatibility model multiple releases, Σ,richer adversaries
+> C1
+> C2
+> C3 C4
+> C5
+
+Figure 2: Interactive privacy-aware curation and its associated research challenges. 
+
+and a candidate prefix disclosure 
+
+𝛼 𝑜 𝑖 +1 = max    
+
+> 𝑠 ∈ S , 𝑡 ∈𝑇
+
+𝜖 𝑜 𝑖 +1 (𝑠, 𝑡 ).
+
+The candidate is feasible only if 𝛼 𝑜 𝑖 +1 ≤ 𝜏 . Among feasible candidates, the curator can compare utility gains. This gives the local primitive shown in Fig. 2: score candidate actions by privacy and utility, keep only those below the disclosure budget, and commit one action to obtain the next prefix. Beyond rejecting unsafe final releases, the curator should see what each proposed operator does before committing to it. In the running example, the guidance loop distinguishes the two one-step refinements of 𝑅 1: dropping Med changes the representation and adds ambiguity, while deleting 𝑡 3 changes presence and removes am-biguity. The former moves the prefix toward the disclosure budget; the latter does no privacy work for the target. This analysis is specific to the compatibility-set instantiation, but the requirement is broader. Any disclosure semantics for privacy-aware curation should support the same operator question: given the current prefix and a candidate next step, what evidence does the step add, remove, or leave unchanged? 
+
+## 4 RESEARCH CHALLENGES 
+
+The compatibility-set view gives privacy-aware curation a concrete semantic object, but it also exposes why the problem is not a direct application of existing release-level privacy tests. A curation plan is not only a final table. It is a sequence of choices, and each choice changes the evidence available to an observer. Fig. 2 marks the four challenges that follow. 
+
+C1. Per-operator privacy semantics. The first challenge is to give each curation operator a privacy semantics. Existing prepara-tion systems already treat curation as a sequence of typed trans-formations, but the types are usually understood operationally: project removes attributes, generalize coarsens values, select re-stricts the population, and delete removes tuples. For privacy, these descriptions are too coarse. In Example 1.1, both 𝑅 2 and 𝑅 3 are one-step refinements of 𝑅 1, and both can be described informally as “removing information.” Yet they have different privacy effects. Dropping Med in 𝑅 2 changes the representation of the target profile and merges the ART and None records, thereby adding ambiguity. Deleting 𝑡 3 in 𝑅 3 changes tuple presence and removes the only non-ART record, thereby removing ambiguity. Thus, the operator name alone does not determine the privacy effect. What is needed is a semantics that predicts, before an operator is committed, whether it expands, shrinks, merges, or splits the evidence classes that determine disclosure. In the compatibility-set instantiation, this is the role of the representation/presence distinction from Sec. 3: column and value operators act on how tuples are represented, while row operators act on which tuples remain available as evidence. 
+
+C2. Prefix-level accounting. The second challenge is that dis-closure must be accounted for over plan prefixes, not only at the endpoint. Example 1.1 already exhibits the phenomenon. Suppose the curator eventually publishes 𝑅 2, where Med has been dropped. For target 𝑡 1, the final disclosure is 0: the compatible set is again 
+
+{𝑡 1, 𝑡 2, 𝑡 3 }, and the secret rate returns to the prior. But one natural construction path reaches 𝑅 2 through 𝑅 1: first drop Diag , bucketize 
+
+Age , and shorten ZIP ; only later drop Med . Along this path, the intermediate prefix 𝑅 1 has disclosure log (3/2), because the target is compatible only with the two ART tuples. Thus, the final release may be acceptable even though the curation process passed through a more revealing state. This matters in interactive settings, where partial results may be inspected, cached, shared with collaborators, or used to decide the next transformation. It also matters conceptually: if the privacy ef-fect of an operator is its marginal change 𝛿 𝑖 (𝑠, 𝑡 ) = 𝜖 𝑖 (𝑠, 𝑡 )− 𝜖 𝑖 −1 (𝑠, 𝑡 ),then the process cannot be reconstructed from the endpoint alone. A privacy-aware curation system should therefore maintain a tra-jectory 𝛼 0, 𝛼 1, . . . , 𝛼 ℓ , not only a final value 𝛼 ℓ .
+
+> 5
+
+C3. Guidance under a disclosure budget. The third challenge is to make the semantics useful to the curator. A data scientist does not only ask whether a release is safe; she asks which operator to apply next. This turns curation into a budgeted search problem: 
+
+max   
+
+> 𝑝 ∈ P
+
+𝑈 (𝑅 𝑝 ) s.t. 𝛼 𝑖 ≤ 𝜏 for every prefix 𝑝 𝑖 ⪯ 𝑝. 
+
+Exact search is unlikely to be the right abstraction for interactive curation. The plan space is combinatorial, and utility is usually task-specific. The useful primitive is local: given the current prefix and a small set of candidate operators, estimate the marginal disclosure of each candidate, rule out those that exceed the budget, and explain the remaining privacy–utility tradeoff. In Example 1.1, this is the difference between telling the curator that dropping Med removes a visible indicator and telling her that deleting 𝑡 3 does no privacy work for the target. 
+
+C4. Re-execution under drift. The fourth challenge is that cu-rated releases are often not one-shot artifacts. The same preparation plan may be committed once and re-executed whenever the source changes. A plan that satisfied a disclosure budget at commit time may fail later because new tuples enter a visible profile, existing tuples change their representation, or correlations between visible attributes and secrets shift. This makes privacy a maintained prop-erty of the curation pipeline, not a one-time certificate. The relevant question is not only whether 𝑝 (𝑅 ) is safe today, but whether the same plan remains safe on 𝑅 ′ before the next release is published. 
+
+C5. Beyond compatibility sets. The compatibility-set seman-tics measures how the release changes the target’s plausible com-parison class. Several extensions are natural. Insert and impute operators introduce synthetic or externally sourced values that are not captured by pure suppression and coarsening. Multiple releases require modeling how evidence accumulates across correlated out-puts. A dependency-explicit version would replace the empirical compatibility score by inference under a declared semantics model 
+
+Σ, connecting privacy-aware curation to inference-aware deletion under dependencies [ 2, 3]. These extensions should refine, not re-place, the operator-level view: the central question remains how each curation step changes the evidence that a released artifact provides about protected facts. Together, these challenges outline the problem space of privacy-aware curation. The aim is not merely to certify a final table, but to make privacy visible during the construction of that table: which operator changed disclosure, in which direction, for which targets, and under what budget. 
+
+Acknowledgements. Chakraborty acknowledges the support of the Hasso-Plattner-Institut. 
+
+## REFERENCES 
+
+[1] Mark Bun and Thomas Steinke. 2016. Concentrated Differential Privacy: Simpli-fications, Extensions, and Lower Bounds. In Proceedings of the 14th International Conference on Theory of Cryptography (TCC) (Lecture Notes in Computer Science) ,Vol. 9985. Springer, Beijing, China, 635–658. [2] Vishal Chakraborty, Youri Kaminsky, Arnav Abhijit Dhariya, Sharad Mehro-tra, Felix Naumann, and Sarvesh Pandey. 2026. Inference-Aware and Privacy-Preserving Deletion in Databases. arXiv preprint arXiv:2604.00326. https: //arxiv.org/abs/2604.00326 [3] Vishal Chakraborty, Youri Kaminsky, Sharad Mehrotra, Felix Naumann, Faisal Nawab, Primal Pappachan, Mohammad Sadoghi, and Nalini Venkatasubramanian. 2025. Meaningful Data Erasure in the Presence of Dependencies. Proc. VLDB Endow. 18, 10 (June 2025), 3435–3448. [4] Sibei Chen, Nan Tang, Ju Fan, Xuemi Yan, Chengliang Chai, Guoliang Li, and Xiaoyong Du. 2023. HAIPipe: Combining Human-generated and Machine-generated Pipelines for Data Preparation. Proceedings of the ACM on Management of Data (PACMMOD) 1, 1 (2023), 91:1–91:26. [5] Cynthia Dwork, Frank McSherry, Kobbi Nissim, and Adam Smith. 2006. Cali-brating Noise to Sensitivity in Private Data Analysis. In Proceedings of the 3rd Theory of Cryptography Conference (TCC) (Lecture Notes in Computer Science) ,Vol. 3876. Springer, New York, NY, USA, 265–284. [6] Cynthia Dwork and Guy N. Rothblum. 2016. Concentrated Differential Privacy. arXiv preprint arXiv:1603.01887. [7] Cynthia Dwork, Guy N. Rothblum, and Salil Vadhan. 2010. Boosting and Differ-ential Privacy. In Proceedings of the 51st Annual IEEE Symposium on Foundations of Computer Science (FOCS) . IEEE, Las Vegas, NV, USA, 51–60. [8] Zhongjun Jin, Michael R. Anderson, Michael J. Cafarella, and H. V. Jagadish. 2017. Foofah: Transforming Data By Example. In Proceedings of the 2017 ACM International Conference on Management of Data (SIGMOD) . ACM, Chicago, IL, USA, 683–698. [9] Sean Kandel, Andreas Paepcke, Joseph M. Hellerstein, and Jeffrey Heer. 2011. Wrangler: Interactive Visual Specification of Data Transformation Scripts. In 
+
+Proceedings of the SIGCHI Conference on Human Factors in Computing Systems (CHI) . ACM, Vancouver, BC, Canada, 3363–3372. [10] Daniel Kifer and Ashwin Machanavajjhala. 2011. No Free Lunch in Data Privacy. In Proceedings of the 2011 ACM SIGMOD International Conference on Management of Data . ACM, 193–204. [11] Daniel Kifer and Ashwin Machanavajjhala. 2014. Pufferfish: A Framework for Mathematical Privacy Definitions. ACM Transactions on Database Systems (TODS) 
+
+39, 1 (2014), 3:1–3:36. [12] Sanjay Krishnan, Jiannan Wang, Michael J. Franklin, Ken Goldberg, and Tim Kraska. 2016. PrivateClean: Data Cleaning and Differential Privacy. In Proceed-ings of the 2016 ACM SIGMOD International Conference on Management of Data (SIGMOD) . ACM, San Francisco, CA, USA, 937–951. [13] Ninghui Li, Tiancheng Li, and Suresh Venkatasubramanian. 2007. 𝑡 -Closeness: Privacy Beyond 𝑘 -Anonymity and ℓ-Diversity. In Proceedings of the 23rd Interna-tional Conference on Data Engineering (ICDE) . IEEE, Istanbul, Turkey, 106–115. [14] Peng Li, Zhiyi Chen, Xu Chu, and Kexin Rong. 2023. DiffPrep: Differentiable Data Preprocessing Pipeline Search for Learning over Tabular Data. Proceedings of the ACM on Management of Data (PACMMOD) 1, 2 (2023), 183:1–183:26. [15] Ashwin Machanavajjhala, Daniel Kifer, Johannes Gehrke, and Muthuramakrish-nan Venkitasubramaniam. 2007. ℓ-Diversity: Privacy Beyond 𝑘 -Anonymity. ACM Transactions on Knowledge Discovery from Data (TKDD) 1, 1 (2007), 3:1–3:52. [16] Frank D. McSherry. 2009. Privacy Integrated Queries: An Extensible Platform for Privacy-Preserving Data Analysis. In Proceedings of the 2009 ACM SIGMOD International Conference on Management of Data (SIGMOD) . ACM, Providence, RI, USA, 19–30. [17] Arvind Narayanan and Vitaly Shmatikov. 2008. Robust De-anonymization of Large Sparse Datasets. In Proceedings of the 2008 IEEE Symposium on Security and Privacy (S&P) . IEEE Computer Society, 111–125. [18] Vijayshankar Raman and Joseph M. Hellerstein. 2001. Potter’s Wheel: An Inter-active Data Cleaning System. In Proceedings of the 27th International Conference on Very Large Data Bases (VLDB) . Morgan Kaufmann, Roma, Italy, 381–390. [19] Jen Rogers and Anamaria Crisan. 2023. Tracing and Visualizing Human-ML/AI Collaborative Processes through Artifacts of Data Work. In Proceedings of the 2023 CHI Conference on Human Factors in Computing Systems . ACM, 837:1–837:22. [20] Ryan M. Rogers, Aaron Roth, Jonathan Ullman, and Salil Vadhan. 2016. Pri-vacy Odometers and Filters: Pay-as-You-Go Composition. In Advances in Neural Information Processing Systems 29 (NeurIPS) . Curran Associates, Barcelona, Spain. [21] Pierangela Samarati. 2001. Protecting Respondents’ Identities in Microdata Release. IEEE Transactions on Knowledge and Data Engineering (TKDE) 13, 6 (2001), 1010–1027. [22] Roee Shraga and Renée J. Miller. 2023. Explaining Dataset Changes for Semantic Data Versioning with Explain-Da-V. Proceedings of the VLDB Endowment (PVLDB) 
+
+16, 6 (2023), 1587–1600. [23] Latanya Sweeney. 2002. 𝑘 -Anonymity: A Model for Protecting Privacy. Interna-tional Journal of Uncertainty, Fuzziness and Knowledge-Based Systems 10, 5 (2002), 557–570. [24] Junwen Yang, Yeye He, and Surajit Chaudhuri. 2021. Auto-Pipeline: Synthesizing Complex Data Pipelines By-Target Using Reinforcement Learning and Search. 
+
+Proceedings of the VLDB Endowment (PVLDB) 14, 11 (2021), 2563–2575. [25] Dan Zhang, Ryan McKenna, Ios Kotsogiannis, Michael Hay, Ashwin Machanava-jjhala, and Gerome Miklau. 2018. EKTELO: A Framework for Defining Differentially-Private Computations. In Proceedings of the 2018 ACM SIGMOD International Conference on Management of Data (SIGMOD) . ACM, Houston, TX, USA, 115–130.
