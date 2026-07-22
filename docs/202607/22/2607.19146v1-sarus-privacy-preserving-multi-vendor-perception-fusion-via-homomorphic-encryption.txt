@@ -1,0 +1,1755 @@
+Title: Sarus: Privacy-Preserving Multi-Vendor Perception Fusion via Homomorphic Encryption
+
+URL Source: https://arxiv.org/pdf/2607.19146v1
+
+Published Time: Wed, 22 Jul 2026 01:22:54 GMT
+
+Number of Pages: 29
+
+Markdown Content:
+# SARUS : P RIVACY -P RESERVING MULTI -V ENDOR PERCEPTION 
+
+# FUSION VIA HOMOMORPHIC ENCRYPTION 
+
+Munawar Hasan 1,2, Apostol Vassilev 11National Institute of Standards and Technology, USA 
+
+> 2
+
+Michigan Technological University, USA 
+
+{munawar.hasan, apostol.vassilev}@nist.gov munawarh@mtu.edu 
+
+# ABSTRACT 
+
+Cooperative perception enables autonomous vehicles (AVs) to improve situational awareness by aggregating detection outputs from multiple agents and sensing platforms, often via a shared fusion service in multi-vendor deployments. However, sharing such outputs at inference time exposes proprietary model behavior and sensitive environmental information, creating significant privacy and security concerns. In this paper, we present Sarus , a privacy-preserving framework for multi-vendor perception fusion via homomorphic encryption (HE), enabling aggregation without revealing individual vendor outputs. Each vendor encodes detections as compact Gaussian moment vectors over a shared spatial lattice and transmits encrypted payloads to a fusion server, which aggregates them directly in the encrypted domain. The fused result is then decrypted and reconstructed into final detections through class-wise bin merging. We analyze the computational complexity, showing linear scaling for vendor payload construction and 
+
+O(BV ) server-side fusion with the number of occupied bins B and vendors V , while postprocessing scales as O(B + P 
+
+> c∈C
+
+B2 
+
+> c
+
+), where C denotes the set of object classes and Bc is the number of occupied bins for class c. Experiments demonstrate linear scaling in practice with only a bounded constant-factor overhead from HE, with decryption dominating postprocessing cost. Experiments on the KITTI dataset using camera (YOLOv8 1) and LiDAR (PointPillars, PV-RCNN) detectors show that Sarus improves scene-level coverage by effectively aggregating complementary detections, particularly in distance-dependent regimes where individual modalities degrade. These results indicate that privacy-preserving multi-vendor perception fusion is feasible for real-time deployment when statistical compression and spatial sparsity are jointly exploited. The demonstration code and dataset for this project is open source, available on Github 2.
+
+Keywords Cooperative Perception · Privacy-Preserving Inference, Multi-Vendor Fusion · Autonomous Vehicles ·
+
+Homomorphic Encryption · Secure Aggregation 
+
+# 1 Introduction 
+
+Cooperative perception enables multiple agents, such as autonomous vehicles, roadside infrastructure, and perception service providers, to share complementary observations of a common environment. By aggregating information from diverse viewpoints and sensing modalities, cooperative perception improves robustness under occlusion, extends sensing range beyond line-of-sight, and enhances reliability in challenging conditions such as adverse weather or 
+
+> 1
+
+Certain equipment, instruments, software, or materials, commercial or noncommercial, are identified in this paper to specify the experimental procedure adequately. Such identification does not imply recommendation or endorsement of any product or service by NIST, nor does it imply that the materials, equipment, or software identified are necessarily the best available for the purpose. 
+
+> 2
+
+https://github.com/mhasan08/sarus arXiv:2607.19146v1 [cs.CR] 21 Jul 2026 Sarus : Privacy-Preserving Multi-Vendor Perception Fusion via Homomorphic Encryption  
+
+> (a) Camera-only perception: YOLOv8 detects two cars. (b) LiDAR-only perception: PV-RCNN. detects three cars.
+
+Figure 1: Complementarity of heterogeneous perception outputs on KITTI (Karlsruhe Institute of Technology and Toyota Technological Institute) [ 9]: The camera detector captures visually salient vehicles, while the LiDAR detector recovers additional 3D structure, including a nearby vehicle missed in the image due to partial occlusion. This example motivates privacy-preserving cooperative fusion: multiple agents or vendors may collectively improve scene coverage, but direct sharing of raw sensor data or detailed proprietary outputs can expose sensitive information. dense traffic [ 1, 2, 3, 4, 5]. Beyond spatial diversity, cooperative perception also leverages temporal and contextual diversity , where observations collected across time or from different agents contribute to a more stable and consistent understanding of dynamic scenes. This enables improved tracking of objects, early detection of hazards, and more reliable estimation of scene structure compared to isolated perception systems. Cooperative perception transforms perception from a purely local task into a distributed sensing and aggregation problem , where multiple heterogeneous sources jointly contribute to a unified representation of the environment. In practical deployments, cooperative perception is often realized through a centralized or edge-based fusion server [ 6, 7], which collects perception outputs from multiple sources and aggregates them into a unified scene representation. Each participant processes its local sensor data independently and transmits a compact representation—such as detected objects, bounding boxes, or intermediate features—to the fusion server. The server then combines these inputs to produce a consistent and enriched understanding of the environment, which can be redistributed to participating agents or used for downstream decision-making. Multi-modal fusion further reinforces the role of the fusion server as an aggregation point for heterogeneous data representations. Each vendor or agent may process distinct sensor modalities or employ modality-specific models, producing outputs that differ in structure, scale, and uncertainty characteristics. The fusion process must therefore reconcile these heterogeneous representations into a consistent spatial interpretation of the scene. By integrating these distributed observations, the fusion server enables a more complete and accurate representation of the scene than any single agent could achieve independently. Real-world deployments, such as the University of Michigan Smart Intersection Project, demonstrate this paradigm by aggregating multi-sensor observations to construct real-time intersection-level scene understanding [ 8 ]. This paradigm shifts perception from isolated sensing to distributed scene understanding. Importantly, cooperative perception operates at the inference level , where agents exchange the outputs of their local perception pipelines rather than raw sensor data or model parameters. Each participant independently processes its sensor inputs and produces detection results—such as object locations, classes, and confidence scores—which are then shared for aggregation. This design avoids the need for centralized training or access to raw data, making it well-suited for real-time deployment in dynamic environments. In Figure 1, YOLOv8 [10] detects two vehicles in the camera image, while PV-RCNN [ 11 ] identifies three using LiDAR (Light Detection and Ranging) data. The missed detection by YOLOv8 corresponds to the closest vehicle, which is occluded by vegetation. This example highlights how inference-level cooperative perception can leverage complementary modalities to recover missed objects. However, operating at the inference level introduces unique challenges. Unlike training-time collaboration frameworks such as federated learning, where model updates can be aggregated without exposing individual predictions, cooperative perception requires sharing fine-grained outputs that directly reflect model behavior on specific scenes. These outputs inherently encode both environmental information and model-specific characteristics, making them highly sensitive. As a result, protecting inference-time data becomes critical for preserving privacy, confidentiality, and competitive integrity in multi-vendor settings. 2Sarus : Privacy-Preserving Multi-Vendor Perception Fusion via Homomorphic Encryption Despite its advantages, cooperative perception introduces a fundamental challenge between utility and privacy . Vendor detections encode not only information about the environment, but also implicit knowledge about proprietary models, training data, and system behavior. Sharing raw perception outputs in cooperative perception systems exposes multiple security and privacy risks. In particular, plaintext detection sharing enables the following attack vectors: 1. Model Extraction: Repeated access to detection outputs allows an adversarial aggregation service or partici-pating vendor to infer properties of proprietary perception models. By observing confidence scores, bounding box behavior, and response patterns across diverse inputs, an attacker can approximate model decision bound-aries or reconstruct surrogate models [ 12 , 13 , 14 ]. This compromises vendor intellectual property. Further, such compromise can also reveal vendor-specific design choices and performance characteristics, enabling competitors to reverse-engineer or benchmark proprietary systems. 2. Data Leakage at Inference: Detection outputs may reveal sensitive information about the observed envi-ronment, including the presence, location, and behavior of objects or individuals. In infrastructure-assisted or multi-agent settings, sharing such outputs in plaintext can inadvertently expose private or regulated data [12, 15]. 3. Side-Channel Leakage: Auxiliary information such as timing, output sparsity, and detection patterns can leak additional information beyond the explicit content of detections. For example, variations in detection latency or confidence distributions may reveal scene complexity, sensor characteristics, internal model behavior, or model format [12, 16] further amplifying privacy risks. 4. Cross-Vendor Inference. In multi-vendor settings, access to multiple vendors’ outputs for the same scene enables comparative analysis, allowing adversaries to infer relative strengths, weaknesses, or biases of individual models. Such cross-analysis can expose competitive information and facilitate targeted attacks against specific vendors. This challenge is further amplified in multi-vendor settings, where participating entities may be competitors or operate under distinct trust and regulatory constraints. Existing cooperative perception systems largely assume access to raw or intermediate detection outputs in plaintext, making them incompatible with privacy-preserving deployment scenarios. Consequently, there is a pressing need for mechanisms that enable secure aggregation of perception outputs without revealing vendor-specific information. In this paper, we present Sarus 3, a privacy-preserving framework for multi-vendor perception fusion based on ho-momorphic encryption (HE). Instead of sharing raw detections, each vendor encodes its observations into compact 
+
+moment-based statistical representations . In this representation, detections are summarized through aggregate quan-tities such as confidence mass, confidence-weighted object center, and spatial spread, which capture object location, uncertainty, and confidence without exposing the raw detection outputs. These representations are encrypted using CKKS (Cheon–Kim–Kim–Song) [ 17 ] and transmitted to a fusion server, which performs aggregation directly in the encrypted domain without accessing plaintext data. The fused result is then decrypted by an authorized party and used to reconstruct the final detections. A key aspect of our design is the use of a shared spatial lattice that discretizes the scene into bins, enabling scalable aggregation without explicit cross-vendor matching. By combining moment-based encoding with spatial binning, Sarus 
+
+achieves linear scaling in the number of occupied bins while maintaining robustness to minor spatial misalignment. Importantly, the use of homomorphic encryption introduces only a bounded constant-factor overhead, preserving practical feasibility. We summarize our contributions below: • We introduce a homomorphically encrypted moment-based fusion framework that enables aggregation of multi-vendor perception outputs without revealing raw detections. • We propose a spatial binning mechanism that ensures scalable fusion with complexity O(B · V ), where B is the number of occupied bins and V the number of vendors. • We provide a comprehensive performance evaluation covering vendor payload generation, server-side homo-morphic fusion, and postprocessing. • We demonstrate that homomorphic encryption incurs only bounded overhead, with linear scaling in practice and decryption dominating vendor-side cost. • We show empirically on KITTI [ 9] that Sarus effectively recovers complementary detections across camera and LiDAR modalities.  
+
+> 3Sarus draws inspiration from the Sarus crane—a species native to India and Southeast Asia—known for its coordinated movement and broad environmental awareness, mirroring the collaborative perception paradigm underlying our framework.
+
+3Sarus : Privacy-Preserving Multi-Vendor Perception Fusion via Homomorphic Encryption Our results show that privacy-preserving multi-vendor perception fusion is feasible in real-time settings when statistical compression and spatial sparsity are jointly exploited, enabling secure and scalable cooperative perception in heteroge-neous environments. We clarify that Sarus does not handle authentication, identity management, schema validation, or proof-carrying compliance for cooperative perception. Instead, it assumes that submitted payloads have passed an admission check before encrypted fusion. This admission check includes both agent legitimacy and adherence to a shared syntax and public specification for the submitted perception output. Such an admission layer may be built from proof-carrying data [ 18 ], vehicular message security and credential mechanisms such as IEEE 1609.2 [ 19 ], and succinct zero-knowledge compliance mechanisms such as Hermes Seal [20]. 
+
+# 2 Related Work 
+
+Cooperative perception enables multiple agents to share observations and improve scene understanding beyond the capabilities of individual sensors. Prior work has explored vehicle-to-vehicle (V2V) and vehicle-to-infrastructure (V2I) collaboration for object detection and tracking, demonstrating improved robustness under occlusion and extended sensing range [ 1, 2, 3]. These approaches typically rely on exchanging raw sensor data [ 4 , 21 , 22 ], intermediate features [ 23 , 24 , 25 ], or detection outputs [ 26 ], and assume a trusted setting in which such information can be shared in plaintext. Infrastructure-assisted systems further extend this paradigm by aggregating observations from roadside units and vehicles to construct a unified scene representation, often via a centralized fusion module. Modern perception systems increasingly incorporate multiple sensing modalities, such as cameras, LiDAR, and radar, to improve robustness and accuracy [ 27 ]. Multi-modal fusion methods [ 28 , 29 , 30 , 31 , 32 , 33 , 34 ] combine complementary information from heterogeneous sensors to enhance detection performance under challenging conditions [ 4, 35 ]. In cooperative settings, this heterogeneity is further amplified, as different agents may employ distinct sensor configurations and model architectures. Existing fusion strategies typically operate on feature-level or detection-level representations and require direct access to underlying data, making them difficult to deploy in privacy-sensitive multi-vendor environments. Privacy-preserving machine learning techniques, such as federated learning (FL) [ 36 , 37 , 38 , 39 ], enable collaborative model training without sharing raw data. In FL, participants exchange model updates rather than inference outputs, reducing exposure of local datasets. However, FL may not be suitable for cooperative perception since, FL cannot operate at inference time , requiring aggregation of instance-level predictions rather than model parameters [ 40 , 41 ]. As a result, existing FL-based approaches do not directly address the privacy risks associated with sharing detection outputs across vendors. Secure aggregation protocols and homomorphic encryption have been widely studied for enabling computation over encrypted data [ 42 , 43 , 44 ]. HE schemes, such as CKKS [ 17 ], support approximate arithmetic on encrypted vectors and have been applied in domains such as secure inference and privacy-preserving analytics [ 45 , 46 ]. Prior work has explored encrypted aggregation in distributed learning and statistics; however, these approaches typically focus on scalar or low-dimensional data and do not address the challenges of structured perception outputs, such as spatial alignment, object-level aggregation, and multi-modal heterogeneity. Existing cooperative perception systems typically assume plaintext sharing of detection outputs, while privacy-preserving learning approaches focus on training or intermediate representations rather than inference-time collaboration. While prior work has explored cooperative perception and privacy-preserving computation independently, a scalable framework for privacy-preserving multi-vendor perception fusion at inference time remains largely unexplored, particu-larly for structured detection outputs. Sarus bridges this gap by introducing an encrypted moment-based representation and a spatial binning strategy that enable scalable homomorphic aggregation of structured perception outputs without revealing vendor-specific information. 
+
+# 3 Data Representation, System, and Threat Model 
+
+We start by presenting notations used in this paper. Table 1 summarizes the abbreviations and mathematical notations. 4Sarus : Privacy-Preserving Multi-Vendor Perception Fusion via Homomorphic Encryption Table 1: Symbols and Mathematical Notations 
+
+V Vendors, V ∈ { v1 . . . v V } such that |V| = V
+
+Enc HE (·), Dec HE (·) Homomorphic encryption and decryption 
+
+Pv Encrypted payload from vendor v ∈ V C Set of object classes 
+
+Fcommon Common spatial reference frame. 
+
+b Bounding box with coordinates x1, y 1, x 2, y 2.
+
+(w, h ) Width and height of bounding box. 
+
+μ, σ2 Mean and variance. 
+
+α Vendor trust weight. 
+
+3.1 Data Representation Definition 1 (Common Spatial Frame) . Let Fcommon ⊆ Rd denote a shared spatial reference frame in which detections from all vendors are expressed. Let O denote a physical object in the environment, and for each vendor v ∈ V , let Φv
+
+denote the observation operator that maps O to the vendor’s sensor observation Iv , i.e., 
+
+Φv : O → I v .
+
+Further, let Tv denote a transformation that maps observations to the common spatial frame, then we have: 
+
+Tv : Iv → F common .
+
+We assume that for any object O observed by multiple vendors, the composed mappings Tv ◦ Φv (O) are spatially consistent, i.e., they lie within a bounded neighborhood in Fcommon .
+
+Φv captures sensing and perception effects (e.g., viewpoint, modality, and model behavior), while Tv accounts for geometric alignment through calibration and localization. 
+
+Definition 2 (Spatial Consistency Assumption) . For any physical object O observed by vendors v and v′, the corre-sponding coordinates (xv , y v ) and (xv′ , y v′ ) in Fcommon satisfy: 
+
+∥(xv , y v ) − (xv′ , y v′ )∥ ≤ ϵ, 
+
+for some bounded alignment error ϵ > 0 determined by calibration and localization accuracy. 
+
+The common spatial frame Fcommon can take several forms depending on the deployment setting. In many autonomous driving systems, detections are projected into a bird’s-eye-view (BEV) representation aligned with the ground plane, enabling consistent spatial reasoning across agents. Alternatively, an ego-centric coordinate frame centered at a reference vehicle may be used, where all detections are expressed relative to the vehicle’s pose. In infrastructure-assisted settings, detections may be aligned to a global or map-based coordinate system using GPS and localization pipelines. These transformations are standard in cooperative perception systems and rely on well-established calibration and pose estimation techniques. 
+
+3.2 System Model 
+
+We consider a multi-vendor cooperative perception setting consisting of a set of vendors such that |V| = V and a centralized fusion server. Each vendor v ∈ V operates an independent perception pipeline over its local sensor observations and participates in collaborative inference through secure aggregation. 
+
+Vendors: Each vendor v observes the environment through local sensors, producing observations Iv (e.g., images or point clouds). Using its proprietary perception model, the vendor extracts detection outputs and encodes them into a compact moment-based representation over a shared spatial frame Fcommon . The resulting payload is encrypted using a homomorphic encryption scheme Enc HE (·) before transmission. 
+
+Fusion Server: The fusion server receives encrypted payloads from the participating vendors and performs aggregation directly in the encrypted domain. Its role is limited to computing aggregated statistics over ciphertexts; it does not require access to plaintext detections, model parameters, or intermediate vendor representations. 
+
+Output Reconstruction: After aggregation, the encrypted fused result is returned to an authorized party (e.g., a participating vendor or a trusted client), which decrypts the payload using Dec HE (·) and reconstructs final detections through spatial and statistical postprocessing. 5Sarus : Privacy-Preserving Multi-Vendor Perception Fusion via Homomorphic Encryption 
+
+Communication Model: Communication occurs in two stages: (i) vendors transmit encrypted payloads to the fusion server, and (ii) the fusion server returns an aggregated encrypted result. Note, no plaintext perception outputs are exchanged between vendors or revealed to the server. 
+
+Assumptions: We assume that all vendors express detections in a shared spatial reference frame Fcommon (see Definition 1). Vendors do not share raw observations or model parameters, and encryption keys are not accessible to the server. 
+
+3.3 Threat Model 
+
+Building on the system model in Section 3.2, Our threat model focuses on protecting the confidentiality of vendor perception outputs at inference time. 
+
+Adversarial Fusion Server: Honest-but-curious —It correctly follows the prescribed aggregation protocol but may attempt to infer information about individual vendor inputs from the received data and intermediate computations. In particular, the server has access to all transmitted payloads and aggregation results, and may perform arbitrary offline analysis on observed data. The server does not possess decryption keys and cannot directly access plaintext representations. 
+
+Curious Vendors: Mutually untrusted — May attempt to infer information about other participants through the fusion process. However, vendors only observe their own inputs and the final fused output after decryption, and do not have access to intermediate per-vendor contributions. 
+
+Adversarial Capabilities: The adversary may — (i) observe all encrypted payloads transmitted to the fusion server, (ii) access aggregated ciphertexts and final fused outputs, and (iii) perform statistical or inference attacks on observed data. The adversary is not able to— (i) break the underlying homomorphic encryption scheme, (ii) access secret keys or decrypt intermediate ciphertexts, and (iii) tamper with the protocol execution (i.e., no active attacks). 
+
+Security Goals: Our objective is to ensure that no party learns any information about individual vendor detections beyond what is revealed by the final fused output. In particular, we aim to: • Protect the confidentiality of vendor detection outputs, including object locations and confidence scores. • Prevent inference of proprietary model behavior from shared data. • Ensure that intermediate aggregation steps do not leak additional information. 
+
+Out of Scope: We assume that all admitted vendors express detections in a shared spatial reference frame Fcommon (see Definition 1) and follow the agreed payload schema and public fusion specification. Admission control, authentication, and compliance checking are treated as prerequisite mechanisms rather than functions provided by Sarus .We do not consider active adversaries that deviate from the protocol, collusion between multiple parties, or side-channel attacks arising from implementation-specific leakage (e.g., timing or hardware effects). These extensions are left for future work. A formal treatment of inference-time privacy with explicit leakage bounds can be developed under standard semantic security assumptions of homomorphic encryption scheme; we defer a detailed treatment to future work. 
+
+Intuition: At a high level, Sarus ensures that the fusion server operates exclusively on encrypted representations of vendor data. Since all vendor payloads are encrypted under a semantically secure homomorphic encryption scheme, the server cannot access individual detections or intermediate statistics in plaintext. Note that we use the term semantic security in its standard cryptographic sense: ciphertexts should not reveal any efficiently computable information about the underlying plaintext, except what is already implied by public information [ 47 , 48 ]. Aggregation is performed through homomorphic operations, and only the final fused result is revealed after decryption. Thus, the server’s view is computationally indistinguishable from that of an observer with access only to encrypted data and the final output. 
+
+# 4 Sarus 
+
+The key challenge in privacy-preserving perception fusion is to aggregate object detections from multiple vendors without revealing proprietary model outputs or intermediate representations of those outputs. Sharing bounding boxes or prediction confidences of the perception stack in plaintext to vendors exposes sensitive perception information, therefore violating the trust-neutral collaboration model. To address this challenge, Sarus converts each detection into a 6Sarus : Privacy-Preserving Multi-Vendor Perception Fusion via Homomorphic Encryption representation whose sufficient statistics can be aggregated using only linear operations. This design enables the fusion server to combine perception outputs directly in encrypted form using homomorphic encryption, while preserving the geometric information required to reconstruct the fused detections. Specifically, each bounding box is represented as a Gaussian splat and encodes its weighted spatial statistics as a moment vector. In this work, Gaussian splatting refers to representing each detection as a spatial Gaussian contribution over the common fusion grid, where the Gaussian center corresponds to the detected object location and the covariance/spread captures localization uncertainty. This allows detections from multiple vendors to be accumulated as smooth statistical evidence rather than as discrete bounding boxes. The moment vectors are accumulated within spatial bins and homomorphically aggregated across vendors. After decryption, the fused moments are inverted to recover the parameters of the fused Gaussian representation, which is then converted back into a bounding box estimate. This representation allows collaborative perception fusion while maintaining strict privacy guarantees for vendor detections. 
+
+4.1 Detection Representation via Gaussian Splats 
+
+Bounding boxes represent discrete geometric primitives whose fusion typically requires non-linear operations such as intersection tests, non-maximum suppression, or heuristic box merging strategies. Such operations are incompatible with secure aggregation under homomorphic encryption, which efficiently supports only linear computations. To address this limitation, Sarus converts each bounding box detection into a continuous spatial representation using a Gaussian splat . The Gaussian representation models the detected object by its spatial center and an associated uncertainty that reflects the spatial extent of the bounding box. This representation provides two important advantages: (1) Gaussian splats allow detections from multiple vendors to be combined in a statistically meaningful manner through aggregation of their spatial statistics, and (2) the sufficient statistics of a Gaussian distribution can be expressed as linear moment sums, enabling secure fusion through homomorphic addition without exposing the underlying detections. Using these two properties Sarus transforms perception fusion into a linear aggregation problem, which can be performed directly on encrypted data while preserving the information required to reconstruct fused object detections. A detection produced by an object detector is represented by an axis-aligned bounding box b = [ x1, y 1, x 2, y 2].Geometrically, the bounding box defines a spatial region as follows: 
+
+b = {(x, y ) | x1 ≤ x ≤ x2, y 1 ≤ y ≤ y2}.
+
+Let the width and height of the bounding box be w = x2 − x1, and h = y2 − y1 respectively and its geometric center be cx = x1+x2 
+
+> 2
+
+and cy = y1+y2 
+
+> 2
+
+respectively. Since the exact object center within the detected box is uncertain, we model spatial uncertainty by assuming that the true object center is uniformly distributed within the bounding box. This assumption should be interpreted as a local non-informative prior over the admissible support region, not as a uniform distribution over the entire scene. In particular, the support is constrained by the detected bounding box, the image plane, and the physically feasible region associated with the candidate object; therefore, physically invalid locations are excluded [ 49 , 50 , 51 ]. Let X and Y denote the horizontal and vertical object coordinates, respectively. Then under uniform uncertainty assumption, we have: 
+
+X ∼ Uniform( x1, x 2), Y ∼ Uniform( y1, y 2).
+
+The corresponding probability density functions are given by: 
+
+fX (x) = 
+
+ 1 
+
+> w
+
+, x1 ≤ x ≤ x2
+
+0, otherwise fY (y) = 
+
+ 1 
+
+> h
+
+, y1 ≤ y ≤ y2
+
+0, otherwise .
+
+Assuming independence between the two spatial coordinates, the joint density inside the bounding box becomes 
+
+fb(x, y ) = 
+
+ 1 
+
+> wh
+
+, (x, y ) ∈ b
+
+0, otherwise .
+
+The mean and variance of the induced spatial distribution are therefore: μx = E[X] = cx, μy = E[Y ] = cy and 
+
+σ2 
+
+> x
+
+= Var( X) = w2 
+
+> 12
+
+and σ2 
+
+> y
+
+= Var( Y ) = h2 
+
+> 12
+
+. While the uniform model captures the spatial extent of the bounding box, Sarus represents detections using a Gaussian splat whose parameters preserve the mean of the distribution while allowing a tunable spatial spread. This spacial spread is controlled by a scaling parameter κ > 0, hence: 
+
+σ2 
+
+> x
+
+=
+
+
+
+κ w
+
+2
+
+2
+
+, σ2 
+
+> y
+
+=
+
+
+
+κ h
+
+2
+
+2
+
+. (1) 7Sarus : Privacy-Preserving Multi-Vendor Perception Fusion via Homomorphic Encryption    
+
+> (a) Stop sign detected 59 .46 m, pedestrian undetected 47 .07 m.(b) Gaussian Splat for the detection.
+
+Figure 2: RT-DETR detection.    
+
+> (a) Stop sign undetected 59 .46 m, pedestrian detected 47 .07 m.(b) Gaussian Splat for the detection.
+
+Figure 3: DETR101 detection. Note, when κ = 1√3 , equation (1) matches the variance induced by the uniform spatial uncertainty of the bounding box. Under this representation, each detection is approximated by the Gaussian distribution: 
+
+N  (μx, μ y ), diag( σ2
+
+> x
+
+, σ 2 
+
+> y
+
+), (2) which we refer to as a Gaussian splat : a continuous spatial model of the detection preserving the geometric information implied by the bounding box and used for encrypted moment aggregation. Figure 2 and Figure 3 show detection in the image space (Figure 2a and Figure 3a) and their respective gaussian splats (Figure 2b and Figure 3b). 
+
+Moment-Based Detection Encoding: Let a detection b with class confidence p be modeled by the Gaussian distribution of equation (2) . Let α be the trust weight associated with some vendor v ∈ V , such that the effective contribution weight of the detection is defined as: w = αp . Then Sarus encodes each detection using a vector of weighted spatial moments: 
+
+m = w · 1, μ x, μ 2
+
+> x
+
+, σ 2
+
+> x
+
+, μ y , μ 2 
+
+> y
+
+, σ 2
+
+> y
+
+ . (3) Each component the vector in equation (3) represents a sufficient statistic of the spatial distribution and is linear with respect to aggregation across detections. Consequently, moment vectors from multiple detections can be accumulated through simple summation. 
+
+Aggregated Moments. Let H denote an object hypothesis, defined as a set of detections that are hypothesized to correspond to the same underlying object instance. Formally, H is a subset of detections whose spatial coordinates and class predictions are mutually consistent under the fusion model. Let mk denote the moment vector produced by the 
+
+kth detection in this set, where k ∈ H . The aggregated statistics of the hypothesis are obtained by: 
+
+s = X
+
+> k∈H
+
+mk.
+
+Expanding the vector yields 
+
+s = Sw, S wμ x , S wμ 2 
+
+> x
+
+, S wσ 2 
+
+> x
+
+, S wμ y , S wμ 2 
+
+> y
+
+, S wσ 2
+
+> y
+
+ . (4) These aggregated quantities correspond to the sufficient statistics of the Gaussian representation associated with the hypothesis H.8Sarus : Privacy-Preserving Multi-Vendor Perception Fusion via Homomorphic Encryption 
+
+Lemma 1 (Linearity and Sufficiency) . Let each contributing detection k ∈ K produce a moment vector 
+
+mk = wk, w kμx,k , w kμ2
+
+> x,k
+
+, w kσ2
+
+> x,k
+
+, w kμy,k , w kμ2
+
+> y,k
+
+, w kσ2
+
+> y,k
+
+,
+
+where wk = αv(k)pk is the weighted confidence of the detection for vendor v ∈ V , such that these moment vectors are aggregated through summation to obtain 
+
+s = X
+
+> k
+
+mk = [ Sw, S wμ x , S wμ 2 
+
+> x
+
+, S wσ 2 
+
+> x
+
+, S wμ y , S wμ 2 
+
+> y
+
+, S wσ 2 
+
+> y
+
+].
+
+Then: 1. (Linearity) The aggregated moment vector s can be computed using only component-wise additions. Con-sequently, if the vectors mk are encrypted, homomorphic addition yields the exact plaintext sums after decryption. 2. (Sufficiency) The fused Gaussian parameters (μx, μ y , σ 2
+
+> x
+
+, σ 2 
+
+> y
+
+) can be recovered from s as 
+
+μx = Swμ x
+
+Sw
+
+, μy = Swμ y
+
+Sw
+
+,σ2 
+
+> x
+
+= Swσ 2 
+
+> x
+
++ Swμ 2
+
+> x
+
+Sw
+
+− μ2
+
+> x
+
+, σ2 
+
+> y
+
+= Swσ 2 
+
+> y
+
++ Swμ 2
+
+> y
+
+Sw
+
+− μ2 
+
+> y
+
+.
+
+Hence, the 7 aggregated moments are sufficient to reconstruct the fused Gaussian representation of the detections. 
+
+The design choice of local aggregation of moment contributions at the vendor before encryption provides the following advantages: 1. Reduced encrypted payload size: Without aggregation, each detection may contribute up to four encrypted moment vectors (due to bilinear assignment, refer section 4.1.1), resulting in O(N ) encrypted messages for N
+
+detections. With aggregation, the payload scales with the number of object hypotheses |H| , typically |H| ≪ N
+
+(see Figure 4). For example, if a vendor produces N = 200 detections, the naive approach may require up to 
+
+800 encrypted vectors. In practice many detections fall within the same spatial hypothesis region and therefore contribute to a common aggregated moment vector, considerably reducing the number of encrypted vectors (e.g., |H| ≈ 30 hypotheses.) 2. Lower encryption cost: Encryption is performed once per hypothesis rather than once per detection contribu-tion, reducing the number of cryptographic operations. 3. Improved network scalability: Across multiple vendors the reduction becomes substantial. For instance, with 50 vendors each producing 200 detections, the naive approach would transmit roughly 50 × 800 ≈ 40000 
+
+ciphertexts, whereas aggregation reduces this to approximately 50 × 30 ≈ 1500 ciphertexts. 4. Efficient homomorphic fusion: Because moment aggregation is linear (Lemma 1), encrypted hypothesis statistics can be combined across vendors using homomorphic addition. We now introduce the spatial binning and soft assignment procedure, which defines the sets of detections that contribute to each object hypothesis H. Detections are associated with nearby grid regions based on the location of their Gaussian centers, and their moment vectors are distributed to neighboring bins using bilinear weights. The resulting moment contributions are then aggregated according to Eq. 4 leveraging the linearity of the moment representation. 
+
+4.1.1 Spatial Binning and Soft Assignment 
+
+Direct aggregation of detections across the entire image would allow spatially distant objects to influence each other, potentially producing unstable fusion results. To ensure that only spatially consistent detections are combined, the image is partitioned into a class-specific spatial grid and aggregation is performed independently within each grid cell. Let Sc and sc be spacial anchor and stride for a given class c, then Algorithm 1 creates such a grid. Since grid creation can be precomputed for a given image size and class, we safely ignore Algorithm 1 in complexity calculation in section 4.5.1. 9Sarus : Privacy-Preserving Multi-Vendor Perception Fusion via Homomorphic Encryption 
+
+Detections 
+
+N detections 
+
+Spatial Hypotheses 
+
+H1
+
+H2
+
+H3
+
+|H| ≪ N
+
+Encrypted Payload 
+
+Enc( sH1 )
+
+Enc( sH2 )
+
+Enc( sH3 )
+
+one ciphertext per hypothesis 
+
+Figure 4: Illustration of vendor-side moment aggregation in Sarus . A large set of detections is first grouped into a smaller number of spatial object hypotheses, and only one encrypted aggregated moment vector is transmitted per hypothesis. 
+
+Algorithm 1 Class-Specific Spatial Grid Generation 
+
+Require: List of classes: C, List of spatial anchors for each class: S, List of strides for each class: s, Image width: W ,Image height: H.
+
+1: G ← ϕ ▷ Initialize grid for each class c in C
+
+2: for c = 1 to |C| do 
+
+3: G[c] ← ϕ ▷ Initialize G for current class c
+
+4: nx ← ⌈ W − S[c]2 
+
+> s[c]
+
+⌉, ny ← ⌈ H− S[c]2 
+
+> s[c]
+
+⌉ ▷ Number of bins for class c ∈ C
+
+5: for j = 1 to ny do 
+
+6: y = S[c]2 + ( j − 1) · s[c]
+
+7: for i = 1 to nx do 
+
+8: x = S[c]2 + ( i − 1) · s[c]
+
+9: G[c].append (( x, y )) ▷ Append grid center for each bin 
+
+10: end for 
+
+11: end for 
+
+12: end for 
+
+13: Return G
+
+Figure 5: Bin centers using spatial anchors for image with width: 1800 and height 700 . Stop sign: 748 bins 
+
+(S = 80 , s = 40) , Person: 518 bins (S = 96 , s = 48) and Car: 176 bins (S = 160 , s = 80) .
+
+Soft Bin Assignment: Let (μx, μ y ) denote the center of the Gaussian splat derived from a bounding box. Then instead of assigning the detection to a single bin, its contribution is distributed to the four neighboring bins using bilinear interpolation. Let (xi, y j ) denote the center of bin (i, j ). Then fractional offsets of the detection center within the local grid cell are: tx = μx−xi 
+
+> sc
+
+and ty = μy −yj 
+
+> sc
+
+and the four neighboring bins are: {(i, j ), (i + 1 , j ), (i, j + 1) , (i + 1 , j + 1) }
+
+with respective bilinear interpolation weights given by: 
+
+ω00 = (1 − tx)(1 − ty ), ω 10 = tx(1 − ty ), ω 01 = (1 − tx)ty , ω 11 = txty ,
+
+where, ω00 + ω10 + ω01 + ω11 = 1 , such that the total contribution of the detection is preserved. 
+
+Moment Accumulation. For each bin receiving a contribution, the weighted moment vector mk (introduced earlier) is accumulated as: sc, (i,j ) ← sc, (i,j ) + ωk→(i,j ) mk, where (i, j ) is the recieving bin. The same update is applied 10 Sarus : Privacy-Preserving Multi-Vendor Perception Fusion via Homomorphic Encryption for the neighboring bins i.e., (i + 1 , j ), (i, j + 1) , and (i + 1 , j + 1) using their corresponding weights. Since each detection contributes to at most four bins, the update cost per detection is constant. Consequently, the construction of per-class-bin moment accumulators scales linearly with the number of detections produced by a vendor and preserving smooth spatial transitions across bin boundaries, which improves the stability of the fused detections. 
+
+4.2 Vendor Payload Construction 
+
+Let vendor v ∈ V produce a set of detections Dv such that: Dv = {dv, 1, d v, 2, . . . , d v,N v }, where Nv is the total number of detections produced by v. Each detection dv,k , where k ∈ { 1, . . . , N v }, is first converted into its Gaussian splat representation as described in Section 4.1, yielding parameters (μx,v,k , μ y,v,k , σ x,v,k , σ y,v,k ) for the kth detection. Let 
+
+pv,k be the detection confidence for the kth detection and the vendor trust weight αv , then the detection weight is defined as: wv,k = αv pv,k . The detection is then encoded as the moment vector as follows: 
+
+mv,k = wv,k 
+
+1, μ x,v,k , μ 2
+
+> x,v,k
+
+, σ 2
+
+> x,v,k
+
+, μ y,v,k , μ 2
+
+> y,v,k
+
+, σ 2
+
+> y,v,k
+
+ .
+
+Using the soft assignment procedure described previously, detection dv,k contributes to at most four neighboring bins with weights ωk→(i,j ). The vendor accumulates these contributions locally: 
+
+sv,c, (i,j ) ← sv,c, (i,j ) + ωk→(i,j ) mv,k .
+
+This accumulation is performed independently for each object class c and spatial bin (i, j ). After processing all detections, vendor v obtains a set of per-bin moment accumulators as follows: 
+
+sv,c, (i,j ) = Sw, S wμ x , S wμ 2 
+
+> x
+
+, S wσ 2 
+
+> x
+
+, S wμ y , S wμ 2 
+
+> y
+
+, S wσ 2
+
+> y
+
+ .
+
+These aggregated statistics constitute sufficient information to reconstruct the fused Gaussian parameters after aggrega-tion. 
+
+Payload Structure: After local aggregation, vendor v constructs a payload indexed by the class-bin key i.e., key ←
+
+(c, (i, j )) . Let Enc HE (·) denote homomorphic encryption scheme which supports linear operation in the encrypted domain ( Sarus uses CKKS[ 17 ]-based homomorphic encryption scheme that provides additive homomorphism). To enable privacy-preserving multi-vendor fusion, each moment vector is encrypted using Enc HE (·). For each occupied 
+
+key , the vendor stores three quantities: 
+
+cv, key = Enc HE (sv, key ),Mv, key = X
+
+> k∈H v, key
+
+ωk→key (αv pv, key ),Cv, key = X
+
+> k∈H v, key
+
+ωk→key αv ,
+
+(5) where, Hv, key denotes the set of detections from v whose soft assignment contributes to key , and ωk→key is the corresponding bilinear assignment weight. The quantity Mv, key represents the aggregated weighted confidence mass for key and Cv, key represents the aggregated weight count. The payload is the set defined as: 
+
+Pv =   cv, key , M v, key , C v, key 
+
+ key = ( c, (i, j )) ,
+
+for all occupied class-bin keys. Algorithm 2 presents the complete pseudocode that a vendor v ∈ V uses to generate their respective payloads. 
+
+4.3 Encrypted Multi-Vendor Fusion by Server 
+
+Let V denote the set of participating vendors such that each vendor v ∈ V transmits a payload, Pv =(cv, key , M v, key , C v, key ) where key = ( c, (i, j )) denotes the class-bin key, cv, key is the encrypted aggregated moment vector, and Mv,κ and Cv, key are the associated statistics defined above. The fusion server first computes the union of all keys contributed by vendors i.e., 
+
+K = [
+
+> v∈V
+
+keys( Pv ),
+
+where, each key ∈ K corresponds to a spatial hypothesis. 11 Sarus : Privacy-Preserving Multi-Vendor Perception Fusion via Homomorphic Encryption 
+
+Algorithm 2 Vendor Payload Construction 
+
+Require: Detection: D, image_width : W , image_height : H
+
+Ensure: Each detection ∈ D :
+
+detection : {probability , class_id , bbox : [ x1, y 1, x 2, y 2], spacial_anchor : S, stride : s}
+
+1: for each detection d ∈ D do 
+
+2: p ← d. get (probability ), cls ← d. get (class_id ), b ← d. get (bbox )
+
+3: (cx, c y , σ 2
+
+> x
+
+, σ 2 
+
+> y
+
+) ← BoxToGaussianParams (b, κ )
+
+4: m ← [αp, αc x, αc 2
+
+> x
+
+, ασ 2
+
+> x
+
+, αc y , αc 2 
+
+> y
+
+, ασ 2 
+
+> y
+
+]
+
+5: B ← SoftAssignBins (cx, c y , d. get (spacial_anchor ), d. get (stride ), W, H )
+
+6: for each (bin , ω ) ∈ B do 
+
+7: key ← (cls , bin_id )
+
+8: accumulator [key ] ← accumulator [key ] + ω · m
+
+9: mass_by_key [key ] ← mass_by_key [key ] + ω · (αp )
+
+10: count_by_key [key ] ← count_by_key [key ] + ω · α
+
+11: end for 
+
+12: end for 
+
+13: cipher_by_key ← ∅ 
+
+14: for each key ∈ keys( accumulator ) do 
+
+15: ciphertext_bytes ← Enc HE (accumulator [key ]) ▷ Homomorphic encryption 
+
+16: cipher_by_key [key ] ← ciphertext_bytes 
+
+17: end for 
+
+18: Return (cipher_by_key , mass_by_key , count_by_key )
+
+BoxToGaussianParams (b, κ ):
+
+1: x1, y 1, x 2, y 2 ← b
+
+2: w ← (x2 − x1), h ← (y2 − y1)
+
+3: cx ← x1+x2 
+
+> 2
+
+, cy ← y1+y2
+
+> 2
+
+4: σ2 
+
+> x
+
+←  κ · w
+
+> 2
+
+2, σ2 
+
+> y
+
+←  κ · h
+
+> 2
+
+2
+
+5: Return (cx, c y , σ 2
+
+> x
+
+, σ 2 
+
+> y
+
+)
+
+SoftAssignBins (μx, μ y , S, s, W, H ):
+
+1: (nx, n y , _) ← SpatialGridGenerator (W, H, S, s )
+
+2: i ← ⌊ (μx − S/ 2) /s ⌋ + 1 ,j ← ⌊ (μy − S/ 2) /s ⌋ + 1 
+
+3: i ← max(1 , min( i, n x − 1)) , j ← max(1 , min( j, n y − 1)) 
+
+4: xi ← S/ 2 + ( i − 1) s, yj ← S/ 2 + ( j − 1) s
+
+5: tx ← (μx − xi)/s , ty ← (μy − yj )/s 
+
+6: tx ← min(1 , max(0 , t x)) , ty ← min(1 , max(0 , t y )) 
+
+7: B ← ∅ 
+
+8: b00 ← (i, j ), ω00 ← (1 − tx)(1 − ty )
+
+9: b10 ← (i + 1 , j ), ω10 ← tx(1 − ty )
+
+10: b01 ← (i, j + 1) , ω01 ← (1 − tx)ty
+
+11: b11 ← (i + 1 , j + 1) , ω11 ← txty
+
+12: for each (bin_id , ω ) ∈ { (b00 , ω 00 ), (b10 , ω 10 ), (b01 , ω 01 ), (b11 , ω 11 )} do 
+
+13: if ω > 0 then 
+
+14: add (bin_id , ω ) to B
+
+15: end if 
+
+16: end for 
+
+17: Z ← P 
+
+> (bin_id ,ω )∈B
+
+ω
+
+18: if Z > 0 then 
+
+19: for each (bin_id , ω ) ∈ B do 
+
+20: ω ← ω/Z 
+
+21: end for 
+
+22: end if 
+
+23: return B
+
+12 Sarus : Privacy-Preserving Multi-Vendor Perception Fusion via Homomorphic Encryption 
+
+Homomorphic Moment Fusion: For each key , the server aggregates encrypted moment vectors across vendors using the additive homomorphism of the encryption scheme: 
+
+c fused  
+
+> key
+
+= M
+
+> v∈V key
+
+cv, key (6) where Vkey ⊆ V denotes the set of vendors that contributed to key , and ⊕ denotes homomorphic ciphertext addition. Since the moment representation is linear (refer Lemma 1), hence, the operation in equation (6) produces an encryption of the fused moment vector: 
+
+c fused  
+
+> key
+
+= Enc 
+
+ X
+
+> v∈V key
+
+sv, key 
+
+ .
+
+The accompanying statistics are aggregated as follows: 
+
+M fused  
+
+> key
+
+= X
+
+> v∈V key
+
+Mv, key , Cfused  
+
+> key
+
+= X
+
+> v∈V key
+
+Cv, key .
+
+Fused Payload: The resulting fused representation maintained by the server is given by the following set: 
+
+Pfused = (cfused  
+
+> key
+
+, M fused  
+
+> key
+
+, C fused  
+
+> key
+
+) key = ( c, (i, j )) ,
+
+which contains encrypted fused moment vectors and the associated statistics for every occupied key . Algorithm 3 presents the pseudocode that the server uses to create fused payload. 
+
+4.4 Fused Payload to Detection Reconstruction 
+
+Vendor v ∈ V operates on the fused payload shared by the server: Pfused = (cfused  
+
+> key
+
+, M fused  
+
+> key
+
+, C fused  
+
+> key
+
+) , where 
+
+key = ( c, (i, j )) denotes the class-bin key, cfused  
+
+> key
+
+is the encrypted fused moment vector, and M fused  
+
+> key
+
+and Cfused  
+
+> key
+
+are the associated statistics obtained during the fusion stage. 
+
+Moment Decryption and Parameter Recovery: For each key , v decrypts the fused moment vector: 
+
+skey = Dec HE 
+
+ cfused 
+
+> key
+
+ .
+
+Let 
+
+skey = Sw, S wμ x , S wμ 2 
+
+> x
+
+, S wσ 2 
+
+> x
+
+, S wμ y , S wμ 2 
+
+> y
+
+, S wσ 2
+
+> y
+
+ .
+
+Using the moment inversion relations derived in Lemma 1, the Gaussian parameters of the fused detection are recovered as: 
+
+μx = Swμ x
+
+Sw
+
+, μy = Swμ y
+
+Sw
+
+,σ2 
+
+> x
+
+= Swσ 2 
+
+> x
+
++ Swμ 2
+
+> x
+
+Sw
+
+− μ2
+
+> x
+
+, σ2 
+
+> y
+
+= Swσ 2 
+
+> y
+
++ Swμ 2
+
+> y
+
+Sw
+
+− μ2 
+
+> y
+
+.
+
+The corresponding standard deviations are 
+
+σx = pmax( σ2
+
+> x
+
+, ϵ ), σy =
+
+q
+
+max( σ2 
+
+> y
+
+, ϵ ).
+
+where ϵ > 0 is a small numerical constant used to ensure non-negative variance and maintain numerical stability during moment inversion. 
+
+Bounding Box Reconstruction: The recovered Gaussian parameters define a spatial extent for the fused detection. This Gaussian representation is converted into a bounding box b = [ x1, y 1, x 2, y 2], such that x1 = μx − λσ x,
+
+y1 = μy − λσ y , x2 = μx + λσ x and y2 = μy + λσ y , where λ controls the spatial coverage of the reconstructed box. 
+
+Class-wise Spatial Hypothesis Grouping: Since soft assignment distributes moment contributions across neighboring bins, the same physical object may appear in multiple adjacent class-bin entries. To recover a consistent set of detections, entries are grouped by object class and spatial consistency is analyzed between neighboring bins. For each class c, let 
+
+Ec = (key , μ x, μ y , σ x, σ y , b, skey ) denote the set of reconstructed bin-level entries. 13 Sarus : Privacy-Preserving Multi-Vendor Perception Fusion via Homomorphic Encryption 
+
+Algorithm 3 HE-Encrypted Multi-Vendor Fusion by Server 
+
+Require: Vendor Payloads V = {p1, . . . , p V } where |V| = V
+
+Ensure: Each vendor payload pv , ∀v ∈ V :
+
+cipher_by_key : {key : ( class_id , bin_id) , ciphertext_bytes } ▷ HE-encrypted v
+
+mass_by_key : {key : ( class_id , bin_id) , float } ▷ Confidence mass 
+
+count_by_key : {key : ( class_id , bin_id) , float } ▷ Detection count  
+
+> 1:
+
+cipher_list ← ∅ , mass_list ← ∅ , count_list ← ∅ , all_keys ← ∅  
+
+> 2:
+
+fused_cipher_by_key ← ∅ , fused_mass_by_key ← ∅ , fused_count_by_key ← ∅  
+
+> 3:
+
+for v ∈ V do  
+
+> 4:
+
+cipher_list .append (pv [cipher_by_key ])  
+
+> 5:
+
+mass_list .append (pv [mass_by_key ]) , 
+
+> 6:
+
+count_list .append (pv [count_by_key ])  
+
+> 7:
+
+end for  
+
+> 8:
+
+for each cipher ∈ cipher_list do  
+
+> 9:
+
+all_keys ← all_keys ∪ keys( cipher ) ▷ Collect all unique (class_id , bin_id ) keys across vendors payloads  
+
+> 10:
+
+end for  
+
+> 11:
+
+if all_keys = ∅ then  
+
+> 12:
+
+raise error "No ciphertexts available"  
+
+> 13:
+
+end if  
+
+> 14:
+
+for each key ∈ all_keys do  
+
+> 15:
+
+fused_cipher_by_key [key ] ←⊥ , fused_mass_by_key [key ] ← 0, fused_count_by_key [key ] ← 0 
+
+> 16:
+
+accumulator ← None  
+
+> 17:
+
+for each cipher ∈ cipher_list do  
+
+> 18:
+
+c ← cipher .get (key ) 
+
+> 19:
+
+if c̸ = None then  
+
+> 20:
+
+if accumulator = None then  
+
+> 21:
+
+accumulator ← c 
+
+> 22:
+
+else  
+
+> 23:
+
+accumulator ← accumulator + c ▷ HE addition based on key (class_id , bin_id ) 
+
+> 24:
+
+end if  
+
+> 25:
+
+end if  
+
+> 26:
+
+end for  
+
+> 27:
+
+fused_cipher_by_key [key ] ← accumulator  
+
+> 28:
+
+for each mass ∈ mass_list do  
+
+> 29:
+
+fused_mass_by_key [key ] ← fused_mass_by_key [key ] + mass .get (key ) 
+
+> 30:
+
+end for  
+
+> 31:
+
+for each count ∈ count_list do  
+
+> 32:
+
+fused_count_by_key [key ] ← fused_count_by_key [key ] + count .get (key ) 
+
+> 33:
+
+end for  
+
+> 34:
+
+end for  
+
+> 35:
+
+Return (fused_cipher_by_key , fused_mass_by_key , fused_count_by_key )
+
+Spatial Consistency Graph: For each class c, we construct an undirected graph given by: Gc = ( Vc, Egraph  
+
+> c
+
+), where the vertex set Vc = Ec consists of the reconstructed bin-level entries for class c (i.e., each vertex key ∈ V c represents a local hypothesis Hkey associated with a class-bin entry). An edge is introduced between two vertices key a, key b ∈ V c
+
+if their corresponding bins are spatially adjacent and their associated Gaussian statistics satisfy spatial consistency constraints. Specifically, an edge (key a, key b) ∈ E graph  
+
+> c
+
+is added if following condition holds: • Adjacency: the bin indices (i, j ) of key a and key b satisfy: |ia − ib| ≤ 1 and |ja − jb| ≤ 1.• Let γx and γy be tunable gating constants that control the allowable spatial deviation between neighboring hypotheses. Then, the difference between Gaussian centers is bounded relative to their spatial uncertainty, as given below: 
+
+|μ(a) 
+
+> x
+
+− μ(b) 
+
+> x
+
+| ≤ γx min( σ(a) 
+
+> x
+
+, σ (b) 
+
+> x
+
+),
+
+|μ(a) 
+
+> y
+
+− μ(b) 
+
+> y
+
+| ≤ γy min( σ(a) 
+
+> y
+
+, σ (b) 
+
+> y
+
+). (7) • The hypotheses exhibit sufficient geometric overlap and statistical proximity, defined as follows: 14 Sarus : Privacy-Preserving Multi-Vendor Perception Fusion via Homomorphic Encryption  
+
+> H1H2
+> H3
+
+Bin-level hypotheses    
+
+> H1H2
+> H3
+> IoU ↑
+> m2↓
+
+Consistency graph 
+
+> Merged Detection
+
+Cluster fusion 
+
+Figure 6: Cross-bin hypothesis merging. Neighboring bins produce Gaussian hypotheses that may correspond to the same physical object. A spatial consistency graph is constructed between hypotheses and connected components are merged together producing the final fused detection. 
+
+– Geometric overlap: The intersection-over-union (IoU) between the bounding boxes satisfies: 
+
+IoU( b(a), b(b)) ≥ τhigh 
+
+– Statistical proximity: The squared Mahalanobis distance between the Gaussian parameters satisfies: 
+
+m2 (μ(a), Σ(a)), (μ(b), Σ(b)) ≤ τm and IoU( b(a), b(b)) ≥ τmin .
+
+where τhigh and τmin denote high and minimum overlap thresholds, respectively, and τm controls statistical similarity. Let Kc = {K1, K 2, . . . } denote the set of connected components of Gc, where each K ⊆ V c is a set of vertices (i.e., class-bin keys). Each component K therefore represents a merged object hypothesis formed by grouping spatially-consistent local hypotheses {H key | key ∈ K}. Figure 6 depicts the construction of the spatial consistency graph and subsequent cluster fusion. Local hypotheses Hkey arising from neighboring bins are linked based on geometric overlap and statistical proximity, and connected components are aggregated to produce the final detection. 
+
+Cluster Fusion and Confidence Recovery. For each connected component K ∈ K c, merged hypothesis is constructed by aggregating the moment vectors of all participating entries, hence we have: 
+
+sK = X
+
+> key ∈K
+
+skey .
+
+The Gaussian parameters (μKx , μ Ky , σ Kx , σ Ky ) and the corresponding bounding box bK are then recovered from sK
+
+using the moment inversion and Gaussian-to-bounding-box mapping described previously. The associated confidence statistics are obtained from the fused payload by aggregating the corresponding quantities across the cluster: 
+
+ˆmK = X
+
+> key ∈K
+
+M fused  
+
+> key
+
+, ˆcK = X
+
+> key ∈K
+
+Cfused  
+
+> key
+
+.
+
+The fused confidence score for the hypothesis is therefore: ˆpK = ˆmK 
+
+> ˆcK
+
+. The final fused detection set is given by: 
+
+O = (μKx , μ Ky , σ Kx , σ Ky , bK , ˆmK , ˆpK ) K ∈ K c, c ∈ C ,
+
+such that each element corresponds to a reconstructed object obtained from merging a cluster of spatially consistent hypotheses. This completes the reconstruction pipeline, mapping encrypted multi-vendor observations to a consistent set of fused object detections. Algorithm 4 summarizes the complete methodology discussed in this section in pseudocode form. Figure 7 shows the obtained Gaussian splat (Figure 7a) after HE merging and the respective detection obtained (Figure 7b) after cluster fusion. 
+
+4.5 Complexity Analysis 4.5.1 Vendor Payload Construction 
+
+Let N denote the number of detections produced by a vendor and let Bv denote the number of occupied class-bin keys for that vendor i.e., key = ( c, (i, j )) after spatial binning. 15 Sarus : Privacy-Preserving Multi-Vendor Perception Fusion via Homomorphic Encryption  
+
+> (a) Gaussian splat after HE merging of RT-DETR and DETR101. (b) Bounding box obtained after cluster fusion.
+
+Figure 7: HE Fusion: RT-DETR and DETR101. 1. Per-Detection Processing: For each detection, Sarus performs (i) Gaussian parameter computation, (ii) moment vector construction, and (iii) soft assignment to at most four neighboring bins. Each operation takes constant time, yielding: 
+
+Tpreprocess = O(N ).
+
+2. Per-Key Aggregation: Each detection contributes to at most four keys, and the corresponding moment vectors are accumulated into per-key aggregates. Since the number of updates per detection is bounded by a constant, the total cost is: 
+
+Taggregation = O(N ).
+
+3. Payload Creation: The payload is constructed by iterating over all occupied keys, resulting in: 
+
+Tpayload = O(Bv ),
+
+where typically Bv ≪ N due to spatial aggregation. Combining the above steps, the total time complexity is: 
+
+Tvendor = O(N + Bv ) = O(N ). (8) This linear complexity is achieved through local aggregation, which avoids per-detection payload expansion. 
+
+4.5.2 Encrypted Multi-Vendor Fusion 
+
+Let V = |V| denote the number of participating vendors and let B denotes the union of keys across all vendors. 1. Key Collection: The fusion server first computes the union of keys contributed by all vendors i.e., K =S 
+
+> v∈V
+
+keys( Pv ). If each vendor contributes at most B occupied keys, then collecting the union requires: 
+
+Tkeys = O(BV ).
+
+2. Per-Key Fusion: For each key key ∈ K , the server scans the vendor payloads and combines the available entries. Ignoring the cost of encryption-specific operations, each per-key update is constant time: one addition for the fused moment accumulator and constant-time updates for the associated plaintext statistics. Since there are at most B keys and at most V vendors contributing to each key, the total cost is: 
+
+Tfusion = O(BV ).
+
+3. Fused Payload Construction: After aggregation, the server stores one fused entry per occupied key, yielding: 
+
+Toutput = O(B).
+
+Combining the above steps, the total time complexity of encrypted multi-vendor fusion by the server is: 
+
+Tfusion = O(BV + B) = O(BV ). (9) 
+
+O(BV ) result comes from the fact that Sarus fuses aggregated per-key payloads, not individual detections. Without vendor-side aggregation, the server would instead process per-detection contributions, leading to a larger dependence on the number of detections. Hence, the server-side fusion complexity scales linearly with both the number of occupied class-bin keys and the number of participating multi-vendors. 16 Sarus : Privacy-Preserving Multi-Vendor Perception Fusion via Homomorphic Encryption 
+
+Algorithm 4 Encrypted Fused Payload to Fused Detection 
+
+Require: Server fused payload Pfused :
+
+fused_cipher_by_key : {key : ( class_id , bin_id ), ciphertext_bytes } ▷ Fused encrypted v
+
+fused_mass_by_key : {key : ( class_id , bin_id) , float } ▷ Fused confidence mass 
+
+fused_count_by_key : {key : ( class_id , bin_id) , float } ▷ Fused detection count 
+
+1: bin_by_class ← ∅ ▷ Group bins by class 
+
+2: O ← ∅ ▷ Fused detections 
+
+3: for each (key , ciphertext_bytes ) ∈ fused_cipher_by_key do 
+
+4: (class_id , bin_id ) ← key 
+
+5: s ← Dec HE (ciphertext_bytes ) ▷ Homomorphic decryption 
+
+6: if s[0] ≤ ϵ then 
+
+7: continue 
+
+8: end if 
+
+9: (μx, μ y , σ x, σ y ) ← InvertMoment (s)
+
+10: b ← GaussianToBBox (μx, μ y , σ x, σ y , λ )
+
+11: if len (bin_by_class [class_id ]) = 0 then 
+
+12: bin_by_class [class_id ] ← [class_id , bin_id , s[0] , μ x, μ y , σ x, σ y , b, s]
+
+13: else 
+
+14: bin_by_class [class_id ].append ([ class_id , bin_id , s[0] , μ x, μ y , σ x, σ y , b, s]) 
+
+15: end if 
+
+16: end for 
+
+17: for each (c, Ec) ∈ bin_by_class do 
+
+18: Oc ← Merge (Ec, fused_mass_by_key , fused_count_by_key )
+
+19: O ← O ∪ O c
+
+20: end for 
+
+21: Return O
+
+InvertMoments (s):
+
+1: [Sw, S wc x , S wc 2 
+
+> x
+
+, S wσ 2 
+
+> x
+
+, S wc y , S wc 2 
+
+> y
+
+, S wσ 2 
+
+> y
+
+] ← s
+
+2: μx ← Swc x /S w, μy ← Swc y /S w
+
+3: vx ← (Swσ 2 
+
+> x
+
++ Swc 2 
+
+> x
+
+)/S w − μ2
+
+> x
+
+, vy ← (Swσ 2 
+
+> y
+
++ Swc 2 
+
+> y
+
+)/S w − μ2
+
+> y
+
+4: vx ← max( vx, ϵ ), vy ← max( vy , ϵ )
+
+5: σx ← √vx, σy ← √vy
+
+6: Return (μx, μ y , σ x, σ y )
+
+GaussianToBBox (μx, μ y , σ x, σ y , λ ):
+
+1: x1 ← (μx − λσ x), y1 ← (μy − λσ y )
+
+2: x2 ← (μx + λσ x), y2 ← (μy + λσ y )
+
+3: Return [x1, y 1, x 2, y 2]
+
+Merge (entries , fused_mass_by_key , fused_count_by_key ):Require: Per-bin entries entries = {ei} for a fixed class 
+
+1: Ocls ← ∅ 
+
+2: n ← | entries |
+
+3: Initialize adjacency list Adj [0 . . . n − 1] 
+
+4: for all pairs (i, j ) with i < j do ▷ Ensure undirected graph 
+
+5: if entries [i].bin_id and entries [j].bin_id are not neighbors then 
+
+6: continue 
+
+7: end if 
+
+8: ∆x ← | entries [i].μ x − entries [j].μ x|
+
+9: ∆y ← | entries [i].μ y − entries [j].μ y |
+
+10: σx, min ← min( entries [i].σ x, entries [j].σ x)
+
+11: σy, min ← min( entries [i].σ y , entries [j].σ y )
+
+17 Sarus : Privacy-Preserving Multi-Vendor Perception Fusion via Homomorphic Encryption 
+
+12: if ∆x > γ xσx, min or ∆y > γ y σy, min then ▷ Center distance gating 
+
+13: continue 
+
+14: end if 
+
+15: IoU ← IoU (entries [i].bbox , entries [j].bbox ) ▷ IoU calculation 
+
+16: m2 ← Maha 2(( μi, σ i), (μj , σ j )) ▷ Mahalanobis distance 
+
+17: if IoU ≥ τstrong or (m2 ≤ τm ∧ IoU ≥ τfloor ) then ▷ Geometric overlap and statistical proximity 
+
+18: add edge i ↔ j to Adj ▷ Add edge from i to j
+
+19: end if 
+
+20: end for 
+
+21: G ← (Vertex , Edge ) constructed from Adj ▷ Undirected graph: Edge between bins ( Vertex ) if adjacent 
+
+22: K ← ConnectedComponents (G) ▷ Perform Breadth First Search on G
+
+23: for all clusters K ∈ K do 
+
+24: if |K| = 1 then 
+
+25: ek ← entries [k] ▷ k ← the single element of K
+
+26: Mk ← fused_mass_by_key [( ek.class_id , e k.bin_id )] 
+
+27: Ak ← fused_count_by_key [( ek.class_id , e k.bin_id )] 
+
+28: ˆpk ← Mk/A k
+
+29: Ocls .append (ek.μ x, e k.μ y , e k.σ x, e k.σ y , e k.b, M k, ˆpk)
+
+30: continue 
+
+31: end if 
+
+32: sK ← P 
+
+> k∈K
+
+entries [k].s
+
+33: (μKx , μ Ky , σ Kx , σ Ky ) ← InvertMoments (sK )
+
+34: bK ← GaussianToBBox (μKx , μ Ky , σ Kx , σ Ky , λ )
+
+35: if (σKx > κ σ max k∈K (σx,k ) or σKy > κ σ max k∈K (σy,k )) or (Area( bK ) > κ A max k∈K (Area( bk))) then 
+
+36: for k ∈ K do 
+
+37: ek ← entries [k]
+
+38: Mk ← fused_mass_by_key [( ek.class_id , e k.bin_id )] 
+
+39: Ak ← fused_count_by_key [( ek.class_id , e k.bin_id )] 
+
+40: ˆpk ← Mk/A k
+
+41: Ocls .append (ek.μ x, e k.μ y , e k.σ x, e k.σ y , e k.b, M k, ˆpk)
+
+42: end for 
+
+43: continue 
+
+44: end if 
+
+45: ˆm ← P 
+
+> k∈K
+
+fused_mass_by_key [( entries [k].class_id , entries [k].bin_id )] ▷ Confidence mass 
+
+46: ˆc ← P 
+
+> k∈K
+
+fused_count_by_key [( entries [k].class_id , entries [k].bin_id )] ▷ Aggregation weight 
+
+47: ˆp ← ˆm 
+
+> ˆc
+
+▷ Fused confidence 
+
+48: Ocls .append (μKx , μ Ky , σ Kx , σ Ky , bK , ˆm, ˆp) ▷ Append the merged object 
+
+49: end for 4.5.3 Fused Payload to Detection Reconstruction 
+
+Let B denote the number of occupied class-bin keys in the fused payload, and let Bc denote the number of reconstructed bin-level entries for class c, such that: X
+
+> c∈C
+
+Bc = B. 
+
+1. Per-Key Reconstruction: For each fused key = ( c, (i, j )) , Sarus decrypts the fused moment vector, inverts the moments to recover (μx, μ y , σ x, σ y ), and reconstructs the corresponding bounding box. Ignoring the cost of decryption, each of these operations takes constant time. Therefore, reconstructing all bin-level entries requires: 
+
+Treconstruct = O(B).
+
+2. Class-wise Grouping: The reconstructed entries are grouped by class before graph-based merging. This requires a single pass over the fused entries, giving: 
+
+Tgroup = O(B).
+
+3. Spatial Consistency Graph Construction: For each class c, Sarus constructs a spatial consistency graph over the Bc reconstructed entries. In the worst case, all pairs of entries for that class are examined to determine 18 Sarus : Privacy-Preserving Multi-Vendor Perception Fusion via Homomorphic Encryption whether an edge should be added. Since each pairwise consistency check (bin adjacency, center gating, IoU, and Mahalanobis distance) takes constant time, the graph construction cost is: 
+
+T (c)graph = O(B2 
+
+> c
+
+).
+
+Summing over all classes yields 
+
+Tgraph = O X
+
+> c∈C
+
+B2
+
+> c
+
+!
+
+,
+
+which, is upper bounded by: 
+
+Tgraph = O(B2).
+
+4. Connected Components: For each class-specific graph, connected components are computed using breadth-first search (BFS). BFS runs in time linear in the number of vertices and edges: 
+
+T (c)cc = O(Bc + Ec),
+
+where Ec is the number of graph edges for class c. Since Ec = O(B2 
+
+> c
+
+) in the worst case, this becomes: 
+
+T (c)cc = O(B2 
+
+> c
+
+).
+
+Therefore, 
+
+Tcc = O X
+
+> c∈C
+
+B2
+
+> c
+
+!
+
+= O(B2).
+
+5. Cluster Fusion: Each connected component K is fused by summing its moment vectors, recovering Gaussian parameters, and computing the associated confidence statistics. Since each reconstructed entry belongs to exactly one connected component, the total work across all clusters is linear in the number of entries: 
+
+Tcluster = O(B).
+
+Combining the above steps, the total time complexity of fused payload to detection reconstruction is 
+
+Tpost = O B + X
+
+> c∈C
+
+B2
+
+> c
+
+!
+
+, (10) which, in the worst case, simplifies to: Tpost = O(B2). Thus, reconstruction is dominated by class-wise graph construction and connected-component analysis, while the remaining stages are linear in the number of occupied fused keys. In practice, the effective cost is often substantially lower because spatial adjacency constraints limit the number of candidate pairs that can form graph edges. 
+
+Summary of Time Complexity: 
+
+1. Vendor payload construction: Tvendor = O(N + Bv ).2. Server encrypted fusion: Tfusion = O(BV ).3. Post-fusion reconstruction: Tpost = O(B + P 
+
+> c∈C
+
+B2 
+
+> c
+
+).where, N = detections per vendor, V = vendors, Bv = bins produced by one vendor, B = fused bins and Bc = bins per class. 
+
+# 5 Experiments 
+
+The dataset was collected using a real-world autonomous test vehicle equipped with a drive-by-wire system provided by Dataspeed Inc. 4. The vehicle is instrumented with a multi-modal sensing suite, including a LiDAR sensor, an image sensor (Lucid Triton camera 5), and a radar sensor. In this work, only the image stream is utilized for evaluating the 
+
+Sarus framework. Sensor data acquisition is performed using the Robot Operating System (ROS) middleware within the perception architecture described in [ 52 ]. The experiments were conducted at the Virginia Tech Transportation Institute (VTTI) autonomous vehicle testing track [53], under controlled city-driving conditions. 
+
+> 4https://www.dataspeedinc.com/
+> 5https://thinklucid.com/product/triton-16-mp-imx273/
+
+19 Sarus : Privacy-Preserving Multi-Vendor Perception Fusion via Homomorphic Encryption The scene is designed to reflect realistic perception challenges. A stop sign is placed along the driving path of the ego vehicle and is partially occluded by a parked truck. Additional dynamic and static objects are present in the environment, including multiple vehicles and a pedestrian partially occluded by vegetation. To further emulate adverse environmental conditions, artificial rain is introduced during data collection. To evaluate robustness under varying motion dynamics, the dataset is collected at three different vehicle speeds: 25 
+
+mph ( 142 frames), 35 mph ( 100 frames), and 55 mph ( 66 frames), a total of 308 frames. Increasing vehicle speed affects temporal sampling, motion blur, and relative object motion, while artificial rain introduces light scattering and attenuation effects. The combination of these factors produces realistic perception distortions that challenge detection consistency across vendors, enabling a rigorous evaluation of fusion stability under adverse and dynamic conditions. This setup enables evaluation of perception fusion under realistic occlusion, multi-object interaction, adverse weather conditions and under varying speeds. 
+
+Multi-Vendor Perception Setup. To emulate a collaborative multi-vendor perception environment, each frame is processed using five heterogeneous object detection models: YOLOv8, YOLOv9, DETR-50, DETR-101, and RT-DETR. Each model is treated as an independent vendor providing its own set of detection outputs. To capture varying levels of vendor participation, we evaluate 26 non-empty subsets of these models, corresponding to combinations of 2, 3, 4, and 5 vendors. Each subset represents a distinct collaborative scenario with differing degrees of redundancy and diversity in perception. For each frame and each vendor subset, fusion is performed independently, resulting in a total of: 
+
+308 × 26 = 8008 
+
+fusion instances. This exhaustive enumeration enables a comprehensive evaluation of the proposed framework across a wide range of multi-vendor configurations. This design allows us to systematically analyze how fusion performance varies with the number and diversity of participating vendors. 
+
+5.1 Equivalence of Homomorphic and Plaintext Fusion 
+
+The primary objective of the experiment is to validate the functional and numerical correctness of the proposed homomorphic fusion pipeline. Specifically, the aim is to verify that fusion performed entirely in the encrypted domain reproduces the same outputs as plaintext fusion, up to negligible numerical error induced by approximate homomorphic encryption. Such a correctness validation is a necessary prerequisite before evaluating downstream perception performance on labeled benchmarks, as any accuracy gains or losses would be meaningless without first demonstrating that encryption itself does not alter fusion behavior. 
+
+Fusion Modes. For each frame and each vendor subset, fusion is executed under two computational settings: 1. Plaintext fusion: the fusion pipeline operates directly on unencrypted detection outputs, serving as the reference baseline 2. Homomorphic fusion: the identical fusion pipeline is executed over CKKS-encrypted representations of the detection payloads, where all aggregation operations are performed in the encrypted domain without access to plaintext data. In both settings, the underlying fusion logic, including moment aggregation, spatial binning, and hypothesis merging, remains unchanged. This ensures that any observed differences in output or runtime are solely attributable to the use of homomorphic encryption. Table 2 quantitatively compares the outputs of homomorphic fusion and plaintext fusion across different driving regimes. The results demonstrate near-perfect agreement between the two pipelines. Across all speed settings, the intersection-over-union (IoU) between bounding boxes produced by homomorphic and plaintext fusion exceeds 0.99997 on average, with the 95 th percentile and maximum values reaching 1.000 . This indicates that the spatial extent of the reconstructed detections is effectively identical in both settings. The absolute deviations in bounding box centers and sizes remain within sub-pixel to pixel-level precision, with 
+
+max |∆c| ≤ 0.5 pixels and max |∆s| ≤ 2.0 pixels across all experiments. Similarly, the differences in the recovered Gaussian standard deviations are negligible, with max |∆σx| and max |∆σy | remaining below 0.05 pixels. These small discrepancies arise from the approximate nature of CKKS-based homomorphic encryption, which introduces bounded numerical error during arithmetic operations. Importantly, the magnitude of these errors is insufficient to affect the geometric interpretation or downstream decision-making of the fused detections. 20 Sarus : Privacy-Preserving Multi-Vendor Perception Fusion via Homomorphic Encryption Table 2: Equivalence between homomorphic and plaintext fusion across driving regimes. 
+
+Speed N IoU(HE,Plain) BBox ∆ (px) ∆σ (px) 
+
+mean p95 max max |∆c| max |∆s| max |∆σx| max |∆σy |
+
+25 mph 3692 (= 142 × 26) 0.999989 1.000 1.000 0.5 1.0 0.048 0.022 35 mph 2600 (= 100 × 26) 0.999978 1.000 1.000 0.5 1.0 0.016 0.005 55 mph 1716 (= 66 × 26) 0.999991 1.000 1.000 0.0 2.0 0.016 0.001 
+
+Overall, these results confirm that the proposed homomorphic fusion pipeline preserves the correctness of plaintext fusion with high numerical fidelity, validating the use of encrypted computation for privacy-preserving multi-vendor perception. 
+
+5.2 Computational Performance Evaluation 
+
+To evaluate the computational behavior of Sarus , we conduct a controlled scaling study that varies both the number of detections per scene and the number of participating vendors. Specifically, we consider detection counts: 
+
+N ∈ { 1, 5, 10 , 15 , 20 , 25 },
+
+which correspond to increasing scene complexity, ranging from sparse to dense object configurations. For each setting, we simulate a collaborative perception environment with: 
+
+V ∈ { 2, 3, 4, 5}
+
+independent vendors, where each vendor contributes its own detection outputs. This setup allows us to systematically analyze how the computational cost of the pipeline scales with (i) the number of objects in the scene and (ii) the number of participating vendors. All measurements are reported separately for the three major stages of the pipeline: (i) vendor-side payload construction, (ii) encrypted multi-vendor fusion at the server, and (iii) fused detection reconstruction. Unless otherwise stated, cryptographic primitives (encryption and decryption) are excluded when analyzing algorithmic scaling behavior, in order to isolate the structural complexity of the proposed method. 
+
+5.2.1 Vendor-Side Payload Construction Runtime vs. Occupied Bins. Figure 8a shows the relationship between payload construction time and the number of occupied class-bin keys B. The results exhibit an almost perfectly linear trend, with a fitted model T = 4 .528 ·B +2 .446 
+
+and R2 = 0 .9995 .This provides strong empirical validation that vendor-side runtime scales as O(B), confirming that the dominant cost arises from per-bin operations such as encryption and serialization, rather than from the raw number of detections. 
+
+Stage-wise Runtime Breakdown. Figure 8b decomposes runtime into preprocessing, encryption, and serialization. Encryption clearly dominates across all detection counts, accounting for the majority of total runtime (e.g., ≈ 250 
+
+ms out of ≈ 360 ms at N = 25 ). Preprocessing remains negligible, while serialization contributes a moderate but consistent overhead. Importantly, both encryption and serialization scale proportionally with B, reinforcing that cryptographic operations are the primary performance bottleneck. 
+
+Homomorphic vs. Plaintext Runtime. Figure 8c compares homomorphic and plaintext payload construction on a logarithmic scale. While both exhibit increasing trends with N , homomorphic execution is several orders of magnitude slower due to CKKS encryption overhead. However, both curves remain approximately linear, indicating that homomorphic processing preserves the same asymptotic behavior as plaintext execution. 
+
+Relative Overhead of Homomorphic Encryption. Figure 8d shows the ratio of homomorphic to plaintext runtime. The overhead ranges from approximately 300 × at low detection counts to over 1000 × at higher densities. This increase is driven by the growth in occupied bins, which amplifies the number of expensive encryption operations. Despite this overhead, the linear scaling behavior ensures predictable performance, making the system amenable to optimization through batching, parameter tuning, or hardware acceleration. 21 Sarus : Privacy-Preserving Multi-Vendor Perception Fusion via Homomorphic Encryption  
+
+> (a) Total runtime as a function of occupied class-bin keys, show-ing a strong linear relationship ( R2= 0 .9995 ).
+> (b) Stage-wise runtime breakdown highlighting encryption as the dominant cost.
+> (c) Comparison between homomorphic and plaintext payload construction (log scale).
+> (d) Relative overhead of homomorphic encryption compared to plaintext.
+
+Figure 8: Vendor-side payload construction performance. 
+
+Discussion. Overall, the vendor-side evaluation confirms that payload construction scales linearly with the number of occupied bins rather than the number of detections. This distinction is critical, as spatial binning effectively compresses multiple detections into fewer encrypted representations, reducing the number of cryptographic operations. While homomorphic encryption introduces significant constant-factor overhead, the preservation of linear scaling ensures that the system remains predictable and scalable. These results validate the theoretical complexity of O(N ) + O(B)
+
+and highlight spatial aggregation as a key mechanism for controlling computational cost. 
+
+Network Overhead: The use of homomorphic encryption introduces a significant increase in payload size compared to plaintext representations due to ciphertext expansion and encoding overhead. In our experiments, the encrypted payload size grows from approximately 0.65 MB at N = 1 to over 26 MB at N = 25 , whereas the corresponding plaintext payload remains below 10 KB. This results in a ciphertext expansion factor of approximately 3 × 10 3, which stabilizes as the number of detections increases. Despite this large constant-factor overhead, the payload size grows approximately linearly with the number of occupied bins, ensuring predictable network cost as a function of scene complexity. Furthermore, the bin-wise aggregation strategy limits the number of transmitted ciphertexts, preventing excessive growth in communication overhead even in dense detection scenarios. This predictable scaling behavior is critical for deployment, as it enables accurate estimation of bandwidth requirements despite the inherent overhead of homomorphic encryption. 22 Sarus : Privacy-Preserving Multi-Vendor Perception Fusion via Homomorphic Encryption     
+
+> (a) HE fusion runtime as a function of occupied class-bin keys for V= 2 .
+> (b) HE fusion runtime as a function of occupied class-bin keys for V= 5 .
+> (c) Stage-wise breakdown highlighting ciphertext deserialization and serialization as the dominant costs.
+> (d) Comparison: homomorphic vs plaintext fusion (log scale), showing constant-factor overhead of encrypted computation.
+
+Figure 9: Server-side fusion performance. 
+
+5.2.2 Server-Side Encrypted Fusion 
+
+Figures 9a and 9b show that server-side HE fusion runtime scales linearly with the number of occupied class-bin keys 
+
+B. Comparing V = 2 and V = 5 , the slope increases with the number of vendors, confirming that the fusion cost grows proportionally with both B and V .Figure 9c provides a stage-wise breakdown, showing that the dominant cost arises from ciphertext deserialization and accumulation, followed by serialization of the fused result. In contrast, key collection and fusion arithmetic contribute negligibly to the overall runtime. Figure 9d compares homomorphic and plaintext fusion, demonstrating that while homomorphic processing introduces a significant constant-factor overhead, both exhibit similar growth trends with increasing problem size. Empirically, the server-side fusion runtime follows a highly linear trend with respect to the number of occupied bins, with fitted slopes of approximately 2.70 ms/bin for V = 2 and 4.35 ms/bin for V = 5 (R2 = 0 .9971 and 0.9990 ,respectively), confirming the expected growth with both B and the number of participating vendors V .
+
+5.2.3 Fused Detection Reconstruction 
+
+The vendor-side postprocessing results further validate the linear scaling behavior of the proposed pipeline. As shown in Figure 10, the total homomorphic runtime grows approximately linearly with the number of detections, which directly corresponds to the number of occupied bins. The stage-wise breakdown reveals that ciphertext decryption dominates the computational cost, while moment-to-geometry transformation and bin merging contribute only marginal overhead. 23 Sarus : Privacy-Preserving Multi-Vendor Perception Fusion via Homomorphic Encryption 
+
+> (a) Stage-wise breakdown of vendor-side postprocessing under homomorphic encryption. Decryption dominates runtime, while moment-to-geometry transformation and merging incur negligi-ble cost.
+> (b) Comparison of core vendor postprocessing runtime between homomorphic and plaintext execution. Homomorphic process-ing exhibits linear scaling with a higher constant factor, while plaintext remains near-negligible.
+
+Figure 10: Vendor-side postprocessing performance. Homomorphic processing introduces significant computational overhead due to ciphertext operations, while preserving linear scaling with respect to the number of occupied bins. In contrast, plaintext postprocessing remains negligible across all detection counts, highlighting that the additional cost is entirely attributable to homomorphic operations rather than the underlying fusion logic. Importantly, despite the large constant-factor overhead, the absence of super-linear growth confirms that the system scales predictably as O(B),making it suitable for deployment under bounded scene complexity. This result is particularly significant, as it demonstrates that the dominant cost arises from unavoidable cryptographic primitives rather than algorithmic inefficiencies, preserving scalability despite strong privacy guarantees. 
+
+5.3 Situational Awareness Evaluation 
+
+In cooperative perception settings, the primary objective is to maximize the coverage of objects in the scene by aggregating complementary detections across heterogeneous perception systems. Hence, we evaluate the situational awareness , rather than conventional detection accuracy. We conduct experiments on the KITTI [ 9] object detection benchmark and focus on the Car and Pedestrian classes, we use training split with corresponding annotations. The dataset provides synchronized RGB images and LiDAR point clouds, enabling evaluation of multi-modal perception and fusion. Camera-based detections are obtained using YOLOv8 [ 10 , 54 ], while LiDAR-based detections are produced using PointPillars [ 55 ] and PV-RCNN [ 11 ]. Evaluation is done on three configurations: (i) LiDAR-only baseline, (ii) 
+
+Sarus , and (iii) an Upper Bound corresponding to the union of camera and LiDAR detections. The LiDAR models are implemented using the OpenPCDet framework [ 56 ], which provides standardized training and inference pipelines for 3D object detection on KITTI. Pretrained models are used to ensure consistent and reproducible performance. We define 
+
+coverage as the fraction of ground-truth objects that are matched by at least one detection. Matching is determined using an Intersection-over-Union (IoU) threshold. We report results at IoU at 0.3, which provides a more appropriate measure of situational awareness while still requiring meaningful spatial overlap. For completeness, we also observe that higher IoU thresholds lead to lower apparent coverage due to reconstruction effects, rather than failure to detect objects. To analyze the spatial behavior of fusion, we stratify evaluation by object distance into three non-overlapping bins: 
+
+[0 , 20) m, [20 , 40) m, and ≥ 40 m. This partitioning captures the distance dependent sensing characteristics of camera and LiDAR modalities. Specifically, LiDAR performance degrades with increasing range due to reduced point cloud density and sparsity, whereas camera-based detection remains comparatively robust. This allows us to isolate regimes of modality complementarity and quantify the effectiveness of fusion under varying sensing conditions. The results in Figure 11 illustrate the distance dependent behavior of the fusion framework across both Pedestrian and Car classes. When paired with PointPillars (see Figure 11a and Figure 11b), the framework leads to substantial improvements in coverage across all distance ranges, particularly for pedestrians and at longer distances where LiDAR-based detection degrades due to reduced point cloud density. In contrast, when combined with PV-RCNN, which 24 Sarus : Privacy-Preserving Multi-Vendor Perception Fusion via Homomorphic Encryption     
+
+> (a) Pedestrian: Significant improvement in coverage when paired with PointPillars, and preserves performance with PV-RCNN, with gains primarily in near and mid ranges.
+> (b) Car: Substantial improvement for PointPillars and yields complementary gains at longer ranges even with PV-RCNN, re-flecting distance-dependent modality complementarity.
+
+Figure 11: Distance-based coverage analysis (IoU = 0.3). Coverage is reported across three distance ranges: [0 , 20) m, 
+
+[20 , 40) m, and ≥ 40 m. Sarus improves situational awareness by aggregating complementary detections from camera and LiDAR modalities. Gains are most pronounced when detectors operate in challenging regimes, such as long-range perception and LiDAR performance degrades due to sparsity. achieves higher baseline coverage, Sarus largely preserves the existing performance while recovering a portion of the remaining missed detections. Notably, even in this setting, consistent gains are observed at longer ranges for cars, highlighting the role of cross-modal complementarity under challenging sensing conditions. These results indicate that the effectiveness of fusion is governed by both the baseline detector performance and the distance-dependent sensing characteristics of the modalities. Overall, framework effectively aggregates complementary information across camera and LiDAR inputs, improving situational awareness while maintaining a compact, privacy-preserving representation. 
+
+# 6 Limitations and Future Work 
+
+Approximate Representation and Localization: Sarus relies on Gaussian moment aggregation over spatial bins to enable efficient and privacy-preserving fusion. This representation requires selecting class-specific spatial anchors S
+
+and strides s, defined with respect to a common reference frame Fcommon (see Definition 1). These parameters determine how detections are assigned to bins and therefore influence both communication cost and reconstruction fidelity. While the moment-based representation preserves object-level awareness, it introduces approximation during binning and reconstruction, which can degrade precise bounding-box localization. This effect is reflected in reduced performance at higher IoU thresholds. Future work will explore adaptive choices of S and s, learned or data-dependent binning strategies, and higher-order representations to better preserve geometric fidelity without sacrificing efficiency. 
+
+Dependence on Detection Quality: The effectiveness of Sarus is influenced by the quality and complementarity of the underlying perception models. When baseline detectors already achieve high coverage, the relative gains from fusion may diminish. Conversely, larger improvements are expected when modalities or vendors exhibit complementary failure modes. A promising direction is to incorporate confidence-aware or reliability-weighted fusion mechanisms that adapt dynamically to detector performance. 
+
+Admission, Compliance, and Verifiable Inputs: Sarus currently assumes that participating vendors submit payloads that are admissible for fusion: they follow the agreed schema, originate from legitimate participants, and conform to the public perception-fusion specification. In multi-vendor or adversarial settings, this assumption may not hold automatically. An important extension is to integrate Sarus with an admission and compliance layer based on credentialed vehicular communication, proof-carrying data, or succinct zero-knowledge compliance proofs. For example, a Hermes Seal–style mechanism could allow vendors to attach evidence that their submitted encrypted payloads satisfy a public specification without revealing raw sensor data, private detections, or proprietary model details. This would strengthen trust in the cooperative perception pipeline while preserving the modular role of Sarus as the encrypted fusion layer. 
+
+Key Management: In our current formulation, the homomorphic encryption context, public encryption material, and decryption authority are assumed to be established before fusion begins. This leaves open important system-design 25 Sarus : Privacy-Preserving Multi-Vendor Perception Fusion via Homomorphic Encryption questions, including which party generates the homomorphic encryption keys, which participants are authorized to decrypt the fused result, how secret keys are protected, and how key rotation or revocation should be handled when vendors join or leave the cooperative perception group. Future work will investigate threshold and multi-key variants of homomorphic encryption, where decryption of the fused output requires participation from multiple authorized parties rather than a single trusted key holder. Another promising direction is to combine encrypted aggregation with secure multi-party computation (MPC), enabling stronger control over key custody, joint decryption, and access policies for fused perception outputs. 
+
+Limited Modalities and Datasets: Our evaluation focuses on camera and LiDAR fusion on the KITTI dataset. While this provides a controlled and reproducible benchmark, real-world deployments may involve additional modalities, such as radar, and more diverse operating environments. Extending Sarus to broader multi-modal and multi-dataset settings, including large-scale autonomous driving benchmarks, is an important direction for future work. 
+
+System-Level Integration: Sarus is currently evaluated as a perception-level fusion module. Integrating it into full autonomous driving stacks, including tracking, prediction, planning, and decision-making, remains an open challenge. Future work will investigate how improved situational awareness from privacy-preserving fusion translates into downstream safety and robustness gains in closed-loop systems. 
+
+# 7 Conclusion 
+
+In this work, we presented Sarus , a privacy-preserving framework for multi-vendor cooperative perception that enables secure aggregation of inference-time detection outputs using CKKS-based homomorphic encryption. By introducing a moment-based representation over a shared spatial lattice, Sarus enables efficient fusion of structured perception outputs without requiring access to raw detections or proprietary model information. The proposed design eliminates the need for plaintext sharing, addressing key privacy and confidentiality challenges in multi-vendor perception systems. We showed that the framework achieves scalable performance through spatial binning, with vendor payload construction scaling linearly with the number of detections and server-side fusion scaling as O(BV ) with respect to the number of occupied bins and vendors. Experimental results demonstrate that homomorphic encryption introduces only a bounded constant-factor overhead, while maintaining linear scaling in practice. These findings indicate that privacy-preserving multi-vendor perception fusion is feasible for real-time deployment when statistical compression and spatial sparsity are jointly exploited. More broadly, this work highlights the importance of inference-time privacy in collaborative AI systems, where sensitive outputs rather than training data must be protected. Future work includes extending the framework to stronger adversarial models, exploring alternative cryptographic primitives with improved efficiency, and integrating the approach into real-world autonomous driving and V2X systems. 
+
+# References 
+
+[1] Qi Chen, Sihai Tang, Qing Yang, and Song Fu. Cooper: Cooperative Perception for Connected Autonomous Vehicles Based on 3D Point Clouds. In 2019 IEEE 39th International Conference on Distributed Computing Systems (ICDCS) , pages 514–524, 2019. https://doi.org/doi:10.1109/ICDCS.2019.00058 .[2] Tsun-Hsuan Wang, Sivabalan Manivasagam, Ming Liang, Bin Yang, Wenyuan Zeng, and Raquel Urtasun. V2VNet: Vehicle-to-vehicle Communication for Joint Perception and Prediction. In European conference on computer vision , pages 605–621. Springer, 2020. https://doi.org/10.48550/arXiv.2008.07519 .[3] Runsheng Xu, Hao Xiang, Xin Xia, Xu Han, Jinlong Li, and Jiaqi Ma. OPV2V: An Open Benchmark Dataset and Fusion Pipeline for Perception with Vehicle-to-Vehicle Communication. In 2022 International Conference on Robotics and Automation (ICRA) , pages 2583–2589, 2022. https://doi.org/doi:10.1109/ICRA46639. 2022.9812038 .[4] Chao Xiang, Chen Feng, Xiaopo Xie, Botian Shi, Hao Lu, Yisheng Lv, Mingchuan Yang, and Zhendong Niu. Multi-Sensor Fusion and Cooperative Perception for Autonomous Driving: A Review. IEEE Intelligent Transportation Systems Magazine , 15(5):36–58, 2023. https://doi.org/doi:10.1109/MITS.2023.3283864 .[5] Seong-Woo Kim, Baoxing Qin, Zhuang Jie Chong, Xiaotong Shen, Wei Liu, Marcelo H. Ang, Emilio Frazzoli, and Daniela Rus. Multivehicle cooperative driving using cooperative perception: Design and experimental validation. 
+
+IEEE Transactions on Intelligent Transportation Systems , 16(2):663–680, 2015. https://doi.org/doi: 10.1109/TITS.2014.2337316 .26 Sarus : Privacy-Preserving Multi-Vendor Perception Fusion via Homomorphic Encryption [6] Bin Dai, Fanglin Xu, Yuanyuan Cao, and Yang Xu. Hybrid sensing data fusion of cooperative perception for autonomous driving with augmented vehicular reality. IEEE Systems Journal , 15(1):1413–1422, 2021. 
+
+https://doi.org/doi:10.1109/JSYST.2020.3007202 .[7] Martin Boehme, Marco Stang, Ferdin Muetsch, and Eric Sax. TalkyCars: A Distributed Software Platform for Cooperative Perception. In 2020 IEEE Intelligent Vehicles Symposium (IV) , pages 701–707, 2020. https: //doi.org/doi:10.1109/IV47402.2020.9304630 .[8] University of Michigan Transportation Research Institute. Smart intersection project. https://sip.umtri. umich.edu/ , 2023. Accessed: 2026. [9] KITTI. KITTI Vision Benchmark Suite. https://www.cvlibs.net/datasets/kitti/ , 2012. Accessed: 2026. [10] Joseph Redmon, Santosh Divvala, Ross Girshick, and Ali Farhadi. You Only Look Once: Unified, Real-Time Object Detection. In 2016 IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , pages 779–788, 2016. https://doi.org/10.1109/CVPR.2016.91 .[11] Shaoshuai Shi, Chaoxu Guo, Li Jiang, Zhe Wang, Jianping Shi, Xiaogang Wang, and Hongsheng Li. PV-RCNN: Point-Voxel Feature Set Abstraction for 3D Object Detection. 2021. https://doi.org/10.48550/arXiv. 1912.13192 .[12] Apostol Vassilev, Alina Oprea, Alice Fordyce, Hyrum Anderson, Xander Davies, and Maia Hamin. Adver-sarial machine learning: A taxonomy and terminology of attacks and mitigations, 2025. National Institute of Standards and Technology Gaithersburg, MD, NIST Trustworthy and Responsible AI, NIST AI 100-2e2025 https://doi.org/10.6028/NIST.AI.100-2e2025. [13] Si Chen, Ruoxi Jia, and Guo-Jun Qi. Improved Techniques for Model Inversion Attacks . 2020. [14] Xi Wu, Matthew Fredrikson, Somesh Jha, and Jeffrey F Naughton. A Methodology for Formalizing Model-Inversion Attacks. In 2016 IEEE 29th computer security foundations symposium (CSF) , pages 355–370. IEEE, 2016. https://doi.org/doi:10.1109/CSF.2016.32 .[15] Sayanton V Dibbo. Sok: Model inversion attack landscape: Taxonomy, challenges, and future roadmap. In 
+
+2023 IEEE 36th Computer Security Foundations Symposium (CSF) , pages 439–456. IEEE, 2023. https: //doi.org/doi:10.1109/CSF57540.2023.00027 .[16] Wiz. Wiz Discovers Flaws in GenAI Models Enabling Customer Data Theft. https://www. infosecurity-magazine.com/news/wiz-discovers-flaws-generative-ai/ , 2024. Accessed: 2026. [17] Jung Hee Cheon, Andrey Kim, Miran Kim, and Yongsoo Song. Homomorphic encryption for arithmetic of approximate numbers. In International conference on the theory and application of cryptology and information security , pages 409–437. Springer, 2017. [18] Alessandro Chiesa and Eran Tromer. Proof-carrying data and hearsay arguments from signature cards. In 
+
+Innovations in Computer Science (ICS) , 2010. [19] IEEE Standard for Wireless Access in Vehicular Environments—Security Services for Application and Manage-ment Messages, 2022. [20] Munawar Hasan, Apostol Vassilev, Edward Griffor, and Thoshitha Gamage. Hermes Seal: Zero-Knowledge Assurance for Autonomous Vehicle Communications. arXiv preprint arXiv:2603.26343 , 2026. https://doi. org/10.48550/arXiv.2603.26343 .[21] Shaowu Zheng, Chong Xie, Shanhu Yu, Ming Ye, Ruyi Huang, and Weihua Li. A robust strategy for roadside cooperative perception based on multi-sensor fusion. In 2022 International Conference on Sensing, Measurement & Data Analytics in the era of Artificial Intelligence (ICSMD) , pages 1–6. IEEE, 2022. https://doi.org/10. 1109/ICSMD57530.2022.10058282 .[22] Eduardo Arnold, Mehrdad Dianati, Robert de Temple, and Saber Fallah. Cooperative perception for 3d object detection in driving scenarios using infrastructure sensors. IEEE Transactions on Intelligent Transportation Systems , 23(3):1852–1864, 2022. https://doi.org/10.1109/TITS.2020.3028424 .[23] Runsheng Xu, Hao Xiang, Zhengzhong Tu, Xin Xia, Ming-Hsuan Yang, and Jiaqi Ma. V2X-ViT: Vehicle-to-Everything Cooperative Perception with Vision Transformer. In Shai Avidan, Gabriel Brostow, Moustapha Cissé, Giovanni Maria Farinella, and Tal Hassner, editors, Computer Vision – ECCV 2022 , pages 107–124, Cham, 2022. Springer Nature Switzerland. https://doi.org/10.48550/arXiv.2203.10638 .[24] Yunsheng Ma, Juanwu Lu, Can Cui, Sicheng Zhao, Xu Cao, Wenqian Ye, and Ziran Wang. MACP: Efficient model adaptation for cooperative perception. In Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision , pages 3373–3382, 2024. https://doi.org/10.48550/arXiv.2310.16870 .27 Sarus : Privacy-Preserving Multi-Vendor Perception Fusion via Homomorphic Encryption [25] Andreas Rauch, Felix Klanner, Ralph Rasshofer, and Klaus Dietmayer. Car2X-based perception in a high-level fusion architecture for cooperative perception systems. In 2012 IEEE Intelligent Vehicles Symposium , pages 270–275, 2012. https://doi.org/10.1109/IVS.2012.6232130 .[26] Jinlong Li, Runsheng Xu, Xinyu Liu, Jin Ma, Zicheng Chi, Jiaqi Ma, and Hongkai Yu. Learning for Vehicle-to-Vehicle Cooperative Perception Under Lossy Communication. IEEE Transactions on Intelligent Vehicles ,8(4):2650–2660, 2023. https://doi.org/10.1109/TIV.2023.3260040 .[27] Chuheng Wei, Guoyuan Wu, and Matthew J. Barth. Cooperative Perception for Automated Driving: A Survey of Algorithms, Applications, and Future Directions. Proceedings of the IEEE , pages 1–27, 2025. https: //doi.org/10.1109/JPROC.2025.3608874 .[28] Lei Zhang, Binglu Wang, Yongqiang Zhao, Yuan Yuan, Tianfei Zhou, and Zhijun Li. Collaborative Multimodal Fusion Network for Multiagent Perception. IEEE Transactions on Cybernetics , 55(1):486–498, 2025. https: //doi.org/10.1109/TCYB.2024.3491756 .[29] Yang Zhou, Cai Yang, Ping Wang, Chao Wang, Xinhong Wang, and Nguyen Ngoc Van. ViT-FuseNet: Multimodal Fusion of Vision Transformer for Vehicle-Infrastructure Cooperative Perception. IEEE Access , 12:31640–31651, 2024. https://doi.org/10.1109/ACCESS.2024.3368404 .[30] Junyang He, Xiaoheng Deng, Jinsong Gui, Tao Zhang, and Xiangjian He. MDNet: Multimodal Cooperative Perception via Spatial Alignment of Modal Decision-Making. IEEE Internet of Things Journal , 12(11):16142– 16154, 2025. https://doi.org/10.1109/JIOT.2025.3531145 .[31] Hongbo Yin, Daxin Tian, Chunmian Lin, Xuting Duan, Jianshan Zhou, Dezong Zhao, and Dongpu Cao. V2VFormer++: Multi-Modal Vehicle-to-Vehicle Cooperative Perception via Global-Local Transformer. IEEE Transactions on Intelligent Transportation Systems , 25(2):2153–2166, 2024. https://doi.org/10.1109/ TITS.2023.3314919 .[32] Hui Zhang, Guiyang Luo, Yuanzhouhan Cao, Yi Jin, and Yidong Li. Multi-Modal Virtual-Real Fusion based Transformer for Collaborative Perception. In 2022 IEEE 13th International Symposium on Parallel Architec-tures, Algorithms and Programming (PAAP) , pages 1–6, 2022. https://doi.org/10.1109/PAAP56126.2022. 10010640 .[33] Lantao Li, Kang Yang, Wenqi Zhang, Xiaoxue Wang, and Chen Sun. RG-Attn: Radian Glue Attention for Multi-modal Multi-agent Cooperative Perception. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 1763–1772, 2025. https://doi.org/10.48550/arXiv.2501.1680 .[34] Bin Lu, Xinyu Xiao, Changzhou Zhang, Yang Zhou, Zhiyu Xiang, Hangguan Shan, and Eryun Liu. Privacy-Preserving V2X Collaborative Perception Integrating Unknown Collaborators. In Proceedings of the AAAI Conference on Artificial Intelligence , volume 39, pages 5802–5810, 2025. [35] Hanwen Jiang, Shijun Zhou, Konglin Zhu, Artur Andrzejak, and Yi Gong. A Multimodal Collaborative Perception Framework in Challenging Environments. In 2025 9th IEEE International Conference on Network Intelligence and Digital Content (IC-NIDC) , pages 62–66, 2025. https://doi.org/10.1109/IC-NIDC67200.2025. 11390536 .[36] Brendan McMahan, Eider Moore, Daniel Ramage, Seth Hampson, and Blaise Aguera y Arcas. Communication-Efficient Learning of Deep Networks from Decentralized Data. In Artificial intelligence and statistics , pages 1273–1282. Pmlr, 2017. https://doi.org/10.48550/arXiv.1602.05629 .[37] Peter Kairouz and H Brendan McMahan. Advances and Open Problems in Federated Learning. Foundations and trends in machine learning , 14(1-2):1–210, 2021. https://doi.org/10.48550/arXiv.1912.04977 .[38] Sai Praneeth Karimireddy, Satyen Kale, Mehryar Mohri, Sashank Reddi, Sebastian Stich, and Ananda Theertha Suresh. SCAFFOLD: Stochastic Controlled Averaging for Federated Learning. In International conference on machine learning , pages 5132–5143. PMLR, 2020. https://doi.org/10.48550/arXiv.1910.06378 .[39] Priyanka Mary Mammen. Federated Learning: Opportunities and Challenges. arXiv preprint arXiv:2101.05428 ,2021. https://doi.org/10.48550/arXiv.2101.05428 .[40] Zhenrong Zhang, Jianan Liu, Xi Zhou, Tao Huang, Qing-Long Han, Jingxin Liu, and Hongbin Liu. On the Federated Learning Framework for Cooperative Perception. IEEE Robotics and Automation Letters , 9(11):9423– 9430, 2024. https://doi.org/10.1109/LRA.2024.3457374 .[41] Mohamed K. Abdel-Aziz, Cristina Perfecto, Sumudu Samarakoon, Mehdi Bennis, and Walid Saad. Vehicular Cooperative Perception Through Action Branching and Federated Reinforcement Learning. IEEE Transactions on Communications , 70(2):891–903, 2022. https://doi.org/10.1109/TCOMM.2021.3126650 .[42] Ehsan Hesamifard, Hassan Takabi, and Mehdi Ghasemi. CryptoDL: Deep Neural Networks over Encrypted Data. 
+
+arXiv preprint arXiv:1711.05189 , 2017. https://doi.org/10.48550/arXiv.1711.05189 .28 Sarus : Privacy-Preserving Multi-Vendor Perception Fusion via Homomorphic Encryption [43] Runhua Xu, James B.D. Joshi, and Chao Li. Cryptonn: Training neural networks over encrypted data. In 
+
+2019 IEEE 39th International Conference on Distributed Computing Systems (ICDCS) , pages 1199–1209, 2019. 
+
+https://doi.org/10.1109/ICDCS.2019.00121 .[44] Raphael Bost, Raluca Ada Popa, Stephen Tu, and Shafi Goldwasser. Machine Learning Classification over Encrypted Data. Cryptology ePrint Archive, Paper 2014/331, 2014. https://doi.org/10.14722/ndss.2015. 23241 .[45] Jungho Moon, Dongwoo Yoo, Xiaoqian Jiang, and Miran Kim. THOR: Secure Transformer Inference with Homo-morphic Encryption. In Proceedings of the 2025 ACM SIGSAC Conference on Computer and Communications Security , pages 3765–3779, 2025. https://doi.org/10.1145/3719027.3765150 .[46] Dongwoo Kim and Cyril Guyot. Optimized Privacy-Preserving CNN Inference With Fully Homomorphic Encryption. IEEE Transactions on Information Forensics and Security , 18:2175–2187, 2023. https://doi. org/110.1109/TIFS.2023.3263631 .[47] Shafi Goldwasser and Silvio Micali. Probabilistic encryption. Journal of Computer and System Sciences ,28(2):270–299, 1984. [48] Jonathan Katz and Yehuda Lindell. Introduction to Modern Cryptography . CRC Press, 3 edition, 2020. [49] Alberto Elfes. Using occupancy grids for mobile robot perception and navigation. Computer , 22(6):46–57, 1989. [50] Calibrating uncertainties in object localization task. [51] Zining Wang, Di Feng, Yiyang Zhou, Lars Rosenbaum, Fabian Timm, Klaus Dietmayer, Masayoshi Tomizuka, and Wei Zhan. Inferring Spatial Uncertainty in Object Detection. arXiv preprint arXiv:2003.03644 , 2020. [52] Apostol Vassilev, Munawar Hasan, Edward Griffor, Honglan Jin, Pavel Piliptchak, Mahima Arora, and Thoshitha Gamage. On the Assessment of Sensitivity of Autonomous Vehicle Perception. arXiv preprint arXiv:2602.00314 ,2026. https://doi.org/10.48550/arXiv.2602.00314 .[53] VTTI. Virginia Tech Transportation Institute. [54] Ultralytics. Ultralytics YOLO. Accessed: 2026. [55] Alex H. Lang, Sourabh Vora, Holger Caesar, Lubing Zhou, Jiong Yang, and Oscar Beijbom. PointPillars: Fast Encoders for Object Detection from Point Clouds. 2019. https://doi.org/10.48550/arXiv.1812.05784 .[56] OpenPCDet Development Team. OpenPCDet: An Open-source Toolbox for 3D Object Detection from Point Clouds. https://github.com/open-mmlab/OpenPCDet , 2020. Accessed: 2026. 29
