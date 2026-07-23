@@ -1,0 +1,1628 @@
+Title: End-to-End Differential Privacy in Training Deep Neural Network Classifiers
+
+URL Source: https://arxiv.org/pdf/2607.19580v1
+
+Published Time: Thu, 23 Jul 2026 00:18:19 GMT
+
+Number of Pages: 32
+
+Markdown Content:
+# End-to-End Differential Privacy in Training Deep Neural Network Classifiers 
+
+Huaiyuan Rao hrao43@gatech.edu 
+
+School of Electrical and Computer Engineering, Georgia Institute of Technology Atlanta, GA 30332, USA 
+
+Calvin Hawkins chawkins64@gatech.edu 
+
+School of Electrical and Computer Engineering, Georgia Institute of Technology Atlanta, GA 30332, USA 
+
+Alexander Benvenuti abenvenuti3@gatech.edu 
+
+School of Electrical and Computer Engineering, Georgia Institute of Technology Atlanta, GA 30332, USA 
+
+Matthew Hale matthale@gatech.edu 
+
+School of Electrical and Computer Engineering, Georgia Institute of Technology Atlanta, GA 30332, USA 
+
+Abstract 
+
+Differentially private machine learning enables model training on sensitive data while en-suring that individual data is unlikely to be recoverable from the parameters of the resulting model. However, existing work often privatizes both training inputs and their labels, and these protections may be conservative when labels are public or can be safely made pub-lic. Therefore, in this work we propose a novel private training framework that instead privatizes training inputs while keeping labels public. We consider neural networks with softmax output layers, and thus the mapping from training inputs to the output of the softmax layer is a mapping onto the unit simplex. We randomize softmax outputs during training by applying the Dirichlet mechanism to enforce differential privacy for the train-ing inputs, hence the “end-to-end” label. Because training data is reused across multiple training epochs, we use the notion of R´ enyi differential privacy to formulate tight bounds on the strength of privacy provided by the Dirichlet mechanism across repeated uses. We show empirically that we attain new state-of-the-art accuracy when training from scratch on CIFAR10, MNIST, MedMNIST, FashionMNIST, and SVHN across all privacy budgets evaluated. Notably, when implementing ( ϵ, δ )-differential privacy with δ = 10 −5, we im-prove the prior state-of-the-art accuracy from 78 .37% to 88 .17% at ϵ = 4 on CIFAR10, and our approach has 82 .96% accuracy even for ϵ = 1, which significantly outperforms prior work. 
+
+Keywords: differential privacy, R´ enyi differential privacy, Dirichlet mechanism, unit simplex, classification  
+
+> ©2026 Huaiyuan Rao, Calvin Hawkins, Alexander Benvenuti, Matthew Hale. License: CC-BY 4.0, see https://creativecommons .org/licenses/by/4 .0/ .arXiv:2607.19580v1 [cs.LG] 21 Jul 2026
+
+Rao, Hawkins, Benvenuti and Hale                            
+
+> Input x∈X
+> Model fθ:X→Rd
+> Logits z=fθ(x)∈Rd
+> Softmax Layer
+> s(z) = softmax( z)∈Sd−1
+> Dirichlet sample ˜p∼Dir( rs (z) + α1d)
+> NLL Loss ℓ=−log(˜ py)True label y
+> Privacy mechanism
+> ∇θℓ
+> Backprop. (SGD)
+
+(a) Training pipeline with the Dirichlet mecha-nism. 1 2 3 4 5 6 7 850 60 70 80 90 Privacy budget ϵ
+
+> Test Accuracy (%)
+> DP-SGD (De et al., 2022)
+> Monir and Ghinita (2024)
+> This work
+
+(b) Test accuracy vs. privacy budget on CI-FAR10. 
+
+Figure 1: Overview of the proposed private training framework. (a) The model fθ first outputs logits that pass through a softmax layer, then a private element of the unit simplex is sampled from a Dirichlet distribution, and it is used to compute the Negative Log-likelihood (NLL) loss. Then the loss is used to compute gra-dients and backpropagate to update the model parameters θ. (b) On CIFAR10, our method consistently outperforms DP-SGD (De et al., 2022) and Monir and Ghinita (2024) across all privacy budgets ϵ. For example, our method achieves over 82% accuracy when ϵ = 1, while the prior work (Monir and Ghinita, 2024) achieves 79% accuracy when ϵ = 4 .46. 
+
+1 Introduction 
+
+Machine learning (ML) models trained on sensitive information such as medical images, biometric data, or financial records are vulnerable to privacy attacks. Examples include reconstruction attacks (Rigaki and Garcia, 2023), which recover sensitive data from learned parameters, or membership inference attacks (Shokri et al., 2017), which determine whether a specific individual’s record was included in a training data set. Other types of attacks are described in (Fredrikson et al., 2015; Ganju et al., 2018; Melis et al., 2019). Differential privacy (Dwork et al., 2014) is a general-purpose privacy framework that protects against many such attacks, and differentially private ML has been used to train models in such a way that an adversary cannot reliably use a model to draw accurate conclusions about the data used in training it. In this paper, we focus on using differential privacy in training deep neural networks for classification tasks. In some real-world applications, training inputs and the labels for those inputs do not have the same privacy risks. For example, in medical imaging, chest X-rays used for pneu-monia detection may contain highly sensitive patient biometric information (Packh¨ auser et al., 2022), whereas the associated diagnostic labels may already be accessible via public health registries (Wang et al., 2017). In recommender systems, users publicly disclose their preferences through item ratings, while their personal social and demographic information (e.g., gender, political affiliation, and ethnicity) may be considered sensitive (Bhagat et al., 
+
+2End-to-End Differential Privacy in Training Deep Neural Network Classifiers 
+
+2014). In financial applications, individual transaction histories are sensitive, while the categories such as risk tiers are often publicly defined. For example, in credit underwriting, borrowers are often publicly grouped into established tiers like “Prime”, “Near-Prime”, or “Subprime” (Bazarbash, 2019). In these and other applications, the training inputs often contain sensitive information about an individual, while the labels of that data are not sensitive and/or may already be public. Motivated by such applications, the question we address is the following: 
+
+Can we train ML models that provide differential privacy to sensitive training inputs while maintaining high accuracy of the models? 
+
+In this paper, we introduce a novel differentially private learning framework that injects calibrated randomness into the outputs of softmax layers, which enables model training with private neural network inputs and public labels. Our approach decomposes the train-ing process into two stages: (i) computing a distribution that enforces a desired level of differential privacy, and (ii) randomizing softmax outputs at every training step by using the Dirichlet mechanism (Ponnoprat, 2023), which perturbs softmax outputs when comput-ing the training loss in order to enforce differential privacy. An illustration of the proposed framework is shown in Figure 1a. As shown in Figure 1b, our method significantly outper-forms DP-SGD (De et al., 2022) and other prior work (Monir and Ghinita, 2024) for all of the privacy budgets that were evaluated. 
+
+1.1 Related Work 
+
+Differentially private stochastic gradient descent (DP-SGD) (Abadi et al., 2016) is a widely used differentially private ML algorithm, which clips per-sample gradients and adds cal-ibrated Gaussian noise to the gradient at each training step. While DP-SGD provides strong privacy guarantees to both training inputs and their labels, it introduces a substan-tial privacy-utility tradeoff: even at moderate privacy budgets, there is a large accuracy gap between models trained with DP-SGD and their non-private baselines. Many follow-up works have sought to reduce the privacy-utility gap of DP-SGD (De et al., 2022; Tramer and Boneh, 2020; Bu et al., 2023; Sander et al., 2023; Papernot et al., 2021; Cheng et al., 2022). One recent body of work has privatized only labels while leaving training inputs public, which has been termed “Label-DP” (Ghazi et al., 2021; Malek Esmaeili et al., 2021; Busa-Fekete et al., 2023; Ghazi et al., 2023; Esfandiari et al., 2022). By assuming that training inputs are non-sensitive, Label-DP reduces the amount of noise injected during training and achieves substantially better accuracy than DP-SGD. The complementary case, in which inputs are sensitive but labels are public, has received less attention. Several works (Fan, 2018; Croft et al., 2021; Luo et al., 2025; Xue et al., 2021) privatize input data before applying a training procedure, rather than developing a new training procedure that is designed to enforce privacy. For example, Fan (2018) introduces a differentially private pixelization method that partitions an image into grid cells and perturbs each cell’s average pixel value with Laplace noise. However, the methods in (Fan, 2018; Croft et al., 2021; Luo et al., 2025; Xue et al., 2021) release a private image rather than a trained ML model, and their evaluations focus on re-identification resistance rather than classification accuracy. The goals of that work are different from the current paper, and a direct comparison would be ill-defined. The closest prior work to ours is Monir 
+
+> 3Rao, Hawkins, Benvenuti and Hale
+
+and Ghinita (2024), which addresses the setting of sensitive inputs and public labels by injecting calibrated Gaussian noise into the penultimate layer of a deep neural network in a way similar to DP-SGD. However, the variance of privacy noise scales with layer width, which can harm accuracy, and per-sample gradient clipping introduces additional computational cost. We show in Section 4.2 that our approach provides a 45 .31% reduction in the classification error on CIFAR10 relative to Monir and Ghinita (2024) when ϵ = 4 .0. Privacy amplification by subsampling (Wang et al., 2019; Mironov et al., 2019) allows DP-SGD-style methods to use the moments accountant to obtain privacy guarantees over many training steps that are stronger than standard composition-type results for differential privacy. The core idea is to apply a privacy mechanism to randomly sampled minibatches from data sets and track the log moment generating function of the privacy loss. Composing these moments ensures a tight bound on the accumulated privacy loss across all training steps. Most existing work based on subsampling uses the Gaussian mechanism, which is the standard mechanism used in DP-SGD. To the best of our knowledge, there is no prior work that has used the Dirichlet mechanism (Ponnoprat, 2023) under subsampling. Our work does so, and thus we address not only the setting of learning from sensitive inputs with public labels, but we also provide the first subsampled privacy analysis of the Dirichlet mechanism. 
+
+1.2 Summary of Contributions 
+
+In this work, we make the following contributions: 
+
+• We propose a novel differentially private training framework that generates private soft-max outputs using the Dirichlet mechanism (Algorithm 1). 
+
+• We provide a formal privacy analysis using subsampling amplification that gives a tight bound on the privacy guarantees of Algorithm 1 (Theorem 10). 
+
+• We show that, on average, the implementation of privacy preserves the direction of gra-dients while scaling their magnitude, and we use this result to demonstrate how to select learning rates to negate this scaling (Theorem 11). 
+
+• We empirically evaluate our method on several benchmark data sets and show that it outperforms prior work across all evaluated privacy budgets (Section 4). A depiction of these results is shown in Figure 1b. Our approach provides a 45 .31% reduction in the classification error on CIFAR10 relative to the method in (Monir and Ghinita, 2024) when ϵ = 4 .0. 
+
+1.3 Notation 
+
+We use R to denote the real numbers, R≥0 to denote the non-negative real numbers, and N to denote the positive integers. For n ∈ N, we use [ n] to denote the set {1, . . . , n }. We use |S| to denote the cardinality of a finite set S. For z ∈ Rd, we use s(z) to denote the softmax func-tion with input z, where the ith component of the output of the softmax function is defined as si(z) = exp( zi)P   
+
+> j∈[d]exp( zj)
+
+. For x > 0, the gamma function is defined as Γ( x) = R ∞ 
+
+> 0
+
+tx−1e−tdt ,and we write ψ(x) = ddx log(Γ( x)) and ψ′(x) = d2 
+
+> dx 2
+
+log(Γ( x)) for the digamma and trigamma functions, respectively. We use DKL to denote the Kullback–Leibler (KL) divergence. For 
+
+> 4End-to-End Differential Privacy in Training Deep Neural Network Classifiers
+
+v ∈ Rd 
+
+> ≥0
+
+the multivariate beta function is defined as B(v) = dQ
+
+> i=1
+
+Γ( vi)
+
+
+
+Γ
+
+ dP
+
+> i=1
+
+vi
+
+
+
+. For 
+
+q ∈ (0 , 1), we use Bernoulli( q) to denote the Bernoulli distribution with parameter q, where a random variable drawn from this distribution takes the value 1 with probability q and takes the value 0 with probability 1 − q. For a non-empty, finite set S, we use Uniform( S)to denote the uniform distribution over S, where each element s ∈ S has probability 1 /|S|.We define 1d = [1 , . . . , 1] ⊤ ∈ Rd. By convention, we have   nm
+
+ = 0 if n < m . We use the Kronecker delta function δij , where δij = 1 if i = j and δij = 0 if i̸ = j. We use Cov( ·, ·) to denote the covariance of two random variables. Lastly, ∥ · ∥ 2 is the ℓ2 norm, and ∥ · ∥ ∞ is the ℓ∞ norm, both are norms on Euclidean spaces. 
+
+2 Preliminaries 
+
+In this section, we review the background needed for the rest of the paper. The final layer of a classification network typically outputs a vector of real-valued scores called logits. These logits can be any real number, which makes them difficult to interpret as probabilities that an input belongs to each class. The softmax function maps logits to a probability distribution over classes, i.e., a vector with non-negative entries that sum to one. Such a vector is an element of the unit simplex. 
+
+Definition 1 (Unit Simplex) Let d ∈ N. The unit simplex in Rd is denoted by Sd−1 and is defined as the set of all element-wise non-negative vectors of length d whose entries sum to 1, i.e., 
+
+Sd−1 =
+
+
+
+p ∈ Rd :
+
+> d
+
+X
+
+> i=1
+
+pi = 1 , p j ≥ 0 for all j ∈ [d]
+
+
+
+.
+
+We will sometimes refer to elements of the simplex as “probability vectors”. We consider data sets of the form D = {(xi, y i)}ni=1 for some n ∈ N, where xi is a training input and yi is its label for each i ∈ [n]. Let D = X × Y denote the collection of all data sets of interest, where X is the collection of all training inputs and Y is the collection of all labels. We do not make any assumptions that D is a particular type of space (e.g., Euclidean). The goal of differential privacy is to randomize data in a way that makes two “similar” pieces of sensitive data produce outputs that are “approximately indistinguishable”. Given two data sets D and D′, the notion of “similarity” is formalized by an adjacency relation (Dwork et al., 2014). 
+
+Definition 2 (Adjacent Data Sets) Let D, D′ ∈ D. Then D and D′ are adjacent if one can be obtained from the other by adding or removing a single data point; that is, either 
+
+D′ = D ∪ { (x, y )} or D = D′ ∪ { (x, y )} for some data point (x, y ). We write Adj (D, D′) = 1 
+
+if D and D′ are adjacent and Adj (D, D′) = 0 otherwise. 
+
+Definition 2 states that two data sets are adjacent if they differ in a single data point. The notion of “approximately indistinguishable” is made precise by the definition of differential privacy itself. 
+
+> 5Rao, Hawkins, Benvenuti and Hale
+
+Definition 3 (Differential Privacy, Dwork et al. 2014) Let δ ∈ [0 , 1) and ϵ > 0 be given. A randomized mechanism M : D → Sd−1 is (ϵ, δ )-differentially private if for every pair of data sets D, D′ ∈ D satisfying Adj (D, D′) = 1 and every measurable output set 
+
+T ⊆ Sd−1, we have 
+
+P[M(D) ∈ T ] ≤ eϵ · P[M(D′) ∈ T ] + δ. 
+
+If δ = 0 , then M is said to be ϵ-differentially private. 
+
+In Definition 3, smaller values of ϵ and δ correspond to stronger privacy guarantees. Typical values of ϵ are 0 .1 to 10 (Hsu et al., 2014), and typical values of δ are chosen to be much less than 1 
+
+> n
+
+. An appealing property of differential privacy is that it is immune to post-processing in the sense that arbitrary computations on differentially private data do not weaken its privacy guarantees. Given a data set D = {(xi, y i)}ni=1 ∈ D, suppose that each entry belongs to an individual and the data set is used to train a model while keeping D differentially private. Then, Definitions 2 and 3 guarantee that given the trained model or an output it generates, an adversary cannot reliably determine if a specific individual’s data is in D.We next introduce R´ enyi differential privacy (RDP), which is a generalization of ( ϵ, δ )-differential privacy. 
+
+Definition 4 (R´ enyi Differential Privacy (RDP), Mironov 2017) Fix λ > 1. A ran-domized mechanism M : D → Sd−1 is (λ, ˆϵ)-R´ enyi differentially private if for all pairs of data sets D, D′ ∈ D satisfying Adj (D, D′) = 1 , we have 
+
+Dλ
+
+ M(D) ∥ M (D′) := 1
+
+λ − 1 log Ey∼M (D)
+
+ pM(D)(y)
+
+pM(D′)(y)
+
+λ−1
+
+≤ ˆϵ, 
+
+where pM(·) denotes the probability distribution of the output of M(·). For λ = 1 , we define 
+
+D1
+
+ M(D) ∥ M (D′) = DKL 
+
+ M(D) ∥ M (D′).
+
+In Definition 4, smaller values of ˆ ϵ and larger values of λ both correspond to stronger privacy guarantees. At each training step, our method applies a privacy mechanism to provide differential privacy to a random minibatch rather than the full data set. Intuitively, for two adjacent data sets D and D′, the differing record between the data sets is unlikely to be included in any given minibatch, which amplifies the protections of differential privacy. This idea is formalized by PoissonSample, which is often used in private learning settings. 
+
+Definition 5 (PoissonSample, Zhu and Wang 2019) Consider a data set D = {(xi,yi)}ni=1 ∈ D and select q ∈ (0 , 1) . Then, the procedure PoissonSample outputs a random sub-set DB ⊆ D with expected cardinality q|D| by: (i) sampling σi ∼ Bernoulli (q) independently for each i ∈ [n] and (ii) outputting the set DB = {(xi, y i) ∈ D : σi = 1 }.
+
+Since E|D B | = q|D| , we refer to DB as a “ q-proportion” of D. When we apply an (ϵ, δ )-differentially private mechanism to a random q-proportion of the data set, privacy am-plification ensures the mechanism provides  log(1 + q(eϵ − 1)), qδ -differential privacy to the full data set. It is straightforward to show that this latter privacy protection is ( O(qϵ ), qδ )-differential privacy, which is stronger than ( ϵ, δ )-differential privacy because q ∈ (0 , 1). This 
+
+> 6End-to-End Differential Privacy in Training Deep Neural Network Classifiers
+
+improved privacy guarantee can be combined with the composition of RDP to tightly char-acterize the privacy loss over many applications of a differential privacy mechanism. As we show in the next section, by composing the privacy loss in the sense of RDP before convert-ing back to standard ( ϵ, δ )-differential privacy, we can run our mechanism many times (and hence train a neural network for many epochs) without blowing up the privacy budget ϵ.
+
+3 Proposed Algorithm 
+
+In this section, we develop a private training framework that provides privacy to training inputs while leaving labels public. During training, our method perturbs the outputs of a softmax layer by drawing samples from a Dirichlet distribution to enforce differential privacy. Each perturbed output can be interpreted as a vector of perturbed probabilities that a training data point belongs to each class of data. Then these perturbed probabilities and the associated true label are used to compute the loss to be optimized. We begin by introducing the Dirichlet mechanism. Then we provide the details of our framework and analyze its privacy guarantees. Lastly, we analyze the first and second moments of the perturbed loss to interpret how the training process changes with privacy. 
+
+3.1 Dirichlet Mechanism 
+
+A mechanism is a map that enforces differential privacy by randomizing functions of sen-sitive data to guarantee that Definition 3 is satisfied. A mechanism is calibrated using the “sensitivity” of the function being privatized, which is equal to the maximum amount that function’s outputs can differ when it is evaluated on adjacent inputs. 
+
+Definition 6 (Sensitivity) Fix a function h : X → Sd−1. The ℓ2- and ℓ∞-sensitivities of 
+
+h, respectively, are 
+
+∆2 = sup 
+
+> x,x ′∈X
+
+∥h(x) − h(x′)∥2
+
+and 
+
+∆∞ = sup 
+
+> x,x ′∈X
+
+∥h(x) − h(x′)∥∞.
+
+In our setting, the sensitive data is the training inputs in the data set D, and the function we privatize is the mapping from neural network inputs to softmax outputs. We privatize at the softmax layer because, regardless of the architecture or current parameters of the neural network, its output lies in the unit simplex, and the compactness of the simplex immediately bounds the neural network’s sensitivity. We next make this observation precise. Mathematically, a neural network defines a mapping fθ : X → Rd parametrized by θ, 
+
+where fθ(x) denotes the logits associated with an input x. Let s : Rd → Sd−1 denote the softmax map. At a fixed training step, the current model parameters θ induce a map 
+
+gθ = s ◦ fθ : X → Sd−1
+
+so that gθ(x) = s(fθ(x)) maps the training input x to output probabilities. We randomize the outputs of gθ to privatize its inputs, and therefore we require the sensitivities of gθ to implement privacy. 
+
+> 7Rao, Hawkins, Benvenuti and Hale
+
+Lemma 7 Let gθ : X → Sd−1 be the model associated with any neural network with a soft-max output layer. Then, regardless of the architecture and model parameters, its sensitivities in the sense of Definition 6 are bounded via ∆22 ≤ 2 and ∆∞ ≤ 1.
+
+Proof See Appendix A. We now introduce the Dirichlet mechanism. 
+
+Mechanism 8 (Dirichlet Mechanism, Ponnoprat 2023, Section 3.1) Fix a function 
+
+gθ : X → Sd−1 parameterized by θ, and fix constants r > 0 and α > 0. Then, for any input 
+
+x ∈ X, the Dirichlet Mechanism M(r,α ) 
+
+> Dir
+
+: Sd−1 → Sd−1 takes gθ(x) as input and outputs 
+
+ρ ∈ Sd−1 sampled from the Dirichlet distribution via 
+
+ρ ∼ Dir( rg θ(x) + α1d),
+
+where the pdf of Dir( v) is f (p; v) = 1
+
+> B(v)
+
+Qdi=1 pvi−1 
+
+> i
+
+.
+
+The Dirichlet mechanism enforces differential privacy with strength determined by r
+
+and α. We will sometimes refer to α as an “offset parameter” and r as a “scaling parameter”. 
+
+Lemma 9 (Ponnoprat 2023) Fix constants α > 0 and r ∈ (0 , α ), and fix an RDP order 
+
+λ ∈ [1 , 1 + αr ). Mechanism 8 enforces (λ, ˆϵ(λ; r)) -RDP as defined in Definition 4, where 
+
+ˆϵ(λ; r) = λr 2ψ′(α − (λ − 1) r).
+
+In our analysis, we adapt the RDP bound for PoissonSample from Zhu and Wang (2019), in which the underlying mechanism is fixed while its RDP guarantee is evaluated across different values of λ. Therefore, in our training procedure we fix the Dirichlet mechanism parameters α and r independently of λ.The privacy guarantee we ultimately seek is for the training inputs within the training set D, i.e., for a point ( xi, y i) ∈ D we seek to privatize xi. The sensitivities ∆ 22 ≤ 2and ∆ ∞ ≤ 1 from Lemma 7 bound how much one forward pass can change between two adjacent training sets, which we will use in Section 3.3 to bound the privacy loss for the entire set of input data. 
+
+3.2 Private Training Algorithm 
+
+In this subsection, we present a differentially private training framework that privatizes training inputs while leaving labels public. Algorithm 1 outlines the process for training a model with a softmax output layer by minimizing an empirical loss function L. Our complete differentially private training pipeline is as follows. At each training step t, we sample a minibatch DBt with sampling rate q by using PoissonSample from Definition 5. Then, for each i ∈ Bt we compute the output probability vector gθt (xi) and sample a private probability vector ˜ pi from Dir( rg θt (xi) + α1d), where α > 0 and r ∈ (0 , α ) are constants that we choose below. Next, we compute the averaged noisy gradient over the minibatch, which is ˜ξ = 1
+
+|Bt|
+
+P 
+
+> i∈Bt
+
+∇θL(˜ pi, y i), where the vector ˜ pi is used in combination with the 
+
+> 8
+
+End-to-End Differential Privacy in Training Deep Neural Network Classifiers 
+
+true label yi to compute the NLL 1 loss L(˜ pi, y i) = − log ˜ piy. Finally, the algorithm takes a step in the direction − ˜ξ. After training for a fixed number of steps T , we output the trained model. This form of training with the Dirichlet mechanism can potentially require many itera-tions, and the strength of privacy degrades with each iteration because training data can be reused. If the Dirichlet mechanism is applied to enforce ( ϵ, δ )-differential privacy T times, then the standard Composition Theorem (Dwork et al., 2014, Chapter 3.5) shows that the data is protected overall with ( T ϵ, T δ )-differential privacy. For large T , these protections may become weak. To reduce the rate of weakening of privacy protections, we use pri-vacy amplification via PoissonSample (Zhu and Wang, 2019), which we describe in detail in Section 3.3. Our approach to privacy is optimizer-agnostic in the sense that any optimizer can be used without harming privacy. However, Algorithm 1 is written with stochastic gradient descent (SGD) because SGD is widely used, and that is the algorithm we analyze in Section 3.5. 
+
+3.3 Privacy Analysis 
+
+To analyze privacy we observe that in Algorithm 1 backpropagation only post-processes private data. Given a minibatch DBt at iteration t, lines 3-6 of Algorithm 1 compute the set 
+
+EBt = {˜pi : ˜ pi ∼ Dir( rg θt (xi) + α1d), (xi, y i) ∈ D Bt for some yi},
+
+and the use of the Dirichlet mechanism ensures that the computation of EBt keeps xi dif-ferentially private for each ( xi, y i) ∈ D Bt . In Algorithm 1, backpropagation uses only EBt
+
+and not DBt , which means that backpropagation post-processes differentially private data. Therefore, the results of backpropagation preserve differential privacy as well. The strength of privacy provided by each iteration of Algorithm 1 is therefore equal to the strength of privacy provided to the training data when computing EBt in lines 3-6 of Algorithm 1. We use this fact in the next theorem, which is our main result on the privacy guarantees of Algorithm 1. 
+
+Theorem 10 Fix a sampling rate q ∈ (0 , 1) for PoissonSample . Fix α > 0 and r ∈ (0 , α ).Then for every integer λ satisfying 2 ≤ λ < 1+ αr , Algorithm 1 is (ϵo(λ, δ ; r), δ )−differentially private with 
+
+ϵo(λ, δ ; r) ≤ Tλ − 1 log 
+
+
+
+(1 − q)λ−1(qλ − q + 1) + 
+
+λ
+
+2
+
+
+
+q2(1 − q)λ−2eˆϵM(2; r)
+
++ 3 
+
+> λ
+
+X
+
+> j=3
+
+λj
+
+
+
+(1 − q)λ−j qj e(j−1)ˆ ϵM(j;r)
+
+
+
++ log( λ − 1) − log( δ) + λ log( λ)
+
+λ − 1 ,
+
+where ˆϵM(j; r) = jr 2ψ′(α − (j − 1) r) and T is the number of training steps. 
+
+Proof See Appendix B.  
+
+> 1. We use NLL rather than cross-entropy (CE) loss because our mechanism directly outputs probabilities and typical implementations of the CE loss operate on the logits directly. Without privacy, using a softmax layer with NLL loss is equivalent to using the CE loss on the logits.
+
+9Rao, Hawkins, Benvenuti and Hale 
+
+Algorithm 1 Training deep neural network classifiers with end-to-end differential privacy 
+
+Input: Data set D = {(xi, y i)}ni=1 , NLL loss function L.
+
+Parameters: Learning rate γ > 0, sampling rate q ∈ (0 , 1), number of training steps 
+
+T ∈ N, Dirichlet mechanism parameters α > 0 and r ∈ (0 , α ). 
+
+Initialize θ0 using the default PyTorch initialization for each layer 2. 
+
+> 1:
+
+for t = 0 , 1, . . . , T − 1 do  
+
+> 2:
+
+Sample a mini-batch DBt ⊆ D via PoissonSample from Definition 5 with rate q. 
+
+> 3:
+
+for each ( xi, y i) ∈ D Bt do  
+
+> 4:
+
+Compute output probabilities: Set gθt (xi) = softmax( fθt (xi)).  
+
+> 5:
+
+Perturb output probabilities: Sample ˜ pi ∼ Dir( rg θt (xi) + α1d).  
+
+> 6:
+
+end for  
+
+> 7:
+
+Compute gradient: ˜ξt ← 1
+
+|Bt|
+
+P 
+
+> i∈Bt
+
+∇θt L(˜ pi, y i).  
+
+> 8:
+
+Update parameters: θt+1 ← θt − γ ˜ξt. 
+
+> 9:
+
+end for Output: θT
+
+Once the parameters r, λ, and δ are fixed, the privacy parameter ϵo(λ, δ ; r) grows as q
+
+grows, which is intuitive because a larger sampling rate q means more points are sampled and that there is less benefit from privacy amplification. Therefore, a small value of q ∈ (0 , 1) should be chosen so that the argument of the first log term in Theorem 10 is dominated by its first two terms. Doing so slows the rate of decay of privacy protections as T grows. The values of r, α , δ, q, and T are always fixed at the beginning of Algorithm 1 so that 
+
+ϵo(λ, δ ; r) is only a function of the RDP order λ. In practice λ is always selected to achieve the minimum value of ϵo(λ, δ ; r). 
+
+3.4 Selecting Dirichlet Mechanism Parameters 
+
+By Theorem 10, Algorithm 1 is ( ϵ, δ )-differentially private for some ϵ and δ. Next, for given privacy parameters ϵ > 0 and δ > 0, we seek to select α > 0 and r ∈ (0 , α ) so that Algorithm 1 is ( λ, ˆϵ(λ; r))-R´ enyi differentially private for values of λ and ˆ ϵ(λ; r) that imply that ( ϵ, δ )-differential privacy holds for the chosen values of ϵ and δ.Our approach is to first fix the offset parameter α > 0 and then solve for the largest scaling parameter r > 0 that ensures the enforcement of ( ϵ, δ )-differential privacy. For any 
+
+r > 0 the admissible RDP orders are Λ( r) = 
+
+n
+
+λ ∈ N | 2 ≤ λ < 1 + αr
+
+o
+
+,
+
+and we define h(r) = min λ∈Λ( r) ϵo(λ, δ ; r). Theorem 10 implies that running Algorithm 1 for T steps is ( h(r), δ )−differentially private. To find the largest r that the privacy budget allows we compute 
+
+r∗ = sup {r ∈ (0 , α ) | h(r) ≤ ϵ} . (1)        
+
+> 2. For network parameters θ0, weights and biases of linear and convolutional layers are drawn from the uniform distribution on the interval ( −1√k,1√k), where kis the number of input features per neuron, normalization scaling factors are set to 1, and normalization biases are set to 0.
+
+10 End-to-End Differential Privacy in Training Deep Neural Network Classifiers 
+
+Since h(r) is increasing in r and lim r→α h(r) = ∞, we see that for any ϵ > lim r→0 h(r) there is an r < α such that h(r) ≤ ϵ. Such an r can be found, for example, via root-finding on the equation h(r) = ϵ. In our experiments in Section 4 we solve this root-finding problem with Brent’s method (Brent, 1971). 
+
+3.5 Analytical Characterization of Algorithm 1 
+
+We now characterize how the choices of the mechanism parameters ( r, α ) affect the opti-mization steps in Algorithm 1. Although Algorithm 1 generates a sequence of parameters 
+
+{θt}Tt=0 , in this subsection we analyze the effect of privacy for arbitrary network parameters 
+
+θ. All results in this subsection apply at any training step with index t ∈ [T ]∪{ 0} by setting 
+
+θ = θt. Since r is automatically determined by (1) in terms of a fixed α and fixed privacy budget ( ϵ, δ ), the behavior of Algorithm 1 is governed by α and the learning rate γ, and our analysis is in terms of these parameters. The main result of this section is that the perturbations due to the Dirichlet mechanism do not change the direction of the expected gradient of the per-sample loss of Algorithm 1. Instead, these perturbations result in an expected private gradient that is equal to a rescaled version of the non-private cross-entropy gradient, and this scaling is captured by a data-dependent scale factor. Consider fixed network parameters θ and a training example ( x, y ) ∈ D . Let z = fθ(x)be the logits associated with x. Recall that s(z) = softmax( z) and gθ(x) = s(fθ(x)) = s(z).
+
+We use sj (z) to denote the probability assigned to class j ∈ [d] and sy(z) to denote the probability assigned to the true class y. 
+
+The cross-entropy loss without privacy is LCE (z) = − log sy(z), which has gradient  
+
+> ∂LCE
+> ∂z j
+
+(z) = sj (z) − δyj for j ∈ [d]. Algorithm 1 perturbs s(z) by drawing a Dirichlet sample and substituting it into the negative log-likelihood loss to compute L(˜ p(z), y ) = − log ˜ py,where ˜ p(z) ∼ Dir  rs (z) + α1d
+
+ and r, α > 0 are the mechanism parameters. To characterize training using Algorithm 1, we analyze the first two moments of the stochastic loss. The expected loss 
+
+F (z) := E˜p[L(˜ p(z), y )] (2) and the expected gradient E˜p
+
+h ∂∂z j L(˜ p(z), y )
+
+i
+
+quantify a training data point’s expected influ-ence on the gradient in Line 7 of Algorithm 1, while Var ˜p
+
+L(˜ p(z), y ) measures the variability of the loss around its mean. 
+
+Theorem 11 Fix a data set D ∈ D and consider training a model using Algorithm 1 with r, α > 0. Consider a single training example (x, y ) ∈ D with logits z = fθ(x) and 
+
+s(z) = softmax (z). Define the scalar attenuation factor 
+
+κ(z; r, α ) := r s y(z) ψ′ rs y(z) + α. (3) 
+
+Then for every z ∈ Rd and every j ∈ [d], for F in (2) we have 
+
+F (z) = ψ(r + dα ) − ψ rs y(z) + α (4) 
+
+E˜p
+
+ ∂∂z j
+
+L(˜ p(z), y )
+
+
+
+= κ z; r, α  ∂LCE 
+
+∂z j
+
+(z)Var ˜p
+
+L(˜ p(z), y ) = ψ′ rs y(z) + α − ψ′(r + dα ). (5) 
+
+> 11 Rao, Hawkins, Benvenuti and Hale
+
+Proof See Appendix C. The last three equations in Theorem 11 have simple interpretations. The first shows that the expected private loss depends on the logits only through the predicted true class probability 
+
+sy(z). The second is the key identity, and it shows that, on a single data point ( x, y ), the expected gradient of the loss with respect to the logits is equal to the clean, non-private cross-entropy gradient multiplied by the scaling factor κ(z; r, α ). Thus, on a per-sample basis, our privacy implementation preserves the gradient’s direction and only rescales its magnitude. The third equation quantifies the randomness introduced by the Dirichlet mechanism through the variance of the stochastic loss. 
+
+3.6 Selecting Learning Rates 
+
+Theorem 11 can be used to calibrate the learning rate of Algorithm 1. In Line 8 of Algo-rithm 1, the parameters of the neural network are updated with the average gradient over a batch. Using Theorem 11, we compute the expected gradient evaluated on the output of the Dirichlet mechanism in terms of the logits z produced by a single training sample x.This gradient is scaled by κ(z; r, α ) from (3), and the corresponding expected SGD update is 
+
+E˜p [−γ∇L (˜ p(z), y )] = −γκ (z; r, α )∇L CE (z),
+
+where ∇L CE (z) is the gradient of the non-private cross-entropy loss evaluated on the logits z
+
+of the training example x.Therefore, on average, a gradient step with privacy implemented with learning rate γ
+
+behaves the same as a gradient step without privacy with learning rate 
+
+γeff = γκ (z; r, α ), (6) which we call the effective learning rate of such an implementation. The attenuation fac-tor κ(z; r, α ) is sample-dependent through its dependence on z, and we of course cannot have a sample-dependent learning rate. However, the following empirical results show that if we simply use the value sy(z) = 0 .9 for all examples and compare training runs using different values of α but the same value of γeff = γκ (z; r, α ), then we achieve similar perfor-mance across those values of α. These results imply that for varying values of the parameter 
+
+α, the learning rate γ of Algorithm 1 can be tuned to counter the effects of privacy and achieve a nearly constant level of accuracy. Figure 2 provides empirical results for the preceding analysis. We consider α ∈ { 0.1, 0.2,
+
+0.3, 0.5, 1, 2, 3, 5, 10 }, and for each α we first find r∗ using (1) with privacy parameters ϵ = 1 and δ = 10 −5. For each α we train a neural network using varying values of γ, specified in Appendix C.2, and for each value we train 10 instances of ResNet-18 on CIFAR10 and report the mean test set accuracy in the left plot of Figure 2. Still using sy(z) = 0 .9 for all examples, we then compute the test accuracy values for varying values of α and γ, and we plot them against the effective learning rate γeff = γκ (z; r, α ) on the right-hand side of Figure 2. The different values of α produce curves that are quite similar, and this behavior shows that at a fixed privacy budget the dependence of performance on ( α, γ ) is largely explained by the change in the average update scale, namely κ(z; r, α ). In Appendix C.1 we analyze the asymptotic behavior of κ(z; r, α ) and Var ˜p
+
+L(˜ p(z), y ) as functions of α. At small values of α, the value of κ(z; r, α ) decays like α−1, while the variance 
+
+> 12
+
+End-to-End Differential Privacy in Training Deep Neural Network Classifiers 
+
+10 −2 10 −1 10 0 10 1
+
+50 
+
+60 
+
+70 
+
+80 
+
+90 
+
+Learning rate γ
+
+> Test accuracy (%)
+
+10 −2 10 −1 10 0
+
+50 
+
+60 
+
+70 
+
+80 
+
+90 
+
+Effective learning rate γeff = γ · κ(z; r, α )         
+
+> Test accuracy (%)  α= 0 .1
+> α= 0 .2
+> α= 0 .3
+> α= 0 .5
+> α= 1
+> α= 2
+> α= 3
+> α= 5
+> α= 10
+
+Figure 2: Mean test accuracy of ResNet-18 on CIFAR10 under a fixed privacy budget ( ϵ =1, δ = 10 −5) for α ∈ [0 .1, 10]. The left plot shows the mean test accuracy as a function of the learning rate γ. The right plot shows the same data plotted against the effective learning rate γeff from (6), which produces overlapping curves and shows that much of accuracy’s dependence on ( α, γ ) is explained by the update scale reparameterization due to κ(z; r, α ). decays like α−2. At large α, the expected update scale saturates, while the variance decays like α−1. Thus, increasing α reduces the randomness of the Dirichlet mechanism faster than it reduces the average update size, which allows for runs with larger values of α to use larger learning rates γ.
+
+4 Evaluation 
+
+In this section we evaluate the proposed framework on standard benchmark data sets that have been used in previous works on private machine learning 3.
+
+4.1 Experimental Setup 
+
+4.1.1 Data sets and models 
+
+We evaluate Algorithm 1 on CIFAR10 (Krizhevsky et al., 2009), MNIST (LeCun et al., 1998), DermaMNIST from MedMNIST (Yang et al., 2023, 2021), FashionMNIST (Xiao et al., 2017), and Street View House Numbers (SVHN) (Netzer et al., 2011). For CI-FAR10, we use ResNet-18 (He et al., 2016), which was also used in Monir and Ghinita (2024) when privatizing training inputs while leaving labels public. For MNIST and Fash-ionMNIST (Xiao et al., 2017), we use a simplified Inception model following Szegedy et al. (2015). For DermaMNIST, we use ResNet-9 following H¨ olzl et al. (2022). For SVHN, we use ResNet-18. We provide results on CIFAR10, MNIST, DermaMNIST, FashionMNIST and SVHN in Section 4.2.      
+
+> 3. Our code is available at https://github .com/Rhyme0730/Dirichlet-mechanism-for-private-classification .
+
+13 Rao, Hawkins, Benvenuti and Hale 
+
+4.1.2 Implementation details 
+
+For all data sets, we use the parameters α = 3 .0 and δ = 10 −5. We train with standard SGD, NLL loss, and PoissonSample for all data sets. We use learning rates γ = 0 .05 for DermaMNIST and γ = 0 .1 for all other data sets. Algorithm 1 is run for E = qT epochs on each data set, where q is the parameter used in PoissonSample. For CIFAR10, we apply standard data augmentations, including random cropping and random horizontal flipping, and training is done with sampling rate q = 250 /50000 = 0 .005 for T = 20 , 000 steps (100 epochs) to ensure a fair comparison with previous work in (Monir and Ghinita, 2024). On DermaMNIST, we use sampling rate q = 70 /7007 ≈ 0.01 and train for T = 6006 steps (60 epochs). On MNIST and FashionMNIST, we use sampling rate q = 250 /60000 ≈ 0.0042 and train for T = 9600 steps (40 epochs). On SVHN, we use sampling rate q = 250 /73257 ≈
+
+0.0034 and train for T = 11 , 722 steps (40 epochs). The parameter r∗ is computed for each data set using (1) based on the training configuration above and the target value of the privacy parameter ϵ. On FashionMNIST and SVHN, we use Opacus (Yousefpour et al., 2021) for our DP-SGD benchmark with maximum gradient clipping norm 1 .0. We use the SGD optimizer with learning rate 0 .1 and no data augmentation with ResNet-18 as a baseline. We report the value of r∗ we use in each experiment in Appendix D.2. In the rest of this section, the mean accuracy and standard deviation for all data sets are reported across 5 independent runs with different random seeds for each value of ϵ. We report results for different sampling rates in Appendix F and for different optimizers in Appendix G. All reported results are obtained from models trained from scratch 4, not through fine-tuning existing models. We use PyTorch (Paszke et al., 2019) for our implementation and train all the models on Nvidia Quadro RTX6000 GPUs. 
+
+4.2 Evaluation of the Proposed Framework 
+
+We report the results of the proposed framework in Tables 1, 2, and 3 for the CIFAR10, MNIST, and DermaMNIST data sets, respectively. We reiterate that DP-SGD privatizes both training inputs and labels, while the current paper and Monir and Ghinita (2024) only privatize training inputs. Therefore, the privacy protections of DP-SGD are strictly stronger than the protections provided by Algorithm 1, though we still compare to DP-SGD because it is widely used in private learning. 
+
+4.2.1 CIFAR10 results 
+
+Table 1 compares Algorithm 1 to DP-SGD (De et al., 2022) using the best results that DP-SGD produces on CIFAR10 from scratch with Wide-ResNet (WRN-40-4), large-batch training, and augmentation multiplicity. According to Zagoruyko and Komodakis (2016), the WRN-40-4 model obtains > 95% accuracy on CIFAR10 when trained non-privately. Algorithm 1 under the configuration in Section 4.1 obtains higher performance than the              
+
+> 4. We run experiments for ϵ=∞using PoissonSample but without privacy. The accuracy degradation from the non-private baseline at ϵ=∞is caused by using PoissonSample and not adding momentum or weight decay to the SGD optimizer, which we choose to do in order to have a meaningful baseline for assessing the performance of Algorithm 1. Results marked with “ †” indicate non-private ( ϵ=∞)baselines that were omitted from (Monir and Ghinita, 2024). We reproduced these values using the configurations described in the references corresponding to each method.
+
+14 End-to-End Differential Privacy in Training Deep Neural Network Classifiers                                        
+
+> Method Model ϵ= 1 ϵ= 2 ϵ= 4 ϵ= 6 ϵ= 8 ϵ=∞
+> DP-SGD (De et al., 2022) WRN-40-4 56 .465 .973 .578 .881 .4—Monir and Ghinita (2024) ResNet-18 ——78 .37 79 .0(ϵ=4 .46) —92 .35 †
+> This work ResNet-18 82 .96 86 .34 88 .17 88 .54 88 .61 92 .35
+> ±1.46 ±0.34 ±0.33 ±0.54 ±0.34
+
+Table 1: Test accuracy (%) on CIFAR10 under δ = 10 −5 across 5 independent runs for each ϵ.WRN-40-4 configurations in (De et al., 2022) for all values of ϵ ∈ [1 , 8]. Notably, when 
+
+ϵ = 1, the test accuracy of DP-SGD is 56 .4%, while the test accuracy of Algorithm 1 is 82 .96%, which is a 60 .92% reduction in test error rate. We also compare to the closest prior work, which is Monir and Ghinita (2024), us-ing the same model (ResNet-18), the same optimizer, and the same sampling rate q of PoissonSample. Since the learning rate γ is not reported in Monir and Ghinita (2024), we use γ = 0 .1 in training CIFAR10 for Algorithm 1. We see that Algorithm 1 has a 45 .3% lower error rate than Monir and Ghinita (2024) when ϵ = 4. Since the accuracy at the strongest privacy level for Algorithm 1 ( ϵ = 1) already exceeds the reported accuracy at the weakest privacy level in Monir and Ghinita (2024) ( ϵ = 4 .46), we omit the accuracy of Algorithm 1 at ϵ = 4 .46 from Table 1. 
+
+4.2.2 MNIST results 
+
+As shown in Table 2, Algorithm 1 has higher accuracy than all DP-SGD baselines and the method of Monir and Ghinita (2024) across all tested values of ϵ. We applied Algorithm 1 to a simplified Inception model (Szegedy et al., 2015), which is a type of convolutional neural network (CNN). In Table 2, we see that the accuracy of the Inception model at ϵ = 0 .5 closely matches the non-private accuracy of the Inception model, demonstrating that Algorithm 1 preserves high utility even under strong privacy protections. Note that Papernot et al. (2021) and Cheng et al. (2022) only report results at ϵ = 2 .93 and ϵ = 3, respectively, and we compare the accuracy of those methods to the accuracy of Algorithm 1 at nearby ϵ                                             
+
+> Method Model ϵ= 0 .5ϵ= 1 ϵ= 2 ϵ= 4 ϵ=∞
+> DP-SGD MLP 90 .0—95 .0—98 .3Papernot et al. (2021) CNN ———98 .1(ϵ=2 .93) 99 .0Cheng et al. (2022) DPNASNet ———98 .57 (ϵ=3) —Monir and Ghinita (2024) CNN —98 .0——99 .4†
+> This work Inception 99 .28 99 .37 99 .40 99 .44 99 .51
+> ±0.072 ±0.059 ±0.058 ±0.038
+
+Table 2: Test accuracy (%) on MNIST under δ = 10 −5 across 5 independent runs for each value of ϵ.
+
+> 15 Rao, Hawkins, Benvenuti and Hale
+
+Method Model ϵ = 1 ϵ = 4 ϵ = 7 .42 ϵ = ∞
+
+DP-SGD (Tang et al., 2023) ResNet-9 68 .34 71 .08 72 .58 76 .16 This work ResNet-9 74 .32 75 .74 76 .31 78 .60 
+
+±1.84 ±0.74 ±1.15 Table 3: Test accuracy (%) on DermaMNIST under δ = 10 −5 across 5 independent runs for each ϵ.values. We also compare to DP-SGD (Abadi et al., 2016) which uses a multilayer perceptron (MLP) model. Even at the strongest privacy level of ϵ = 0 .5, Algorithm 1 produces higher accuracy than Monir and Ghinita (2024) at ϵ = 1. Also, the method in Monir and Ghinita (2024) requires a specific funnel-shaped CNN designed to reduce the noise injected during training, while Algorithm 1 can be applied to any neural network architecture that has a softmax output layer. The improvement in test accuracy of Algorithm 1 over Monir and Ghinita (2024) is due to two factors: (i) we inject randomness only at the softmax layer rather than at layers throughout the network, and (ii) under the same privacy budget, the Dirichlet mechanism introduces randomness with lower variance than the Gaussian mechanism from Monir and Ghinita (2024). 
+
+4.2.3 DermaMNIST results 
+
+We have shown that Algorithm 1 outperforms previous work on the standard computer vision benchmarks of CIFAR10 and MNIST, and we now extend our evaluation to medical images, where the privacy of input data is critical. For training, we applied Algorithm 1 to ResNet-9, which was also used in (H¨ olzl et al., 2022). There is limited previous work that evaluates the accuracy of private machine learning models on sensitive medical data such as DermaMNIST (Yang et al., 2021, 2023). Evaluating privately learned models on this data set directly highlights the practical significance of Algorithm 1, which privatizes inputs that are medical images to ensure privacy for patients. In Table 3 we see that Algorithm 1 outperforms the benchmark DP-SGD method (Tang et al., 2023) from ϵ = 1 to ϵ = 7 .42 when using the same architecture 5. Furthermore, the gap between our accuracy at ϵ = 1 and the non-private baseline is less than 5%, demonstrating that Algorithm 1 provides strong privacy protections while maintaining high model accuracy. Due to DermaMNIST’s train/validation/test partitioning, we also report the validation accuracy in Appendix E. 
+
+4.2.4 FashionMNIST and SVHN results 
+
+As shown in Figure 3, Algorithm 1 has higher accuracy than DP-SGD across all tested val-ues of ϵ. Notably, on FashionMNIST at ϵ = 4 .0, Algorithm 1 achieves a 48 .93% reduction in test error rate relative to DP-SGD. Algorithm 1 also outperforms Tempered Sigmoid (Pa-pernot et al., 2021), which reports the highest accuracy among existing methods for private learning. On SVHN at ϵ = 1 .0, Algorithm 1 achieves a 35 .77% reduction in test error rate     
+
+> 5. The accuracy gap at ϵ=∞between DP-SGD and Algorithm 1 arises from DP-SGD’s use of group normalization (required for DP compatibility) versus batch normalization used in our work.
+> 16 End-to-End Differential Privacy in Training Deep Neural Network Classifiers
+
+0.5 1 2 4
+
+75 
+
+80 
+
+85 
+
+90 
+
+ϵ
+
+> Test Accuracy (%)
+> This work
+> DP-SGD
+> Tempered Sigmoid
+
+(a) 
+
+1 2 3 4 6 8
+
+75 
+
+80 
+
+85 
+
+90 
+
+95 
+
+ϵ
+
+> Test Accuracy (%)
+> This work
+> DP-SGD
+
+(b) 
+
+Figure 3: Test accuracy (%) under δ = 10 −5 across 5 independent runs for each ϵ on (a) FashionMNIST and (b) SVHN. Shaded bands show one standard deviation for each ϵ.                                    
+
+> Method Model ϵ= 0 .5ϵ= 1 ϵ= 2 ϵ= 4 ϵ=∞
+> Tempered Sigmoid CNN ——86 .1(ϵ=2 .7) —89 .4DP-SGD Inception 77 .37 80 .60 82 .63 84 .18 93 .13
+> ±1.06 ±0.71 ±0.45 ±0.31 This work Inception 81 .02 86 .35 91 .13 91 .69 93 .13
+> ±5.91 ±3.79 ±0.18 ±0.14
+
+Table 4: Test accuracy (%) on FashionMNIST under δ = 10 −5 across 5 independent runs for each ϵ.relative to DP-SGD. The full results are shown in Table 4 for FashionMNIST and Table 5 for SVHN. 
+
+4.2.5 Computational cost 
+
+Our private training framework can be split into two stages. First, we compute r∗ using (1) for a fixed DP budget ( ϵ, δ ) and a fixed value of α, which usually takes less than one minute for each ϵ ∈ [1 , 8]. Once r∗ is computed, we follow the traditional image training process with an additional step of perturbing output probabilities using the Dirichlet mechanism at each training step, for which the additional time complexity is O(dq |D| T ) for the whole training process, where q|D| is the expected mini-batch size at each iteration of Algorithm 1 and d is the number of classes. Compared to previous work (Monir and Ghinita, 2024) that follows the DP-SGD approach for adding noise to model layer outputs and using per-sample clipping, the training process of Algorithm 1 is significantly faster. When privately training                                   
+
+> 17 Rao, Hawkins, Benvenuti and Hale
+> Method Model ϵ=1 ϵ=2 ϵ=3 ϵ=4 ϵ=6 ϵ=8 ϵ=∞
+> DP-SGD ResNet-18 76 .77 82 .66 84 .27 85 .10 86 .38 86 .75 94 .58
+> ±1.19 ±0.62 ±0.43 ±0.22 ±0.35 ±0.34 This work ResNet-18 85 .08 91 .91 92 .39 92 .94 93 .37 93 .39 94 .58
+> ±5.43 ±0.41 ±0.34 ±0.25 ±0.22 ±0.31
+
+Table 5: Test accuracy (%) on SVHN under δ = 10 −5 across 5 independent runs for each ϵ.ResNet-18 on CIFAR10, training an epoch (200 steps) for Algorithm 1 consumes ∼ 30 seconds, while for DP-SGD it consumes ∼ 60 seconds. The main reason Algorithm 1’s training speed is faster is because per-sample clipping is unnecessary for it. 
+
+5 Discussion 
+
+Monir and Ghinita (2024) show that injecting calibrated Gaussian noise into the penulti-mate layer of a neural network can privatize inputs by randomizing features while keeping labels public, and that work demonstrates that this approach to privacy produces higher accuracy than DP-SGD. However, the variance of privacy noise in Monir and Ghinita (2024) scales with the width of the penultimate layer, which degrades utility for larger models. In contrast, the variance of the Dirichlet mechanism scales with the number of classes in the data set, yielding substantially better utility under the same privacy guarantee. A second key difference is that Algorithm 1 eliminates the need for per-sample gradient clipping, which Monir and Ghinita (2024) use. Clipping degrades utility and slows training, since each sample’s gradient must be clipped individually. Comparing the improvements between Algorithm 1 and Monir and Ghinita (2024) shows two contributions of our work: (i) the use of the Dirichlet mechanism instead of the Gaussian mechanism and (ii) the choice of layer at which privacy is introduced. At ϵ = 4 .0, we observe a 45 .31% lower error rate in test accuracy on CIFAR10 relative to the method in Monir and Ghinita (2024), while using the same architecture (ResNet-18). And the accuracy of Algorithm 1 at the strongest privacy level we test ( ϵ = 1 .0) exceeds the accuracy of the method of Monir and Ghinita (2024) at the weakest privacy level they test ( ϵ = 4 .46). While DP-SGD (Abadi et al., 2016) provides a stronger privacy guarantee since it pri-vatizes both training inputs and labels, it has worse performance compared to Algorithm 1. Algorithm 1 only provides privacy to training inputs, which allows it to introduce less ran-domness into training and produce models with higher accuracy. This difference allows users to choose which part of their data requires privacy protections, and Algorithm 1 allows users to avoid unnecessary accuracy loss from privatizing labels that do not need privacy pro-tections. Algorithm 1 is therefore complementary to DP-SGD because it provides different privacy protections and serves different use cases than DP-SGD. 
+
+> 18 End-to-End Differential Privacy in Training Deep Neural Network Classifiers
+
+6 Conclusion 
+
+In this work, we introduced a novel private training procedure that privatizes input data while keeping labels public when training deep neural networks. We showed that the Dirich-let mechanism for differential privacy can be implemented at a softmax layer, with the resulting randomized probabilities used for computing the loss and backpropagation. The overall framework can be broken into two stages: (i) using an upper bound on the privacy budget to determine the parameters for the Dirichlet mechanism that produce the desired variance of privatized data, and (ii) implementing the Dirichlet mechanism at the softmax layer at each training step. Empirical evaluations on CIFAR10, MNIST, DermaMNIST, Fashion MNIST and SVHN demonstrate that our framework substantially outperforms the prior state of the art by improving test accuracy from 78 .37% to 88 .17% at ϵ = 4, and retaining meaningful utility even under strong privacy at ϵ = 1. Furthermore, the improve-ments of our approach persist across different image data sets, model architectures, and optimizers. Future work includes the development of additional parameter selection rules to boost accuracy, as well as extending the private training framework to other machine learning tasks such as language, speech, and financial modeling. 
+
+Acknowledgments and Disclosure of Funding 
+
+This work was supported by NSF under CAREER grant 2422260 and Graduate Research Fellowship grant DGE-2039655, AFOSR under grant FA9550-19-1-0169, and ONR under grant N00014-24-1-2432. The authors declare no competing interests. 
+
+> 19
+
+Rao, Hawkins, Benvenuti and Hale 
+
+Appendix A. Proof of Lemma 7 
+
+For any inputs x, x ′ ∈ X and any adjacent data sets D and D′, both gθ(x) and gθ(x′) lie in the simplex Sd−1 because a softmax layer always outputs a probability vector. We define 
+
+a = gθ(x) and b = gθ(x′), and for k ∈ [d] we use ak, b k ≥ 0 to denote the kth entries of a
+
+and b, respectively. Then Pdk=1 ak = Pdk=1 bk = 1. For the ℓ2-sensitivity, we have 
+
+∥a − b∥22 =
+
+> d
+
+X
+
+> k=1
+
+ ak − bk
+
+2 =
+
+> d
+
+X
+
+> k=1
+
+a2 
+
+> k
+
++
+
+> d
+
+X
+
+> k=1
+
+b2 
+
+> k
+
+− 2
+
+> d
+
+X
+
+> k=1
+
+akbk.
+
+Then, since ak, b k ∈ [0 , 1] we have Pdk=1 a2 
+
+> k
+
+≤ Pdk=1 ak = 1, along with Pdk=1 b2 
+
+> k
+
+≤
+
+Pdk=1 bk = 1, and Pdk=1 akbk ≥ 0. Hence ∆22 = sup 
+
+> x,x ′∈X
+
+∥gθ(x) − gθ(x′)∥22 ≤ 1 + 1 − 0 ≤ 2.
+
+For the ℓ∞-sensitivity, we have 
+
+∥a − b∥∞ ≤ max 
+
+> k∈[d]
+
+{ak, b k} ≤ 1,
+
+and therefore ∆∞ = sup 
+
+> x,x ′∈X
+
+∥gθ(x) − gθ(x′)∥∞ ≤ 1.
+
+Appendix B. Proof of Theorem 10 
+
+We use the lemmas below in proving Theorem 10. 
+
+B.1 Supporting Lemmas Lemma 12 (Composition of RDP mechanisms, Mironov 2017) Fix λ ≥ 1 and k ∈
+
+N privacy mechanisms M1, . . . , Mk, where mechanism i is (λ, ˆϵMi (λ)) −RDP for all i ∈ [k].
+
+Let M = ( M1, . . . , Mk), where, for all i ∈ [k]\{ 1}, Mi can depend on the outputs of 
+
+M1, . . . , Mi−1. Then M is (λ, ˆϵM(λ)) −RDP with ˆϵM(λ) = Pki=1 ˆϵMi (λ).
+
+Lemma 13 (RDP to DP conversion, Canonne et al. 2020) Let ϵ, δ > 0. If M :
+
+D → Sd−1 is (λ, ˆϵ)-Renyi differentially private in the sense of Definition 4, then it is (ϵ, δ )-differentially private in the sense of Definition 3, with 
+
+ϵ = ˆ ϵ + log( λ − 1) − log( δ) + λ log( λ)
+
+λ − 1 .
+
+B.2 Proof 
+
+Each iteration of Algorithm 1 applies Mechanism 8 to a Poisson subsampled minibatch of D.By Lemma 9, for any λ ∈ [1 , 1 + αr ) a single application of the Dirichlet mechanism enforces (λ, ˆϵM(λ; r))-Renyi differential privacy with ˆ ϵM(λ; r) = λr 2ψ′(α − (λ − 1) r). In (Ponnoprat, 2023), α is set to be a function of r and the RDP order λ. In our analysis, we adapt the moments accountant from (Zhu and Wang, 2019), in which the underlying mechanism must 
+
+20 End-to-End Differential Privacy in Training Deep Neural Network Classifiers 
+
+be fixed while its RDP protections are evaluated across different values of λ and ˆ ϵM(λ; r). Therefore, in our training procedure we fix the Dirichlet mechanism parameters α and r
+
+independently of λ.Since each minibatch is drawn using Poisson subsampling with rate q, the per-step RDP protections are amplified. It follows from (Zhu and Wang, 2019, Theorem 5) that for any integer value of λ ∈ [2 , 1 + αr ), we have ˆϵsub (λ; r) ≤ 1
+
+λ − 1 log 
+
+
+
+(1 − q)λ−1(qλ − q + 1) +
+
+λ
+
+2
+
+
+
+q2(1 − q)λ−2eˆϵM(2; r) + 3 
+
+> λ
+
+X
+
+> j=3
+
+λj
+
+
+
+(1 − q)λ−j qj e(j−1)ˆ ϵM(j;r)
+
+
+
+,
+
+where  λ, ˆϵsub (λ; r) is the strength of RDP protection provided to the minibatch at a single training step. Over T training steps, the overall RDP guarantees compose according to Lemma 12, and the training data is protected with  λ, ˆϵo(λ; r)-RDP, where ˆϵo(λ; r) ≤ Tλ − 1 log 
+
+
+
+(1 − q)λ−1(qλ − q + 1) +
+
+λ
+
+2
+
+
+
+q2(1 − q)λ−2eˆϵM(2; r) + 3 
+
+> λ
+
+X
+
+> j=3
+
+λj
+
+
+
+(1 − q)λ−j qj e(j−1)ˆ ϵM(j;r)
+
+
+
+.
+
+Lastly, using Lemma 13 for a fixed δ > 0 gives 
+
+ϵo(λ, δ ; r) ≤ Tλ − 1 log 
+
+
+
+(1 − q)λ−1(qλ − q + 1) + 
+
+λ
+
+2
+
+
+
+q2(1 − q)λ−2eˆϵM(2; r)
+
++ 3 
+
+> λ
+
+X
+
+> j=3
+
+λj
+
+
+
+(1 − q)λ−j qj e(j−1)ˆ ϵM(j;r)
+
+
+
++ log( λ − 1) − log( δ) + λ log( λ)
+
+λ − 1for any integer value of λ ∈ [2 , 1 + αr ).
+
+Appendix C. Proof of Theorem 11 
+
+We first prove 
+
+F (z) = E˜p
+
+L(˜ p(z), y ) = ψ(r + dα ) − ψ rs y(z) + α (7) and Var ˜p
+
+L(˜ p(z), y ) = ψ′ rs y(z) + α − ψ′(r + dα ). (8) The derivation of these equations uses properties of the exponential family of distribu-tions: 
+
+Definition 14 (Wainwright and Jordan 2008, Proposition 3.1) The exponential fam-ily of distributions contains densities of the form 
+
+p(x; ϑ) = exp 
+
+> d
+
+X
+
+> i=1
+
+ϑiϕi(x) − A(ϑ)
+
+!
+
+h(x),
+
+21 Rao, Hawkins, Benvenuti and Hale 
+
+where x ∈ Rn denotes a generic realization of the random variable being modeled and ϑ ∈ Rd
+
+is the parameter indexing the distribution. For i, j ∈ [d] these distributions satisfy 
+
+∂A (ϑ)
+
+∂ϑ i
+
+= E[ϕi(X)] (9) 
+
+∂2A(ϑ)
+
+∂ϑ i∂ϑ j
+
+= Cov( ϕi(X), ϕ j (X)) . (10) Let z ∈ Rd be the network logits for a single example x with true label y ∈ [d]. Let 
+
+η(z) = rs (z) + α1d, with 
+
+ηy(z) = rs y(z) + α, τ =
+
+> d
+
+X
+
+> j=1
+
+ηj (z) = r + dα. (11) The probability density function used in Mechanism 8 takes the form 
+
+f (˜ p; η(z)) = 1
+
+B(η(z)) 
+
+> d
+
+Y
+
+> j=1
+
+˜pηj (z)−1 
+
+> j
+
+, ˜p ∈ Sd−1.
+
+Writing this density as 
+
+f (˜ p; η(z)) = exp 
+
+− log B(η(z)) + 
+
+> d
+
+X
+
+> j=1
+
+(ηj (z) − 1) log ˜ pj
+
+ ,
+
+we observe that this form matches Definition 14 with x = ˜ p and ϑi = ηi(z) − 1 for i ∈ [d], along with 
+
+ϕj (˜ p) = log ˜ pj
+
+A(η(z)) = log B(η(z)) 
+
+h(˜ p) = 1 .
+
+Therefore the exponential family identities in (9) and (10) give 
+
+E˜p[log ˜ pj ] = ∂∂η j
+
+log B(η(z)) Cov(log ˜ pi, log ˜ pj ) = ∂2
+
+∂η i∂η j
+
+log B(η(z)) .
+
+We then find 
+
+∂∂η j
+
+log B(η(z)) = ∂∂η j
+
+" dX
+
+> k=1
+
+log Γ( ηk(z)) − log Γ( τ )
+
+#
+
+= ψ(ηj (z)) − ψ(τ ),
+
+where τ is from (11). Therefore, E˜p[log ˜ pj ] = ψ(ηj (z)) − ψ(τ ) = ψ rs y(z) + α − ψ(r + dα )and F (z) = E˜p[− log ˜ pj ] = ψ(r + dα ) − ψ rs y(z) + α, which is exactly (4). 
+
+22 End-to-End Differential Privacy in Training Deep Neural Network Classifiers 
+
+Computing the second derivative, we find 
+
+∂2
+
+∂η i∂η j
+
+log B(η(z)) = ∂∂η i
+
+[ψ(ηj (z)) − ψ(τ )] = δij ψ′(ηj (z)) − ψ′(τ ).
+
+Evaluating this expression with i = j = y gives Cov(log ˜ py, log ˜ py) = ψ′(rs y(z) + α) − ψ′(r +
+
+dα ). Since Var ˜p
+
+L(˜ p(z), y ) = Var ˜p
+
+− log ˜ py
+
+ = Var ˜p
+
+log ˜ py
+
+ = Cov(log ˜ py, log ˜ py), we have Var ˜p
+
+L(˜ p(z), y ) = ψ′(rs y(z) + α) − ψ′(r + dα ), which is exactly (8). Before proving the result for E˜p
+
+h ∂∂z j L(˜ p(z), y )
+
+i
+
+, we first compute ∂∂z j E˜p [L(˜ p(z), y )]. Let 
+
+LCE (z) = − log sy(z). Then the partial derivatives with respect to zj are given by 
+
+∂s y(z)
+
+∂z j
+
+= sy(z)( δyj − sj (z)) (12) 
+
+∂LCE (z)
+
+∂z j
+
+= sj (z) − δyj . (13) Differentiating (7) gives 
+
+∂∂z j
+
+E˜p [L(˜ p(z), y )] = ∂∂z j
+
+ψ(r + dα ) − ψ rs y(z) + α 
+
+= −ψ′ rs y(z) + α · r · ∂s y(z)
+
+∂z j
+
+= −rψ ′(rs y(z) + α) · sy(z)( δyj − sj (z)) = rs y(z)ψ′(rs y(z) + α) · (sj (z) − δyj )= κ(z; r, α ) ∂LCE (z)
+
+∂z j
+
+, (14) where the third line uses (12) and the fifth line uses (13). Finally, we prove 
+
+E˜p
+
+ ∂∂z j
+
+L(˜ p(z), y )
+
+
+
+= κ z; r, α  ∂LCE 
+
+∂z j
+
+(z). (15) Since we have already shown in (14) that ∂∂z j E˜p [L(˜ p(z), y )] = κ(z; r, α ) ∂LCE  
+
+> ∂z j
+
+, the equality in (15) follows directly from an application of the Dominated Convergence Theorem, i.e., 
+
+E˜p
+
+ ∂∂z j
+
+L(˜ p(z), y )
+
+
+
+= ∂∂z j
+
+E˜p [L(˜ p(z), y )] = κ(z; r, α ) ∂LCE 
+
+∂z j
+
+,
+
+and the remainder of the proof justifies the application of the Dominated Convergence Theorem (Lieb and Loss, 2001, Theorem 1.8). To emphasize the density’s dependence on 
+
+z we abuse notation and denote the Dirichlet density by fz (u) = 1
+
+> B(η(z))
+
+Qdj=1 uηj (z)−1 
+
+> i
+
+. We have E[− log ˜ py] = R 
+
+> Sd−1
+
+− log uyf (u; η(z)) du . To move ∂∂z j inside the integral with the 
+
+23 Rao, Hawkins, Benvenuti and Hale 
+
+Dominated Convergence Theorem, we must show that there exists an integrable function 
+
+Z : Sd−1 → R such that 
+
+∂∂z j
+
+[− log uyf (u; η(z))] ≤ Z(u)for all u ∈ Sd−1. We first have 
+
+∂∂z j
+
+[f (u; η(z))] = f (u; η(z)) ∂∂z j
+
+log f (u; η(z)) = f (u; η(z)) 
+
+"
+
+− ∂∂z j
+
+log B(η(z)) + 
+
+> d
+
+X
+
+> k=1
+
+∂η k(z)
+
+∂z j
+
+log uk
+
+#
+
+.
+
+Using log B(η(z)) = Pdk=1 log Γ( ηk(z)) − log Γ( τ ) then gives ∂∂η k log B(η(z)) = ψ(ηk(z)) −
+
+ψ(τ ), and applying the chain rule gives 
+
+∂∂z j
+
+log B(η(z)) = 
+
+> d
+
+X
+
+> k=1
+
+∂η k(z)
+
+∂z j
+
+ ψ(ηk(z)) − ψ(τ )
+
+and 
+
+∂∂z j
+
+[f (u; η(z))] = f (u; η(z)) 
+
+> d
+
+X
+
+> k=1
+
+∂η k(z)
+
+∂z j
+
+  log uk − ψ(ηk(z)) + ψ(τ ).
+
+Therefore 
+
+∂∂z j
+
+[− log uyf (u; η(z))] ≤ | log uy|f (u; η(z)) 
+
+> d
+
+X
+
+> k=1
+
+∂η k(z)
+
+∂z j
+
+
+
+| log uk| + |ψ(ηk(z)) | + |ψ(τ )|
+
+
+
+.
+
+(16) We now establish that the terms that depend on z are bounded: 1. The density f (u; η(z)) is bounded: (a) Since ηk(z) ∈ [α, α +r] and 1 /B (·) is continuous on (0 , ∞), there exists a constant 
+
+C1 < ∞ such that 1 
+
+> B(η(z))
+
+≤ C1.(b) Because uk ∈ (0 , 1] and ηk(z) ≥ α, we have uηk (z)−1 
+
+> k
+
+≤ uα−1 
+
+> k
+
+.2. We have ∂η k (z) 
+
+> ∂z j
+
+= r ∂s k (z) 
+
+> ∂z j
+
+, where ∂s k (z) 
+
+> ∂z j
+
+is the derivative of the softmax function, which is bounded, and there exists a constant C2 such that ∂η k (z) 
+
+> ∂z j
+
+≤ C2.3. Since ηk(z) ∈ [α, α + r] and ψ is continuous on (0 , ∞), there exists a constant C3 such that |ψ(ηk(z)) | ≤ C3.4. The value of ψ(τ ) is constant because τ = r + dα .
+
+24 End-to-End Differential Privacy in Training Deep Neural Network Classifiers 
+
+Combining items 1-4 in (16) gives the bound 
+
+∂∂z j
+
+[− log uyf (u; η(z))] ≤ C1C2| log uy|
+
+d(C3 + |ψ(τ )|) + 
+
+> d
+
+X
+
+> j=1
+
+| log uj |
+
+
+
+> d
+
+Y
+
+> i=1
+
+uα−1
+
+> i
+
+≤ C| log uy|
+
+1 + 
+
+> d
+
+X
+
+> j=1
+
+| log uj |
+
+
+
+> d
+
+Y
+
+> i=1
+
+uα−1 
+
+> i
+
+,
+
+where C = C1C2
+
+
+
+d C3 + |ψ(τ )| + 1 
+
+
+
+.Now we show that this dominating function has a finite integral over the simplex. We use Young’s inequality, namely 
+
+ab ≤ a2 + b2
+
+2 ,
+
+with a = | log uy| and b = 1 + Pdj=1 | log uj | to find 
+
+C| log uy|
+
+1 + 
+
+> d
+
+X
+
+> j=1
+
+| log uj |
+
+
+
+> d
+
+Y
+
+> i=1
+
+uα−1 
+
+> i
+
+≤ C
+
+2
+
+| log uy|2 +
+
+1 + 
+
+> d
+
+X
+
+> j=1
+
+| log uj |
+
+
+
+> 2
+
+
+
+> d
+
+Y
+
+> i=1
+
+uα−1
+
+> i
+
+≤ C
+
+2
+
+| log uy|2 + ( d + 1) 
+
+1 + 
+
+> d
+
+X
+
+> j=1
+
+| log uj |2
+
+
+
+> d
+
+Y
+
+> i=1
+
+uα−1 
+
+> i
+
+, (17) where the second inequality applies Cauchy-Schwarz. For the function on the right-hand side of (17) to be integrable, it suffices to show that 
+
+Z
+
+> Sd−1
+
+| log uj |2
+
+> d
+
+Y
+
+> i=1
+
+uα−1 
+
+> i
+
+du < ∞ (18) for all j ∈ [d]. In the scalar case, i.e., for u ∈ (0 , 1] rather than u ∈ Sd−1, the corresponding integrals are finite because Z 10
+
+uα−1du = 1
+
+α < ∞
+
+and Z 10
+
+| log u|2uα−1du =
+
+Z 10
+
+(− log u)2uα−1du = 2
+
+α3 < ∞.
+
+For each j ∈ [d], the simplex integral in (18) has the same form as one of the scalar integrals above. Thus, the dominating function in (17) is integrable and the Dominated Convergence Theorem applies. 
+
+C.1 Asymptotic Analysis and Empirical Results for Section 3.5 
+
+We perform a brief asymptotic analysis to characterize how γeff in (6) varies with α. First, we account for the fact that r∗ is constrained by the condition h(r) ≤ ϵ from (1). We 
+
+25 Rao, Hawkins, Benvenuti and Hale 
+
+α r∗ r∗/α 
+
+0.1 0.0087 0.0870 0.3 0.0260 0.0867 0.5 0.0433 0.0866 1 0.0864 0.0864 2 0.1580 0.0790 3 0.2349 0.0783 Table 6: Values of r∗ found with (1) for CIFAR10/ResNet-18, with ϵ = 1, δ = 10 −5, a batch size of 250, and T = 20000 steps. approximate r∗ as a linear function of α of the form c(ϵ)α. Table 6 shows that at ϵ = 1 , the behavior of r∗ is roughly linear in α with c(1) ≈ 0.08 .
+
+Substituting the linear approximation into (5) and (3) and using ψ′(x) ≈ x−2 as x → 0and ψ′(x) ≈ x−1 as x → ∞ yields the two regimes 
+
+κ(z; r, α ) ≈
+
+(α−1, α ≪ 1const , α ≫ 1, Var ˜p
+
+L(z; ˜ p) ≈
+
+(α−2, α ≪ 1
+
+α−1, α ≫ 1.
+
+Both the scaling factor κ(z; r, α ) and the per-step variance Var ˜p
+
+L(z; ˜ p) shrink as α
+
+grows, but the variance shrinks faster. Thus, as α increases, Algorithm 1 takes smaller steps on average but also experiences substantially less privacy-induced variance. This behavior makes runs with larger α less noisy and allows for stability at larger learning rates. 
+
+C.2 Learning Rate Values for Figure 2 
+
+Here we provide the learning rate values tested for each α value in Figure 2. For α ∈{0.1, 0.2, 0.3, 0.5} we use 11 values, namely γ ∈ { 0.01 , 0.025 , 0.05 , 0.075 , 0.1, 0.2, 0.3, 0.4, 0.5,
+
+0.75 , 1}. For α ∈ { 1, 2, 3} we use 13 values, namely γ ∈ { 0.05 , 0.075 , 0.1, 0.15 , 0.2, 0.3, 0.5, 1,
+
+1.5, 2, 3, 5, 10 }. For α ∈ { 5, 10 } we use 11 values, namely γ ∈ { 0.1, 0.2, 0.5, 0.75 , 1, 2, 3, 4, 5, 6,
+
+7}.
+
+Appendix D. Implementation Details 
+
+D.1 Data Sets 
+
+We evaluate our framework on the following image classification data sets: 
+
+• CIFAR10 (Krizhevsky et al., 2009) provides 32 × 32 color images categorized into 10 distinct classes. The data set is partitioned into 50 , 000 images for training and 10 , 000 for testing. 
+
+• MNIST (LeCun et al., 1998) consists of 28 × 28 grayscale images of handwritten digits divided into 10 classes. The standard benchmark includes 60 , 000 training samples and 10 , 000 testing samples. 
+
+> 26 End-to-End Differential Privacy in Training Deep Neural Network Classifiers
+
+Data set α ϵ = 0 .5 ϵ = 1 ϵ = 2 ϵ = 3 ϵ = 4 ϵ = 6 ϵ = 8 CIFAR10 3.0 — 0.235 0.404 0.559 0.679 0.825 0.903 MNIST 3.0 0.136 0.277 0.472 — 0.711 — —DermaMNIST 3.0 — 0.137 — — 0.645 — 0.856 (ϵ=7 .42) 
+
+SVHN 3.0 — 0.284 0.475 0.575 0.717 0.930 0.964 FashionMNIST 3.0 0.136 0.277 0.472 — 0.711 — —Table 7: Dirichlet parameters r∗ and α for each data set and each value of ϵ when δ = 10 −5.
+
+• DermaMNIST (Yang et al., 2021, 2023), part of the broader MedMNIST collection, fo-cuses on classifying dermoscopic images into 7 different types of skin lesions. The images are standardized to 28 × 28 pixels, with the data set split into 7 , 007 training, 993 vali-dation, and 2 , 005 test examples. 
+
+• FashionMNIST (Xiao et al., 2017) consists of Zalando’s clothing articles. It shares the same 10-class structure, 28 × 28 grayscale format, and 60 , 000/10 , 000 train-test split as MNIST. 
+
+• SVHN (Netzer et al., 2011) (Street View House Numbers) contains 32 × 32 RGB images of cropped digits captured from real-world street signs. It covers 10 classes and provides 73 , 257 training images alongside 26 , 032 testing images in its core data set. 
+
+D.2 Dirichlet Parameters 
+
+In Table 7, we report the Dirichlet parameters r∗ and α for each data set and each privacy budget when using δ = 10 −5. Each value of r∗ is computed using (1). 
+
+Appendix E. Additional Results on DermaMNIST 
+
+We follow H¨ olzl et al. (2022) and report validation accuracy in Table 8. Our work outper-forms the DP-SGD baseline (Tang et al., 2023) and H¨ olzl et al. (2022) across all evaluated values of ϵ.                           
+
+> Method Model ϵ= 1 ϵ= 4 ϵ= 7 .42 ϵ=∞
+> DP-SGD (Tang et al., 2023) ResNet-9 69 .00 71 .78 74 .08 77 .27 H¨ olzl et al. (2022) ResNet-9 ——74 .17 77 .84 This work ResNet-9 74 .98 76 .27 76 .49 79 .26
+> ±2.04 ±1.22 ±1.45
+
+Table 8: Validation accuracy (%) on DermaMNIST under δ = 10 −5 across 5 independent runs for each ϵ.                 
+
+> 27 Rao, Hawkins, Benvenuti and Hale
+> Method Model q= 0 .001 q= 0 .01 q= 0 .02 q= 0 .04 This work ResNet-18 89 .41 82 .94 71 .18 56 .49
+> ±3.63 ±2.73 ±5.53 ±3.51
+
+Table 9: Test accuracy (%) of this work using different sampling rates on CIFAR10 across 5 independent runs for (4 .0, 10 −5)-differential privacy.                              
+
+> Method Model ϵ= 1 ϵ= 2 ϵ= 3 ϵ= 4 ϵ= 6 ϵ= 8 ϵ=∞
+> This work ResNet-18 86 .78 87 .50 87 .99 88 .27 88 .57 88 .62 94 .58
+> ±0.66 ±0.61 ±0.25 ±0.39 ±0.57 ±0.24
+
+Table 10: Test accuracy (%) of Algorithm 1 using the Adam optimizer on CIFAR10 across 5 independent runs for each ϵ.
+
+Appendix F. Experiments with Different Sampling Rates 
+
+We use the SGD optimizer with learning rate γ = 0 .1, T = 20000 steps, no momentum, and with random crop and horizontal flip on CIFAR10 with ResNet-18 as a baseline. We then investigate the effects of different sampling rates under (4 , 10 −5)-differential privacy with Dirichlet parameter α = 3 .0. As shown in Table 9, we observe that smaller sampling rates improves the accuracy of private training with Algorithm 1, while large sampling rates such as q = 0 .04 lead to worse accuracy. This degradation in accuracy is caused by privacy amplification effects, since when the sampling rate is large, the privacy-utility tradeoff benefits less from privacy amplification. In practice, a small sampling rate is desired when training with Algorithm 1. 
+
+Appendix G. Results on Different Optimizer 
+
+We also test our private training framework using ResNet-18 on CIFAR10 with the Adam optimizer (Kingma and Ba, 2014) using learning rate γ = 0 .001, sampling rate q = 0 .005, 
+
+T = 20000 steps, no momentum, δ = 10 −5, and α = 3 .0. Table 10 shows the privacy-utility tradeoff for Algorithm 1 using the Adam optimizer. The accuracy increases as ϵ increases, which follows the same trend as using the SGD optimizer. Notably, even at strongest privacy level of ϵ = 1, the accuracy is 86 .78%. These results illustrate that Algorithm 1 is optimizer-agnostic in the sense that any optimizer can be used without harming privacy, while also maintaining high accuracy. 
+
+References 
+
+M. Abadi, A. Chu, I. Goodfellow, H. B. McMahan, I. Mironov, K. Talwar, and L. Zhang. Deep learning with differential privacy. In Proceedings of the 2016 ACM SIGSAC con-ference on computer and communications security , pages 308–318, 2016. 
+
+> 28 End-to-End Differential Privacy in Training Deep Neural Network Classifiers
+
+M. Bazarbash. Fintech in financial inclusion: machine learning applications in assessing credit risk . International Monetary Fund, 2019. S. Bhagat, U. Weinsberg, S. Ioannidis, and N. Taft. Recommending with an agenda: Active learning of private attributes using matrix factorization. In Proceedings of the 8th ACM conference on recommender systems , pages 65–72, 2014. R. P. Brent. An algorithm with guaranteed convergence for finding a zero of a function. 
+
+The computer journal , 14(4):422–425, 1971. Z. Bu, Y.-X. Wang, S. Zha, and G. Karypis. Automatic clipping: Differentially private deep learning made easier and stronger. Advances in Neural Information Processing Systems ,36:41727–41764, 2023. R. I. Busa-Fekete, A. M. Medina, U. Syed, and S. Vassilvitskii. Label differential privacy and private training data release. In International Conference on Machine Learning ,pages 3233–3251. PMLR, 2023. C. L. Canonne, G. Kamath, and T. Steinke. The discrete gaussian for differential privacy. 
+
+Advances in Neural Information Processing Systems , 33:15676–15688, 2020. A. Cheng, J. Wang, X. S. Zhang, Q. Chen, P. Wang, and J. Cheng. Dpnas: Neural architecture search for deep learning with differential privacy. In Proceedings of the AAAI conference on artificial intelligence , volume 36, pages 6358–6366, 2022. W. L. Croft, J.-R. Sack, and W. Shi. Obfuscation of images via differential privacy: From facial images to general images. Peer-to-Peer Networking and Applications , 14(3):1705– 1733, 2021. S. De, L. Berrada, J. Hayes, S. L. Smith, and B. Balle. Unlocking high-accuracy differentially private image classification through scale. arXiv preprint arXiv:2204.13650 , 2022. C. Dwork, A. Roth, et al. The algorithmic foundations of differential privacy. Foundations and Trends in Theoretical Computer Science , 9(3–4):211–407, 2014. H. Esfandiari, V. Mirrokni, U. Syed, and S. Vassilvitskii. Label differential privacy via clustering. In International Conference on Artificial Intelligence and Statistics , pages 7055–7075. PMLR, 2022. L. Fan. Image pixelization with differential privacy. In IFIP Annual Conference on Data and Applications Security and Privacy , pages 148–162. Springer, 2018. M. Fredrikson, S. Jha, and T. Ristenpart. Model inversion attacks that exploit confidence information and basic countermeasures. In Proceedings of the 22nd ACM SIGSAC con-ference on computer and communications security , pages 1322–1333, 2015. K. Ganju, Q. Wang, W. Yang, C. A. Gunter, and N. Borisov. Property inference attacks on fully connected neural networks using permutation invariant representations. In Proceed-ings of the 2018 ACM SIGSAC conference on computer and communications security ,pages 619–633, 2018. 
+
+> 29 Rao, Hawkins, Benvenuti and Hale
+
+B. Ghazi, N. Golowich, R. Kumar, P. Manurangsi, and C. Zhang. Deep learning with label differential privacy. Advances in neural information processing systems , 34:27131–27145, 2021. B. Ghazi, P. Kamath, R. Kumar, E. Leeman, P. Manurangsi, A. Varadarajan, and C. Zhang. Regression with label differential privacy. In The Eleventh International Conference on Learning Representations , 2023. K. He, X. Zhang, S. Ren, and J. Sun. Deep residual learning for image recognition. In 
+
+Proceedings of the IEEE conference on computer vision and pattern recognition , pages 770–778, 2016. F. A. H¨ olzl, D. Rueckert, and G. Kaissis. Bridging the gap: Differentially private equivariant deep learning for medical image analysis. arXiv preprint arXiv:2209.04338 , 2022. J. Hsu, M. Gaboardi, A. Haeberlen, S. Khanna, A. Narayan, B. C. Pierce, and A. Roth. Differential privacy: An economic method for choosing epsilon. In 2014 IEEE 27th Computer Security Foundations Symposium , pages 398–410. IEEE, 2014. D. P. Kingma and J. Ba. Adam: A method for stochastic optimization. arXiv preprint arXiv:1412.6980 , 2014. A. Krizhevsky, G. Hinton, et al. Learning multiple layers of features from tiny images. 
+
+Technical Report , 2009. Y. LeCun, L. Bottou, Y. Bengio, and P. Haffner. Gradient-based learning applied to docu-ment recognition. Proceedings of the IEEE , 86(11):2278–2324, 1998. E. H. Lieb and M. Loss. Analysis , volume 14. American Mathematical Soc., 2001. Y. Luo, T. Hu, X. Ouyang, J. Liu, Q. Fu, S. Qin, Z. Min, and X. Lin. Dpo-face: Differential privacy obfuscation for facial sensitive regions. Computers & Security , 154:104434, 2025. M. Malek Esmaeili, I. Mironov, K. Prasad, I. Shilov, and F. Tramer. Antipodes of label differential privacy: Pate and alibi. Advances in neural information processing systems ,34:6934–6945, 2021. L. Melis, C. Song, E. De Cristofaro, and V. Shmatikov. Exploiting unintended feature leakage in collaborative learning. In 2019 IEEE symposium on security and privacy (SP) ,pages 691–706. IEEE, 2019. I. Mironov. R´ enyi differential privacy. In 2017 IEEE 30th computer security foundations symposium (CSF) , pages 263–275. IEEE, 2017. I. Mironov, K. Talwar, and L. Zhang. R´ enyi differential privacy of the sampled gaussian mechanism. arXiv preprint arXiv:1908.10530 , 2019. I. A. Monir and G. Ghinita. Differentially-private neural network training with private fea-tures and public labels. In International Conference on Big Data Analytics and Knowledge Discovery , pages 208–222. Springer, 2024. 
+
+> 30 End-to-End Differential Privacy in Training Deep Neural Network Classifiers
+
+Y. Netzer, T. Wang, A. Coates, A. Bissacco, B. Wu, and A. Y. Ng. Reading digits in natural images with unsupervised feature learning. In NIPS Workshop on Deep Learning and Unsupervised Feature Learning 2011 , 2011. K. Packh¨ auser, S. G¨ undel, N. M¨ unster, C. Syben, V. Christlein, and A. Maier. Deep learning-based patient re-identification is able to exploit the biometric nature of medical chest x-ray data. Scientific Reports , 12(1):14851, 2022. N. Papernot, A. Thakurta, S. Song, S. Chien, and ´U. Erlingsson. Tempered sigmoid activa-tions for deep learning with differential privacy. In Proceedings of the AAAI conference on artificial intelligence , volume 35, pages 9312–9321, 2021. A. Paszke, S. Gross, F. Massa, A. Lerer, J. Bradbury, G. Chanan, T. Killeen, Z. Lin, N. Gimelshein, L. Antiga, et al. Pytorch: An imperative style, high-performance deep learning library. Advances in neural information processing systems , 32, 2019. D. Ponnoprat. Dirichlet mechanism for differentially private kl divergence minimization. 
+
+Transactions on Machine Learning Research , 2023. M. Rigaki and S. Garcia. A survey of privacy attacks in machine learning. ACM Computing Surveys , 56(4):1–34, 2023. T. Sander, P. Stock, and A. Sablayrolles. Tan without a burn: Scaling laws of dp-sgd. In 
+
+International Conference on Machine Learning , pages 29937–29949. PMLR, 2023. R. Shokri, M. Stronati, C. Song, and V. Shmatikov. Membership inference attacks against machine learning models. In 2017 IEEE symposium on security and privacy (SP) , pages 3–18. IEEE, 2017. C. Szegedy, W. Liu, Y. Jia, P. Sermanet, S. Reed, D. Anguelov, D. Erhan, V. Vanhoucke, and A. Rabinovich. Going deeper with convolutions. In Proceedings of the IEEE confer-ence on computer vision and pattern recognition , pages 1–9, 2015. X. Tang, A. Panda, V. Sehwag, and P. Mittal. Differentially private image classification by learning priors from random processes. Advances in neural information processing systems , 36:35855–35877, 2023. F. Tramer and D. Boneh. Differentially private learning needs better features (or much more data). In International Conference on Learning Representations , 2020. M. J. Wainwright and M. I. Jordan. Graphical models, exponential families, and variational inference. Foundations and Trends ® in Machine Learning , 1(1-2):1–305, 2008. X. Wang, Y. Peng, L. Lu, Z. Lu, M. Bagheri, and R. M. Summers. Chestx-ray8: Hospital-scale chest x-ray database and benchmarks on weakly-supervised classification and local-ization of common thorax diseases. In Proceedings of the IEEE conference on computer vision and pattern recognition , pages 2097–2106, 2017. Y.-X. Wang, B. Balle, and S. P. Kasiviswanathan. Subsampled r´ enyi differential privacy and analytical moments accountant. In The 22nd international conference on artificial intelligence and statistics , pages 1226–1235. PMLR, 2019. 
+
+> 31 Rao, Hawkins, Benvenuti and Hale
+
+H. Xiao, K. Rasul, and R. Vollgraf. Fashion-mnist: a novel image dataset for benchmarking machine learning algorithms. arXiv preprint arXiv:1708.07747 , 2017. H. Xue, B. Liu, M. Ding, T. Zhu, D. Ye, L. Song, and W. Zhou. Dp-image: Differential privacy for image data in feature space. arXiv preprint arXiv:2103.07073 , 2021. J. Yang, R. Shi, and B. Ni. Medmnist classification decathlon: A lightweight automl bench-mark for medical image analysis. In IEEE 18th International Symposium on Biomedical Imaging (ISBI) , pages 191–195, 2021. J. Yang, R. Shi, D. Wei, Z. Liu, L. Zhao, B. Ke, H. Pfister, and B. Ni. Medmnist v2-a large-scale lightweight benchmark for 2d and 3d biomedical image classification. Scientific Data , 10(1):41, 2023. A. Yousefpour, I. Shilov, A. Sablayrolles, D. Testuggine, K. Prasad, M. Malek, J. Nguyen, S. Ghosh, A. Bharadwaj, J. Zhao, G. Cormode, and I. Mironov. Opacus: User-friendly differential privacy library in PyTorch. arXiv preprint arXiv:2109.12298 , 2021. S. Zagoruyko and N. Komodakis. Wide residual networks. arXiv preprint arXiv:1605.07146 ,2016. Y. Zhu and Y.-X. Wang. Poission subsampled r´ enyi differential privacy. In International Conference on Machine Learning , pages 7634–7642. PMLR, 2019.
