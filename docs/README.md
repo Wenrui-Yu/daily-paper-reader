@@ -6,31 +6,29 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-25
-- 运行时间：2026-07-25 19:58:47 UTC
+- 最新运行日期：2026-07-26
+- 运行时间：2026-07-26 20:50:45 UTC
 - 运行状态：成功
 - 本次总论文数：3
 - 精读区：1
 - 速读区：2
 
 ### 今日简报（AI）
-今日精选3篇论文，聚焦隐私保护与数据生成。
-最值得关注的是《Towards Privacy-Preserving Federated Prompt Tuning under Data Heterogeneity》提出的子空间分解专家方法，评分9.0，为联邦学习隐私与异质性挑战提供了新思路。
-建议普通读者优先精读该文，并关注联邦学习中的隐私保护与数据异构性权衡。
-- 详情：[/202607/25/README](/202607/25/README)
+今日精选一篇高评分合成数据隐私机制论文，并快速浏览了对话产品顾问可用性及多语言隐私政策审计两项研究。最值得关注的是《Optimal Domain-Aware Privacy Mechanisms for Synthetic Data Generation》（8.0/10）中提出的领域感知最优隐私方案，以及《Transparent by Design, Usable in Practice?》（7.0/10）对对话界面实际可用性的反思。面向普通读者，建议优先精读合成数据论文以理解隐私保护前沿，再快速浏览可用性案例对比实际应用效果。
+- 详情：[/202607/26/README](/202607/26/README)
 
 ### 精读区论文标签
-1. [Towards Privacy-Preserving Federated Prompt Tuning under Data Heterogeneity: A Subspace-Decomposed Expert Approach](/202607/25/2607.21417v1-towards-privacy-preserving-federated-prompt-tuning-under-data-heterogeneity-a-subspace-decomposed-expert-approach)  
-   标签：评分：9.0/10、query:daily
-   evidence：差分隐私下保护隐私的联邦提示调优
+1. [Optimal Domain-Aware Privacy Mechanisms for Synthetic Data Generation](/202607/26/2607.18021v1-optimal-domain-aware-privacy-mechanisms-for-synthetic-data-generation)  
+   标签：评分：8.0/10、query:daily
+   evidence：合成数据生成中的差分隐私机制
 
 ### 速读区论文标签
-1. [Optimal Domain-Aware Privacy Mechanisms for Synthetic Data Generation](/202607/25/2607.18021v1-optimal-domain-aware-privacy-mechanisms-for-synthetic-data-generation)  
+1. [Transparent by Design, Usable in Practice? A Formative Usability Study of a Conversational Product Advisor](/202607/26/2607.21513v1-transparent-by-design-usable-in-practice-a-formative-usability-study-of-a-conversational-product-advisor)  
+   标签：评分：7.0/10、query:daily
+   evidence：关注LLM透明性和可用性
+2. [Enabling Multilingual Privacy Policy Audits: Large-Scale Analysis of Spanish Mobile Apps](/202607/26/2607.18424v1-enabling-multilingual-privacy-policy-audits-large-scale-analysis-of-spanish-mobile-apps)  
    标签：评分：6.0/10、query:daily
-   evidence：差分隐私机制与合成数据
-2. [Weak Private Information Retrieval for Graph-based Storage](/202607/25/2607.21014v1-weak-private-information-retrieval-for-graph-based-storage)  
-   标签：评分：6.0/10、query:daily
-   evidence：图基分布式存储的弱私密信息检索
+   evidence：基于大语言模型的多语言隐私政策审计
 
 
 <div class="dpr-home-promo-card">
