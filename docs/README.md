@@ -6,41 +6,35 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-27
-- 运行时间：2026-07-27 20:19:33 UTC
+- 最新运行日期：2026-07-28
+- 运行时间：2026-07-28 20:41:41 UTC
 - 运行状态：成功
-- 本次总论文数：7
-- 精读区：3
-- 速读区：4
+- 本次总论文数：5
+- 精读区：4
+- 速读区：1
 
 ### 今日简报（AI）
-今日阅读7篇密码学与隐私计算论文，精读3篇、速读4篇。最值得关注的是《PrivDNN》提出的部分DNN加密安全多方计算框架（9.0分），以及《Certified in Theory, Broken in Practice》对密码学模型认证假设鸿沟的警示（8.0分）。建议聚焦隐私计算理论与实现间的差距，同时关注开源工具trasgoDP在本地差分隐私中的应用。
-- 详情：[/202607/27/README](/202607/27/README)
+今日精读2篇高分论文，聚焦联邦学习隐私博弈与分布式卷积秩回归。最值得看的是统一平均场视角下的多智能体隐私博弈，以及分布式网络上的卷积秩回归方法。建议读者优先深入理解这两篇精读论文的核心思路。
+- 详情：[/202607/28/README](/202607/28/README)
 
 ### 精读区论文标签
-1. [PrivDNN: A Secure Multi-Party Computation Framework for Deep Learning using Partial DNN Encryption](/202607/27/2607.21895v1-privdnn-a-secure-multi-party-computation-framework-for-deep-learning-using-partial-dnn-encryption)  
+1. [Multi-Agent Privacy Game in Federated Learning: A Unified Mean-Field View](/202607/28/2607.23029v1-multi-agent-privacy-game-in-federated-learning-a-unified-mean-field-view)  
+   标签：评分：10.0/10、query:daily
+   evidence：联邦学习中的多智能体隐私博弈
+2. [Distributed Convolutional Rank Regression over Decentralized Networks](/202607/28/2607.23639v1-distributed-convolutional-rank-regression-over-decentralized-networks)  
    标签：评分：9.0/10、query:daily
-   evidence：通过安全多方计算和部分加密实现隐私保护的深度学习
-2. [Certified in Theory, Broken in Practice: Assumption Gaps in Cryptographic Model Certification](/202607/27/2607.21839v1-certified-in-theory-broken-in-practice-assumption-gaps-in-cryptographic-model-certification)  
+   evidence：去中心化分布式学习并保护隐私
+3. [BettiSplit: Topology-Guided Privacy-Aware Split Learning Against Feature Inversion and Gradient Leakage](/202607/28/2607.24556v1-bettisplit-topology-guided-privacy-aware-split-learning-against-feature-inversion-and-gradient-leakage)  
+   标签：评分：9.0/10、query:daily
+   evidence：针对分布式机器学习中隐私泄露的分割学习方法
+4. [FedSLIM: Privacy-Preserving Federated MDL-Based Descriptive Pattern Mining Across Data Silos](/202607/28/2607.23236v1-fedslim-privacy-preserving-federated-mdl-based-descriptive-pattern-mining-across-data-silos)  
    标签：评分：8.0/10、query:daily
-   evidence：隐私保护的机器学习审计与密码学认证
-3. [A Maximum Entropy Implementation of Differential Privacy Under Linear Invariants](/202607/27/2607.22450v1-a-maximum-entropy-implementation-of-differential-privacy-under-linear-invariants)  
-   标签：评分：8.0/10、query:daily
-   evidence：线性约束下差分隐私的实现，用于隐私保护数据发布
+   evidence：隐私保护联邦模式挖掘
 
 ### 速读区论文标签
-1. [Optimal Domain-Aware Privacy Mechanisms for Synthetic Data Generation](/202607/27/2607.18021v1-optimal-domain-aware-privacy-mechanisms-for-synthetic-data-generation)  
+1. [Optimal Domain-Aware Privacy Mechanisms for Synthetic Data Generation](/202607/28/2607.18021v1-optimal-domain-aware-privacy-mechanisms-for-synthetic-data-generation)  
    标签：评分：7.0/10、query:daily
-   evidence：差分隐私机制用于合成数据
-2. [Exponentially Fewer-Server PIR from Sparser $S$-Decoding Polynomials](/202607/27/2607.22033v1-exponentially-fewer-server-pir-from-sparser-s-decoding-polynomials)  
-   标签：评分：7.0/10、query:daily
-   evidence：用于隐私保护数据访问的私有信息检索协议
-3. [trasgoDP: An Open Source Framework for Releasing Noised Tabular Microdata under Local Differential Privacy](/202607/27/2607.22230v1-trasgodp-an-open-source-framework-for-releasing-noised-tabular-microdata-under-local-differential-privacy)  
-   标签：评分：7.0/10、query:daily
-   evidence：本地差分隐私微数据发布开源框架
-4. [Weak Private Information Retrieval for Graph-based Storage](/202607/27/2607.21014v1-weak-private-information-retrieval-for-graph-based-storage)  
-   标签：评分：6.0/10、query:daily
-   evidence：基于图存储的私有信息检索
+   evidence：领域感知的合成数据隐私机制
 
 
 <div class="dpr-home-promo-card">
