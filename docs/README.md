@@ -6,35 +6,47 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-28
-- 运行时间：2026-07-28 20:41:41 UTC
+- 最新运行日期：2026-07-29
+- 运行时间：2026-07-29 21:15:38 UTC
 - 运行状态：成功
-- 本次总论文数：5
-- 精读区：4
-- 速读区：1
+- 本次总论文数：9
+- 精读区：6
+- 速读区：3
 
 ### 今日简报（AI）
-今日精读2篇高分论文，聚焦联邦学习隐私博弈与分布式卷积秩回归。最值得看的是统一平均场视角下的多智能体隐私博弈，以及分布式网络上的卷积秩回归方法。建议读者优先深入理解这两篇精读论文的核心思路。
-- 详情：[/202607/28/README](/202607/28/README)
+今日聚焦隐私保护与AI安全，精读MOSAIC-FL的微服务式基因组学框架与Share No More的联邦披露机制。最值得看的方向是隐私保护框架（MOSAIC-FL）和视角感知AI的披露策略（Share No More）。建议优先阅读这两篇高分论文，并从隐私设计角度思考AI应用中的信息泄露风险。
+- 详情：[/202607/29/README](/202607/29/README)
 
 ### 精读区论文标签
-1. [Multi-Agent Privacy Game in Federated Learning: A Unified Mean-Field View](/202607/28/2607.23029v1-multi-agent-privacy-game-in-federated-learning-a-unified-mean-field-view)  
+1. [MOSAIC-FL, a micro-service based privacy-preserving framework with application to genomics](/202607/29/2607.25107v1-mosaic-fl-a-micro-service-based-privacy-preserving-framework-with-application-to-genomics)  
    标签：评分：10.0/10、query:daily
-   evidence：联邦学习中的多智能体隐私博弈
-2. [Distributed Convolutional Rank Regression over Decentralized Networks](/202607/28/2607.23639v1-distributed-convolutional-rank-regression-over-decentralized-networks)  
+   evidence：基于微服务的隐私保护联邦学习框架
+2. [Share No More Than the Request Requires: Federated Disclosure for Perspective-Aware AI](/202607/29/2607.22953v1-share-no-more-than-the-request-requires-federated-disclosure-for-perspective-aware-ai)  
    标签：评分：9.0/10、query:daily
-   evidence：去中心化分布式学习并保护隐私
-3. [BettiSplit: Topology-Guided Privacy-Aware Split Learning Against Feature Inversion and Gradient Leakage](/202607/28/2607.24556v1-bettisplit-topology-guided-privacy-aware-split-learning-against-feature-inversion-and-gradient-leakage)  
+   evidence：联邦隐私保护披露
+3. [Distributed Convolutional Rank Regression over Decentralized Networks](/202607/29/2607.23639v2-distributed-convolutional-rank-regression-over-decentralized-networks)  
    标签：评分：9.0/10、query:daily
-   evidence：针对分布式机器学习中隐私泄露的分割学习方法
-4. [FedSLIM: Privacy-Preserving Federated MDL-Based Descriptive Pattern Mining Across Data Silos](/202607/28/2607.23236v1-fedslim-privacy-preserving-federated-mdl-based-descriptive-pattern-mining-across-data-silos)  
+   evidence：基于共识ADMM的隐私保护分布式卷积秩回归
+4. [DP-IVON-Gradsq: Differentially Private Squared-Gradient Improved Variational Online Newton](/202607/29/2607.23649v1-dp-ivon-gradsq-differentially-private-squared-gradient-improved-variational-online-newton)  
+   标签：评分：9.0/10、query:daily
+   evidence：差分隐私优化方法
+5. [SafeStats: Efficient 2PC Protocols for Data Statistic-Related Functions](/202607/29/2607.25430v1-safestats-efficient-2pc-protocols-for-data-statistic-related-functions)  
+   标签：评分：9.0/10、query:daily
+   evidence：安全统计函数的两方计算
+6. [One More Turn, Less Regret: A Regret-Based Multi-Turn Benchmark for LLMs' Clarification Policies](/202607/29/2607.21143v1-one-more-turn-less-regret-a-regret-based-multi-turn-benchmark-for-llms-clarification-policies)  
    标签：评分：8.0/10、query:daily
-   evidence：隐私保护联邦模式挖掘
+   evidence：面向模糊用户请求的澄清基准
 
 ### 速读区论文标签
-1. [Optimal Domain-Aware Privacy Mechanisms for Synthetic Data Generation](/202607/28/2607.18021v1-optimal-domain-aware-privacy-mechanisms-for-synthetic-data-generation)  
+1. [Private Again: AI Agents Restore Anonymity---Foreclosing Discrimination and Its Proof](/202607/29/2607.23539v1-private-again-ai-agents-restore-anonymity---foreclosing-discrimination-and-its-proof)  
+   标签：评分：8.0/10、query:daily
+   evidence：AI代理恢复匿名性以阻止歧视
+2. [Isolated but Exposed: Persistence-Based Memory Extraction Attack on LLM Agents](/202607/29/2607.23444v1-isolated-but-exposed-persistence-based-memory-extraction-attack-on-llm-agents)  
    标签：评分：7.0/10、query:daily
-   evidence：领域感知的合成数据隐私机制
+   evidence：面向LLM代理的内存提取攻击揭示隐私漏洞
+3. [MemLens: A Value-Aware Memory Management System with Interactive Analytics for LLM-based Agents](/202607/29/2607.25992v1-memlens-a-value-aware-memory-management-system-with-interactive-analytics-for-llm-based-agents)  
+   标签：评分：7.0/10、query:daily
+   evidence：面向LLM代理的值感知内存管理
 
 
 <div class="dpr-home-promo-card">

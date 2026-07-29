@@ -1,0 +1,550 @@
+Title: DP-IVON-Gradsq: Differentially Private Squared-Gradient Improved Variational Online Newton
+
+URL Source: https://arxiv.org/pdf/2607.23649v1
+
+Published Time: Tue, 28 Jul 2026 01:07:32 GMT
+
+Number of Pages: 14
+
+Markdown Content:
+# DP-IVON-Gradsq : Differentially Private Squared-Gradient Improved Variational Online Newton 
+
+Nour Jamoussi 1, Ikram Dridi 2, Giuseppe Serra 1, and Marios Kountouris 1,3 
+
+> 1
+
+EURECOM, Sophia Antipolis, France 
+
+nour.jamoussi@eurecom.fr  
+
+> 2
+
+Concordia University, Montreal, Canada  
+
+> 3
+
+University of Granada, Granada, Spain 
+
+mariosk@ugr.es 
+
+Abstract. Differential privacy provides formal privacy guarantees for training neural networks on sensitive data, while Bayesian deep learning offers a principled framework for uncertainty-aware prediction. Combin-ing these two objectives remains challenging, as privacy noise can in-teract with the stochasticity introduced by Bayesian posterior sampling. In this work, we investigate differentially private variational Bayesian learning through the Improved Variational Online Newton (IVON) op-timizer. We introduce DP-IVON-Gradsq , a private variant of IVON. The proposed method constructs its curvature estimate from the pri-vatized gradient using a noise-corrected squared-gradient estimator, re-ducing the direct interaction between posterior-sampling noise and pri-vacy noise while preserving the Adam-like computational efficiency of IVON. We evaluate DP-IVON-Gradsq on CIFAR-10 against the stan-dard private optimizers DP-SGD and DP-Adam over a range of pri-vacy budgets. The results show that DP-IVON-Gradsq is competi-tive under weak-to-moderate privacy constraints, i.e., large-to-moderate values of ε, while degrading under strong privacy. Code is available at https://github.com/NourJamoussi/DP-IVON-Gradsq.git. 
+
+Keywords: Differential Privacy · Bayesian Learning · IVON. 
+
+## 1 Introduction 
+
+Deep neural networks are increasingly deployed in sensitive domains such as healthcare, finance, and mobile applications, where training data may contain personal and confidential information. This raises important privacy concerns, reinforced by data-protection regulations such as the General Data Protection Regulation (GDPR), which require careful handling of personal data through-out the machine learning pipeline. Nevertheless, many high-stakes applications require models not only to make accurate predictions, but also to quantify uncer-tainty, especially under limited data or distribution shift. Bayesian deep learning provides a principled framework for uncertainty-aware prediction by learning a arXiv:2607.23649v1 [cs.LG] 26 Jul 2026 2 Jamoussi et al. 
+
+distribution over model parameters instead of learning a single deterministic so-lution. However, when Bayesian models are trained on sensitive datasets, the learned posterior may still reveal information about individual training exam-ples. This creates a need for learning algorithms that combine the uncertainty-awareness of Bayesian deep learning with formal privacy guarantees. Differential privacy (DP) [4] has become a standard framework for analyzing privacy guarantees in learning-based systems. Informally, a randomized learning algorithm is differentially private if changing one individual training example has only a limited effect on the distribution of the algorithm’s output. A central quantity in this setting is the sensitivity of the released statistic, which measures how much this statistic can change when a single training example is modified, added, or removed. In gradient-based learning, the quantity privatized is typi-cally a minibatch gradient, or a function of it. Since neural-network gradients can have large or unbounded sensitivity, private training methods aim to control this sensitivity [5]. Methods such as DP-SGD [1] and DP-Adam [16] enforce bounded sensitivity by clipping per-example gradients and adding calibrated Gaussian noise before the optimizer update. The resulting privacy loss is then tracked using accounting tools such as the Rényi differential privacy (RDP) [9] accounting. While these methods are general and widely used for deterministic deep neural networks, their direct application to Bayesian deep learning raises additional challenges: the interaction between injected privacy noise and the posterior sampling noise is non-trivial. In this work, we take a step toward differentially private variational Bayesian deep learning by introducing DP-IVON-Gradsq , a private variant of the Im-proved Variational Online Newton (IVON) [11]. Our method combines the pos-terior updates of IVON with the standard privacy mechanism of per-example gradient clipping, Gaussian noise injection, and RDP accounting. To reduce the interaction between variational sampling noise and privacy noise, we pro-pose to employ the squared-gradient curvature estimation, where the curva-ture estimate is constructed from the privatized gradient using a noise-corrected squared-gradient approximation. We further develop an Opacus [14]-compatible implementation comprising both a custom DP-IVON-Gradsq optimizer and a custom privacy-engine wrapper. Empirically, we evaluate the resulting privacy-utility trade-off and compare DP-IVON-Gradsq against standard differentially private optimizers such as DP-SGD and DP-Adam. 
+
+## 2 Related Work 
+
+2.1 Differential Privacy for Bayesian Deep Learning 
+
+A first line of work studies Bayesian neural networks trained by posterior sam-pling, in particular stochastic gradient Langevin dynamics (SGLD) [13, 8]. SGLD can be interpreted as noisy SGD; consequently, DP-SGLD [12] can be viewed as a subclass of DP-SGD with an additional regularization term; for example, DP-IVON-Gradsq 3
+
+with a Gaussian prior, DP-SGLD becomes closely related to DP-SGD with an L2 norm penalty [15]. This connection makes SGLD particularly appealing for private Bayesian learning. The “privacy for free” perspective [12] shows that, under bounded sensitivity, posterior sampling mechanisms can satisfy DP with-out requiring the same explicit clipping-and-noising procedure used in DP-SGD. However, in deep learning, the sensitivity of gradients or posterior updates is typically unbounded, so practical DP-SGLD variants often reintroduce clipping and Gaussian noise. This equivalence is useful conceptually, but it also means that DP-SGLD inherits many of the hyperparameter sensitivities of DP-SGD, while suffering from the absence of an analytic posterior and potentially high storage or sampling costs [15]. A second line of work considers differentially private variational inference for Bayesian neural networks, including DP versions of Bayes by Backprop (DP-BBP) [3, 15]. Variational methods are attractive because they provide an ex-plicit approximate posterior, often chosen as a diagonal Gaussian, which is more compact and scalable than storing many posterior samples. This makes DP-BBP more appealing than DP-SGLD from a memory perspective. However, private variational learning remains computationally demanding because the method combines stochastic variational optimization, Monte Carlo sampling, gradient clipping, and privacy noise [15]. As a result, existing DP variational methods [15] are slower and can exhibit weaker calibration than sampling-based alternatives such as DP-SGLD. This suggests that simply applying DP-SGD-style clipping and noising to variational objectives does not fully exploit the structure of Bayesian learning. A related approximation is Monte Carlo Dropout, which interprets dropout as approximate Bayesian inference and estimates predictive uncertainty through stochastic forward passes [6]. In a differentially private setting, DP-MC Dropout can be understood as training a dropout network with DP-SGD [15]. This makes it relatively fast and easy to implement, while still providing a practical form of uncertainty quantification. However, its Bayesian interpretation is limited: the equivalence between dropout training and variational inference depends on spe-cific assumptions, such as a Gaussian prior over weights, and does not generally hold for richer priors or posterior families. Overall, DP-SGLD benefits from a strong theoretical link between posterior sampling and privacy, but it is less scalable and lacks an analytic posterior. DP-BBP provides a compact variational posterior, but current private variants are computationally expensive and may suffer in calibration. DP-MC Dropout offers a simple and fast approximation, but its Bayesian interpretation is limited. These limitations motivate the development of new differentially private variational learning algorithms. 
+
+2.2 Improved Variational Online Newton (IVON) 
+
+Recent advances in scalable variational learning, particularly IVON [11], reopen the question of how to design private Bayesian optimizers that are both efficient and uncertainty-aware. Unlike standard variational inference methods [2], IVON, 4 Jamoussi et al. 
+
+rooted in the Bayesian learning rule [7], embeds variational learning within the optimizer itself, without requiring changes to the network architecture or the training objective. It maintains a Gaussian posterior over the model weights using efficient second-order updates derived from reparameterized Hessian es-timates, thereby enabling uncertainty-aware training at a computational cost close to that of deterministic Adam-based optimization [11]. It learns both a posterior mean and a diagonal curvature-based uncertainty estimate, and it has been shown to scale to large models while improving calibration and predictive uncertainty. This makes IVON a promising candidate for differentially private Bayesian deep learning. 
+
+## 3 Differentially Private Squared-Gradient IVON Variant 
+
+3.1 DP-IVON-Gradsq Algorithm 
+
+We propose a differentially private variant of IVON based on the squared-gradient curvature approximation, which we refer to as DP-IVON-Gradsq .The goal is to retain the variational-learning structure of IVON while enforc-ing DP through per-example gradient clipping and Gaussian noise injection. Unlike standard DP-SGD, which learns a deterministic point estimate, DP-IVON-Gradsq maintains a Gaussian posterior approximation over the model parameters. At each optimization step, the algorithm updates both the posterior mean and a diagonal curvature estimate, which in turn determines the posterior variance. Let q(θ) = N (m, diag( σ2 
+
+> v
+
+)) denote the current variational posterior over model parameters, where m is the posterior mean and σ2 
+
+> v
+
+is the diagonal pos-terior variance. As in IVON, the posterior variance is parameterized through a diagonal curvature estimate h as σ2 
+
+> v
+
+= 1  
+
+> Ness (h+δv)
+
+, where Ness is the effective sam-ple size and δv is a damping term, also playing the role of weight decay. At each iteration, we sample a parameter vector θ distributed as θ ∼ N (m, diag( σ2 
+
+> v
+
+)) ,
+
+compute gradients at the sampled parameters, and use them to update the vari-ational posterior. To enforce DP, we sanitize the stochastic gradient before it is used by the IVON update. Given a minibatch B of size b, we first compute per-example gradients gi = ∇θ L(θ; xi, y i), (xi, y i) ∈ B. Each gradient is then clipped using a global ℓ2-norm constraint: ¯gi = gi min 
+
+
+
+1, C
+
+> ∥gi∥2+εnum
+
+
+
+, where C is a predefined clipping threshold and εnum is a small numerical constant. The private averaged gradient is obtained by applying the Gaussian mechanism: 
+
+gdp = 1
+
+b
+
+X
+
+> i∈B
+
+¯gi + ξ, ξ ∼ N 0, σ2 
+
+> p
+
+C2
+
+b2 I
+
+!
+
+,
+
+where σp is the privacy noise multiplier. This corresponds to adding Gaussian noise with standard deviation σpC to the clipped sum, followed by averaging over the minibatch. DP-IVON-Gradsq 5
+
+A key design choice of our method is to reduce the interaction between the variational noise induced by posterior sampling and the Gaussian noise injected for privacy. To this end, we modify the Hessian approximation used in IVON. Instead of employing the original reparameterized estimator 
+
+bhIVON = gdp ⊙ θ − mσ2
+
+> v
+
+,
+
+which explicitly depends on the sampled perturbation θ − m, we use a squared-gradient curvature estimate g2dp . This choice avoids coupling the privacy noise in 
+
+gdp with the variational sampling noise in θ, and makes the curvature estimate a post-processing of the privatized gradient. However, because gdp contains Gaussian privacy noise, using g2dp directly would add the variance of the injected noise to the curvature estimate. We there-fore subtract the known privacy-noise variance, as a pre-projection correction for this additive contribution, and then project the result onto the nonnegative or-thant to obtain a nonnegative squared-gradient curvature estimate: 
+
+bv = max g2dp − σ2 
+
+> p
+
+C2
+
+b2 , 0
+
+!
+
+. (1) The variance subtraction corrects the additive contribution of the Gaussian privacy noise before projection. However, the subsequent nonnegative projection introduces positive bias, while minibatch sampling and per-example clipping change the quantity being estimated. Therefore, bv should be interpreted as a stabilized, curvature proxy rather than an unbiased estimator. All squares, divisions, and maximum operations are applied elementwise. The quantity bv is computed only from the privatized gradient gdp , and is therefore a post-processing operation; it does not consume any additional privacy budget. The corresponding curvature estimate is then given by 
+
+bh = Ness bv. 
+
+This scaling is inherited from IVON, where the curvature term corresponds to the Hessian approximation of the full objective rather than only the minibatch-averaged loss. The diagonal curvature estimate is updated using the positivity-preserving IVON update: 
+
+h ← β2h + (1 − β2)bh + (1 − β2)2(h − bh)2
+
+2( h + δv ) . (2) The private gradient gdp is also used to update the gradient momentum: 
+
+s ← β1s + (1 − β1)gdp , (3) 
+
+¯s = s
+
+1 − βt
+
+> 1
+
+. (4) 6 Jamoussi et al. 
+
+The posterior mean is then updated using the IVON natural-gradient-style preconditioning: 
+
+m ← m − α ¯s + δv mh + δv
+
+. (5) The proposed procedure can be interpreted as inserting a DP gradient-sanitization layer (Algorithm 1) inside IVON as shown in Algorithm 2. The privacy mechanism acts only on the per-example gradients through clipping and Gaussian noise. The subsequent curvature estimate, momentum update, poste-rior mean update, and posterior variance update are post-processing operations of the privatized gradient and therefore do not increase the privacy loss. The overall privacy budget is tracked with a standard DP accountant using the sam-pling rate q = b/ |D| , the number of optimization steps T , the noise multiplier 
+
+σp, and the target privacy parameter δp. This yields a final privacy guarantee of the form (ε, δ p)-DP. 
+
+Algorithm 1: DPSanitizeGradsq 
+
+Input: minibatch B, loss L, posterior mean m, posterior variance σ2 
+
+> v
+
+,clipping norm C, noise multiplier σp
+
+Sample variational weights: 
+
+θ ∼ N (m, diag( σ2 
+
+> v
+
+)) .
+
+Compute per-example gradients: 
+
+gi = ∇θ L(θ; xi, y i), (xi, y i) ∈ B. 
+
+Clip each gradient: 
+
+¯gi = gi min 
+
+
+
+1, C
+
+∥gi∥2 + εnum 
+
+
+
+.
+
+Compute the private averaged gradient: 
+
+gdp = 1
+
+b
+
+X
+
+> i∈B
+
+¯gi + N 0, σ2 
+
+> p
+
+C2
+
+b2 I
+
+!
+
+, b = |B|.
+
+Compute the noise-corrected squared-gradient estimate: 
+
+bv = max g2dp − σ2 
+
+> p
+
+C2
+
+b2 , 0
+
+!
+
+.
+
+Output: private gradient gdp and squared-gradient estimate bvDP-IVON-Gradsq 7
+
+Algorithm 2: DP-IVON-Gradsq 
+
+Input: dataset D, loss L, noise multiplier σp, privacy parameter δp,clipping norm C, effective sample size Ness , learning rate α,momenta β1, β 2, damping δv , initial mean m0, initial curvature estimate h0
+
+Initialize posterior mean m ← m0
+
+Initialize curvature estimate h ← h0
+
+Initialize gradient momentum s ← 0
+
+Set posterior variance 
+
+σ2 
+
+> v
+
+← 1
+
+Ness (h + δv ) .
+
+for t = 1 , . . . , T do 
+
+Sample minibatch B ⊂ D 
+
+// DP gradient sanitization (Algorithm 1) 
+
+(gdp , bv) ← DPSanitizeGradsq  B, L, m, σ 2 
+
+> v
+
+, C, σ p
+
+ .
+
+// Squared-gradient curvature estimate 
+
+bh ← Ness bv. 
+
+// curvature estimate update 
+
+h ← β2h + (1 − β2)bh + (1 − β2)2(h − bh)2
+
+2( h + δv ) .
+
+// Private gradient momentum update 
+
+s ← β1s + (1 − β1)gdp . ¯s ← s
+
+1 − βt
+
+> 1
+
+.
+
+// Posterior mean update 
+
+m ← m − α ¯s + δv mh + δv
+
+.
+
+// Posterior variance update 
+
+σ2 
+
+> v
+
+← 1
+
+Ness (h + δv ) .
+
+Update privacy accountant with sampling rate q = |B||D| .
+
+end 
+
+Compute final privacy budget 
+
+ε = Accountant( q, T, σ p, δ p).
+
+Output: private posterior approximation N (m, diag( σ2 
+
+> v
+
+)) and privacy guarantee (ε, δ p)8 Jamoussi et al. 
+
+3.2 Relationship to the DPAGD Framework 
+
+Differentially Private Adaptive Gradient Descent (DPAGD) [16] provides a gen-eral framework for private adaptive optimization. At each iteration, a noisy pri-vate gradient ˜gt is first computed by clipping per-example gradients and adding Gaussian noise. The optimizer then constructs two adaptive quantities from the history of privatized gradients: 
+
+mt = ϕt(˜ g1, . . . , ˜gt), vt = min( ψt(˜ g1, . . . , ˜gt), λ )
+
+where λ is a positive hyperparameter. The optimizer then updates the parame-ters using a preconditioned gradient step 
+
+θt+1 = θt − ηt
+
+mt
+
+√vt + ν .
+
+Different DP adaptive optimizers correspond to different choices of these two functions: for instance, DP-SGD uses the private gradient directly, while DP-Adam uses exponential moving averages of the private gradients and their squares [16]. This formulation is useful for positioning our method, since DP-IVON-Gradsq can also be interpreted as belonging to this family at the level of private adaptive gradient construction. Indeed, after per-example clipping and Gaussian noise injection, the optimizer receives a privatized gradient gdp ,t ,which is then used to update an Adam-like first-moment estimate (Equation (3)). The main difference lies in the adaptive second-order quantity. Instead of using the classical Adam-style second moment, DP-IVON-Gradsq builds a noise-corrected squared-gradient estimate (Equation (1)), which is then scaled by the effective sample size to obtain the IVON curvature target. This target is used in the IVON Hessian recursion (Equation (2)). Thus, DP-IVON-Gradsq 
+
+can be viewed as a DP adaptive gradient method whose momentum function ϕt
+
+is the private gradient momentum (Equation (4)) 
+
+ϕDP-IVON-Gradsq  
+
+> t
+
+= ¯ st,
+
+and whose adaptive function 
+
+ψDP-IVON-Gradsq  
+
+> t
+
+= ht,
+
+is the IVON squared-gradient curvature recursion (Equation (2)). However, unlike DP-Adam or DP-RMSProp, the resulting update is Newton-like: the posterior mean is updated using ht + δv directly as a curvature precon-ditioner, rather than using √vt + ν. This interpretation highlights that DP-IVON-Gradsq follows the DPAGD principle of adapting only from privatized gradients, while preserving the variational posterior structure of IVON. 
+
+## 4 Implementation of DP-IVON-Gradsq with Opacus-Compatible Components 
+
+The main implementation challenge is that Opacus [14] does not natively sup-port IVON’s variational posterior updates. We therefore reused selected Opacus components and implemented the IVON-specific components separately. DP-IVON-Gradsq 9
+
+For the implementation of DP-IVON-Gradsq , we built upon the Opa-cus library while substantially extending its functionality to accommodate the Bayesian and variational components of IVON. Concretely, within our custom implementation of make_private , the model is wrapped with Opacus’s GradSamp leModule , which enables the computation of per-sample gradients during back-propagation and, consequently, the individual gradient clipping required for dif-ferential privacy. We also rely on Opacus’s RDPAccountant to track the cumula-tive privacy loss across training steps and certify the final (ε, δ )-DP guarantee. The core optimization logic, however, was implemented from scratch to sup-port the specific requirements of IVON in the differentially private setting. After per-sample clipping and gradient aggregation, calibrated Gaussian noise is added independently to each aggregated parameter-gradient tensor before the optimizer update. The resulting pipeline is encapsulated in a custom DPOptimizer whose interface and hook compatibility follow the structure of Opacus’s DPOptimizer .Reused Opacus Components   
+
+> Model wrapped with
+> Opacus Per-example
+> gradients
+> Gaussian
+> noise
+> injection
+> Private
+> gradient Custom
+> optimizer update
+> Posterior mean
+> and variance
+> Final privacy
+> guarantee
+> Gradient
+> clipping
+> Custom DP-IVON-Gradsq Components
+> Reused
+> Opacus
+> Component
+> Input
+
+Fig. 1. Implementation pipeline of DP-IVON-Gradsq . We reuse Opacus components for per-example gradient computation through GradSampleModule and privacy account-ing through RDPAccountant . The IVON-specific private gradient sanitization, squared-gradient curvature approximation, and variational posterior update are implemented in a custom optimizer compatible with the Opacus-style training interface. 
+
+## 5 Experiments 
+
+5.1 Experimental setup 
+
+We evaluate DP-IVON-Gradsq on CIFAR-10 using a convolutional neural network architecture and compare it against two standard private optimizers, DP-SGD and DP-Adam. 
+
+Model Architecture. The model consists of three convolutional blocks followed by a two-layer classifier. We employ group normalization instead of batch normal-ization to make the architecture compatible with differentially private training. 10 Jamoussi et al. 
+
+Hyperparameters. All methods are trained for 150 epochs and evaluated over three random seeds in order to account for variability across runs. We perform a grid search over the main privacy and optimization hyperparameters, consid-ering batch sizes in {128 , 256 , 512 }, noise multipliers in {0.1, 1.0, 5.0, 10 .0, 15 .0},privacy delta δp = 10 −5, and clipping thresholds in {10 , 20 }. The weight decay parameter is fixed to 10 −4 for all experiments. For each optimizer, we first tune the learning rate over a grid of three candidate values and then use the best-performing value in the full comparison. The selected learning rates are 10 −4 for DP-Adam, 10 −2 for DP-SGD, and 10 −1 for DP-IVON-Gradsq .
+
+Metrics. In addition to accuracy, we report Expected Calibration Error (ECE) and Negative Log-Likelihood (NLL) in order to evaluate not only the privacy-utility trade-off, but also the reliability of the predictive distributions. Accu-racy measures the classification performance of the private models, while NLL penalizes both incorrect and overconfident predictions. ECE further evaluates whether predicted confidence scores are aligned with empirical correctness. We also report the final privacy budget ε at a fixed target δp, computed using RDP accounting. Since the same noise multiplier can correspond to different privacy guarantees depending on the batch size and number of training steps, we analyze performance as a function of ε rather than only as a function of the noise scale. 
+
+5.2 Results 
+
+In all the following figures, the x-axis reports the final RDP-accounted privacy budget ε and is shown on an inverted logarithmic scale. Larger values of ε corre-spond to weaker privacy guarantees, while smaller values correspond to stronger privacy guarantees. Thus, curves should be read from left to right as moving from the low-privacy regime to the high-privacy regime. 
+
+Accuracy vs. Privacy. Figure 2 reports the accuracy-privacy trade-off of DP-IVON-Gradsq compared with DP-SGD and DP-Adam on CIFAR-10. The main observation is that DP-IVON-Gradsq is able to achieve competitive accuracy in the weak-privacy regime, where ε is large, indicating that the proposed vari-ant can achieve strong performance when the privacy perturbation is moderate. However, as ε decreases, DP-IVON-Gradsq exhibits a sharper degradation than the strongest baseline, especially for smaller batch sizes. This behavior suggests that the variational update remains sensitive to the Gaussian noise introduced by the DP mechanism, even after replacing the original IVON Hessian approxi-mation with the corrected squared-gradient curvature estimate. Across the three batch-size settings, DP-IVON-Gradsq follows the expected behavior of DP gradient-based training [10]. Larger batch sizes generally improve robustness in the medium-privacy regime and delay the point at which accuracy collapses. This is consistent with the standard DP-SGD trade-off: when Gaus-sian noise is added to the averaged clipped gradient, its scale is proportional to 
+
+C/b , so increasing the batch size reduces the effective perturbation applied to the private gradient. The clipping norm also affects this trade-off by controlling both DP-IVON-Gradsq 11 
+
+the sensitivity of the gradient estimate and the magnitude of the injected noise. In this respect, DP-IVON-Gradsq exhibits the same qualitative dependence on batch size and clipping norm as standard DP optimizers. However, because the privatized gradient is also used to construct the curvature estimate, these hyper-parameters influence not only the mean update but also the variational curvature estimate that determines the posterior variance. 10 1
+
+> 10 0
+> 10 1
+> 10 2
+> 10 3
+> 10 4
+> 10 5
+> Epsilon (log scale)
+> 20
+> 40
+> 60
+> 80
+> Accuracy
+> Batch size = 128
+> 10 0
+> 10 1
+> 10 2
+> 10 3
+> 10 4
+> 10 5
+> Epsilon (log scale)
+> Batch size = 256
+> 10 0
+> 10 1
+> 10 2
+> 10 3
+> 10 4
+> 10 5
+> Epsilon (log scale)
+> Batch size = 512
+> DP-Adam | C=10
+> DP-Adam | C=20
+> DP-IVON-Gradsq | C=10
+> DP-IVON-Gradsq | C=20
+> DP-SGD | C=10
+> DP-SGD | C=20
+
+Fig. 2. Privacy-accuracy trade-off on CIFAR-10 for DP-Adam, DP-IVON-Gradsq, and DP-SGD. Test accuracy is reported as a function of the privacy budget ε on an inverted logarithmic scale, for batch sizes 128 , 256 , and 512 . Solid and dashed curves correspond to clipping norms C = 10 and C = 20 , respectively. 
+
+NLL vs. Privacy. Figure 3 reports the evolution of test NLL as a function of the privacy budget ε. For DP-IVON-Gradsq, the results show that the method remains stable in the weak-privacy regime, where ε is large, with NLL values better than or comparable to the DP-SGD and DP-Adam baselines. This indi-cates that, when the injected privacy noise is moderate, the proposed variant can preserve the uncertainty-aware behavior of IVON while satisfying DP. However, DP-IVON-Gradsq becomes more sensitive as the privacy constraint becomes stronger. In particular, for smaller batch sizes, the NLL increases sharply at low ε, especially when using the larger clipping norm C = 20 . This degradation is stronger than what is observed for DP-SGD, suggesting that the privatized gradient affects DP-IVON-Gradsq through two coupled mechanisms: 
+
+– It directly drives the posterior mean update. 
+
+– It also determines the curvature estimate through a noise-corrected squared-gradient approximation, as in Equation (1), which may lead to less reliable posterior variance estimates and overconfident or poorly calibrated predic-tions in the high-privacy regime. The batch-size effect follows the standard trend observed for accuracy. Larger batch sizes reduce the effective noise scale on the averaged clipped gradient and therefore improve stability across all optimizers. For DP-IVON-Gradsq, this effect is especially visible when moving from batch size 128 to 512 , where the NLL growth under stronger privacy constraints becomes substantially less severe. 12 Jamoussi et al. 
+
+This suggests that DP-IVON-Gradsq benefits from larger minibatches, not only for improving the private gradient estimate, but also for stabilizing the curvature estimate used in the variational update. 10 1
+
+> 10 0
+> 10 1
+> 10 2
+> 10 3
+> 10 4
+> 10 5
+> Epsilon (log scale)
+> 0
+> 5
+> 10
+> 15
+> NLL
+> Batch size = 128
+> 10 0
+> 10 1
+> 10 2
+> 10 3
+> 10 4
+> 10 5
+> Epsilon (log scale)
+> Batch size = 256
+> 10 0
+> 10 1
+> 10 2
+> 10 3
+> 10 4
+> 10 5
+> Epsilon (log scale)
+> Batch size = 512
+> DP-Adam | C=10
+> DP-Adam | C=20
+> DP-IVON-Gradsq | C=10
+> DP-IVON-Gradsq | C=20
+> DP-SGD | C=10
+> DP-SGD | C=20
+
+Fig. 3. Privacy-NLL trade-off on CIFAR-10 for DP-Adam, DP-IVON-Gradsq, and DP-SGD. Test NLL is reported as a function of the privacy budget ε on an inverted logarithmic scale, for batch sizes 128 , 256 , and 512 . Solid and dashed curves correspond to clipping norms C = 10 and C = 20 , respectively. 10 1
+
+> 10 0
+> 10 1
+> 10 2
+> 10 3
+> 10 4
+> 10 5
+> Epsilon (log scale)
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> ECE
+> Batch size = 128
+> 10 0
+> 10 1
+> 10 2
+> 10 3
+> 10 4
+> 10 5
+> Epsilon (log scale)
+> Batch size = 256
+> 10 0
+> 10 1
+> 10 2
+> 10 3
+> 10 4
+> 10 5
+> Epsilon (log scale)
+> Batch size = 512
+> DP-Adam | C=10
+> DP-Adam | C=20
+> DP-IVON-Gradsq | C=10
+> DP-IVON-Gradsq | C=20
+> DP-SGD | C=10
+> DP-SGD | C=20
+
+Fig. 4. Privacy-calibration trade-off on CIFAR-10 for DP-Adam, DP-IVON-Gradsq, and DP-SGD. Test ECE is reported as a function of the privacy budget ε on an inverted logarithmic scale, for batch sizes 128 , 256 , and 512 . Solid and dashed curves correspond to clipping norms C = 10 and C = 20 , respectively. 
+
+ECE vs. Privacy. Figure 4 reports the calibration behavior of the private opti-mizers through ECE. DP-IVON-Gradsq appears best calibrated in the weak and medium privacy regimes, where ε is large or moderate. However, as the privacy budget becomes smaller, DP-IVON-Gradsq exhibits a sharper increase in ECE, especially for C = 20 and smaller batch sizes. This indicates that, in the high-privacy regime, the injected Gaussian noise affects not only classification accuracy but also the reliability of the predicted confidence scores. The effect is particularly visible for batch sizes 128 and 256 ,where DP-IVON-Gradsq becomes substantially less calibrated at low ε. This DP-IVON-Gradsq 13 
+
+behavior is consistent with the NLL results and suggests that the curvature estimate is sensitive to strong privacy perturbations. 
+
+## 6 Discussion 
+
+The empirical results show that DP-IVON-Gradsq is feasible as a private variational optimizer and can remain competitive when the privacy constraint is not too stringent, without introducing an additional computational cost specific to variational learning. Nevertheless, its faster degradation in the high-privacy regime highlights a central challenge of differentially private variational learn-ing. We hypothesize that this behavior is partly caused by the noise-correction and projection step used in the squared-gradient estimator (Equation (1)). In particular, when gradients become small toward the end of training, subtract-ing the privacy-noise variance can dominate the squared-gradient signal, causing the projected squared-gradient estimate bv to be zero for many coordinates. In this case, the corresponding curvature target bh = Ness bv also becomes zero, and the curvature update no longer receives an informative curvature signal. The running curvature estimate then mainly decays slowly through the momentum update. This can weaken the interpretation of h as a curvature estimate and lead to poorly informative posterior variance estimates. This motivates further work on more robust private curvature estimation and better tuning strategies for IVON-specific hyperparameters under strong privacy constraints. 
+
+## 7 Conclusion and Future Work 
+
+In this work, we investigated the integration of differential privacy with vari-ational Bayesian deep learning through IVON, with computational cost close to deterministic DP optimizers. We introduced DP-IVON-Gradsq , a differen-tially private variant of IVON. The proposed variant was designed to reduce the direct interaction between posterior-sampling noise and privacy noise by con-structing the curvature estimate from the privatized gradient through a noise-corrected squared-gradient estimator. Our findings highlight both the promise and the difficulty of differentially private variational optimization. While DP-IVON-Gradsq provides a practi-cal route toward uncertainty-aware private training, the results also show that more robust private curvature estimation is needed for high-privacy regimes. Future work will investigate alternative curvature estimators and stronger the-oretical analyses of the interaction between privacy noise, variational sampling, and posterior uncertainty. 
+
+## Acknowledgments 
+
+This work was supported by the IMT “Futur, Ruptures & Impacts” programme, by the European Research Council (ERC) under the European Union’s Hori-14 Jamoussi et al. 
+
+zon 2020 research and innovation programme (Grant Agreement No. 101003431, SONATA), and by the Smart Networks and Services Joint Undertaking (SNS JU) under the European Union’s Horizon Europe research and innovation pro-gramme (Grant Agreement No. 101192080, 6G-LEADER). 
+
+## References 
+
+1. Abadi, M., Chu, A., Goodfellow, I., McMahan, H.B., Mironov, I., Talwar, K., Zhang, L.: Deep Learning with Differential Privacy. In: Proceedings of the 2016 ACM SIGSAC Conference on Computer and Communications Security. pp. 308– 318 (2016) 2. Blei, D.M., Kucukelbir, A., McAuliffe, J.D.: Variational Inference: A Review for Statisticians. Journal of the American Statistical Association 112 (518), 859–877 (2017) 3. Blundell, C., Cornebise, J., Kavukcuoglu, K., Wierstra, D.: Weight Uncertainty in Neural Networks. In: ICML. pp. 1613–1622. PMLR (2015) 4. Dwork, C., McSherry, F., Nissim, K., Smith, A.: Calibrating Noise to Sensitivity in Private Data Analysis. In: Theory of Cryptography Conference. pp. 265–284. Springer (2006) 5. Dwork, C., Roth, A.: The Algorithmic Foundations of Differential Privacy. Foun-dations and Trends ® in Theoretical Computer Science 9(3-4), 211–487 (2014) 6. Gal, Y., Ghahramani, Z.: Dropout as a Bayesian Approximation: Representing Model Uncertainty in Deep Learning. In: ICML. pp. 1050–1059. PMLR (2016) 7. Khan, M.E., Rue, H.: The Bayesian Learning Rule. JMLR 24 (281), 1–46 (2023) 8. Li, C., Chen, C., Carlson, D., Carin, L.: Preconditioned Stochastic Gradient Langevin Dynamics for Deep Neural Networks. In: Proceedings of the AAAI Con-ference on Artificial Intelligence. vol. 30 (2016) 9. Mironov, I.: Rényi Differential Privacy. In: 2017 IEEE 30th Computer Security Foundations Symposium (CSF). pp. 263–275. IEEE (2017) 10. Räisä, O., Jälkö, J., Honkela, A.: Subsampling is not Magic: Why Large Batch Sizes Work for Differentially Private Stochastic Optimisation. In: Proceedings of the 41st ICML. PMLR, vol. 235, pp. 41959–41981. PMLR (21–27 Jul 2024) 11. Shen, Y., Daheim, N., Cong, B., Nickl, P., Marconi, G.M., Raoul, B.C.E.M., Yokota, R., Gurevych, I., Cremers, D., Khan, M.E., Möllenhoff, T.: Variational Learning is Effective for Large Deep Networks. In: Proceedings of the 41st ICML. PMLR, vol. 235, pp. 44665–44686. PMLR (2024) 12. Wang, Y.X., Fienberg, S., Smola, A.: Privacy for Free: Posterior Sampling and Stochastic Gradient Monte Carlo. In: ICML. pp. 2493–2502. PMLR (2015) 13. Welling, M., Teh, Y.W.: Bayesian Learning via Stochastic Gradient Langevin Dy-namics. In: Proceedings of the 28th ICML. pp. 681–688 (2011) 14. Yousefpour, A., Shilov, I., Sablayrolles, A., Testuggine, D., Prasad, K., Malek, M., Nguyen, J., Ghosh, S., Bharadwaj, A., Zhao, J., Cormode, G., Mironov, I.: Opacus: User-Friendly Differential Privacy Library in PyTorch. CoRR (2021) 15. Zhang, Q., Bu, Z., Chen, K., Long, Q.: Differentially Private Bayesian Neural Networks on Accuracy, Privacy and Reliability. In: Joint European Conference on Machine Learning and Knowledge Discovery in Databases. pp. 604–619. Springer (2023) 16. Zhou, Y., Chen, X., Hong, M., Wu, Z.S., Banerjee, A.: Private Stochastic Non-Convex Optimization: Adaptive Algorithms and Tighter Generalization Bounds. arXiv preprint arXiv:2006.13501 (2020)

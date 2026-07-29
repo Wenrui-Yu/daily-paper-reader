@@ -1,0 +1,2073 @@
+Title: SafeStats: Efficient 2PC Protocols for Data Statistic-Related Functions
+
+URL Source: https://arxiv.org/pdf/2607.25430v1
+
+Published Time: Wed, 29 Jul 2026 00:41:01 GMT
+
+Number of Pages: 18
+
+Markdown Content:
+# SAFE STATS : Efficient 2PC Protocols for Data Statistic-Related Functions 
+
+Tanren Liu 
+
+Xidian University Xi’an, Shaanxi, China fatw email@163.com 
+
+Xianjia Meng 
+
+Northwest University Xi’an, Shaanxi, China xianjiam@nwu.edu.cn 
+
+Yang Liu 
+
+Xidian University Xi’an, Shaanxi, China bcds2018@foxmail.com 
+
+Xin Kang 
+
+Xidian University Xi’an, Shaanxi, China kangxin@stu.xidian.edu.cn 
+
+Chenhui You 
+
+Xidian University Xi’an, Shaanxi, China 25151213660@stu.xidian.edu.cn 
+
+Yong Zeng 
+
+Xidian University Xi’an, Shaanxi, China yzeng@mail.xidian.edu.cn 
+
+Zhuo Ma 
+
+Xidian University Xi’an, Shaanxi, China mazhuo@mail.xidian.edu.cn 
+
+Abstract —Statistical analysis on sensitive datasets like medical records and financial transactions is essential for decision-making, but raises significant privacy concerns. While existing secure Two-Party Computation (2PC) makes extensive efforts in designing the common secure primitives (e.g., addition and multiplication) or machine learning-related functions, few pay attention to the statistical functions. In this paper, we propose SAFE STATS , a secure toolkit tailored for 2PC secure statistical analysis. Specifically, to develop S AFE STATS , we first refer to Microsoft Excel’s statistical library and summarize that most statistical operations can be achieved with three core functions: 1) frequency counting, 2) sorting, and 3) non-linear math functions. Then, for each core statistical function, S AFE STATS 
+
+presents an efficient 2PC implementation. For secure frequency counting, SAFE STATS adopts a secure shift-based strategy to avoid invoking expensive 2PC equality test protocols. For secure sort, S AFE STATS involves a secure segment-indicator protocol to achieve secure counting-based sort, which enables fast element sorting over specific statistical scenarios without the need for secure comparison. For non-linear math functions, we enhance the current reduce-then-approximate paradigm by introducing a bisection-based range reduction protocol. Finally, we implement S AFE STATS and test it on 14 common statistical analysis cases. As an example, for the chi-square test, S AFE STATS achieves a 1.5× runtime speedup and a 4.2×
+
+reduction in communication compared to directly using the current general-purpose 2PC library to realize it. 
+
+## 1. Introduction 
+
+Statistical analysis plays a pivotal role in enabling data-driven decision-making across diverse domains, including big data analytics, social sciences, and etc. However, in these domains, the pervasive issue of data privacy leakage has emerged as a significant concern for both industry and academia [1], [2], [3]. To address this challenge, the secure two-party computation (2PC) technique has gained consid-erable attention from the research community, offering a promising avenue for mitigating privacy risks. Although 2PC is extensively studied [4], [5], [6], [7], [8], significant challenges remain in deploying it within the statistical analysis scenarios. Existing studies on 2PC primarily focus on either low-level secure primitives like secure multiplication and secure comparison [9], [10], [11], or high-level applications such as privacy-preserving ma-chine learning model training and predictions [4], [12], [13]. Nevertheless, turning to the statistical operations such as 
+
+Median and Rank , existing schemes [7], [14] typically adopt the most straightforward solution: directly utilizing 2PC primitives to reproduce the operations. As a result, even with the state-of-the-art (SOTA) protocols [7], [15], computing a 
+
+Rank function over 212 elements still requires more than 18 
+
+minutes. Intuitively, such overhead renders these solutions impractical for most applications. 
+
+1.1. Our Techniques 
+
+In this work, we present S AFE STATS , a secure toolkit tai-lored for 2PC privacy-preserving statistical analysis. Specif-ically, to develop S AFE STATS , our research mainly proceeds with the following three steps: 1) analyze the requirement to realize 2PC statistical analysis; 2) propose three secure and efficient 2PC protocols for core statistical functions; 3) test SAFE STATS over an extensive range of specific statistical analysis cases. 
+
+1.1.1. Requirement analysis. Statistical analysis involves a wide range of different operations, which makes it impos-sible to enumerate and develop a 2PC protocol for each of them. Therefore, to simplify the design of S AFE STATS , we refer to Microsoft Excel’s statistical library 1 and summarize the common functions used for most statistical operations. Table 1 shows our investigation result. From this, we can cat-egorize the common statistical operations into three groups: 
+
+> 1. https://support.microsoft.com/en-us/office/statistical-functions-reference-624dac86-a375-4435-bc25-76d659719ffd arXiv:2607.25430v1 [cs.CR] 28 Jul 2026
+
+TABLE 1: Commonly used statistical functions in Ex-cel and their required building blocks: counting func-tion ( Frequency ), sort function ( Sort ), mathematical non-linear functions ( ln x, √x, 1/x ). Operations relying only on addition/multiplication (e.g., mean, variance) are excluded since these are well-supported in standard 2PC frameworks.                                                 
+
+> Statistical Operations Building Blocks Counting Func. Sort Func. Math Func(s). Order & Frequency Median □■□
+> Mode ■■□
+> Percentile □■□
+> Rank □■□
+> Min/Max □■□
+> Descriptive Statistics Std □□■
+> Skew □□■
+> Kurt □□■
+> Regression Analysis Linest □□■
+> Logest □□■
+> Correlation Pearson □□■
+> Hypothesis Testing T.Test □□■
+> CHISQ.Test ■□■
+> F.Test □□■■= required; □= not required.
+> •
+
+The frequency counting-based operations ( Frequency ), which outputs the frequency of the chosen element values and offers support to counting-related statistical operations, e.g., Mode and CHISQ .Test . 
+
+> •
+
+The sorting-based operations ( Sort ), which sort the cho-sen data elements with a specific order and offer support to order-related operations, e.g., Median and Rank . 
+
+> •
+
+Non-linear math function(s)-based operations, e.g. 
+
+Logarithm , used to implement algebraic statistical func-tions, e.g., Std and Skew .Here, we omit the reference to basic linear functions like addition and multiplication because they have been exten-sively discussed in prior works. According to the above, we can derive that to develop a secure 2PC library for private statistical analysis, the main task is to implement three core functions, i.e., secure counting function , secure sort function , and secure math non-linear function(s) .
+
+1.1.2. Secure counting function (section 3). To obtain the private frequency counting of each value v, previous methods [16] need to separately check every input whether it is equal to v, leading to a high execution complex-ity. S AFE STATS introduces a new paradigm for frequency counting without the dependence on equality test. The key observation of our paradigm is that the result of performing equality test between input x and each value v ∈ [0 , m − 1] 
+
+can be viewed as a boolean vector of length m. The vector has value 1 at position x and 0 elsewhere, abbr. ⃗e x. Instead of constructing ⃗e x through m equality tests, we note that ⃗e x
+
+can be derived as an x offset right-shifted version of vector ⃗e 0. With this shift-based representation, we can replace the 
+
+m times equality test with one vector shift to implement the secure counting function. Note that our oblivious shift only needs O(log m) invocation of oblivious transfer (OT), while equality test needs O(mℓ ) OTs [10], [11], where ℓ is the data length of the input. Concretely, for frequency count-ing, S AFE STATS achieves 4.0-7.9× runtime improvement and 3.1-8.6× communication improvement compared to the current equality-based frequency counting methods [16]. 
+
+1.1.3. Secure sort function (section 4). Prior secure sort [7], [14], [17] offer efficient general-purpose solutions. However, they become inefficient for statistical tasks on large dataset with small, enumerable feature domains 2, be-cause their performance is dominated by secure comparison, which is widely recognized as the performance bottleneck in 2PC [11], [18], [19]. To break the bottleneck, S AFE STATS 
+
+proposes a secure counting-based sort protocol without the reliance on secure comparisons. Commonly, counting sort is carried out with two steps: 1) frequency vector construc-tion and 2) element insertion. Intuitively, the former step can be well implemented with the above-mentioned secure frequency counting protocol. While for the second step, a direct solution is to use the secure iterative insertion method introduced by [20]. However, as depicted in Figure 1, this insertion method can only be executed sequentially, which makes it suffer from a very high circuit depth (i.e., O(n)). Relatively, S AFE STATS introduces a secure segment-indicator protocol to achieve elements insertion for counting-based sort. With private input a, b , this protocol outputs a secret-shared indicator vector equal to 1 on the in-terval [a, b ] and 0 elsewhere Using this protocol, S AFE STATS 
+
+can insert all elements with the same value into the output vector via a single element-wise multiplication as shown in Figure 1. As a result, besides the O(1) circuit depth, SAFE STATS only needs O(n(m + log m)) OTs to achieve secure sort, which outperforms the previous comparison-based sort with O(n log n log( nm )) OTs, where n is the data size and m is the domain size. In our experiments with m ≤ log 2 n, S AFE STATS achieves 3.4-20 .5× runtime speedup and 1.3-7.6× communication reduction compared to the prior methods [7], [14], [17]. 
+
+1.1.4. Secure non-linear math functions (section 5). 
+
+To securely evaluate non-linear functions, existing pipelines [21], [22], [23], [24], [25] mainly contains two steps: 1) range normalization, rewriting the input as x = 2tx′; and 2) polynomial approximation of the non-linear function over x′. A dominant cost in this pipeline arises from range reduction (40%-60%), whose core operation is identifying the Most Significant Non-Zero (MSNZ) bit of x. Existing protocol [23] computes the MSNZ bit of x with a linear strategy: decomposing the 
+
+ℓ-bit input into d digits of c-bit ( ℓ = c · d), and sequentially examining the digits from most to least to locate the MSNZ digit. The exact MSNZ bit is then obtained via a 
+
+> 2. We say that such an assumption is common for statistical apps, e.g., analyzing the relationship between income level and educational attainment at the city level, where each feature has fewer than 10 discrete categories, while the dataset contains tens of thousands of records.
+
+Figure 1: A toy example of iterative and batch insertion in counting sort. private lookup table. This leads to O(d) communication rounds. Observing that the MSNZ digit always lies in the non-zero half of x, S AFE STATS proposes a bisection-based protocol for MSNZ bit identification. Instead of scanning digits sequentially, our protocol recursively partitions the input and selects the non-zero half at each step, reducing the communication rounds to O(log d).By incorporating this bisection-based MSNZ protocol, our implementation of SAFE STATS reduces runtime by 
+
+1.2-1.7× and communication by 1.15 -1.16 × for secure non-linear function evaluation compared to the current work [23]. 
+
+1.1.5. Case Study (subsection 6.4). To validate the im-provement of S AFE STATS , we experiment with it on 14 
+
+specific cases of statistical operations. Since parts of the operations (e.g., Rank and CHISQ .Test ) have not been discussed in previous work, we directly implement them with SOTA 2PC primitives [8], [26] as baselines. According to the results, S AFE STATS gives an optimization on all 14 
+
+cases. As an example, for the chi-square test, S AFE STATS 
+
+achieves a 1.5× runtime speedup and a 4.2× reduction in communication compared to baselines. The contributions of this work are summarized below.  
+
+> •
+
+Secure counting function . We propose a secure shift-based frequency counting function that reduces the OT invocations from O(mℓ ) to O(log m). Moreover, we further optimize a customized secure counting function with the Chinese Remainder Theorem (CRT), which de-composes the feature domain into smaller sub-domains, enabling the construction of shorter frequency vectors.  
+
+> •
+
+Secure sort function . We introduce a novel secure counting sort protocol designed for statistical tasks on large datasets with small feature domains. By leverag-ing a secure segment-indicator protocol, our approach achieves constant communication rounds. In addition, considering percentiles , a special case of sorting, we re-frame it as an interval-testing problem, achieving notable efficiency when the feature domain is small.  
+
+> •
+
+Secure non-linear math functions . We improve the efficiency of secure non-linear functions by introducing a novel secure MSNZB protocol that reduces the com-munication rounds from O(n) to O(log n). Furthermore, we characterize the relationship between the degree of an approximation polynomial and its valid approximation range, and offer an alternative efficiency optimization direction for secure non-linear math functions, i.e., in-terval compression.  
+
+> •
+
+Security and performance . Besides providing formal security proof for our proposed protocols, we implement SAFE STATS and benchmark the proposed protocols. The results on 14 commonly used statistical functions demonstrate that S AFE STATS provides a more efficient implementation compared to directly using EzPC [8]. 
+
+## 2. Preliminaries 
+
+Notation. For an vector ⃗a,⃗a[i] denotes the i-th element in ⃗a. [n] denotes the set of integers {0, . . . , n − 1}. Let 
+
+a ← Z2ℓ denotes sampling a number uniformly at random from Z2ℓ . Let 1{b} denotes the indicator function that is 1
+
+when b is true and 0 when b is false . Let ℓm = ⌈log m⌉ and 
+
+ℓn = ⌈log n⌉. λ is the security parameter and is typically set to 128. 
+
+2.1. System Model 
+
+We consider a two-party system consisting of parties P0
+
+and P1 that jointly conduct a statistical task, such as com-puting the correlation between education level and income. 
+
+P0 and P1 owns the secret-shared input ⟨⃗x⟩ b respectively. The parties compute corresponding statistical functions on the secret-shared inputs via SAFE STATS . The output is secret-shared between parties, which can be revealed when necessary. 
+
+2.2. Security Model 
+
+We provide security in the Universal Composability (UC) framework [27] against a static semi-honest proba-bilistic polynomial-time (PPT) adversary A. In this model, a computationally bounded adversary A corrupts either P0
+
+or P1 at the start of the protocol execution and then hon-estly follows the prescribed steps of the protocol. Security is defined by comparing two executions: (1) a real-world execution Real Π,A,Z (1 λ), where P0 and P1 run the pro-tocol in the presence of A and an environment Z; and (2) an ideal-world execution Ideal F,S,Z (1 λ), where both parties submit their inputs to a trusted functionality that performs the computation correctly and outputs the result. Many of our constructions employ multiple sub-protocols. We formalize these using the hybrid model, which resembles the real-world execution except that calls to sub-protocols are replaced with invocations of their corresponding ideal functionalities. A protocol that makes use of an ideal func-tionality F is said to operate in the F-hybrid model. Definition 1. We say protocol Π UC-secure realizes func-tionality F if for all PPT adversaries A there exists a PPT simulator S such that for all PPT environment Z, it holds: 
+
+Real Π,A,Z (1 λ) ≈ Ideal F,S,Z (1 λ)
+
+2.3. Cryptographic Primitives 
+
+Secret Sharing Schemes . Throughout this work, we use 2-out-of-2 additive secret sharing schemes over different rings. There are 3 specific rings that we consider: Z2, Z2ℓ ,and ZN , for a positive N (N is not a power of 2). The secret share function takes as input x ∈ Z2ℓ , and output shares over Z2ℓ , denoted by ⟨x⟩2ℓ 
+
+> 0
+
+and ⟨x⟩2ℓ 
+
+> 1
+
+, with the only constriction is ⟨x⟩2ℓ 
+
+> 0
+
++ ⟨x⟩2ℓ 
+
+> 1
+
+= x (+ denotes addition in 
+
+Z2ℓ ). The secret share schemes are defined similarly in Z2
+
+and ZN . We sometimes refer to shares over ZN and Z2ℓ
+
+as arithmetic shares, denoted as ⟨·⟩ 2ℓ
+
+, ⟨·⟩ N and shares over 
+
+Z2 as boolean shares, denoted as ⟨·⟩ B . When the context is clear, we omit the superscript notation like ⟨·⟩ for simplicity. 
+
+Oblivious Transfer . Oblivious Transfer (OT) is the functionality for the sender to input messages m0, . . . , m k−1
+
+and the receiver to input the choice c ∈ Zk. The receiver receives mc as output, but doesn’t know the other messages. The sender has nothing about the choice c. We denote a 1-out-of-k OT as (1 , k )-OT ℓ. Additionally, we also use two specific OT: the 1-out-of 2 correlated OT (1 , 2) -COT ℓ
+
+and the 1-out-of 2 random OT (1 , 2) -ROT ℓ. (1 , 2) -COT ℓ is defined as follows: sender inputs a correlation x, receiver inputs a choice bit i ∈ { 0, 1} and the functionality outputs a random element r to the sender and −r + i · x to the receiver. While in (1 , 2) -ROT ℓ, the sender receives two random messages m1, m 2. The receiver receives the random choice bit b and the corresponding message mb. These OTs can be implemented using either IKNP-style [28] or VOLE-style [29]. For IKNP-style OT, excluding the one-time setup cost for the base OTs, (1 , k )-OT ℓ, (1 , 2) -COT ℓ
+
+require 2λ + kℓ , λ + ℓ. Specifically, simpler (1 , 2) -OT ℓ
+
+has a communication of λ + 2 ℓ. For fair comparison, we adopt IKNP-style OT for the following protocol complexity analysis. 
+
+Random Vector Oblivious Shift Evaluation . The func-tionality FRVOSE [9] takes a boolean vector ⃗ a as input from P0, and outputs ⃗ b to P0, and outputs an offset ϵ and vector ⃗ c = shift (ϵ,⃗ a) ⊕⃗ b to P1. This functionality can be implemented by [9] with a communication complexity 
+
+3λ log n. We can freely extend this functionality FRVOSE to the arithmetic version, where ⃗c = shift (ϵ,⃗ a) + ⃗ b. The only difference with ΠRVOSE in [9] is that we use the pseudo-random generator to derive the puncture matrix, where each element in Z2ℓ instead of Z2.
+
+Multiplexer & B2A conversion . The functionality 
+
+FMUX [23] takes as input arithmetic shares of a, boolean shares of b, and outputs shares of a if b = 1 , else outputs shares of 0. A protocol for FMUX can be implemented by 
+
+2 simultaneous calls to (1 , 2) -COT ℓ and communication complexity is 2( λ + ℓ). The functionality FB2A [23] takes boolean shares as input and gives out arithmetic shares of the same value as output. It can be realized via one call to 
+
+(1 , 2) -COT ℓ, and communication complexity is λ + ℓ.
+
+AND Gate . The functionality FAN D [23] takes as in-put boolean shares of a and b from P0, P1, and outputs boolean shares of a ∧ b. The protocol for FAN D [10], [11], [23] can be implemented based on Beaver Triples, which can be implemented with (1 , 16) -OT 2, and communication complexity is λ + 20 bits. 
+
+Equality Test & Millionaires . The functionality 
+
+Feq [23] takes as input arithmetic shares of a and b from P0,
+
+P1, and returns shares of one bit 1{a = b}. The functionality 
+
+FMill [23] takes as input arithmetic shares of a and b from 
+
+P0, P1, and returns shares of one bit 1{a > = b}. [10] implement Feq with the communication complexity below  
+
+> 34
+
+λℓ + 9 ℓ and FMill below λℓ + 14 ℓ.
+
+Share Conversion . The functionality FN1→N2 
+
+> convert
+
+[23] takes as input arithmetic shares of x on ZN1 from P0,
+
+P1, and outputs arithmetic shares of x on ZN2 . The pro-tocol for FN1→N2 
+
+> convert
+
+can be implemented based on FMill 
+
+and FB2A [23], and communication complexity is less than 
+
+λℓ 1 + 14 ℓ1 + λ + ℓ2, ℓ1 = ⌈log N1⌉, ℓ 2 = ⌈log N2⌉.
+
+## 3. The Secure Counting Function 
+
+In this section, we present our secure counting protocol, a core primitive underpinning many statistical analyses over private data such as the Mode and CHISQ .Test . We formal-ize the secure counting functionality FPFC in Figure 2, which securely constructs a frequency vector ⟨⃗y⟩ from a secret-shared vector ⟨⃗x⟩. Beyond the general setting, we consider a practically important special case in which half of the input features are identical 3, and introduce a customized CRT-based secure frequency counting protocol that partitions the feature domain into small sub-domains.                                                                                          
+
+> FPFC interacts with P0,P1and the simulator S.
+> Parameters: nis the size of the dataset; mis the size of feature domain. ℓn=⌈log n⌉,ℓm=⌈log m⌉.
+> Input:
+> •Upon receiving (Input ,sid ,⟨⃗x⟩0)from P0, record ⟨⃗x⟩0and send (Input ,sid , P 0)to S, where ⟨⃗x⟩0∈Znm.
+> •Upon receiving (Input ,sid ,⟨⃗x⟩1)from P1, record ⟨⃗x⟩1and send (Input ,sid , P 1)to S, where ⟨⃗x⟩1∈Znm.
+> Execution:
+> •If both ⟨⃗x⟩0,⟨⃗x⟩1are recorded, reveal ⃗x:= ⟨⃗x⟩0+⟨⃗x⟩1,compute the frequency vector ⃗y, uniform randomly sample vector ⟨⃗y⟩0←Zm
+> 2ℓn , and compute ⟨⃗y⟩1:= ⃗y− ⟨ ⃗y⟩0,
+> ⟨⃗y⟩1∈Zm
+> 2ℓn .
+> •Send (Output ,sid ,⟨⃗y⟩b)to Pb,b∈ { 0,1}.
+
+Functionality Fm,n 
+
+> PFC
+
+Figure 2: The Ideal Functionality FPFC .
+
+> 3. This scenario commonly arises in statistical applications such as abnormal network traffic analysis [30], [31] and industrial equipment condition analysis [32], [33], [34].
+
+3.1. Private Frequency Counting via Secure Shift 
+
+To get the private frequency vector, previous meth-ods [16] get the frequency of v through n times equality test, i.e., 1{xi = v}, i ∈ [n], convert the boolean shares to the arithmetic shares, and then sum up these equality test results. The intuition of our private frequency counting is that if we combine the result of all 1{x = vj }, j ∈ [m],we can get a boolean unit vector ⃗e x, where ⃗e x equals 1
+
+only in the index x and 0 else. To obtain the boolean vector ⃗e x, instead of performing m times equality test, we can get it through a secure vector shift, as shown in Figure 3. Given the secret shares of ⟨x⟩, we can get ⃗e through two vector circular shifts on the unit vector ⃗e 0 with the offsets 
+
+⟨x⟩0, ⟨x⟩1, respectively. 
+
+Figure 3: Illustration of shift-based secure frequency count-ing. Specifically, these two circular shifts can be achieved in the following steps. First P0 can locally perform a circular shift with offset ⟨x⟩0 and ⃗e 0 to get the ⃗e ⟨x⟩0 . To circular shift vector ⃗e ⟨x⟩0 with offset ⟨x⟩1, we leverage the functionality 
+
+FRVOSE . In the offline phase, parties invoke FRVOSE . P0 gets ⃗a,⃗ b, P1 gets ϵ,⃗ c. In the online phase, P 0 masks ⃗e ⟨x⟩0 with ⃗a, sends ⃗ d := ⃗e ⟨x⟩0 ⊕⃗a to P 1. P1 masks ⟨x⟩1 with ϵ, sends 
+
+⟨x⟩1 − ϵ to P0. Receiving ⟨x⟩1 − ϵ, P0 circular shifts ⃗ b with offset ⟨x⟩1 −ϵ, outputs ⟨⃗e x⟩0 := shift (⟨x⟩1 −ϵ,⃗ b ). P1 circular shifts ⃗ d with ϵ offset, and computes ⃗ t := shift (ϵ,⃗ d ) ⊕⃗c,further circular shifts ⃗ t with offset ⟨x⟩1 − ϵ, and outputs 
+
+⟨⃗e x⟩1 := shift (⟨x⟩1 − ϵ,⃗ t ). Performing the above steps for each input xi, we can get the boolean share ⟨⃗e xi ⟩.Getting the boolean shares ⟨⃗e xi ⟩, parties convert them into the arithmetic shares and locally sum up to get the secret shares of the frequency vector ⟨⃗y⟩. The complete protocol is given in Figure 4. 
+
+Correctness. The circular shift of a m length vector ⃗x
+
+holds that if we have offset ϵ0, ϵ1 and ϵ = ϵ0 + ϵ1 mod m,then the result of circular shift ⃗x with ϵ offset equals to twice circular shift of ⃗x with ϵ 0 and ϵ1. Given the correctness of FRVOSE , we have ⃗ t ⊕⃗ b = shift (ϵ,⃗ e ⟨x⟩0 ⊕⃗a) ⊕⃗c ⊕⃗ b =
+
+shift (ϵ,⃗ e ⟨x⟩0 ). The further circular shift with offset ⟨x⟩1 − ϵ
+
+holds that ⟨⃗y ′′ ⟩0 ⊕⟨ ⃗y ′′ ⟩1 = shift (⟨x⟩1 −ϵ,⃗ t ⊕⃗ b). Such that the vector ⃗e 0 shifts offset ⟨x⟩0 + ϵ + ⟨x⟩1 − ϵ = x mod n. Given the correctness of FB2A , the correctness of the frequency counting can easily follow. 
+
+Efficiency. For each element in vector ⃗x, the protocol 
+
+ΠPFC requires one call to FRVOSE in the offline phase, m-                                                                                                                                                                          
+
+> The protocol is parameterized by the dataset size nand the feature domain m.ℓm=⌈log m⌉, ℓ n=⌈log n⌉.
+> Input :For b∈ { 0,1},Pbinputs the datasets ⟨⃗x⟩b∈Znm.mis the number of possible values.
+> Output :Pboutputs the private frequency ⟨⃗y⟩b∈Zm
+> 2ℓn .
+> Protocol: Offline:
+> 1) For i∈[n],P0samples vector ⃗ai←Zm
+> 2uniformly at random. 2) For i∈[n],P0&P1invoke FRVOSE with P0inputs ⃗ai,and P0receives ⃗bi∈Zm
+> 2,P1receives ⃗ci∈Zm
+> 2and
+> ϵi∈Zm.
+> Online:
+> 1) For i∈[n],P0initializes a boolean vector ⃗ei∈Zm
+> 2, and sets ⃗ei[j] := 1 if j=⟨⃗x[i]⟩0else 0.2) For i∈[n],P0computes ⃗di:= ⃗ei⊕⃗aiand sends it to P1.3) For i∈[n],P1computes ⟨⃗x[i]⟩1−ϵiand sends it to P0.4) For i∈[n],P1computes ⃗ti:= shift (ϵi,⃗ d i)⊕⃗ci, and computes shift (⟨⃗x[i]⟩1−ϵi,⃗ t i)as ⟨⃗y′′
+> i⟩1.5) For i∈[n],P0computes shift (⟨⃗x[i]⟩1−ϵi,⃗ b i)as ⟨⃗y′′
+> i⟩0.6) For i∈[n],P0&P1invoke FB2A with input ⟨⃗y′′
+> i⟩0,⟨⃗y′′
+> i⟩1
+> and learns ⟨⃗y′
+> i⟩0,⟨⃗y′
+> i⟩1.7) Pblocally compute ⟨⃗y[j]⟩b:= Pn−1
+> i=0 ⟨⃗y′
+> i[j]⟩b.
+
+Protocol Πm,n 
+
+> PFC
+
+Figure 4: The Secure Frequency Counting Protocol. length boolean vector and one index message communi-cation, and m calls to FB2A . The offline phase requires 
+
+n3λ log m bit communication with 2 rounds. The online phase requires n(m + ℓm + mλ + mℓ n) bit communication with 3 rounds. The total cost is n(3 λ log m + ℓm + m(1 + 
+
+λ + ℓn)) bits with 5 communication rounds. The total cost of previous frequency counting based on the equality test is mn ( 34 λℓ m + 9 ℓm + λ + ℓn) with log ℓm + 2 commu-nication rounds. We also compare our protocol with the bit decomposition-based frequency counting design [17]. In this design, the total cost is n(2 λl m + 40 lm + m(λ +20) /2+ m(λ+ln)) with 2lm +1 rounds. Asymptotically, the equality-based design requires O(mn (log m + log n)) . Our shift-based design instead requires O(n log m + mn log n).The bit decomposition-based requires the same asymptotical complexity with our design, but has a higher communication round complexity. Overall, the secure-shift design provides a lower complexity compared to the baselines. 
+
+Security. We define the functionality Fm,n  
+
+> PFC
+
+for secure frequency counting in Figure 2 and describe the protocol in Figure 4. We prove our protocol Πm,n  
+
+> PFC
+
+realizes functionality 
+
+Fm,n  
+
+> PFC
+
+.
+
+Theorem 1. Πm,n  
+
+> PFC
+
+UC realizes Fm,n  
+
+> PFC
+
+in the (FB2A , FRVOSE )
+
+hybrid model against semi-honest probabilistic polynomial time (PPT) adversaries with statistical corruption. Proof. CF. Appendix. A.1 for details. 3.2. Private Frequency Counting with CRT 
+
+In this subsection, we present a customized secure counting to get the mode of the input vector ⃗x when the mode’s frequency fmode exceeds n/ 2. The intuition of our customized secure counting is that if the mode value w has frequency fw > n/ 2, then the mode wi of the dataset ⃗x i
+
+satisfies wi = w mod ti, where ⃗x i := {d mod ti | d ∈⃗x}
+
+and ti are co-prime. Following this insight, we break down the private mode on a large frequency vector into a series of short frequency sub-vectors by choosing ti according to the CRT, i.e., ti are co-prime, and N = Q 
+
+> i
+
+ti is slightly larger than m. Then, obtaining the arithmetical share of the mode in each sub-vector ⟨wi⟩b, we can reconstruct w with the CRT that: w := Pui=1 wi · Mi · βi (mod N ), where 
+
+Mi = Nti , β i ≡ M −1 
+
+> i
+
+mod ti are both public numbers, such that w can be reconstruct locally. 
+
+Figure 5: The mode function computed in a naive way and optimized with CRT. The data range is [0 , 15] .Specifically, we present our customized secure frequency counting via a toy example in Figure 5. Suppose the data range is [0 , 15] and the mode’s frequency exceeds half the dataset size. Using the naive method, we need to perform 
+
+Fn 
+
+> argmax
+
+[10] on the frequency vector with length 16 to find the mode. Fn 
+
+> argmax
+
+gets secret shared vector ⟨⃗x⟩ b as input and outputs the secret shared index of the max value in ⃗x.In contrast, with the CRT optimization, parties first convert the input ⟨⃗x⟩ ∈ Z nm into ⟨⃗x i⟩ ∈ Znti . Then parties compute the frequency vector of each ⟨⃗x i⟩ with Fti,n  
+
+> PFC
+
+to learns 
+
+⟨⃗y i⟩b, and perform Fti 
+
+> argmax
+
+with input sub-domain frequency vectors to get the modes. In our toy example, parties perform 
+
+F4 
+
+> argmax
+
+and F5 
+
+> argmax
+
+on two sub-domain frequency vectors, respectively. After getting the results of modes ⟨w′
+
+> i
+
+⟩ti over the sub-domain frequency vectors, parties convert ⟨w′
+
+> i
+
+⟩ti
+
+into ⟨w′
+
+> i
+
+⟩N , and compute the mode ⟨w⟩N via the CRT. The complete algorithm is in Figure 6. 
+
+Correctness. The correctness that ⟨wi⟩N are the mode can be easily followed via the correctness of FN1→N2 
+
+> convert
+
+,                                                                                                                           
+
+> The protocol is parameterized by the dataset size nand the feature domain m.ℓm=⌈log m⌉, ℓ n=⌈log n⌉.tiare u
+> co-prime numbers in set T, and N=Q
+> iti≥m.
+> Input :For b∈ { 0,1},Pbinputs the datasets ⟨⃗x⟩b∈Znm.
+> Output :Pboutputs the share ⟨w⟩Nb,w=mode (⃗x).
+> Protocol:
+> 1) For i∈[u],P0&P1invoke Fm→ti
+> convert with input ⟨⃗x⟩0,⟨⃗x⟩1
+> and learns ⟨⃗xi⟩ti
+> 0,⟨⃗xi⟩ti
+> 1.2) For i∈[u],P0&P1invoke Fti,n
+> PFC with input
+> ⟨⃗xi⟩ti
+> 0,⟨⃗xi⟩ti
+> 1and learn ⟨⃗yi⟩0∈Zti
+> 2ℓn ,⟨⃗yi⟩1∈Zti
+> 2ℓn .3) For i∈[u],P0&P1invoke Fti
+> argmax with input
+> ⟨⃗yi⟩0,⟨⃗yi⟩1and learn secret shares of the index of the max value ⟨w′
+> i⟩ti
+> 0,⟨w′
+> i⟩ti
+> 1.4) For i∈[u],P0&P1invoke Fti→N
+> convert with input
+> ⟨w′
+> i⟩ti
+> 0,⟨w′
+> i⟩ti
+> 1and learns ⟨wi⟩N
+> 0,⟨wi⟩N
+> 1.5) Pblocally reconstructs the arithmetical share ⟨w⟩bmode based on the CRT.
+
+Protocol Πm,n, T
+
+> mode
+
+Figure 6: The Customized Secure mode .
+
+Fm,n  
+
+> PFC
+
+, and Fn
+
+> argmax
+
+. Given the correctness of ⟨wi⟩N , w =
+
+⟨w⟩0 + ⟨w⟩1 = Pui=1 (⟨wi⟩0 + ⟨wi⟩1) · Mi · βi = Pui=1 wi ·
+
+Mi · βi (mod N ), which is correct with the CRT. 
+
+Efficiency. Πm,n, T 
+
+> mode
+
+requires u times Fm→ti 
+
+> convert
+
+, Fti,n  
+
+> PFC
+
+,
+
+Fti 
+
+> argmax
+
+and Fti→N 
+
+> convert
+
+. The Fm→ti 
+
+> convert
+
+requires (λ + 14) uℓ m +
+
+uλ + Pu−1 
+
+> i=0
+
+ℓti bits with log ℓm + 2 communication rounds. 
+
+Fti,n  
+
+> PFC
+
+requires n Pu−1 
+
+> i=0
+
+(3 λ log ti + ℓti + ti(1 + λ + ℓn)) 
+
+with 5 communication rounds. Fti 
+
+> argmax
+
+requires Pu−1 
+
+> i=0
+
+(λℓ n+16 ℓn + 4 λ + 2 ℓti )( ti − 1) with 2 log ℓn log ˆ t communi-cation rounds, where ˆt is the max ti. Fti→N 
+
+> convert
+
+requires 
+
+(λ + 14) Pu−1 
+
+> i=0
+
+ℓti + uλ + uℓ N bits with log ℓˆt + 2 commu-nication rounds. Using the naive way, the communication complexity to computes mode of the m length frequency vector is n(3 λ log m + ℓm + m(1 + λ + ℓn)) for n times 
+
+Fm,n  
+
+> PFC
+
+and (λℓ n + 16 ℓn + 4 λ + 2 ℓm)( m − 1) for Fm
+
+> argmax
+
+. The communication rounds is 2 log ℓn log m+5 . Asymptotically, the CRT optimization communication complexity is about 
+
+O(n log m + P tin log n + P ti log m). The naive way is about O(n log m + mn log n + m log m).
+
+Security . We provide the security proof of Πm,n, T 
+
+> mode
+
+in Appendix.A.4. 
+
+## 4. The Secure Sort Function 
+
+In this section, we present our secure counting sort protocol, which supports statistical functions (e.g., Rank )on large datasets but small feature domains. We formalize the secure sort functionality Fsort in Figure 7, which takes a secret-shared vector ⟨⃗x⟩ as input and outputs a secret-shared sorted vector ⟨⃗y⟩. In addition, to efficiently support statistical functions such as Percentiles , we reformulate them as interval-testing problems based on the frequency vector, thereby avoiding the need to fully sort the input vector. Fsort interacts with P0, P1 and the simulator S.                                                                                
+
+> Parameters: nis the size of the dataset; mis the size of feature domain. ℓm=⌈log m⌉,ℓn=⌈log n⌉.
+> Input:
+> •Upon receiving (Input ,sid ,⟨⃗x⟩0)from P0, record ⟨⃗x⟩0and send (Input ,sid , P 0)to S, where ⟨⃗x⟩0∈Znm.
+> •Upon receiving (Input ,sid ,⟨⃗x⟩1)from P1, record ⟨⃗x⟩1and send (Input ,sid , P 1)to S, where ⟨⃗x⟩1∈Znm.
+> Execution:
+> •If both ⟨⃗x⟩0,⟨⃗x⟩1are recorded, reveal ⃗x:= ⟨⃗x⟩0+⟨⃗x⟩1,compute the ascending sorted vector ⃗y, uniformly random sample ⟨⃗y⟩0←Zn
+> 2ℓm , and compute ⟨⃗y⟩1:= ⃗y− ⟨ ⃗y⟩0.
+> •Send (Output ,sid ,⟨⃗y⟩b)to Pb,b∈ { 0,1}.
+
+Functionality Fm,n 
+
+> sort
+
+Figure 7: The Ideal Functionality Fsort .
+
+4.1. The Secure Counting Sort 
+
+The secure counting sort consists of two main steps: 1)the frequency vector construction and 2)the element in-sertion. The first step can be achieved through Fm,n  
+
+> PFC
+
+. We here present the element insertion using our secure segment-indicator vector. The secure segment-indicator vector is an arithmetic secret share of a vector with elements in index a
+
+to b is 1 else 0, abbr, ⃗ 1a:b (the index a, b here starts from 
+
+1,⃗ 1a:b denotes a zero vector, when a > b ). Given the secret share of ⃗ 1a:b, we can insert value v via a scale multiplication 
+
+v ·⃗ 1a:b. We compute the vector ⃗ 1a:b through ⃗ 11: b −⃗ 11: a−1 To get vector ⃗ 11: b with input b, we can derive it from the unit vector ⃗e b via ⃗ 11: b[i] := Pnj=i⃗e b[j].⃗e b can be constructed similarly with a secure shift paradigm. 
+
+Figure 8: Example of constructing ⃗ 12:3 for data range [0 , 3] .Specifically, after obtaining the private frequency vector, parties first compute the prefix sum of the private frequency vector ⃗ q, where ⃗ q[i] is the end index of value i in the final sorted vector and ⃗q[i] + 1 is the start index of value 
+
+i + 1 . In other words, the segment-indicator vector for value i is ⃗ 1⃗q[i−1]+1: ⃗q[i] . As the frequency ranges from 0 to 
+
+n, it needs to convert the private frequency vector ⃗q into shares over Zn+1 to ensure the correctness. We present the concrete steps to get ⟨⃗1a:b⟩ with a toy example, assuming 
+
+n = 4, a = 2, b = 3, as shown in Figure 8. Given 
+
+ϵ0 + ϵ1 = 3 mod 5 , parties can compute the ⟨⃗e 3⟩ leveraging 
+
+FRVOSE . Then, parties remove the first element of ⟨⃗e 3⟩ such that for frequency 0, the parties can obtain secret shares of a zero vector. With ⟨⃗ ˆe3⟩ := ⟨⃗e 3[1 :] ⟩ parties can compute 
+
+⟨⃗11:3 ⟩ through ⟨⃗ 11:3 [i]⟩ := Pnj=i⟨⃗ ˆe3[j]⟩. Similarly, parties can get ⟨⃗ 11:1 ⟩ with input ϵ′
+
+> 0
+
+, ϵ ′
+
+> 1
+
+, where ϵ′ 
+
+> 0
+
++ ϵ′ 
+
+> 1
+
+= 1 mod 5 .With ⟨⃗11:3 ⟩, ⟨⃗11:1 ⟩ parties can locally compute ⟨⃗ 12:3 ⟩ := 
+
+⟨⃗11:3 ⟩ − ⟨ ⃗11:1 ⟩. Using ⟨⃗y ′
+
+> i
+
+⟩ to denote the secret share of the segment-indicator vector of value i, we can get the final sorted vector through ⟨⃗y⟩ := Pm−1 
+
+> i=0
+
+⟨⃗y ′
+
+> i
+
+⟩ · (i + 1) −⃗ 1. The detailed steps are shown in Figure 9. 
+
+Correctness . By the correctness of Fm,n  
+
+> PFC
+
+and FRVOSE ,we get the secret shared frequency vector ⟨⃗q ′⟩ of the input 
+
+⟨⃗x⟩. In the sorted vector, the value i is inserted into the vector behind all values less than i such that the segment-indicator vector is ⃗ 1a:b, where a = 1 + Pi−1
+
+> j=0
+
+⃗q ′[j], b =
+
+a +⃗q ′[i]. Then, ⟨⃗ 1a:b⟩ = ⟨⃗11: b⟩ − ⟨ ⃗ 11: a−1⟩, and ⟨⃗ 11: a[i]⟩ =Pnj=i⟨⃗ ˆea[j]⟩. ⟨⃗ ˆea⟩ = ⟨⃗e a[1 :] ⟩. The first element of ⃗e a is removed to ensure the value with frequency 0 outputs a zero segment-indicator vector. The correctness of ⟨⃗e a⟩ follows similar to Πm,n  
+
+> PFC
+
+.
+
+Efficiency . Πm,n  
+
+> CSort
+
+first invokes Fm,n  
+
+> PFC
+
+, which costs 
+
+n3λ log m bits with 2 rounds in the offline phase, and 
+
+n(m + ℓm + mλ + mℓ n) bits with 3 rounds in the online phase. Then invokes the share conversion to translate the shares in Zn+1 , which costs less than λℓ n + 15 ℓn + λ
+
+with log ℓm + 1 rounds. Then, m − 1 times circular shift using the arithmetic version of FRVOSE , which costs (m −
+
+1)3 λ log( n + 1) bits with 2 rounds in the offline phase and (m − 1)( ℓn + ( n + 1) ℓm) bits with 1 rounds in the online phase. The total communication complexity is about 
+
+O(mn log( mn )) , and the round complexity is O(log log m).The communication and round complexity of the Quick-Sort [7] are O(n log n(log( mn )) and O(log n log log m)
+
+respectively. The communication and round complexities of RadixSort [17] are O(mn log m + m1/t n log n) and 
+
+O(log m), respectively, where t depends on the selected radix. 
+
+Security . We define the functionality Fm,n  
+
+> sort
+
+for secure sort in Figure 7 and describe the protocol in Figure 9. We prove our protocol Πm,n  
+
+> CSort
+
+realizes functionality Fm,n  
+
+> sort
+
+.
+
+Theorem 2. Πm,n  
+
+> CSort
+
+UC realizes Fm,n  
+
+> sort
+
+in the (Fm,n  
+
+> PFC
+
+, FRVOSE )
+
+hybrid model against semi-honest probabilistic polynomial time (PPT) adversaries with statistical corruption. Proof. CF. Appendix. A.2 for details. 
+
+4.2. The Secure Counting Percentile 
+
+Percentile outputs the k-th smallest value from the dataset that represents the point below which a given per-centage of data falls, where the given percentage determines The protocol is parameterized by the dataset size n and the feature domain m. ℓm = ⌈log m⌉, ℓ n = ⌈log n⌉.
+
+Input : For b ∈ { 0, 1}, Pb inputs vector ⟨⃗x⟩ b ∈ Znm.
+
+Output : Pb outputs the sorted vector ⟨⃗y⟩ b ∈ Zn 
+
+> 2ℓm
+
+.
+
+Protocol: Offline: 
+
+1) For i ∈ [m−1] , P0 samples vector ⃗a i ← Zn+1 2ℓm uniformly at random. 2) For i ∈ [m−1] , P0 & P1 invoke FRVOSE with P0 inputs ⃗a i, and P0 receives ⃗ bi ∈ Zn+1 2ℓm , P1 receives ⃗c i ∈ Zn+1 2ℓm and 
+
+ϵi ∈ Zn+1 .
+
+Protocol: 
+
+1) P0 & P1 invoke Fm,n  
+
+> PFC
+
+with input ⟨⃗x⟩ 0, ⟨⃗x⟩ 1 and learn 
+
+⟨⃗q ′′ ⟩0, ⟨⃗q ′′ ⟩1.2) P0 & P1 invoke F2ℓn →n+1  
+
+> convert
+
+with input ⟨⃗q ′′ ⟩2ℓn  
+
+> 0
+
+, ⟨⃗q ′′ ⟩2ℓn 
+
+> 1
+
+and learn ⟨⃗q ′⟩n+1 0 , ⟨⃗q ′⟩n+1 1 .3) For i ∈ [m−1] , Pb computes 
+
+⟨⃗q[i]⟩ n+1  
+
+> b
+
+:= Pij=0 ⟨⃗q ′[j]⟩n+1  
+
+> b
+
+.4) For i ∈ [m−1] , P0 initializes ⃗v i ∈ Zn+1 2ℓm , and sets ⃗v i[j] := 1 if j = ⟨⃗q[i]⟩ 0 else 0.5) For i ∈ [m−1] , P0 sends ⃗ di := ⃗v i −⃗a i to P1.6) For i ∈ [m−1] , P1 sends ⟨⃗q[i]⟩ 1 − ϵi to P0.7) For i ∈ [m−1] , P1 computes ⃗ ti := shift (ϵi,⃗ d i) + ⃗c i, and sets shift (⟨⃗q[i]⟩ 1 − ϵi,⃗ t i) as ⟨⃗y ′′′ ⟩1.8) For i ∈ [m−1] , P0 sets shift (⟨⃗q[i]⟩ 1 − ϵi,⃗ b i) as ⟨⃗y ′′′  
+
+> i
+
+⟩0.9) For i ∈ [m−1] , Pb computes 
+
+⟨⃗y ′′  
+
+> i
+
+[j]⟩b := Pnu=j ⟨⃗y ′′′  
+
+> i
+
+[u]⟩b, j ∈ [1 , n ].10) P0 sets ⟨⃗y ′′ 
+
+> m−1
+
+⟩0 to an all-ones vector, while P1 sets 
+
+⟨⃗y ′′ 
+
+> m−1
+
+⟩1 to the zero vector. 11) For i ∈ [1 , m −1] , Pb compute ⟨⃗y ′
+
+> i
+
+⟩ := ⟨⃗y ′′  
+
+> i
+
+⟩ − ⟨ ⃗y ′′ 
+
+> i−1
+
+⟩ and 
+
+⟨⃗y ′
+
+> 0
+
+⟩ := ⟨⃗y ′′  
+
+> 0
+
+⟩.12) Pb computes ⟨⃗y⟩ := Pm−1 
+
+> i=0
+
+⟨⃗y ′
+
+> i
+
+⟩ · (i + 1) −⃗ 1.
+
+Protocol Πm,n 
+
+> CSort
+
+Figure 9: Protocol of ΠCSort 
+
+k. As a special case of sorting, Percentile does not need to sort the entire input vector. Such that instead of inserting all the elements according to the frequency counting vector, we construct Πm,n,k  
+
+> percentile
+
+based on the following observation. For the Percentile operation, we note that the k-th smallest value 
+
+i denotes that k falls in the i-th interval of the prefix-sum frequency vector. Following the above idea of the interval test, we evaluate the k-th smallest value by judging which interval k falls in. Specifically, parties first construct the private prefix-sum frequency vector ⟨⃗z⟩ via F m,n  
+
+> PFC
+
+. Then, to judge whether 
+
+k falls in the interval (⃗z[i],⃗ z[i + 1]] , parties compute the indicator 1{k ≤⃗ z[i + 1] } by invoking F Mill on inputs 
+
+k and ⟨⃗z[i + 1] ⟩, obtaining a private bit ⟨t[i + 1] ⟩. Next, parties obtain 1{k >⃗ z[i]} by setting ⟨⃗ u′[i]⟩b := ⟨⃗ t[i]⟩b ⊕ b,and securely combine ⟨⃗ u′[i]⟩ and ⟨⃗ t[i + 1] ⟩ using FAND to derive ⟨u[i]⟩, which indicates whether k lies in the interval 
+
+(⃗z[i],⃗ z[i + 1]] . From these values, parties construct a private unit vector with one position corresponding to the target in-terval. They then invoke FB2A to convert this boolean vector into an arithmetic unit vector ⟨⃗w⟩, and finally compute the output percentile value as ⟨ω⟩ := Pm−1 
+
+> i=0
+
+i · ⟨ w[i]⟩, which yields the k-th smallest element in the domain. The complete protocol is presented in Figure 10. 
+
+Correctness . The correctness of Πm,n,k  
+
+> percentile
+
+follows from the correctness that the unit vector ⃗v indicates which interval 
+
+k falls in. Specifically, the correctness of ⃗v is established as follows. For the first entry, we have ⃗v[0] = ⃗ t[0] = 1 {k ≤⃗z[0] }. For each i ∈ [1 , m −2] , it holds that ⃗v[i] = ⃗ t[i]∧⃗ u′[i−
+
+1] = 1{k ≤⃗z[i]}∧ 1{k >⃗ z[i−1] } = 1 {⃗z[i−1] < k ≤⃗z[i]}.Finally, for the last entry, ⃗v[m − 1] = ⃗ u′[m − 2] = 1 {k >⃗ z[m−2] }. Therefore, ⃗v is a unit vector that correctly encodes the interval containing k.
+
+Efficiency . Πkth invokes m − 1 times FMill to get the result of 1{k ≤⃗z[i]}, i ∈ [0 , m − 2] . Then need m − 2 times 
+
+FAND to get the interval test result of 1{⃗z[i] < k ≤⃗z[i +1] }, i ∈ [1 , m − 2] . Finally m times FB2A to get the result of 
+
+k. This part of the interval test communication complexity is 
+
+m(λ(ℓn +2)+14 ℓn +ℓm +20) −λ(ℓn +2) −14 ℓn −40 . This part of the interval test communication round is log log m+4 
+
+rounds. Adding the cost of secure frequency vector con-struction, the total communication complexity is about 
+
+O(m log m+n log m+mn log n), and the round complexity is about O(log log m). The communication complexity of the SOTA [7], [14] is O(n log nm ) and a communication round complexity O(log n log log m).
+
+Security . We provide the security proof of Πm,n,k  
+
+> percentile
+
+in Appendix.A.5. 
+
+The protocol is parameterized by the dataset size n and the feature domain m. k denotes the index of the percentile value in the sorted vector. ℓm = ⌈log m⌉, ℓ n = ⌈log n⌉.
+
+Input : For b ∈ {0, 1} Pb inputs the private prefix-sum frequency ⟨⃗z⟩ b ∈ Zm 
+
+> 2ℓn
+
+and the private ⟨k⟩b.
+
+Output : Pb outputs the k-th smallest value ⟨ω⟩b.
+
+Protocol: 
+
+1) P0 & P1 invoke Fm,n  
+
+> PFC
+
+with input ⟨⃗x⟩ 0, ⟨⃗x⟩ 1 and learns 
+
+⟨⃗z ′⟩0, ⟨⃗z ′⟩1.2) Pb computes ⟨⃗z[i]⟩ b := Pij=0 ⟨⃗z′[j]⟩b.3) P0 & P1 invoke FMill with input k and 
+
+⟨⃗z[i]⟩ 0, ⟨⃗z[i]⟩ 1, i ∈ [0 , m −2] and gets ⟨ti⟩0, ⟨ti⟩1,
+
+ti = 1 {k ≤⃗z[i]}.4) Pb sets ⟨⃗u ′[i]⟩b := ⟨⃗ t[i]⟩b ⊕ b, i ∈ [0 , m −2] .5) P0 & P1 invoke FAND with input ⟨⃗ t[i+1] ⟩0, ⟨⃗ t[i+1] ⟩1,
+
+⟨⃗u ′[i]⟩0, ⟨⃗u ′[i]⟩1, and learns ⟨⃗u[i]⟩ 0, ⟨⃗u[i]⟩ 1, i ∈ [0 , m −3] .6) Pb constructs boolean vector ⟨⃗v⟩, where ⟨⃗v[0] ⟩ b := ⟨⃗ t[0] ⟩b,
+
+⟨⃗v[i+1] ⟩ b := ⟨⃗u[i]⟩ b, i ∈ [0 , m −3] , and 
+
+⟨⃗v[m−1] ⟩ b := ⟨⃗u ′[m−2] ⟩b.7) P0 & P1 invoke FB2A with input 
+
+⟨⃗v[i]⟩ 0, ⟨⃗v[i]⟩ 1, i ∈ [0 , m −1] and learns 
+
+⟨⃗w[i]⟩ 2ℓm  
+
+> 0
+
+, ⟨⃗w[i]⟩ 2ℓm  
+
+> 1
+
+, i ∈ [0 , m −1] .8) Pb locally computes ⟨ω⟩b := Pm−1 
+
+> i=0
+
+i · ⟨ ⃗w[i]⟩ b.
+
+Protocol Πm,n,k 
+
+> percentile
+
+Figure 10: The Secure Percentiles Protocol For the max or min operation, it is special as its order index falls into the interval endpoints, which enables us to replace the FMill with Feq . In contrast to the general interval test whose endpoints are typically different numbers, here the interval endpoints can be the same (the case appears when there are no elements whose value is xi, such that 
+
+zi−1 = zi). Such that there will be more than one interval endpoint hit to indicate the maximum value. After perform-ing Feq (⟨zi⟩b, n ), i ∈ [m], we will get a boolean secret share vector ⟨⃗u⟩ Bb , where ⃗u[j] = 1 if j ≥ Max (⃗x) else 0. To get the result of a unit vector indicates the max value, Pb can be computed as follows: ⃗u ′[0] := ⃗u[0] ,⃗ u ′[i] := ⃗u[i − 1] ⊕⃗u[i].Obtaining ⃗u ′, we can get the max value through m times 
+
+FB2A and a local sum up. The extended communication complexity besides Fm,n  
+
+> PFC
+
+is m( 34 λ + 9 ℓn + λ + ℓm). We present the complete protocol ΠCMax in subsection B. 
+
+## 5. The Secure Non-linear Math Functions 
+
+In this section, we present our bisection-based secure MSNZ bit protocol, which constitutes the dominant compu-tational cost in secure non-linear math functions. We adopt the functionality FMSNZB defined in [23], which takes a secret-shared value ⟨x⟩ as input and outputs a secret-shared vector ⟨⃗z⟩ B s.t. ⃗z[i] = 1 if 2 i ≤ x < 2i+1 and 0 otherwise. Furthermore, we formally characterize the relationship be-tween the degree of an approximation polynomial and its valid approximation interval, and propose a secure interval-compression protocol that offers an orthogonal efficiency optimization for secure non-linear math functions. 
+
+5.1. The Optimized Most Significant Non-Zero Bit Protocol 
+
+To get the MSNZ bit of ⟨x⟩, Sirnn [23] realizes first invoking the FDigDec to convert the arithmetical secret shares of x into the arithmetical secret shares of xi ∈ Z2c , i ∈
+
+[d], c = ℓ/d , where x = x0|| . . . || xd−1. Then getting the 
+
+ki = MSNZB (xi), v i = 1 if xi = 0 else 0 using private lookup table (LUT), and then combining the result to get MSNZB (x) := P 
+
+> i
+
+ki · (1 ⊕ vi) · Q 
+
+> j>i
+
+vj , which requires 
+
+O(d) communication rounds to locate the MSNZ xi. The intuition of our ΠMSNZB is that the MSNZ xi locates in the non-zero half part of x. Such that we can obliviously locate the MSNZ xi based on the bisection idea recursively. Specifically, parties first decompose ⟨x⟩ to ⟨x0⟩||⟨ x1⟩,where x = x0|| x1 x0 and x1 have the same bit length through the invocation of FMill and FB2A . Then parties check whether x0 is zero through the invocation of Feq .Leveraging the result 1{x0 = 0 }, parties can obliviously choose xb as x′, where b = 1 − 1{x0 = 0 }. Then we apply the same steps on x′ to get a shorter message, which can finally be efficiently evaluated by the private LUT. To get the final result, assume that the MSNZB of x′ is 
+
+k, MSNZB (x) = k + ℓ/ 2 · (1 ⊕ b). To get the boolean secret share of vector ⟨⃗z⟩ B with input ⟨MSNZB (x)⟩, we can construct it via a secure vector circular shift similar in ΠPFC . For input length ℓ that is not a power of 2, we can perform zero extension to convert the input to Z2t to ensure that during each step the input can be decomposed into two with the same bit length. The functionality FLUT 
+
+and Fone-hot [23] can be implemented with (1 , k )-OT. We provide the complete protocol ΠMSNZB in Figure 11. 
+
+Correctness . For ℓ bit input x = x0|| x1, we have MSNZB (x) = MSNZB (x0) + ℓ/ 2 if x0̸ = 0 else MSNZB (x) = MSNZB (x1). When the input to MSNZB is small enough, the correctness is ensured through the correctness of FLUT .
+
+Efficiency . For ℓ bit input x, our method consists of four parts to get the MSNZ bit of x. The first step is to obliviously find the most significant block, where each step requires one invocation of FMill , FB2A , Feq and FMUX , whose commu-nication complexity is less than ( 74 ν + 3 d)λ + 26 ν, where 
+
+ℓ = dc , ν = Plog di=1 ( ℓ 
+
+> 2i
+
+) with 2ν + 3 log d communication rounds. The second step is the evaluation of LUT, whose communication complexity is 2λ + 2 cι with 2 communica-tion rounds. The third step is the result combination, which requires log d times FB2A , whose communication complex-ity is log d(λ + ι) with 2 log d communication rounds. The fourth step is the one-hot conversion, whose communication complexity is 2λ + ℓ2 with 2 communication rounds. As for the concrete parameter ℓ = 32 , c = 8 suggested in Sirnn [23], our protocol has 1.47 × less communication complexity. 
+
+Security . We describe the protocol in Figure 11. We prove our protocol ΠMSNZB realizes functionality FMSNZB in Sirnn [23]. 
+
+Theorem 3. ΠMSNZB UC realizes FMSNZB in the FMill , FB2A ,
+
+Feq , FMUX , Fone-hot , FLUT hybrid model against semi-honest probabilistic polynomial time (PPT) adversaries with statis-tical corruption. Proof. CF. Appendix. A.3 for details. 
+
+5.2. The Secure Interval Compression Protocol 
+
+In this subsection, we present an alternative efficiency optimization direction for secure non-linear math functions through the secure interval compression protocol. As dis-cussed in subsection 5.1, x can be deflated into the interval 
+
+[2 k, 2k(1 + ϵ)] , where k ∈ Z. Leveraging the FMSNZB , the 
+
+ϵ is a constant equals 1. In the following, we present the efficency improvement brought from the interval compres-sion when applying the polynomial approximation or the iterative methods like Newton’s iteration. In the following, we take 1/x as an example. As for the polynomial approximation, to minimize the max approximation error with Chebyshev polynomial ap-proximation, we have the following lemma. 
+
+Lemma 1. The minimax approximation error of 1/x on interval [2 k, 2k(1 + ϵ)] is less than ϵn+1  
+
+> 22n+1 2k
+
+.Proof. According to the minimax approximation error in [35], we have that for the non-linear function f (x) the n-Input : For b ∈ { 0, 1} Pb inputs ⟨x⟩b ∈ Z2ℓ .                                                                                                                                                     
+
+> Output :Pboutputs {⟨ zi⟩Bb}i∈[ℓ]s.t. zi= 1 if 2i≤x <
+> 2i+1 and 0 otherwise.
+> Protocol:
+> 1) Pbsets ⟨x⟩bas ⟨x1⟩b
+> 2) For j= 1 to log d:1) Pblocally decompose ⟨xj⟩2ℓj
+> binto
+> ⟨uj⟩2ℓj+1
+> b||⟨ vj⟩2ℓj+1
+> b, where ℓj+1 =ℓj/2.2) Pbinvokes FMill with inputs ⟨vj⟩band learns ⟨wj⟩Bb,where wj= 1 {⟨ vj⟩0+⟨vj⟩1≥2ℓj+1 }.3) Pbinvokes FB2A with input ⟨wj⟩Bband learns ⟨tj⟩b.4) Pbinvokes Feq with input ⟨tj⟩b,⟨uj⟩band learns
+> ⟨σj⟩Bb, where
+> σj= 1 {0 = ⟨tj⟩0+⟨uj⟩0+⟨tj⟩1+⟨uj⟩1}.5) Pbinvokes FMUX with input
+> ⟨σj⟩Bb,⟨tj⟩b+⟨uj⟩b,⟨vj⟩band learns ⟨xj+1 ⟩b.3) Pbinvokes FLUT with inputs ⟨xd+1 ⟩band learns
+> ⟨ezd⟩b∈Z2ι, where ι= log ℓ.4) For j= 1 to log d:1) Pbinvokes FB2A with input ⟨σd−j⟩Bband learns
+> ⟨h′⟩2ι
+> b, then computes ⟨h⟩b:= ⟨h′⟩b·ℓ
+> 2d−j.2) Pbcomputes ⟨ezd−j⟩b:= ⟨ezd−j+1 ⟩b+⟨h⟩b.5) Pbinvokes Fone-hot (⟨ez1⟩b)and learns {⟨ zi⟩Bb}i∈[ℓ].
+
+Protocol ΠMSNZB 
+
+Figure 11: The Secure MSNZB Protocol degree approximation polynomial pn(x) on the range [a, b ]
+
+has the error 
+
+max  
+
+> a≤x≤b
+
+|f (x) − pn(x)| ≤ (b − a)n+1 
+
+22n+1 (n + 1)! 
+
+· max  
+
+> a≤x≤b
+
+|f (n+1) (x)|.
+
+For f (x) = 1 /x on the interval [2 k, 2k(1 + ϵ)] , we have 
+
+Err ≤ ϵn+1 
+
+22n+1 2k
+
+. which implies Lemma 1. Leveraging Lemma 1, we can see that if we only use 
+
+FMSNZB , the error equals to 122n+1 2k . Although we can nor-malize x into the interval [2 k, 2k+1 ] with larger k to increase the convergence, it needs a longer bit to represent the input to avoid the overflow during the polynomial computation, which increases the overhead. Our alternative direction is to minimize the ϵ, i.e., compress the interval then ϵ = 1 /2.Such that the approximation error is 123n+2 2k , which gives a faster convergence. That is, given the same precision target, we can also use lower polynomial degree to bring an efficiency improvement. As for the iterative method, the ap-proximation error relates to the initial value. In SIRNN [23], the initial values are assigned with a private LUT. Following our interval compression idea, we can reduce about half of the LUT size. To compress the interval such that [2 k, 2k(1 + ϵ)] , where 
+
+ϵ = 1 /2, we propose the following lemma. 
+
+Lemma 2. For any x ∈ [a + b, a + 2 b), a, b ∈ R, a > 0, b > 
+
+0, one can find c ∈ R and a positive number x′ such that 
+
+x′ = cx, x ′ ∈ [a, a + b)
+
+Proof. One can write as x′ = cx . such that a+b ≤ cx < a +2b. To ensure this inequality holds, we can get the following two inequalities 
+
+c · (a + 2 b) < a + bc · (a + b) ≥ a
+
+We work out the aa+b ≤ c < a+ba+2 b . We can compute that 
+
+a + ba + 2 b − aa + b = (a + b)2 − a(a + 2 b)(a + 2 b)( a + b)= b2
+
+(a + 2 b)( a + b) > 0
+
+Thus we find c = aa+b , which implies Lemma 2. The proof of Lemma 2 also presents the concrete method to normalize x in interval [2 k, 2k · 2) to [2 k, 2k · 1.5) .Specifically, take k = 0 , x ∈ [1 , 2) as an example, parties input ⟨x⟩b, 1.5 to FMill . After the execution, parties get the output ⟨η⟩Bb , η = 1 {x > 1.5} from FMill . According to Lemma 2, for a = 1 , b = 1 /2, we can find c = 2 /3. The final x′ := x + η(cx − x), which requires one FMUX with input ⟨η⟩B and ⟨cx − x⟩2ℓ
+
+.
+
+## 6. Experiments 
+
+Experimental setup . Our experiments were conducted on a single machine with Intel(R) Core(TM) i5-14400F CPU @ 4.70GHz and 32.0GB RAM running Ubuntu 22.04. To simulate various network conditions, we used Linux Traffic Control (tc), emulating a LAN environment with 10 Gbps bandwidth and 0.125 ms round-trip (RTT) latency and a WAN environment with 1 Gbps bandwidth and 50 ms RTT latency. All experiments were built upon the EzPC library 4, with the underlying IKNP-style OT protocols. We use 32-out-of-16 to represent the decimals. In the following, we first present our benchmark of the three functions: 1) secure frequency counting, 2) secure sorting, and 3) the non-linear math function. Then we give the result of the case study. Our implementations are publicly available at https://anonymous.4open.science/r/PSC-FC2D/. 
+
+6.1. Secure counting function 
+
+We evaluate the communication cost and running time of secure frequency counting under two scalability settings: varying the data size n with a fixed domain size m = 1024 ,and varying the domain size m with a fixed data size 
+
+n = 4096 . As baselines, we compare S AFE STATS with three 
+
+> 4. https://github.com/mpc-msri/EzPC
+
+representative approaches: equality-based counting instan-tiated with state-of-the-art secure equality tests [10], [23], DPF-based 5 counting based on distributed function secret sharing [36], and bit-decomposition-based counting [17]. The results are reported in Figure 12 and Table 2. Overall, S AFE STATS consistently outperforms all baselines in both communication and running time. In terms of communication, SAFE STATS reduces the communication cost by 3.1-8.6× compared with equality-based count-ing, 4.7-21 .0× compared with DPF-based counting, and 
+
+1.4-1.9× compared with bit-decomposition-based counting. For running time, S AFE STATS achieves the best perfor-mance under both LAN and WAN settings. Under the LAN setting, SAFE STATS achieves a 4.0-7.9× speedup over equality-based counting and a 1.1-3.0× speedup over bit-decomposition-based counting. Under the WAN setting, where network latency becomes more significant, S AFE S- 
+
+> TATS
+
+further achieves a 1.3-7.2× speedup over equality-based counting, a 1.6-2.3× speedup over bit-decomposition-based counting. For the DPF-based counting baseline, the correlated key generation under 2PC requires securely eval-uating a large number of PRG expansions and correction-word computations, which makes it substantially slower than the other methods in the 2PC setting. These results demonstrate that S AFE STATS scales efficiently with both the data size and the domain size. TABLE 2: Running-time overhead comparison for counting schemes under LAN and WAN settings. DPF, BitDec, and Equality are short for DPF-based, bit-decomposition-based, and Equality-based schemes, respectively. When varying n,we fix m = 1024 ; when varying m, we fix n = 4096 .                                                                    
+
+> Network Varying Value Runtime Overhead (s) DPF BitDec Equality Ours LAN
+> m
+> 16 193.77 0.03 0.04 0.01
+> 64 277.22 0.08 0.20 0.05
+> 256 345.14 0.29 1.29 0.19
+> 1024 445.15 1.05 6.09 0.77
+> n
+> 2048 223.47 0.53 3.15 0.46
+> 4096 442.95 1.06 6.12 0.82
+> 8192 918.81 2.05 12.96 1.79
+> 16384 2143.02 4.42 25.28 3.89
+> WAN
+> m
+> 16 15125.56 1.12 0.92 0.70
+> 64 21707.92 1.89 2.03 0.92
+> 256 28112.28 3.27 7.77 1.42
+> 1024 34533.01 8.45 29.36 4.34
+> n
+> 2048 17262.74 5.18 15.46 2.41
+> 4096 34517.30 8.38 29.99 4.34
+> 8192 69050.15 14.74 57.36 8.28
+> 16384 138098.30 27.34 116.00 16.14
+> 5. https://github.com/xingpz2008/dealerless-FSS public
+
+Figure 12: Communication overhead of secure frequency counting under varying data sizes and domain sizes. 
+
+6.2. Secure order function 
+
+Similar to the secure frequency counting setting, we evaluate the communication cost and running time of secure sorting under two scalability settings: varying the data size 
+
+n with a fixed domain size m = 1024 , and varying the domain size m with a fixed data size n = 4096 . As baselines, we compare S AFE STATS with three representative approaches: shuffle-based QuickSort instantiated with state-of-the-art secure comparison [10], [23] and secure shuf-fle [37], DCF-based sorting based on distributed function secret sharing [36], and RadixSort from [17]. The results are reported in Table 3 and Figure 13. The DCF-based sorting is omitted from Figure 13 for readability, since its communication cost is at the GB scale ( > 50GB). When varying the data size n with a fixed domain size m = 1024 , SAFE STATS incurs approximately 2×
+
+higher communication cost than the QuickSort and Radix-Sort baselines. Despite this increase in communication vol-ume, S AFE STATS requires significantly fewer communica-tion rounds, O(log log m) compared to O(log n log log m)
+
+for the QuickSort baseline and O(log m) for the Radix-Sort baseline, which results in lower overall running time. Specifically, under the LAN setting, S AFE STATS achieves a 4.7-5.9× speedup over the QuickSort baseline across all evaluated values of n. Under the WAN setting, where network latency dominates, the advantage becomes substan-tially more pronounced: S AFE STATS reduces the running time by roughly 90 × over QuickSort baseline and 4.7× over RadixSort baseline. When varying the domain size m with a fixed data size 
+
+n = 4096 , the communication cost and running time of QuickSort stay almost unchanged as m increases, since its cost primarily scales with the dataset size n. In contrast, RadixSort exhibits a moderate growth trend because its cost is affected by the number of radix decomposition rounds, which increases with m. For S AFE STATS , both commu-nication cost and running time grow more noticeably as 
+
+m increases, due to its domain-size-dependent computation pattern. Specifically, under the LAN setting, S AFE STATS 
+
+is 21 .4×, 10 .1×, and 3.4× faster than RadixSort when 
+
+m = 16 , 64 , and 256 , respectively. However, when m
+
+increases to 1024 , the running time of S AFE STATS becomes comparable to RadixSort, with a slight slowdown of 1.1×.In terms of communication, S AFE STATS also requires less communication than RadixSort when m is small, while its communication cost becomes about 2.1× higher than RadixSort at m = 1024 .Overall, these results indicate that S AFE STATS is partic-ularly effective in optimizing running time and communica-tion cost when the feature domain size m < log 2 n.TABLE 3: Running-time overhead comparison for sorting schemes under LAN and WAN settings. DCF is short for DCF-based sorting. When varying n, we fix m = 1024 ;when varying m, we fix n = 4096 .                                                                    
+
+> Network Varying Value Runtime Overhead (s) DCF QuickSort RadixSort Ours LAN
+> m
+> 16 34610.61 14.66 1.07 0.05
+> 64 47301.48 14.71 1.62 0.16
+> 256 52696.67 14.70 2.16 0.63
+> 1024 61931.15 14.75 2.71 2.87
+> n
+> 2048 27208.71 5.58 1.28 1.18
+> 4096 67119.64 14.64 2.76 2.53
+> 8192 153826.28 42.58 7.92 7.54
+> 16384 337420.98 136.03 15.29 22.97 WAN
+> m
+> 16 3.49e6 1113.81 13.48 1.23
+> 64 4.55e6 1104.57 20.41 1.54
+> 256 5.76e6 1114.85 27.22 3.12
+> 1024 6.98e6 1109.80 34.65 9.77
+> n
+> 2048 2.91e6 557.76 20.96 4.94
+> 4096 7.65e6 1119.99 35.08 9.54
+> 8192 1.62e7 2232.24 95.82 20.19
+> 16384 3.80e7 4507.88 186.52 46.82
+
+Figure 13: Communication overhead of secure sorting under varying data sizes and domain sizes,excluding the GB-scale DCF-based sorting for readability. 
+
+6.3. Secure non-linear math function 
+
+In this subsection, we evaluate our protocols for secure non-linear math functions, including the tree-based ΠMSNZB 
+
+and its application to functions 1/x , 1/√x, and ln( x).To evaluate the efficiency improvement of our secure MSNZB protocol, we test 10 5 numbers under both LAN and WAN settings and set the MSNZB in Sirnn [23] as the baseline. As shown in Table 4, our tree-based MSNZB achieves consistent improvements in both communication and runtime. Specifically, it reduces communication by 
+
+1.47 × and achieves 2.48 × and 1.61 × faster execution under LAN and WAN settings, respectively. These gains stem from the hierarchical tree structure, which requires only a single invocation of the LUTs, leading to a more communication-efficient protocol. Since MSNZB serves as a fundamental building block for most nonlinear functions, this optimization directly accelerates the overall evaluation of such functions. TABLE 4: Performance comparison of MSNZB implemen-tations.           
+
+> Method Total Time (in sec) Comm./ Inst. (in KB) LAN WAN SAFE STATS 1.49 8.32 1.14 [23] 3.68 (2.48 ×)13.37 (1.61 ×)1.68 (1.47 ×)
+
+To evaluate the efficiency improvement of non-linear math functions brought from the new MSNZB protocol, we also test it on 1/x , 1/√x and ln x. We test 10 5 numbers under both LAN and WAN settings. We set the 1/x and 
+
+1/√x in [23], and ln x in [25] as baselines. As summarized in Table 5, our method reduces communication cost by about 1.15 ×, and about 1.70 × faster execution under LAN settings, and about 1.25 × under WAN conditions. TABLE 5: Performance comparison against [23] and [25] under different network conditions.                             
+
+> Method Total Time (in sec) Comm./Inst. (in KB) Max ULP Error LAN WAN 1/x SAFE STATS 2.86 18.97 3.37 2[23] 5.06 (1.77 ×)24.01 (1.26 ×)3.91 (1.16 ×)1
+> 1/√x
+> SAFE STATS 3.22 21.78 3.56 4[23] 5.42 (1.68 ×)26.82 (1.23 ×)4.10 (1.15 ×)4
+> ln x
+> SAFE STATS 2.96 20.44 3.29 12 [25] 5.16 (1.74 ×)25.48 (1.25 ×)3.84 (1.16 ×)28
+
+6.4. Case studies 
+
+To evaluate the efficiency of S AFE STATS for statistical analysis, we select 14 commonly used statistical functions. All selected functions can be constructed using the three categories of secure primitives provided by S AFE STATS .For example, consider the secure CHISQ .Test , defined as 
+
+χ2 = Pai=1 
+
+Pbj=1 (Oij −Eij )2 
+
+> Eij
+
+, where Oij denotes the ob-served frequency and Eij = OiOj 
+
+> N
+
+. This function can be implemented by combining the secure frequency counting protocol Πm,n  
+
+> PFC
+
+, the secure reciprocal ( 1/x ) primitive, and se-cure multiplication. In this subsection, we report experimen-tal results obtained using EzPC. For baseline comparison, we also implement the same statistical functions using the TABLE 6: Case studies of S AFE STATS and baseline implemented on EzPC                                                                                       
+
+> Functions Runtime(ms) LAN Runtime(ms) WAN Communication(KB) Baseline SAFE STATS Baseline SAFE STATS Baseline SAFE STATS
+> Mode 263.12 195.66 23633.80 20897.83 14864.63 4332.40 Median/Percentile 764.43 41.83 9915.76 1450.39 3149.44 2688.69 Rank 3064.60 77.58 321953.92 1567.40 16709.84 4865.48 Min/Max 796.87 36.17 123398.53 1048.07 9879.38 2645.67 Std 0.07 0.05 5.75 5.70 13.45 12.91 Skew 0.10 0.08 14.89 14.84 32.13 31.59 Kurt 0.09 0.07 11.23 11.18 22.78 22.24 Linest 0.10 0.08 14.86 14.81 31.94 31.40 Logest 61.78 35.46 319.36 259.06 4618.36 3971.73 Pearson 0.12 0.10 20.36 20.31 41.46 40.92 T.Test 0.12 0.08 5.99 5.89 17.36 16.28 CHISQ.Test 54.95 36.67 832.67 423.15 6741.99 1621.38 F.Test 0.20 0.14 11.78 11.63 31.29 29.67
+
+corresponding secure primitives. Specifically, for secure fre-quency counting, we adopt a straightforward equality-test-based implementation as the baseline. For secure sorting, we employ the shuffle-then-compare paradigm from [14], instantiated with the SOTA secure shuffle protocol [37] and secure comparison [10], [11]. For secure non-linear mathematical functions, we use the protocols from [23] as the baseline. We conduct performance evaluations using the Stu-dents Academic Performance Evaluation Dataset 6, a pub-licly available educational dataset comprising approximately 
+
+1195 students with multiple learning behavior features and corresponding academic performance indicators. In our ex-periments, we use average class attendance and cumulative grade point average (CGPA) as input attributes, with domain sizes of 100 and 400 , respectively. For single-variable func-tions, average class attendance is used as the input. For two-variable functions, both average class attendance and CGPA are used. For the CHISQ .Test , we discretize average class attendance and CGPA into 5 and 10 categories, respectively. As shown in Table 6, functions implemented using SAFE STATS consistently outperform the baseline across most evaluated cases. The performance gains are particularly pronounced for functions that rely on secure sorting, such as Rank , which achieves a 39 .5× speedup in running time under the LAN setting and a 205 .4× speedup under the WAN setting, along with a 3.4× reduction in communi-cation. In contrast, the improvement is less pronounced for multiplication-intensive statistical functions such as Std ,where the dominant cost arises from secure multiplication and both S AFE STATS and the baseline use the same imple-mentation provided by EzPC. Overall, these results suggest that SAFE STATS is particularly effective in accelerating secure statistical computations that involve non-linear op-
+
+> 6. https://data.mendeley.com/datasets/dc3797vf3t/1
+
+erations, while maintaining competitive performance across a broad range of data statistics-related functions. 
+
+## 7. Conclusion 
+
+In this paper, we propose S AFE STATS , a secure and efficient toolkit designed for 2PC-based statistical analysis. By examining Microsoft Excel’s statistical library, we ob-served that a wide range of statistical tasks can be decom-posed into three fundamental operations: frequency count-ing, sorting, and non-linear mathematical functions. Guided by this insight, S AFE STATS provides specialized 2PC im-plementations for each core operation, enabling secure sta-tistical analysis with significantly improved efficiency. For frequency counting, S AFE STATS introduces a secure shift-based strategy that avoids costly equality tests. For sort-ing, we propose a secure segment-indicator protocol that supports counting-based sorting without relying on secure comparisons, making it particularly suitable for common statistical scenarios. For non-linear math functions, S AFE S- 
+
+> TATS
+
+advances the reduce-then-approximate paradigm with a bisection-based range reduction protocol, improving both accuracy and efficiency. Our experimental evaluation on 14 representative statistical analysis tasks demonstrates the efficiency improvement of S AFE STATS to implement data statistic-related functions. 
+
+## References     
+
+> [1] M. Seyidova, “Mathematical and statistical methods in the application fields of data mining technology,” Luminis Applied Science and Engineering , vol. 2, no. 3, pp. 81–87, 2025. [2] S. Raj Pandey, P. Pinson, and P. Popovski, “Privacy-aware data acqui-sition under data similarity in regression markets,” IEEE Transactions on Neural Networks and Learning Systems , vol. 36, no. 6, pp. 10 580– 10 591, 2025.
+
+[3] W. Liu, Y. Zhang, H. Yang, and Q. Meng, “A survey on differential privacy for medical data analysis,” Annals of Data Science , vol. 11, no. 2, pp. 733–747, 2024. [4] H. Guo, Z. Liu, X. Fu, and Z. Liu, “Seaf: secure evaluation on activation functions with dynamic precision for secure two-party in-ference,” in Proceedings of the 34th USENIX Conference on Security Symposium , ser. SEC ’25. USA: USENIX Association, 2025. [5] S. Liu, Z. Liu, D. Chen, W. Dai, L. Zhou, Z. Liu, R. C. Cheung, and C ¸ . K. Koc ¸, “Mlformer: a high performance mpc linear inference framework for transformers,” Journal of Cryptographic Engineering ,vol. 15, no. 1, p. 2, 2025. [6] Z. Li, K. Yang, J. Tan, W.-j. Lu, H. Wu, X. Wang, Y. Yu, D. Zhao, Y. Zheng, M. Guo et al. , “Nimbus: Secure and efficient two-party in-ference for transformers,” Advances in Neural Information Processing Systems , vol. 37, pp. 21 572–21 600, 2024. [7] X. Hou, J. Liu, J. Li, Y. Li, W. jie Lu, C. Hong, and K. Ren, “CipherGPT: Secure two-party GPT inference,” Cryptology ePrint Archive, Paper 2023/1147, 2023. [Online]. Available: https://eprint.iacr.org/2023/1147 [8] N. Chandran, D. Gupta, A. Rastogi, R. Sharma, and S. Tripathi, “Ezpc: Programmable and efficient secure two-party computation for machine learning,” in 2019 IEEE European Symposium on Security and Privacy (EuroS&P) , Stockholm, 2019, pp. 496–511. [9] T. Lu, X. Kang, B. Zhang, Z. Ma, X. Zhang, Y. Liu, K. Ren, and C. Chen, Efficient 2PC for constant round secure equality testing and comparison . USA: USENIX Association, 2025. [10] D. Rathee, M. Rathee, N. Kumar, N. Chandran, D. Gupta, A. Rastogi, and R. Sharma, “CrypTFlow2: Practical 2-party secure inference,” Cryptology ePrint Archive, Paper 2020/1002, 2020. [Online]. Available: https://eprint.iacr.org/2020/1002 [11] Z. Huang, W. jie Lu, C. Hong, and J. Ding, “Cheetah: Lean and fast secure Two-Party deep neural network inference,” in 31st USENIX Security Symposium (USENIX Security 22) . Boston, MA: USENIX Association, Aug. 2022, pp. 809–826. [Online]. Available: https://www.usenix.org/conference/ usenixsecurity22/presentation/huang-zhicong [12] T. Xu, W.-j. Lu, J. Yu, Y. Chen, C. Lin, R. Wang, and M. Li, “Breaking the layer barrier: remodeling private transformer inference with hybrid ckks and mpc,” in Proceedings of the 34th USENIX Conference on Security Symposium , ser. SEC ’25. USA: USENIX Association, 2025. [13] J. Luo, Y. Zhang, Z. Zhang, J. Zhang, X. Mu, H. Wang, Y. Yu, and Z. Xu, “SecFormer: Fast and accurate privacy-preserving inference for transformer models via SMPC,” in Findings of the Association for Computational Linguistics: ACL 2024 , L.-W. Ku, A. Martins, and V. Srikumar, Eds. Bangkok, Thailand: Association for Computational Linguistics, Aug. 2024, pp. 13 333–13 348. [Online]. Available: https://aclanthology.org/2024.findings-acl.790/ [14] K. Hamada, R. Kikuchi, D. Ikarashi, K. Chida, and K. Takahashi, “Practically efficient multi-party sorting protocols from comparison sort algorithms,” in Information Security and Cryptology – ICISC 2012 , T. Kwon, M.-K. Lee, and D. Kwon, Eds. Berlin, Heidelberg: Springer Berlin Heidelberg, 2013, pp. 202–216. [15] D. Bogdanov, S. Laur, and R. Talviste, “A practical analysis of oblivious sorting algorithms for secure multi-party computation,” in 
+
+Secure IT Systems , K. Bernsmed and S. Fischer-H¨ ubner, Eds. Cham: Springer International Publishing, 2014, pp. 59–74. [16] B. Zhang, “Generic constant-round oblivious sorting algorithm for mpc,” in Proceedings of the 5th International Conference on Provable Security , ser. ProvSec’11. Berlin, Heidelberg: Springer-Verlag, 2011, p. 240–256. [17] S. Peceny, S. Raghuraman, P. Rindal, and H. Shah, “Efficient permu-tation correlations and batched random access for two-party computa-tion,” in IACR International Conference on Public-Key Cryptography .Springer, 2025, pp. 76–109. [18] A. Patra, T. Schneider, A. Suresh, and H. Yalame, “ABY2.0: Improved Mixed-Protocol secure Two-Party computation,” in 
+
+30th USENIX Security Symposium (USENIX Security 21) .Vancouver, B.C., Canada: USENIX Association, Aug. 2021, pp. 2165–2182. [Online]. Available: https://www.usenix.org/conference/ usenixsecurity21/presentation/patra [19] L. Zhou, Z. Wang, H. Cui, Q. Song, and Y. Yu, “ Bicoptor: Two-round Secure Three-party Non-linear Computation without Preprocessing for Privacy-preserving Machine Learning ,” in 2023 IEEE Symposium on Security and Privacy (SP) . Los Alamitos, CA, USA: IEEE Computer Society, May 2023, pp. 534–551. [Online]. Available: https://doi.ieeecomputersociety.org/10.1109/SP46215.2023.10179449 [20] S. Azogagh, M.-O. Killijian, and F. Larose-Gervais, “A non-comparison oblivious sort and its application to private k-NN,” Cryptology ePrint Archive, Paper 2024/1894, 2024. [Online]. Available: https://eprint.iacr.org/2024/1894 [21] M. Keller, “Mp-spdz: A versatile framework for multi-party computation,” in Proceedings of the 2020 ACM SIGSAC Conference on Computer and Communications Security , ser. CCS ’20. New York, NY, USA: Association for Computing Machinery, 2020, p. 1575–1590. [Online]. Available: https://doi.org/10.1145/3372297. 3417872 [22] Z. Hua, Y. Tong, Y. Zheng, Y. Li, and Y. Zhang, “Ppglove: Privacy-preserving glove for training word vectors in the dark,” IEEE Transac-tions on Information Forensics and Security , vol. 19, pp. 3644–3658, 2024. [23] D. Rathee, M. Rathee, R. K. Kiran Goli, D. Gupta, R. Sharma, N. Chandran, and A. Rastogi, “Sirnn: A math library for secure rnn inference,” in 2021 IEEE Symposium on Security and Privacy (SP) ,San Francisco, CA, 2021, pp. 1003–1020. [24] M. Keller and K. Sun, “Secure quantized training for deep learning,” 2022. [Online]. Available: https://arxiv.org/abs/2107.00501 [25] W.-j. Lu, Y. Fang, Z. Huang, C. Hong, C. Chen, H. Qu, Y. Zhou, and K. Ren, “Faster secure multiparty computation of adaptive gradient descent,” in Proceedings of the 2020 Workshop on Privacy-Preserving Machine Learning in Practice , ser. PPMLP’20. New York, NY, USA: Association for Computing Machinery, 2020, p. 47–49. [Online]. Available: https://doi.org/10.1145/3411501.3419427 [26] J. Ma, Y. Zheng, J. Feng, D. Zhao, H. Wu, W. Fang, J. Tan, C. Yu, B. Zhang, and L. Wang, “SecretFlow-SPU: A performant and User-Friendly framework for Privacy-Preserving machine learning,” in 2023 USENIX Annual Technical Conference (USENIX ATC 23) .Boston, MA: USENIX Association, Jul. 2023, pp. 17–33. [Online]. Available: https://www.usenix.org/conference/atc23/presentation/ma [27] R. Canetti, “Universally composable security: A new paradigm for cryptographic protocols,” in Proceedings of the 42nd IEEE Sympo-sium on Foundations of Computer Science , ser. FOCS ’01. USA: IEEE Computer Society, 2001, p. 136. [28] G. Asharov, Y. Lindell, T. Schneider, and M. Zohner, “More efficient oblivious transfer and extensions for faster secure computation,” in 
+
+Proceedings of the 2013 ACM SIGSAC Conference on Computer & Communications Security , ser. CCS ’13. New York, NY, USA: Association for Computing Machinery, 2013, p. 535–548. [Online]. Available: https://doi.org/10.1145/2508859.2516738 [29] K. Yang, C. Weng, X. Lan, J. Zhang, and X. Wang, “Ferret: Fast extension for correlated ot with small communication,” in 
+
+Proceedings of the 2020 ACM SIGSAC Conference on Computer and Communications Security , ser. CCS ’20. New York, NY, USA: Association for Computing Machinery, 2020, p. 1607–1626. [Online]. Available: https://doi.org/10.1145/3372297.3417276 [30] S. Morsy and D. Nashat, “Vb-arp: Boyer–moore majority voting algorithm based defense for arp spoofing,” Journal of Networking and Network Applications , vol. 4, no. 4, pp. 172–177, 2025. [31] M. Hennequin, A. Zitouni, K. Benabdeslem, H. Elghazel, and Y. Gaci, “Multi-view majority vote learning algorithms: Direct minimization of pac-bayesian bounds,” 2025. [Online]. Available: https://arxiv.org/abs/2411.06276 [32] A. B. Lahama, L. Sitanayah, S. Pandelaki et al. , “Implementation of the boyer-moore majority vote algorithm in an internet of things-based inventory management system,” Jurnal Pekommas , vol. 9, no. 1, pp. 1–14, 2024. [33] M. Kallitsis, S. A. Stoev, S. Bhattacharya, and G. Michailidis, “Amon: An open source architecture for online monitoring, statistical analysis, and forensics of multi-gigabit streams,” IEEE Journal on Selected Areas in Communications , vol. 34, no. 6, pp. 1834–1848, 2016. [34] P. Brass, H.-S. Na, and C.-S. Shin, “Local event boundary detection with unreliable sensors: Analysis of the majority vote scheme,” 
+
+Theoretical Computer Science , vol. 607, pp. 96–112, 2015. [35] M. J. D. Powell, Approximation theory and methods . Cambridge university press, 1981. [36] P. Xing, H. Li, M. Hao, H. Chen, J. Hu, and D. Liu, “Distributed function secret sharing and applications.” in NDSS , 2025. [37] M. Chase, E. Ghosh, and O. Poburinnaya, “Secret-shared shuffle,” in 
+
+Advances in Cryptology – ASIACRYPT 2020 , S. Moriai and H. Wang, Eds. Cham: Springer International Publishing, 2020, pp. 342–372. 
+
+## Appendix 
+
+1. Security Proof 
+
+Due to the page limit, we include the complete simu-lation proof only for Πm,n  
+
+> PFC
+
+, our secure frequency counting protocol Πm,n  
+
+> PFC
+
+and secure sorting protocol Πm,n 
+
+> CSort
+
+. The other protocols are proved using the same simulation paradigm together with UC composition in their respective hybrid models, so we only provide concise proof sketches here. The full simulators and detailed indistinguishability arguments are deferred to the full version. 
+
+1.1. Secure Frequency Counting. 
+
+Proof. To prove Theorem 1, we construct a PPT simulator 
+
+S, such that no non-uniform PPT environment Z can dis-tinguish between the ideal world Ideal Fm,n   
+
+> PFC ,S,Z
+
+(1 λ) and the real world Real FRVOSE ,FB2A   
+
+> Πm,n
+> PFC ,A,Z
+
+(1 λ). We consider the following cases: 
+
+Case 1: P0 is corrupted. We construct the simulator S
+
+that internally runs A, simulates FRVOSE and FB2A , forwards messages to/from Z, and simulates the interface of the honest party P1.Upon receiving (Input , sid , P 1) from Fm,n  
+
+> PFC
+
+, S does as follows.  
+
+> •
+
+Upon receiving Output , sid , ⟨⃗y⟩ 0 from Fm,n  
+
+> PFC
+
+, S records 
+
+⟨⃗y⟩ 0. 
+
+> •
+
+When P0 invokes FRVOSE with (input , sid , ˜ai), S
+
+records ⃗a i and samples ⃗ ˇbi ← Zm 
+
+> 2
+
+, ˇϵi ← Zm, computes ⃗
+
+ˇci := shift ( ˇ ϵi,⃗ a i)⊕⃗ ˇbi and sends ⃗ ˇbi to P0 act as FRVOSE . 
+
+> •
+
+S samples ri ← Zn and sends ri to P0 act as P1. 
+
+> •
+
+When P0 invokes FB2A with (input , sid , ⟨⃗y′′  
+
+> i
+
+⟩0), S
+
+samples ⟨⃗ ˇy′
+
+> i
+
+⟩0 ← Zm 
+
+> 2ℓn
+
+, for i ∈ [n − 1] , computes 
+
+⟨⃗ ˇy′
+
+> n−1
+
+⟩0 := ⟨⃗y⟩ 0 − Pn−2 
+
+> i=0
+
+⟨⃗ ˇy′⟩0, and sends ⟨⃗ ˇy′
+
+> i
+
+⟩0 to P0
+
+act as FB2A .
+
+Indistinguishability . We show that the incoming message and the output of P0 in the ideal world are indistinguishable from the real world. 
+
+Claim 1. The ideal world Ideal Fm,n   
+
+> PFC ,S,Z
+
+(1 λ) and the real world Real FRVOSE ,FB2A   
+
+> Πm,n
+> PFC ,A,Z
+
+(1 λ) are perfectly indistinguishable. Proof. There are three parts of incoming messages that are different between Ideal Fm,n   
+
+> PFC ,S,Z
+
+(1 λ) and 
+
+Real FRVOSE ,FB2A   
+
+> Πm,n
+> PFC ,A,Z
+
+(1 λ). 
+
+> •
+
+The output of FRVOSE is a random boolean vector, which is indistinguishable between the ideal world and the real world.  
+
+> •
+
+In the ideal world, ri are sampled uniformly at random rather than real ⟨⃗x[i]⟩ 1 − ϵi. 
+
+> •
+
+In the ideal world, ⟨⃗y′[i]⟩0, i ∈ [n − 1] are sampled uniformly at random, and ⟨⃗ ˇy′[n − 1] ⟩0 are calculated with ⟨⃗y⟩ 0 − Pn−2 
+
+> i=0
+
+⟨⃗ ˇy′
+
+> i
+
+⟩ rather than the output of FB2A .For the second part, due to the ϵi in the real world are sampled uniformly at random, ⟨⃗x[i]⟩ 1 − ϵ mod n are also uniformly random, which is indistinguishable from the ideal world. For the third part, ⟨⃗ y′
+
+> i
+
+⟩0 are the output of FB2A , which are random arithmetic vectors. ⟨⃗ ˇy′
+
+> i
+
+⟩0, i ∈ [n−2] are sampled uniformly at random, and ⟨⃗ ˇy′
+
+> n−1
+
+⟩0 := ⟨⃗y⟩ 0 − Pn−2 
+
+> i=0
+
+⟨⃗ ˇy′
+
+> i
+
+⟩ is also uniformly random, thus ⟨⃗ ˇy′
+
+> i
+
+⟩0 in the ideal world are indistinguishable with ⟨⃗ y′
+
+> i
+
+⟩0 in the real world. 
+
+Case 2: P1 is corrupted. We construct the simulator S
+
+that internally runs A, simulates FRVOSE and FB2A , forwards messages to/from Z, and simulates the interface of the honest party P0.Upon receiving (Input , sid , P 0) from Fm,n  
+
+> PFC
+
+, S does as follows.  
+
+> •
+
+Upon receiving Output , sid , ⟨⃗y⟩ 0 from Fm,n  
+
+> PFC
+
+, S records 
+
+⟨⃗y⟩ 1. 
+
+> •
+
+When P1 invokes FRVOSE , S samples ⃗ ˇci ← Zm 
+
+> 2
+
+, ˇϵi ←
+
+Zm, and sends ⃗ ˇci and ˇϵi to P1 act as FRVOSE . 
+
+> •
+
+S samples ⃗ ˇdi ← Zn 
+
+> 2
+
+and sends ⃗ ˇdi to P1 act as P0. 
+
+> •
+
+When P1 invokes FB2A with (input , sid , ⟨⃗y′′  
+
+> i
+
+⟩1), S
+
+samples ⟨⃗ ˇy′
+
+> i
+
+⟩1 ← Zm 
+
+> 2ℓn
+
+, for i ∈ [n − 1] , computes 
+
+⟨⃗ ˇy′
+
+> n−1
+
+⟩1 := ⟨⃗y⟩ 1 − Pn−2 
+
+> i=0
+
+⟨⃗ ˇy′⟩1, and sends ⟨⃗ ˇy′
+
+> i
+
+⟩1 to P1
+
+act as FB2A .
+
+Indistinguishability . We show that the incoming message and the output of P1 in the ideal world are indistinguishable from the real world. 
+
+Claim 2. The ideal world Ideal Fm,n   
+
+> PFC ,S,Z
+
+(1 λ) and the real world Real FRVOSE ,FB2A   
+
+> Πm,n
+> PFC ,A,Z
+
+(1 λ) are perfectly indistinguishable. Proof. There are three parts of incoming messages that are different between Ideal Fm,n   
+
+> PFC ,S,Z
+
+(1 λ) and 
+
+Real FRVOSE ,FB2A   
+
+> Πm,n
+> PFC ,A,Z
+
+(1 λ). 
+
+> •
+
+The output of FRVOSE is a random boolean vector, which is indistinguishable between the ideal world and the real world.  
+
+> •
+
+In the ideal world, ⟨⃗ ˇdi⟩1 are sampled uniformly at random rather than real ⟨⃗ di⟩1 := ⃗e i ⊕⃗a i.• In the ideal world, ⟨⃗y′[i]⟩1, i ∈ [n − 1] are sampled uniformly at random, and ⟨⃗ ˇy′[n − 1] ⟩1 are calculated with ⟨⃗y⟩ 1 − Pn−2 
+
+> i=0
+
+⟨⃗ ˇy′
+
+> i
+
+⟩1 rather than the output of FB2A .For the second part, due to the ⃗a i in the real world are the output of FRVOSE which are uniformly at random, such that it is indistinguishable from ⃗ ˇdi in the ideal world. For the third part, the indistinguishability is same as the Case 
+
+1.This concludes the proof. 
+
+1.2. Secure Counting Sort. 
+
+Proof. To prove Theorem 2, we construct a PPT simula-tor S, such that no non-uniform PPT environment Z can distinguish between the ideal world Ideal Fm,n   
+
+> sort ,S,Z
+
+(1 λ) and the real world Real Fm,n     
+
+> PFC ,FN1→N2
+> convert ,FRVOSE
+> Πm,n
+> CSort ,A,Z
+
+(1 λ). We consider the following cases: 
+
+Case 1: P0 is corrupted. We construct the simulator 
+
+S that internally runs A, simulates FN1→N2 
+
+> convert
+
+, Fm,n  
+
+> PFC
+
+, and 
+
+FRVOSE , forwards messages to/from Z, and simulates the interface of the honest party P1.Upon receiving (Input , sid , P 1) from Fm,n  
+
+> sort
+
+, S does as follows.  
+
+> •
+
+Upon receiving Output , sid , ⟨⃗y⟩ 0 from Fm,n  
+
+> sort
+
+, S records 
+
+⟨⃗y⟩ 0, and samples ⟨⃗ ˇy′′  
+
+> i
+
+⟩0 ← Zn 
+
+> 2ℓm
+
+, i ∈ [1 , m − 1] ,computes ⟨⃗ ˇy′′  
+
+> 0
+
+⟩0 := 2 ·⟨ ⃗ ˇy′′  
+
+> 1
+
+⟩0 +Pm−1 
+
+> i=2
+
+(⟨⃗ ˇy′′  
+
+> i
+
+⟩0 −⟨ ⃗ ˇy′′ 
+
+> i−1
+
+⟩0)·
+
+(i + 1) − ⟨ ⃗y⟩ 0 −⃗ 1, samples ri ← Zn+1 . S computes 
+
+⟨⃗ ˇy′′′  
+
+> i
+
+⟩0 by solving the equation ⟨⃗ ˇy′′  
+
+> i
+
+⟩0 = A⟨⃗ ˇy′′′  
+
+> i
+
+⟩0, where 
+
+A ∈ Zn×n 
+
+> 2ℓm
+
+is an unit lower triangular matrix.  
+
+> •
+
+When P0 invokes FRVOSE with ⃗ a i, S sets ⃗ ˇbi := 
+
+shift (−ri, ⟨⃗ ˇy′′′  
+
+> i
+
+⟩0), and sends ⃗ ˇbi to P0 act as FRVOSE . 
+
+> •
+
+When P0 invokes Fm,n  
+
+> PFC
+
+with ⟨⃗x⟩ 0, S samples ⟨⃗ ˇq′′ ⟩ ← 
+
+Zm 
+
+> 2ℓn
+
+, and sends ⟨⃗ ˇq′′ ⟩ to P0 act as Fm,n  
+
+> PFC
+
+. 
+
+> •
+
+When P0 invokes F2ℓn →n+1  
+
+> convert
+
+with ⟨⃗ q′′ ⟩2ℓn  
+
+> 0
+
+, S samples 
+
+⟨⃗ ˇq′⟩0 ← Zm 
+
+> 2n+1
+
+, 
+
+> •
+
+To simulate the ⟨⃗q[i]⟩ 1 − ϵi, S sends ri to P0 act as P1.
+
+Indistinguishability . We show that the incoming message and the output of P0 in the ideal world are indistinguishable from the real world. 
+
+Claim 3. The ideal world Ideal Fm,n   
+
+> sort ,S,Z
+
+(1 λ) and the real world Real FRVOSE ,FN1→N2   
+
+> convert ,Fm,n
+> PFC
+> Πm,n
+> CSort ,A,Z
+
+(1 λ) are perfectly indistin-guishable. Proof. There are four parts of incoming messages that are different between Ideal Fsort ,S,Z (1 λ) and 
+
+Real FRVOSE ,Fm,n   
+
+> PFC ,FN1→N2
+> convert
+> Πsort ,A,Z
+
+(1 λ). 
+
+> •
+
+In the ideal world, ⟨⃗ ˇbi⟩0 are calculated based on ⟨⃗ ˇy′′′  
+
+> i
+
+⟩0
+
+rather than the output of FRVOSE . 
+
+> •
+
+The output of Fm,n  
+
+> PFC
+
+is a random arithmetic vector, which is indistinguishable between the ideal world and the real world.  
+
+> •
+
+The output of F2ℓn →n+1  
+
+> convert
+
+is a random arithmetic vector, which is indistinguishable between the ideal world and the real world.  
+
+> •
+
+In the ideal world, ri are sampled randomly rather than 
+
+⟨⃗q[i]⟩ 1 − ϵi.For the first part, based on the randomness of ⟨⃗ ˇy′′  
+
+> i
+
+⟩0, ∈
+
+[1 , m − 1] , ⟨⃗ ˇy′′  
+
+> 0
+
+⟩0 is a random vector. Given the matrix A is an unit lower triangular matrix, the map from ⃗s to ⃗ t = A⃗ s is bijection. Such that ⟨⃗ ˇy′′′  
+
+> i
+
+⟩ is a random vector. ⃗ ˇbi is circular shift of ⟨⃗ ˇy′′′  
+
+> i
+
+⟩0, which is indistinguishable from the output of 
+
+FRVOSE in the real world. For the fourth part, due to the ϵi in the real world are uniformly random, ⟨⃗q[i]⟩ 1 −ϵ mod ( n+1) 
+
+are uniformly random, which is indistinguishable from the ideal world. 
+
+Case 2: P1 is corrupted. We construct the simulator 
+
+S that internally runs A, simulates FN1→N2 
+
+> convert
+
+, Fm,n  
+
+> PFC
+
+, and 
+
+FRVOSE , forwards messages to/from Z, and simulates the interface of the honest party P0.Upon receiving (Input , sid , P 0) from Fm,n  
+
+> sort
+
+, S does as follows.  
+
+> •
+
+Upon receiving (Output , sid , ⟨⃗y⟩ 1) from Fm,n  
+
+> sort
+
+, S
+
+records ⟨⃗y⟩ 1, and samples ⟨⃗ ˇy′′  
+
+> i
+
+⟩1 ← Zn 
+
+> 2ℓm
+
+, i ∈ [1 , m −
+
+1] , computes ⟨⃗ ˇy′′  
+
+> 0
+
+⟩1 := 2 · ⟨ ⃗ ˇy′′  
+
+> 1
+
+⟩1 + Pm−1 
+
+> i=2
+
+(⟨⃗ ˇy′′  
+
+> i
+
+⟩1 −⟨⃗ ˇy′′ 
+
+> i−1
+
+⟩1)·(i+1) −⟨ ⃗y⟩ 1 −⃗ 1, samples ri ← Zn+1 . S com-putes ⟨⃗ ˇy′′′  
+
+> i
+
+⟩1 by solving the equation ⟨⃗ ˇy′′  
+
+> i
+
+⟩1 = A⟨⃗ ˇy′′′  
+
+> i
+
+⟩1,where A ∈ Zn×n 
+
+> 2ℓm
+
+is an unit lower triangular matrix.  
+
+> •
+
+When P1 invokes FRVOSE , S sets ⃗ ˇci ← Zn+1 2ℓm , ˇϵi ←
+
+Zn+1 , and sends ⃗ ˇci, ˇϵi to P1 act as FRVOSE . 
+
+> •
+
+When P1 invokes Fm,n  
+
+> PFC
+
+with ⟨⃗x⟩ 1, S samples ⟨⃗ ˇq′′ ⟩1 ←
+
+Zm 
+
+> 2ℓn
+
+, and sends ⟨⃗ ˇq′′ ⟩1 to P1 act as Fm,n  
+
+> PFC
+
+. 
+
+> •
+
+When P1 invokes F2ℓn →n+1  
+
+> convert
+
+with ⟨⃗ q′′ ⟩2ℓn  
+
+> 1
+
+, S samples 
+
+⟨⃗ ˇq′⟩1 ← Zmn+1 , sends ⟨⃗ ˇq′⟩1 to P1 act as F2ℓn →n+1  
+
+> convert
+
+, and computes ⟨⃗ ˇq[i]⟩ := Pij=0 (⟨⃗ ˇq′[j]⟩). 
+
+> •
+
+To simulate the ⃗ di, S computes ⃗ ˇti := shift ( ˇ ϵi −⟨⃗ ˇq[i]⟩1, ⟨⃗ ˇy′′′  
+
+> i
+
+⟩1),⃗ ˇdi := shift (− ˇϵi,⃗ ˇti −⃗ ˇci) sends ⃗ ˇdi to 
+
+P1 act as P0.
+
+Indistinguishability . We show that the incoming message and the output of P0 in the ideal world are indistinguishable from the real world. 
+
+Claim 4. The ideal world Ideal Fm,n   
+
+> sort ,S,Z
+
+(1 λ) and the real world Real FRVOSE ,F2ℓn →n+1    
+
+> convert ,Fm,n
+> PFC
+> Πm,n
+> CSort ,A,Z
+
+(1 λ) are perfectly indistin-guishable. Proof. There are four parts of incoming messages that are different between Ideal Fm,n   
+
+> PFC ,S,Z
+
+(1 λ) and 
+
+Real FRVOSE ,FB2A   
+
+> Πm,n
+> PFC ,A,Z
+
+(1 λ). 
+
+> •
+
+The output of FRVOSE is a random arithmetic vector and a random number, which are indistinguishable between the ideal world and the real world. • The output of Fm,n  
+
+> PFC
+
+is a random arithmetic vector, which is indistinguishable between the ideal world and the real world.  
+
+> •
+
+The output of F2ℓn →n+1  
+
+> convert
+
+is a random arithmetic vector, which is indistinguishable between the ideal world and the real world.  
+
+> •
+
+In the ideal world, ⃗ ˇdi are calculated based on ⟨⃗ ˇy′′′  
+
+> i
+
+⟩
+
+rather than ⃗ di in the real world. For the fourth part, we can proof ⟨⃗ ˇy′′′  
+
+> i
+
+⟩ are uniformly random in a similar way in Case 1, then ⃗ ˇti is uniformly random, which is a circular vector shift of ⟨⃗ ˇy′′′  
+
+> i
+
+⟩.⃗ ˇdi =
+
+shift (− ˇϵi,⃗ ˇti −⃗ ˇci) is uniformly random based on the ran-domness of ⃗ ˇti. Then, the fourth part is indistinguishable between the ideal world and the real world. This concludes the proof. 
+
+1.3. Secure MSNZB. 
+
+Proof. To prove Theorem 3, we construct a PPT simulator 
+
+S to simulate the views of the corrupted party. 
+
+Case 1: P0 is corrupted. In the hybrid model, 
+
+P0 receives messages from the functionalities, 
+
+FMill ,FB2A ,Feq ,FMUX ,FLUT ,FB2A and Fone-hot . By the UC security of the functionalities, their outputs are uniformly random. We construct the simulator S to samples uniformly random values to simulate the messages that P0
+
+receives. 
+
+Case 2: P1 is corrupted. The construction of S and the indistinguishability are the same as Case 1.                                                                              
+
+> Fmode interacts with P0,P1and the simulator S.
+> Parameters: nis the size of the dataset; mis the size of feature domain, Nis an integer sightly larger than m.
+> Input:
+> •Upon receiving (Input ,sid ,⟨⃗x⟩0)from P0, record ⟨⃗x⟩0and send (Input ,sid , P 0)to S, where ⟨⃗x⟩0∈Znm.
+> •Upon receiving (Input ,sid ,⟨⃗x⟩1)from P1, record ⟨⃗x⟩1and send (Input ,sid , P 1)to S, where ⟨⃗x⟩1∈Znm.
+> Execution:
+> •If both ⟨⃗x⟩0,⟨⃗x⟩1are recorded, reveal ⃗x:= ⟨⃗x⟩0+⟨⃗x⟩1,computes the mode value y, samples y0←ZN, and computes y1:= y−y0.
+> •Send (Output ,sid , y b)to Pb,b∈ { 0,1}.
+
+Functionality Fm,n,N 
+
+> mode
+
+Figure 14: The Ideal Functionality Fmode .
+
+1.4. Secure Mode. We define the functionality Fm,n,k  
+
+> percentile
+
+for secure percentile in Figure 15 and describe the protocol in Figure 10. 
+
+Theorem 4. Πm,n,k  
+
+> percentile
+
+UC realizes Fm,n,k  
+
+> percentile
+
+in the 
+
+(Fm,n  
+
+> PFC
+
+, FRVOSE ) hybrid model against semi-honest proba-bilistic polynomial time (PPT) adversaries with statistical corruption. Proof. To prove Theorem 4, we construct a PPT simulator 
+
+S to simulate the views of the corrupted party. 
+
+Case 1: P0 is corrupted. In the hybrid model, P0 receives messages from the functionalities, Fm,n  
+
+> PFC
+
+, FN1→N2 
+
+> convert
+
+, Fti
+
+> argmax
+
+.By the UC security of the functionalities, their outputs are uniformly random. We construct the simulator S to samples uniformly random values to simulate the messages that P0
+
+receives. 
+
+Case 2: P1 is corrupted. The construction of S and the indistinguishability are the same as Case 1.                                                                            
+
+> Fpercentile interacts with P0,P1and the simulator S.
+> Parameters: nis the size of the dataset; mis the size of feature domain, kis the corresponding index of the percentile
+> value in the sorted vector.
+> Input:
+> •Upon receiving (Input ,sid ,⟨⃗x⟩0)from P0, record ⟨⃗x⟩0and send (Input ,sid , P 0)to S, where ⟨⃗x⟩0∈Znm.
+> •Upon receiving (Input ,sid ,⟨⃗x⟩1)from P1, record ⟨⃗x⟩1and send (Input ,sid , P 1)to S, where ⟨⃗x⟩1∈Znm.
+> Execution:
+> •If both ⟨⃗x⟩0,⟨⃗x⟩1are recorded, reveal ⃗x:= ⟨⃗x⟩0+⟨⃗x⟩1,computes the sorted vector ⃗y, uniformly random sample
+> y0←Z2ℓm , and compute y1:= ⃗y[k]−y0.
+> •Send (Output ,sid , y b)to Pb,b∈ { 0,1}.
+
+Functionality Fm,n,k 
+
+> percentile
+
+Figure 15: The Ideal Functionality Fm,n,k 
+
+> percentile
+
+.
+
+1.5. Secure Percentile. We define the functionality 
+
+Fm,n,k  
+
+> percentile
+
+for secure percentile in Figure 15 and describe the protocol in Figure 10. 
+
+Theorem 5. Πm,n,k  
+
+> percentile
+
+UC realizes Fm,n,k  
+
+> percentile
+
+in the 
+
+(Fm,n  
+
+> PFC
+
+,FMill ,FAND ,FB2A ) hybrid model against semi-honest probabilistic polynomial time (PPT) adversaries with statis-tical corruption. Proof. To prove Theorem 5, we construct a PPT simulator 
+
+S to simulate the views of the corrupted party. 
+
+Case 1: P0 is corrupted. In the hybrid model, P0 receives messages from the functionalities, Fm,n  
+
+> PFC
+
+, FMill , FAND , FB2A .By the universal composability security of the functionali-ties, their outputs are uniformly random. We construct the simulator S to samples uniformly random values to simulate the messages that P0 receives. 
+
+Case 2: P1 is corrupted. The construction of S and the indistinguishability are the same as Case 1.
+
+2. The protocol of Secure Counting Max Input : For b ∈ {0, 1} Pb inputs the private prefix-sum frequency ⟨⃗z⟩ b ∈ Zm 
+
+> 2ℓn
+
+and the private ⟨k⟩b.
+
+Output : Pb outputs the max value ⟨ω⟩b.
+
+Protocol: 
+
+1) Pb computes 1{⟨ ⃗z[i]⟩ = n} and gets ⟨⃗u ′[i]⟩, i ∈ [m].2) Pb sets ⟨⃗u⟩[0] := ⟨⃗u ′[0] ⟩, ⟨⃗u[i]⟩ := ⟨⃗u ′[i − 1] ⟩ ⊕ ⟨ ⃗u ′[i]⟩.3) Pb invokes FB2A with ⟨⃗u⟩ b as input and learns ⟨⃗ t⟩2lm  
+
+> b
+
+.4) Pb sets ⟨ω⟩b := Pmj=0 j⟨⃗t[j]⟩2lm  
+
+> b
+
+.
+
+Protocol ΠCMax 
+
+Figure 16: The Secure Counting Max Protocol
