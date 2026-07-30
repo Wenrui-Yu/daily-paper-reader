@@ -1,0 +1,1445 @@
+Title: FedWeave: Rethinking the Unit of Specialization in Heterogeneous Federated MoE-LoRA
+
+URL Source: https://arxiv.org/pdf/2607.26618v1
+
+Published Time: Thu, 30 Jul 2026 00:36:29 GMT
+
+Number of Pages: 14
+
+Markdown Content:
+# FedWeave: Rethinking the Unit of Specialization in Heterogeneous Federated MoE-LoRA 
+
+## Donghang Duan 1∗, Xu Zheng 1∗, Lizong Zhang 1, Chong Mu 1, Meng Han 2
+
+> 1
+
+University of Electronic Science and Technology of China 
+
+> 2
+
+Zhejiang University 
+
+Abstract 
+
+Federated PEFT enables LLMs to collaboratively adapt to de-centralized private data without sharing raw examples. How-ever, task heterogeneity across clients can cause cross-task interference and gradient conflicts during aggregation. Feder-ated MoE-LoRA addresses this challenge through specialized LoRA experts and conditional routing. Yet existing methods typically specialize at client granularity, implicitly assuming task-coherent clients. Our core insight is that experts need pu-rity —pattern-coherent updates that preserve specialization— whereas routers need contrast —mixed-task observations that support expert comparison. We propose FedWeave , a frame-work that adopts asymmetric aggregation, separating expert aggregation from router optimization to meet these two re-quirements. FedWeave uses unsupervised prototype discov-ery to form local buckets and align them across clients, enabling prototype-level expert aggregation while retaining mixed-task client trajectories for router training. At infer-ence, FedWeave performs sparse inference with one active expert while preserving nearly all soft-routing performance. Our theoretical analysis explains why asymmetric aggregation is advantageous: it controls expert convergence in stationar-ity through off-pattern contamination, identifies the consensus error induced by fragmented router trajectories, and bounds sparse-inference risk. On a heterogeneous multi-task bench-mark with mainstream LLM backbones, FedWeave consis-tently outperforms strong baselines, while ablations verify the effectiveness of our design. 
+
+## Introduction 
+
+Federated learning (FL) enables multiple clients to train mod-els collaboratively without sharing their private data (McMa-han et al. 2017; Kairouz et al. 2021). This paradigm is par-ticularly attractive for large language models (LLMs), whose instruction data may be distributed across users and organi-zations, with direct sharing restricted by policies and regu-lations on data privacy. However, full-parameter LLM fine-tuning is often impractical in federated environments because of its substantial computational and communication costs. Parameter-efficient fine-tuning (PEFT), especially low-rank adaptation (LoRA) (Hu et al. 2022), addresses this constraint by updating lightweight adapters while keeping the back-bone frozen. Recent work has therefore explored federated instruction tuning and federated LoRA as scalable strategies 
+
+> ∗
+
+These authors contributed equally. 
+
+for decentralized LLM adaptation (Zhang et al. 2023; Sun et al. 2024; Guo et al. 2025; Bian et al. 2026a,b). Despite this progress, federated LLM instruction tuning remains fundamentally challenged by task heterogeneity. Clients may differ in their domains, task distributions, and instruction styles; more importantly, a single client may itself mix several latent instruction patterns (Marfoq et al. 2021; Feng et al. 2023; Talasso et al. 2026). These patterns may demand different reasoning skills, output structures, or adap-tation directions, despite residing on the same client. When these patterns are compressed into a single client update, their adaptation signals lose the pattern coherence required for specialization before cross-client aggregation begins. Nevertheless, current efforts on federated PEFT mainly or-ganize heterogeneity at the granularity of clients. Client cor-rection, clustering, and personalization improve how client updates are optimized or shared (Li et al. 2020; Sattler, Müller, and Samek 2021; Sun et al. 2024; Guo et al. 2025). Mixture-of-Experts (MoE) and multi-expert LoRA add spe-cialization capacity by routing inputs to lightweight ex-perts (Shazeer et al. 2017; Fedus, Zoph, and Shazeer 2022; Liao et al. 2025). Federated expert models bring this idea to decentralized settings (Zec et al. 2020; Reisser et al. 2021; Wang et al. 2025). Yet when expert allocation, training, and aggregation remain tied to client identity, incompatible pat-terns within one client are mixed into the same update and related patterns across clients remain unaligned. The central challenge is a component-dependent mismatch in aggregation granularity. Put simply, experts need purity —pattern-coherent updates that preserve specialization— whereas routers need contrast —cross-pattern observations that enable expert comparison. Consequently, client-level aggregation is too coarse for experts, while independently training and aggregating a router for each pattern fragments the cross-pattern trajectory required for routing. No single aggregation granularity serves both components. Moreover, realizing such mixed-granularity aggregation is non-trivial: training budgets are limited and unevenly distributed across patterns, while experts and routers exhibit distinct conver-gence dynamics. 
+
+FedWeave operationalizes this purity–contrast insight through asymmetric aggregation as illustrated in Figure 1. Each client performs unsupervised prototype discovery with-out requiring task-identity labels and derives an adaptation arXiv:2607.26618v1 [cs.LG] 29 Jul 2026 signature for each local bucket. The server uses these signa-tures to align related buckets across clients into global ex-pert groups. Local training interleaves bucket-homogeneous mini-batches, after which the server aggregates expert up-dates among matched prototypes. In contrast, the broad-cast global router is updated across each client’s complete bucket trajectory and aggregated from one client-level delta, preserving cross-pattern contrast for expert selection. Fed-Weave trains with soft routing and supports both soft-mixture and sparse inference; in the sparse mode, only one LoRA expert is activated. Our component-wise theory makes this asymmetry ex-plicit: prototype-level aggregation gives O(1 /U ) expert con-vergence to a contamination-controlled stationary neighbor-hood under non-vanishing routed weight; the router result gives a PL-convergence bound separating interleaving-order bias from reset consensus error; gap calibration then transfers these bounds to sparse-inference risk. On a multi-task bench-mark comprising CoEdIT, GSM8K, TweetEval, and ARC-C, 
+
+FedWeave achieves the best performance among the evalu-ated baselines on Llama3.2-3B and Gemma-2-2B and out-performs the closest client-level expert baseline across the tested heterogeneity levels (Meta AI 2024; Gemma Team et al. 2024), while ablations verify the effectiveness of our de-sign. Sparse inference preserves nearly all soft-routing qual-ity while activating only one expert per input. Our contributions are summarized as follows: 
+
+• We identify a purity–contrast principle for federated MoE-LoRA under intra-client task heterogeneity: ex-perts require pattern-coherent updates for specialization, whereas routers require client-level trajectories that retain cross-pattern contrast. 
+
+• We propose FedWeave , a federated MoE-LoRA frame-work which refines the granularity to the prototype level and aggregates expert and router in an asymmetric way. 
+
+• We derive component-wise convergence guarantees: contamination-controlled expert stationarity, PL router convergence separating order bias from reset consensus error, and sparse-risk transfer. 
+
+## Related Work 
+
+Federated learning under heterogeneity. FedProx and SCAFFOLD correct client-level optimization (Li et al. 2020; Karimireddy et al. 2020), while clustered FL learns models for latent client groups (Sattler, Müller, and Samek 2021; Ghosh et al. 2020); both retain the client-level update struc-ture of FedAvg (McMahan et al. 2017; Kairouz et al. 2021). Mixture-based FL instead models each client through latent sources (Marfoq et al. 2021), and FedIns performs instance-adaptive inference under intra-client heterogeneity (Feng et al. 2023). FedWeave instead turns aligned within-client prototypes into shared expert-update units. 
+
+Federated PEFT for LLMs. LoRA and QLoRA restrict adaptation to low-rank residuals (Hu et al. 2022; Dettmers et al. 2023), enabling federated instruction tuning (Zhang et al. 2023; Yang et al. 2025). Federated LoRA meth-ods address factor-aggregation bias through fixed or se-lective factors, server correction, alternating updates, ex-act inner-matrix aggregation, or gauge-aware consensus sub-spaces (Sun et al. 2024; Guo et al. 2025; Bian et al. 2025; Koo, Jang, and Ok 2025; Singhal et al. 2026; Chen, Liu, and Zhu 2026). Others accommodate heterogeneous ranks or structures, privacy noise, personalization, or layer-wise sharing (Cho et al. 2024; Wang et al. 2024; Fan et al. 2025; Lee et al. 2025; Bian et al. 2026a; Hao et al. 2025; Shen et al. 2026). FedTreeLoRA varies layer-wise sharing depth through a client hierarchy to couple statistical and functional heterogeneity (Bian et al. 2026b). These methods modify adapter parameterization or client-level sharing, whereas 
+
+FedWeave changes the within-client data unit that defines expert specialization. 
+
+Expert models and sparse routing. Sparse MoE mod-els (Shazeer et al. 2017; Fedus, Zoph, and Shazeer 2022) and MoE-LoRA (Liao et al. 2025) provide conditional specializa-tion; LLaVA-MoLE and HotMoE address conflicts through sparse or hybrid routing (Chen, Jie, and Ma 2024; Huang et al. 2026), while sparse-and-orthogonal federated LoRA targets multi-task interference through implicit expert sepa-ration (Yang et al. 2026). Federated MoE methods person-alize experts by client (Zec et al. 2020; Reisser et al. 2021): FedMoE selects client-specific sub-MoEs from a pretrained sparse model (Mei et al. 2024), while FedLEASE allocates LoRA experts to client clusters (Wang et al. 2025). LoMo-Fed separates global and local experts in personalized vision heads (Sang et al. 2026), whereas FedRouter associates local clusters with task-centric adapters but uses nearest-centroid selection at evaluation (Talasso et al. 2026). In contrast, Fed-Weave aggregates expert updates over aligned within-client prototypes while training a single global router from com-plete client trajectories, matching expert purity with router contrast. 
+
+## Method 
+
+Problem Setup 
+
+We consider N clients with local datasets {D i}Ni=1 and a shared frozen LLM backbone W0. The trainable model com-prises LoRA experts Θ = {θm}M ⋆ 
+
+> m=1
+
+and a global router φ.We call a coherent local sub-distribution that induces similar adaptation behavior a latent instruction pattern . Task labels are used only to construct and audit the benchmark; they are not provided to FedWeave .Figure 1 summarizes the pipeline. Each client first dis-covers local buckets {B i,c }Ci
+
+> c=1
+
+, the server then aligns buck-ets into global expert groups, and local training interleaves bucket-homogeneous mini-batches. The central asymmetry is that aligned-prototype sample counts weight expert up-dates to preserve pattern purity, whereas the global router spans each client’s complete trajectory to retain cross-pattern contrast. Implementation details, diagnostics, and proofs are in Appendices A–C. 
+
+Local Prototype Discovery 
+
+Each client embeds its local examples with the frozen back-bone W0 and partitions Di into local prototype buckets Problem: No Single Granularity Serves both         
+
+> Experts and the Router in Federated MoE -LoRA
+> Clients contain mixed latent instruction patterns
+> Client 1 Client 2 Client 3 Client 4
+> Previous method: client -level experts
+> Expert 1 Expert 2 Expert 3
+> Client is too
+> coarse
+> Mixed local modes become
+> entangled before sharing
+
+Design I: Prototype Discovery    
+
+> Client 1
+> Client 2
+> Client 3
+> Client 4
+> Local Prototype Discovery
+> Short LoRA
+> Warmup
+> Expert 1
+> Expert 2
+> Expert 3
+> Expert 4
+> Cross -Client
+> Prototype Alignment
+> Design II: Asymmetric
+> Aggregation
+> Expert Aggregation at
+> Prototype Granularity
+> Router Aggregation at
+> Client Granularity
+> Expert needs purity
+> Router needs contrast
+> Design III:
+> Sparse
+> Inference
+> Input
+> Global Router
+> Top -1 Selection
+> Frozen LLM Backbone
+> Output
+> Prototype is too
+> fine -grained
+> Naive solution: dive into prototype granularity
+> Expert 1 Expert 2 Expert 3
+> Per -prototype router
+> updates fragment
+> the contrast needed for
+> expert selection
+
+Figure 1: FedWeave overview. Aligned local prototypes provide pattern-coherent batch supervision for experts, whereas the single global router retains cross-pattern contrast by training over each client’s complete bucket trajectory. The server aggregates the two components at different granularities. 
+
+{B i,c }Ci
+
+c=1 . We call the conceptual specialization unit a pro-totype and its concrete local implementation a bucket . This exposes intra-client structure without sharing raw examples. Semantic proximity identifies local modes but does not determine whether their updates are compatible. Each bucket therefore performs a short LoRA warmup from the same initialization and records an adaptation signature si,c from the resulting B matrices, following prior observations of functional asymmetry between the LoRA factors (Guo et al. 2025; Sun et al. 2024). The signature enables cross-client matching of buckets that can share an expert while preserving expert-update purity. 
+
+Cross-Client Prototype Alignment 
+
+The alignment must decide both how many specialization units exist and which units should share parameters across clients. Each client runs k-means on frozen-backbone em-beddings and selects Ci by maximizing the average silhouette coefficient (Rousseeuw 1987). The server forms D = ( duv )
+
+from the mean layer-wise cosine distance across LB LoRA-
+
+B blocks. Let Agg M (D) denote agglomerative clustering into M groups, where Kg is the feasible candidate set. We select M ∈ K g by silhouette score: 
+
+duv = 1
+
+LBLBX
+
+ℓ=1 
+
+h
+
+1 − cos( s(ℓ)
+
+u , s (ℓ)
+
+v )
+
+i
+
+,M ⋆ = arg max 
+
+M ∈K g
+
+Sil(Agg M (D)) .
+
+(1) The one-time alignment fixes M ⋆ and a(i, c ) ∈ { 1, . . . , M ⋆}
+
+throughout federated training, mapping bucket c of client i
+
+to one global expert. With Um = {(i, c ) : a(i, c ) = m} and the warmup adapter eθi,c , the implementation initializes 
+
+θ0
+
+m = 1
+
+|U m|
+
+X
+
+(i,c )∈U m
+
+eθi,c . (2) Semantic similarity exposes local modes, while adaptation similarity determines which modes share an expert without benchmark task labels. K-means and agglomerative clus-tering are default implementations; the framework requires only coherent local buckets and cross-client alignment, and Table 3 evaluates alternatives. 
+
+Local Training over Interleaved Buckets 
+
+After prototype alignment, each communication round trains experts and the router with different local granularities. For an example x ∈ B i,c , the router produces rm(x; φ) ≥ 0 with P
+
+m rm(x; φ) = 1 , and the bucket objective is 
+
+Li,c (Θ , φ ) = 1
+
+|B i,c |
+
+X
+
+(x,y )∈B i,c 
+
+ℓ fW0,Θ,r (x;φ)(x), y  . (3) Soft routing keeps router-expert training differentiable and supplies comparative signals to non-anchor experts while early assignments remain uncertain, reducing premature ex-pert starvation. It can also transmit off-pattern gradients; the theory records this routing leakage in each expert’s off-target contribution weight. Each client retains the same fixed E-step mini-batch bud-get, allocates it across buckets approximately in proportion to bucket size with a small minimum for every nonempty bucket, and then interleaves the scheduled bucket identifiers. At each scheduled step, the client draws a mini-batch only from the selected bucket, preserving pattern-coherent expert supervision. The broadcast global-router state persists across the entire interleaved schedule, accumulating cross-pattern contrast across the client’s buckets. 
+
+Asymmetric Federated Aggregation 
+
+Let ∆θti,m and ∆φti denote client i’s local expert and router deltas at round t, and let ni,m = P
+
+c:a(i,c )= m |B i,c | be the Algorithm 1 FedWeave training and sparse inference 
+
+Require: Client datasets {D i}, frozen backbone W0, rounds T ,local-step budget E
+
+1: for all clients i do 
+
+2: Embed Di, select Ci, and form buckets {B i,c }
+
+3: Warm up one LoRA per bucket and send signatures {si,c }
+
+4: end for 
+
+5: Cluster signatures into M ⋆ experts and obtain a(i, c )
+
+6: Initialize global experts {θ0
+
+> m
+
+} and router φ0
+
+7: for t = 0 to T − 1 do 
+
+8: Sample St; broadcast {θtm}, φt, and assignments 9: for all i ∈ S t in parallel do 
+
+10: Allocate E steps by bucket sample counts and interleave bucket IDs 11: Update soft-routed experts and the broadcast global-router state 12: Return ∆θi,m when ni,m > 0 and one ∆φi
+
+13: end for 
+
+14: Aggregate expert and router deltas using Eq. (4) 15: end for 
+
+16: At inference, activate θarg max m rm(x;φ) for each input x
+
+local sample count aligned to expert m for FedAvg-style weighting (McMahan et al. 2017). The server updates 
+
+θt+1  
+
+> m
+
+= θtm + X
+
+> i∈S t:ni,m >0
+
+ni,m 
+
+P 
+
+> j∈S t
+
+nj,m 
+
+∆θti,m ,φt+1 = φt + X
+
+> i∈S t
+
+|D i|
+
+P 
+
+> j∈S t
+
+|D j | ∆φti.
+
+(4) The expert rule weights each delta by matched-pattern su-pervision to preserve expert-update purity, whereas the router rule contributes one delta from each client’s full interleaved trajectory to retain cross-bucket contrast. 
+
+Sparse Inference 
+
+Training uses the full softmax mixture so that each example supplies comparative supervision across experts. At infer-ence, FedWeave selects bm(x) = arg max m rm(x; φ) and activates only θ bm(x); the analysis below connects router op-timization to the risk of this sparse decision. 
+
+Theory of Asymmetric Aggregation 
+
+The analysis formalizes three advantages of FedWeave .First, prototype conditioning gives O(1 /U ) expert conver-gence to a stationary neighborhood controlled by routed off-pattern weight. Second, persistent router training con-tracts under the PL condition while exposing deterministic interleaving bias instead of incurring the reset consensus residual. Third, gap calibration transfers router suboptimal-ity to Top-1 sparse-inference risk. The full assumptions, the mixed-gradient conflict calculation, and all proofs are given in Appendix C. 
+
+Expert convergence: stationarity under routed con-tamination. The first advantage is expert convergence: prototype-conditioned aggregation makes the deviation from an expert’s target gradient depend on the off-pattern weight routed to that expert, rather than the full client mix-ture. To quantify it, fix the router and the other ex-perts, let expert m target pattern κm, and let χm(θm) = P  
+
+> i,c,k ̸=κm
+
+ωi,c,k,m (θm) be its off-target routed contribution weight, where ωi,c,k,m is the normalized weight of pattern-k
+
+examples in client i’s bucket c routed to expert m. Under bounded routed gradients and within-pattern shift δpat , the directional error is at most εum = 2 Bg χm(θum) + δpat . Here 
+
+Fκm,m is expert m’s clean loss on pattern κm; assume it is 
+
+LE -smooth and lower bounded, and that the routed stochas-tic direction has conditional variance at most (ρum)2σ2 
+
+> E
+
+. Let 
+
+gum = ∇Fκm,m (θum), ρum = ρm(θum), aum = ηE ρum ≤ 1/L E ,
+
+Am,U = P 
+
+> u<U
+
+E[aum] > 0, and ∆0 
+
+> E,m
+
+= Fκm,m (θ0
+
+> m
+
+) −
+
+F ⋆κm,m .
+
+Theorem 1 (Expert convergence under routed contamina-tion) .
+
+> 1
+> Am,U
+
+X
+
+> u<U
+
+E[aum∥gum∥2] ≤ 2∆ 0 
+
+> E,m
+> Am,U
+
++ 1
+
+> Am,U
+
+X
+
+> u<U
+
+E[aum(εum)2]+ LE σ2
+
+> E
+> Am,U
+
+X
+
+> u<U
+
+E[( aum)2].
+
+(5) With non-vanishing routed weight and bounded contam-ination, this is O(1 /U ) convergence to a contamination– noise stationary neighborhood; Am,U records the effective optimization budget received by expert m and thus exposes expert starvation. With other terms matched, the prototype bound is no looser if χm(θum) ≤ αclient ,u m at every active step, and strictly tighter if the inequality is strict with posi-tive probability. 
+
+Router convergence: persistent versus reset-and-average. 
+
+The second advantage is router convergence: FedWeave keeps one broadcast router state across interleaved buckets, so all bucket updates follow a single trajectory. For compar-ison, reset-and-average maintains one state per bucket and averages them at the end, mirroring the router-state reset in the w/o client-router ablation. With experts fixed, let Ri,c be the router loss on bucket c, and let Ri(φ) = P 
+
+> c
+
+πi,c Ri,c (φ),
+
+gi(φ) = ∇Ri(φ), and gi,c (φ) = ∇Ri,c (φ), where πi,c =
+
+|B i,c |/|D i| is the bucket sample fraction. Assume LR-smooth bucket losses, a μ-PL client objective (Karimi, Nu-tini, and Schmidt 2016), conditional variance at most σ2
+
+> R
+
+,and 0 < η R ≤ 1/L R. Over S local steps, let bgi,c be the stochastic gradient on bucket c; for the persistent schedule and reset states, define qs(φs) = E[bgi,c s (φs) | φs] − gi(φs),
+
+¯φs = P 
+
+> c
+
+πi,c φc,s , and es = P 
+
+> c
+
+πi,c [gi,c (φc,s ) − gi,c ( ¯ φs)] .Let 
+
+Ei,S = (1 − μη R)S (Ri(φ0) − R⋆i ) + LRηRσ2 
+
+> R
+> 2μ
+
+,
+
+Oi,S = ηR
+
+> 2
+
+X
+
+> s<S
+
+(1 − μη R)S−1−sE∥qs(φs)∥2,
+
+Ci,S = ηR
+
+> 2
+
+X
+
+> s<S
+
+(1 − μη R)S−1−sE∥es∥2.
+
+(6) 
+
+Theorem 2 (Persistent versus reset-and-average router con-vergence) . Under matched initialization, depth, and effective pattern weights, 
+
+E[Ri(φS ) − R⋆i ] ≤ E i,S + Oi,S ,
+
+E[Ri( ¯ φS ) − R⋆i ] ≤ E i,S + Ci,S . (7) Both procedures share the same PL contraction and stochastic-noise floor. Sample-count-proportional random-ized bucket sampling gives Oi,S = 0 ; FedWeave ’s deter-ministic interleaving incurs Oi,S , whereas reset-and-average incurs Ci,S from bucket-local dispersion. 
+
+Sparse inference: router error controls Top-1 risk. Fi-nally, although training uses a soft mixture, inference acti-vates only one expert; insufficient router probability on the la-tent oracle expert can therefore incur excess loss. In the clean one-pattern-per-expert regime, let m†(x) be the oracle ex-pert, Ri, oracle its risk, and Si(φ) = E[1 − rm†(x)(x; φ)] . As-sume the expert-loss-gap calibration cgap Si(φ) ≤ Ri(φ) −
+
+Ri, oracle + βmix with cgap > 0, and let Ai = [R⋆i −
+
+Ri, oracle ]+. If non-oracle excess loss is bounded by ∆max ,then the Top-1 risk Rsparse ,i obeys 
+
+Rsparse ,i − Ri, oracle ≤ 2∆ max 
+
+cgap 
+
+[Ri(φ) − R⋆i + Ai + βmix ].
+
+(8) Taking expectations, Theorem 2 supplies Ei,S + Oi,S for φS
+
+and Ei,S + Ci,S for ¯φS .
+
+## Experiments 
+
+Experimental Setup 
+
+Benchmark and Datasets. Our controlled heterogeneous multi-task benchmark combines CoEdIT (Raheja et al. 2023), GSM8K (Cobbe et al. 2021), TweetEval senti-ment classification (TweetEval) (Barbieri et al. 2020), and ARC-Challenge (ARC-C) (Clark et al. 2018). For each seed, we sample disjoint per-task subsets of 2,000/100/400 train/validation/test examples from the pooled sources, yield-ing 1,600 test examples in total. Equal task budgets keep client mixtures and macro-averages comparable across tasks. 
+
+Federated training. We partition training data among 20 clients by task-identity Dirichlet sampling; smaller α means stronger client imbalance. The main setting is α = 0 .3; mean 
+
+± standard deviation over seeds 42/43/44 jointly reflects data subsampling, client partitioning, and training randomness. Task labels construct and audit this controlled benchmark but are never exposed to FedWeave . The benchmark con-tains distinct instruction patterns that can be recovered from the frozen representations; Table 3 reports the resulting align-ment quality. We evaluate Llama3.2-3B (Meta AI 2024) and Gemma-2-2B (Gemma Team et al. 2024) with all 20 clients participating for 20 rounds and 10 local optimizer steps per round. All methods use the same local-step budget; Fed-Weave redistributes its 10 steps across buckets according to their sample counts. All runs use AdamW with learning rate 1e-4, effective batch size 8, gradient clipping at 1.0, and maximum length 512. Single-adapter baselines use one rank-32 LoRA, whereas FedWeave and FedLEASE use rank 8 per expert; all LoRAs use scaling factor 16, dropout 0.05, and query/value projections. FedWeave and FedLEASE se-lect the expert count adaptively by silhouette search over prototype and client signatures, respectively; the reported main runs selected four experts for both methods. For either backbone, this realized count matches the total LoRA ca-pacity of its rank-32 single-adapter counterpart. FedWeave 
+
+trains a hidden-size-512 global router with learning rate 5e-5, zero dropout. Experts average their aligned warmup adapters, whereas the two-layer router uses default random initializa-tion and initially distributes weight across all experts via soft routing. At test time, sparse inference activates one expert. 
+
+Evaluation. CoEdIT uses mean ROUGE-1/2/Lsum F1; GSM8K and ARC-C use exact-answer accuracy; and Tweet-Eval uses accuracy. Greedy decoding permits 64/192/4/4 new tokens for CoEdIT/GSM8K/TweetEval/ARC-C; full settings are in Appendix A. 
+
+Baselines and Comparison Scope 
+
+Holding the backbone, LoRA capacity, data, and global-model target fixed, we compare four representative feder-ated LoRA approaches. FedIT jointly trains both factors of one shared LoRA and aggregates client deltas by sample-weighted FedAvg. FFA-LoRA freezes the randomly ini-tialized A factor and trains and aggregates only the zero-initialized B factor. FedSA-LoRA aggregates A globally while retaining client-local B states across rounds; global evaluation pairs the shared A with their sample-weighted mean. FedLEASE , the closest empirical baseline, selects the client-cluster count by silhouette score and maintains one expert and router for each selected cluster. Backbone-specific trainable-parameter counts are tabulated in Table 5 of Appendix A. FedWeave remains in the same trainable-parameter range as the full-adapter baselines FedIT/FedSA and smaller than FedLEASE. 
+
+Overall Effectiveness 
+
+Table 1 shows that, at α = 0 .3, FedWeave raises the best-baseline macro-average score from 0.5673 to 0.5872 on Llama3.2-3B and from 0.4839 to 0.5163 on Gemma-2-2B, while reducing macro-average loss from 0.7496 to 0.7264 and from 0.7443 to 0.6954, respectively. On Llama3.2-3B it leads on GSM8K, TweetEval, and ARC-C, while FedIT remains strongest on CoEdIT; on Gemma-2-2B it ranks first on all four tasks. The gain therefore persists across two archi-tectures without requiring a task-specific expert assignment. Figure 2 shows that FedWeave assigns the four tasks to dis-tinct dominant experts (E1/E4/E3/E2), whereas FedLEASE reuses E3 for CoEdIT and GSM8K and distributes the re-maining tasks more broadly. 
+
+Robustness to Client Heterogeneity 
+
+Figure 3 shows that, against FedLEASE on Llama3.2-3B, FedWeave improves macro-average score by 0.0150, 0.0223, and 0.0106 for α = 0 .1, 0.3, 0.5, respectively, while reducing macro-average loss by 0.0256, 0.0336, and 0.0245. The advantage remains positive at all three heterogeneity levels and is largest at α = 0 .3.Model Method Macro Avg. CoEdIT GSM8K TweetEval ARC-C 
+
+Task Scores ↑
+
+Llama3.2-3B 
+
+FedIT 0.5673 ±0.0051 0.6293 ±0.0090 0.3033 ±0.0138 0.6633 ±0.0194 0.6733 ±0.0104 
+
+FFA-LoRA 0.5050 ±0.0028 0.5368 ±0.0114 0.2392 ±0.0240 0.6300 ±0.0180 0.6142 ±0.0161 
+
+FedSA-LoRA 0.5558 ±0.0043 0.5999 ±0.0048 0.3067 ±0.0095 0.6433 ±0.0243 0.6733 ±0.0063 
+
+FedLEASE 0.5649 ±0.0090 0.5948 ±0.0537 0.3142 ±0.0161 0.6742 ±0.0236 0.6767 ±0.0052 
+
+FedWeave 0.5872 ±0.0047 0.6190 ±0.0067 0.3283 ±0.0076 0.6875 ±0.0225 0.7142 ±0.0104 
+
+Gemma-2-2B 
+
+FedIT 0.4839 ±0.0174 0.3340 ±0.0054 0.3033 ±0.0113 0.6592 ±0.0379 0.6392 ±0.0250 
+
+FFA-LoRA 0.4544 ±0.0071 0.3276 ±0.0051 0.2642 ±0.0236 0.6492 ±0.0300 0.5767 ±0.0281 
+
+FedSA-LoRA 0.4664 ±0.0081 0.3297 ±0.0055 0.3108 ±0.0163 0.6225 ±0.0139 0.6025 ±0.0261 
+
+FedLEASE 0.4755 ±0.0074 0.3313 ±0.0131 0.2942 ±0.0208 0.6408 ±0.0456 0.6358 ±0.0118 
+
+FedWeave 0.5163 ±0.0154 0.3442 ±0.0087 0.3333 ±0.0456 0.6892 ±0.0445 0.6983 ±0.0080 
+
+Teacher-Forced Losses ↓
+
+Llama3.2-3B 
+
+FedIT 0.7496 ±0.0095 0.8537 ±0.0144 0.6258 ±0.0054 0.7070 ±0.0355 0.8120 ±0.0244 
+
+FFA-LoRA 0.9113 ±0.0084 1.0396 ±0.0064 0.8720 ±0.0139 0.8110 ±0.0272 0.9226 ±0.0027 
+
+FedSA-LoRA 0.8214 ±0.0130 0.9457 ±0.0044 0.6874 ±0.0268 0.7525 ±0.0169 0.9000 ±0.0126 
+
+FedLEASE 0.7600 ±0.0170 0.8490 ±0.0328 0.6080 ±0.0062 0.7050 ±0.0353 0.8782 ±0.0531 
+
+FedWeave 0.7264 ±0.0076 0.8046 ±0.0071 0.6057 ±0.0097 0.6931 ±0.0385 0.8023 ±0.0214 
+
+Gemma-2-2B 
+
+FedIT 0.7443 ±0.0166 0.8469 ±0.0134 0.5062 ±0.0015 0.7181 ±0.0212 0.9060 ±0.0627 
+
+FFA-LoRA 0.8174 ±0.0131 0.9180 ±0.0091 0.5799 ±0.0026 0.7621 ±0.0213 1.0096 ±0.0515 
+
+FedSA-LoRA 0.8255 ±0.0020 0.9135 ±0.0053 0.5613 ±0.0279 0.7821 ±0.0275 1.0452 ±0.0496 
+
+FedLEASE 0.8030 ±0.0155 0.8677 ±0.0363 0.5184 ±0.0237 0.8372 ±0.0353 0.9888 ±0.0441 
+
+FedWeave 0.6954 ±0.0132 0.7881 ±0.0188 0.4915 ±0.0034 0.6802 ±0.0338 0.8218 ±0.0380 
+
+Table 1: Main results at α = 0 .3 (mean ± standard deviation over seeds 42/43/44). “Macro Avg.” is the unweighted mean across tasks within each panel. Best and second-best results are bold and underlined. E1 E2 E3 E4                            
+
+> Expert
+> CoEdIT
+> GSM8K
+> TweetEval
+> ARC-C
+> 0.96 0.01 0.01 0.01
+> 0.00 0.00 0.00 1.00
+> 0.09 0.03 0.86 0.02
+> 0.11 0.70 0.05 0.14
+> FedWeave
+> E1 E2 E3 E4
+> Expert
+> 0.25 0.17 0.49 0.10
+> 0.01 0.04 0.95 0.00
+> 0.01 0.20 0.10 0.69
+> 0.06 0.65 0.29 0.00
+> FedLEASE
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+
+Figure 2: Row-normalized task–expert routing weights on Llama3.2-3B at α = 0 .3. FedWeave learns a distinct domi-nant expert for each task compared to FedLEASE. 
+
+Ablation Study 
+
+Aggregation Granularity With the same backbone, data, and expert capacity, w/o prototype-expert uses Client/Client aggregation, whereas w/o client-router uses Prototype/Prototype aggregation with per-bucket router re-sets and sample-weighted endpoints. Table 2 shows macro-average gains of 0.0223 and 0.0294 over w/o prototype-expert and w/o client-router , with loss reductions of 0.0336 and 0.0428. FedWeave leads every task score and loss; against w/o client-router , its largest score gains on TweetEval and ARC-C support preserving cross-bucket contrast within one router trajectory. The w/o prototype-expert comparison supports forming experts from 0.56 0.57 0.58 0.59           
+
+> Score
+> α= 0.1
+> α= 0.3
+> α= 0.5
+> Macro Avg. Score ↑
+> +0.0150
+> +0.0223
+> +0.0106
+> 0.72 0.74 0.76 0.78
+> Loss
+> α= 0.1
+> α= 0.3
+> α= 0.5
+> Macro Avg. Loss ↓
+> -0.0256
+> -0.0336
+> -0.0245
+> Performance across heterogeneity levels
+> FedLEASE FedWeave
+
+Figure 3: Macro-average score and teacher-forced loss on Llama3.2-3B across Dirichlet heterogeneity levels. Shaded regions show one standard deviation over three seeds. coherent bucket contexts. Because the w/o client-router im-plementation has effective weight eπc ∝ acHc, where ac
+
+is the endpoint aggregation coefficient and Hc is the reset depth for bucket c, its comparison with FedWeave captures both router-state fragmentation and bucket reweighting, as predicted by the asymmetric analysis. These comparisons support the component-dependent purity–contrast design. 
+
+Prototype Discovery Table 3 compares client-side clus-terers. k-means and spectral clustering achieve nearly iden-tical global purity (0.9515 versus 0.9499) and similar macro scores (0.5872 versus 0.5889). However, k-means scales as O(In iCide), whereas spectral clustering costs O(n3
+
+i ).We therefore adopt k-means as the default because it pre-Method Expert Router Average CoEdIT GSM8K TweetEval ARC-C 
+
+Task Metrics ↑
+
+w/o prototype-expert Client Client 0.5649 0.5948 0.3142 0.6742 0.6767 w/o client-router Prototype Prototype 0.5578 0.6013 0.3225 0.6408 0.6667 
+
+FedWeave Prototype Client 0.5872 0.6190 0.3283 0.6875 0.7142 
+
+Task Losses ↓
+
+w/o prototype-expert Client Client 0.7600 0.8490 0.6080 0.7050 0.8782 w/o client-router Prototype Prototype 0.7692 0.8066 0.6071 0.7622 0.9008 
+
+FedWeave Prototype Client 0.7264 0.8046 0.6057 0.6931 0.8023 
+
+Table 2: Aggregation-granularity ablation. w/o prototype-expert : Client/Client; w/o client-router : Prototype/Prototype with per-bucket router resets and sample-weighted endpoints; FedWeave : Prototype/Client with one global router following complete client trajectories. Local Clusterer Complexity Local Alignment Global Alignment Macro Score ↑ Macro Loss ↓
+
+Purity ↑ NMI ↑ ARI ↑ Purity ↑ NMI ↑ ARI ↑
+
+K-Means O(In iCide) 0.9685 0.9051 0.9288 0.9515 0.8567 0.8763 0.5872 0.7264 Agglomerative O(n2 
+
+> i
+
+log ni) 0.7680 0.2635 0.2669 0.2522 0.0044 0.0000 0.5684 0.7526 Spectral O(n3 
+
+> i
+
+) 0.9728 0.9000 0.9013 0.9499 0.8649 0.8780 0.5889 0.7242 
+
+Table 3: Prototype alignment quality under different local clusterers. Purity measures dominant-label agreement, NMI measures normalized information agreement, and ARI measures chance-corrected pairwise agreement; exact definitions are in Appendix A. Complexities are per client, where ni = |D i|, Ci is the selected local bucket count, de is the frozen embedding dimension, and I is the number of k-means iterations; server-side signature alignment is fixed. 
+
+serves high-quality prototype discovery at substantially lower asymptotic cost. 
+
+Sparse Inference Using the same trained checkpoints over three seeds, Figure 4 shows that sparse inference (activating the highest-scoring expert) reaches 0.5872 versus 0.5883 for soft routing and lowers mean latency from 3177 to 2147 ms (32.4%). Activating two experts reaches 0.5890 at 2587 ms, only 0.0018 above sparse inference at higher latency. Soft Top-2 Top-1          
+
+> 0.50
+> 0.52
+> 0.54
+> 0.56
+> 0.58
+> 0.60 0.5883 0.5890 0.5872
+> Macro Avg. Score ↑
+> Soft Top-2 Top-1
+> 0.600
+> 0.625
+> 0.650
+> 0.675
+> 0.700
+> 0.725
+> 0.750
+> 0.7212 0.7215 0.7264
+> Macro Avg. Loss ↓
+> Soft Top-2 Top-1
+> 1500
+> 2000
+> 2500
+> 3000
+> 3500
+> 3177 ms
+> 2587 ms
+> 2147 ms
+> Mean Latency ↓
+> Sparse-inference quality-latency trade-off
+
+Figure 4: Sparse-inference quality–latency trade-off over three seeds. Sparse inference activates the Top-1 expert at lower latency but nearly preserves soft-routing quality. 
+
+## Limitations 
+
+Evaluation scope. Due to the limited computational re-sources, our study focuses on 2B–3B backbones and con-trolled four-task tests. This scope enables matched compar-isons across methods, backbones, and heterogeneity levels, while broader validation on larger models and naturally oc-curring mixtures remains future work. 
+
+Recoverable specialization. FedWeave assumes that lo-cal patterns are sufficiently separable in representation and adaptation-signature space for prototype recovery and cross-client alignment. The high alignment purity in Table 3 sup-ports this condition in the studied regime, where pronounced task heterogeneity makes specialization most relevant. When heterogeneity is weak and adaptation signatures become less distinguishable, the benefit of specialization may diminish. 
+
+Privacy and discovery overhead. FedWeave currently does not incorporate differential privacy or secure aggre-gation for its update-derived signatures; integrating these mechanisms is an important extension. Prototype discovery also introduces a one-time first-stage overhead from embed-ding, short LoRA warmups, and signature upload, which is amortized across subsequent communication rounds. De-tailed computation, communication, and parameter account-ing is provided in Appendix B. 
+
+## Conclusion 
+
+FedWeave addresses intra-client task heterogeneity by as-signing specialization and routing to different aggregation units: aligned local prototypes form coherent expert updates, while a single global router trained from complete client trajectories retains cross-pattern contrast. The component-wise theory mirrors this design: prototype conditioning con-trols routing-weighted expert contamination, persistent tra-jectories replace the reset consensus residual with an ex-plicit schedule-order residual, and gap calibration connects router optimization to sparse-inference risk. Across two back-bones, it outperforms the evaluated baselines on the con-trolled benchmark, and its advantage over FedLEASE per-sists across three heterogeneity levels. The granularity abla-tion supports the asymmetric design, while sparse inference preserves nearly all soft-routing quality with one active ex-pert. These results identify aggregation granularity, rather than expert count alone, as a central design choice for fed-erated MoE-LoRA. Future work should test natural, drifting streams with privacy-preserving online alignment. References 
+
+Barbieri, F.; Camacho-Collados, J.; Espinosa Anke, L.; and Neves, L. 2020. TweetEval: Unified Benchmark and Compar-ative Evaluation for Tweet Classification. In Findings of the Association for Computational Linguistics: EMNLP 2020 ,1644–1650. Association for Computational Linguistics. Bian, J.; Wang, L.; Zhang, L.; and Xu, J. 2025. LoRA-FAIR: Federated LoRA Fine-Tuning with Aggregation and Initialization Refinement. In Proceedings of the IEEE/CVF International Conference on Computer Vision , 3737–3746. Bian, J.; Wang, L.; Zhang, L.; and Xu, J. 2026a. FedALT: Federated Fine-Tuning Through Adaptive Local Training with Rest-of-World LoRA. Proceedings of the AAAI Confer-ence on Artificial Intelligence , 40(24): 19728–19736. Bian, J.; Wang, L.; Zhang, L.; and Xu, J. 2026b. FedTreeLoRA: Reconciling Statistical and Functional Het-erogeneity in Federated LoRA Fine-Tuning. arXiv preprint arXiv:2603.13282 .Chen, J.; Liu, C.; and Zhu, J. 2026. Beyond Factor Aggre-gation: Gauge-Aware Low-Rank Server Representations for Federated LoRA. arXiv preprint arXiv:2605.06733 .Chen, S.; Jie, Z.; and Ma, L. 2024. LLaVA-MoLE: Sparse Mixture of LoRA Experts for Mitigating Data Con-flicts in Instruction Finetuning MLLMs. arXiv preprint arXiv:2401.16160 .Cho, Y. J.; Liu, L.; Xu, Z.; Fahrezi, A.; and Joshi, G. 2024. Heterogeneous LoRA for Federated Fine-tuning of On-Device Foundation Models. In Proceedings of the 2024 Conference on Empirical Methods in Natural Language Pro-cessing , 12903–12913. Association for Computational Lin-guistics. Clark, P.; Cowhey, I.; Etzioni, O.; Khot, T.; Sabharwal, A.; Schoenick, C.; and Tafjord, O. 2018. Think You Have Solved Question Answering? Try ARC, the AI2 Reasoning Chal-lenge. arXiv preprint arXiv:1803.05457 .Cobbe, K.; Kosaraju, V.; Bavarian, M.; Chen, M.; Jun, H.; Kaiser, L.; Plappert, M.; Tworek, J.; Hilton, J.; Nakano, R.; Hesse, C.; and Schulman, J. 2021. Training Verifiers to Solve Math Word Problems. arXiv preprint arXiv:2110.14168 .Dettmers, T.; Pagnoni, A.; Holtzman, A.; and Zettlemoyer, L. 2023. QLoRA: Efficient Finetuning of Quantized LLMs. In Advances in Neural Information Processing Systems , vol-ume 36. Fan, B.; Su, X.; Tarkoma, S.; and Hui, P. 2025. HeLoRA: LoRA-Heterogeneous Federated Fine-Tuning for Foundation Models. ACM Transactions on Internet Technology , 25(2): 11:1–11:22. Fedus, W.; Zoph, B.; and Shazeer, N. 2022. Switch Trans-formers: Scaling to Trillion Parameter Models with Simple and Efficient Sparsity. Journal of Machine Learning Re-search , 23(120): 1–39. Feng, C.-M.; Yu, K.; Liu, N.; Xu, X.; Khan, S.; and Zuo, W. 2023. Towards Instance-adaptive Inference for Federated Learning. In Proceedings of the IEEE/CVF International Conference on Computer Vision , 23287–23296. Gemma Team; Rivière, M.; Pathak, S.; Sessa, P. G.; Hardin, C.; Bhupatiraju, S.; Hussenot, L.; Mesnard, T.; Shahriari, B.; Rame, A.; et al. 2024. Gemma 2: Improving Open Language Models at a Practical Size. arXiv preprint arXiv:2408.00118 .Ghosh, A.; Chung, J.; Yin, D.; and Ramchandran, K. 2020. An Efficient Framework for Clustered Federated Learning. In Advances in Neural Information Processing Systems , vol-ume 33, 19586–19597. Guo, P.; Zeng, S.; Wang, Y.; Fan, H.; Wang, F.; and Qu, L. 2025. Selective Aggregation for Low-Rank Adaptation in Federated Learning. In International Conference on Learn-ing Representations .Hao, J.; Wu, Y.; Payani, A.; Lee, M.; and Liu, M. 2025. Per-sonalized Federated Fine-tuning for Heterogeneous Data: An Automatic Rank Learning Approach via Two-Level LoRA. 
+
+arXiv preprint arXiv:2503.03920 .Hu, E. J.; Shen, Y.; Wallis, P.; Allen-Zhu, Z.; Li, Y.; Wang, S.; Wang, L.; and Chen, W. 2022. LoRA: Low-Rank Adaptation of Large Language Models. In International Conference on Learning Representations .Huang, Y.; Yang, Z.; Wang, Z.; Qi, J.; Yu, R.; Fan, X.; and Wang, C. 2026. Hybrid Routing for a Mixture of LoRA Experts. Proceedings of the AAAI Conference on Artificial Intelligence , 40(37): 31211–31219. Kairouz, P.; McMahan, H. B.; Avent, B.; Bellet, A.; Bennis, M.; Bhagoji, A. N.; Bonawitz, K.; Charles, Z.; Cormode, G.; Cummings, R.; et al. 2021. Advances and Open Problems in Federated Learning. Foundations and Trends in Machine Learning , 14(1–2): 1–210. Karimi, H.; Nutini, J.; and Schmidt, M. 2016. Linear Con-vergence of Gradient and Proximal-Gradient Methods Under the Polyak–Łojasiewicz Condition. In Machine Learning and Knowledge Discovery in Databases , 795–811. Springer. Karimireddy, S. P.; Kale, S.; Mohri, M.; Reddi, S.; Stich, S.; and Suresh, A. T. 2020. SCAFFOLD: Stochastic Controlled Averaging for Federated Learning. In Proceedings of the 37th International Conference on Machine Learning , volume 119 of Proceedings of Machine Learning Research , 5132–5143. PMLR. Koo, J.; Jang, M.; and Ok, J. 2025. Towards Robust and Ef-ficient Federated Low-Rank Adaptation with Heterogeneous Clients. In Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , 416–429. Lee, S.; Park, S.; Lee, D. B.; Wagner, D.; Seong, H.; Bocklet, T.; Lee, J.; and Hwang, S. J. 2025. FedSVD: Adaptive Or-thogonalization for Private Federated Learning with LoRA. In Advances in Neural Information Processing Systems , vol-ume 38. Li, T.; Sahu, A. K.; Zaheer, M.; Sanjabi, M.; Talwalkar, A.; and Smith, V. 2020. Federated Optimization in Heteroge-neous Networks. In Proceedings of Machine Learning and Systems , volume 2, 429–450. Liao, M.; Chen, W.; Shen, J.; Guo, S.; and Wan, H. 2025. HMoRA: Making LLMs More Effective with Hierarchical Mixture of LoRA Experts. In International Conference on Learning Representations .Marfoq, O.; Neglia, G.; Bellet, A.; Kameni, L.; and Vidal, R. 2021. Federated Multi-Task Learning under a Mixture of Distributions. In Advances in Neural Information Processing Systems , volume 34, 15434–15447. McMahan, H. B.; Moore, E.; Ramage, D.; Hampson, S.; and Aguera y Arcas, B. 2017. Communication-Efficient Learning of Deep Networks from Decentralized Data. In Proceedings of the 20th International Conference on Artificial Intelli-gence and Statistics , volume 54 of Proceedings of Machine Learning Research , 1273–1282. PMLR. Mei, H.; Cai, D.; Zhou, A.; Wang, S.; and Xu, M. 2024. Fed-MoE: Personalized Federated Learning via Heterogeneous Mixture of Experts. arXiv preprint arXiv:2408.11304 .Meta AI. 2024. Llama 3.2 Model Card. https: //github.com/meta-llama/llama-models/blob/main/models/ llama3_2/MODEL_CARD.md. Raheja, V.; Kumar, D.; Koo, R.; and Kang, D. 2023. CoEdIT: Text Editing by Task-Specific Instruction Tuning. In Findings of the Association for Computational Linguistics: EMNLP 2023 , 5274–5291. Association for Computational Linguis-tics. Reisser, M.; Louizos, C.; Gavves, E.; and Welling, M. 2021. Federated Mixture of Experts. arXiv preprint arXiv:2107.06724 .Rousseeuw, P. J. 1987. Silhouettes: A Graphical Aid to the Interpretation and Validation of Cluster Analysis. Journal of Computational and Applied Mathematics , 20: 53–65. Sang, T.; Chu, Z.; Xuan, J.; and Zhang, X. 2026. ACommunication-Efficient Personalized Federated Learning Framework Driven by Parameter Decoupling. Neurocom-puting , 692: 133790. Sattler, F.; Müller, K.-R.; and Samek, W. 2021. Clustered Federated Learning: Model-Agnostic Distributed Multi-Task Optimization under Privacy Constraints. IEEE Transactions on Neural Networks and Learning Systems , 32(8): 3710– 3722. Shazeer, N.; Mirhoseini, A.; Maziarz, K.; Davis, A.; Le, Q.; Hinton, G.; and Dean, J. 2017. Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer. In 
+
+International Conference on Learning Representations .Shen, Z.; Lu, J.; Wan, H.; and Chen, J. 2026. SDFLoRA: Se-lective Decoupled Federated LoRA for Privacy-preserving Fine-tuning with Heterogeneous Clients. arXiv preprint arXiv:2601.11219 .Singhal, R.; Ponkshe, K.; Vartak, R.; Varshney, L. R.; and Vepakomma, P. 2026. Fed-SB: A Silver Bullet for Ex-treme Communication Efficiency and Performance in (Pri-vate) Federated LoRA Fine-Tuning. Transactions on Ma-chine Learning Research .Sun, Y.; Li, Z.; Li, Y.; and Ding, B. 2024. Improving LoRA in Privacy-preserving Federated Learning. In International Conference on Learning Representations .Talasso, G. U.; Kurmanji, M.; de Souza, A. M.; Lane, N. D.; and Villas, L. A. 2026. Task-Centric Personalized Fed-erated Fine-Tuning of Language Models. arXiv preprint arXiv:2604.00050 .Wang, L.; Bian, J.; Zhang, L.; and Xu, J. 2025. Adaptive LoRA Experts Allocation and Selection for Federated Fine-Tuning. In Advances in Neural Information Processing Sys-tems , volume 38. Wang, Z.; Shen, Z.; He, Y.; Sun, G.; Wang, H.; Lyu, L.; and Li, A. 2024. FLoRA: Federated Fine-Tuning Large Lan-guage Models with Heterogeneous Low-Rank Adaptations. In Advances in Neural Information Processing Systems , vol-ume 37. Yang, N.; Wang, S.; Huan, O.; Chen, M.; Quek, T. Q. S.; and Yin, C. 2026. Wireless Federated Multi-Task LLM Fine-Tuning via Sparse-and-Orthogonal LoRA. arXiv preprint arXiv:2602.20492 .Yang, Y.; Long, G.; Lu, Q.; Zhu, L.; Jiang, J.; and Zhang, C. 2025. Federated Low-Rank Adaptation for Foundation Models: A Survey. In Proceedings of the Thirty-Fourth Inter-national Joint Conference on Artificial Intelligence , 10779– 10787. Zec, E. L.; Mogren, O.; Martinsson, J.; Sütfeld, L. R.; and Gillblad, D. 2020. Specialized Federated Learning using a Mixture of Experts. arXiv preprint arXiv:2010.02056 .Zhang, J.; Vahidian, S.; Kuo, M.; Li, C.; Zhang, R.; Yu, T.; Zhou, Y.; Wang, G.; and Chen, Y. 2023. Towards Building the Federated GPT: Federated Instruction Tuning. arXiv preprint arXiv:2305.05644 .
+
+## A Implementation and Reproducibility Details           
+
+> Table 4 collects the resolved settings used by the reported runs. Lo-cal discovery uses ℓ2-normalized, mean-pooled last-layer prompt representations from the frozen backbone. For a client with nex-amples, the candidate counts are 2, . . . , min(8 , n −1) ; the default is k-means with 10 restarts, selected by Euclidean silhouette score. Each bucket then warms up a rank-8 LoRA from the same initial-ization for 10 steps with batch size 8. Its signature concatenates the LoRA-Bfactors on query/value projections across layers. The server computes the mean layer-wise cosine distance between signa-tures and applies silhouette-selected agglomerative clustering over the same feasible count range, so the number of global experts is data-adaptive; this procedure selects four experts in the reported main runs. FedLEASE independently searches from 2 to at most 8 client clusters by the same silhouette criterion and likewise selects four experts in the reported runs. All 20 clients participate in every communication round. The router receives the attention-mask-weighted mean of the frozen backbone’s last hidden states, computed with LoRA adapters dis-abled, and uses a two-layer MLP with hidden size 512 followed by a full softmax over experts. The single global router is broadcast to each client, updated across its interleaved bucket schedule, and returned as one delta per round. Generation uses greedy decoding (do_sample=False ,num_beams=1 ). The code package ac-companying the paper contains training and evaluation scripts, de-terministic data-construction code, and a manifest recording source dataset identifiers, split pools, sample budgets, and seed protocols. When executed, the generated data cache records the source split and row index of every sampled example.
+
+Alignment Metrics         
+
+> Let Ω={ω1, . . . , ω R}be the discovered clusters and Y=
+> {y1, . . . , y K}the reference pattern labels used only for evalua-
+
+Table 4: Resolved implementation settings for the reported experiments. “Effective batch” counts gradient accumulation; only the memory-bound Gemma FedLEASE runs use micro-batch 4 with accumulation 2. Full-softmax training uses every selected expert, so the stored cumulative-probability threshold is inactive in these runs. 
+
+Group Setting Resolved value Benchmark Data and partition CoEdIT, GSM8K, TweetEval sentiment, and ARC-Challenge; 2,000/100/400 train/validation/test examples per task; 20 clients; main Dirichlet α = 0 .3;seeds 42/43/44. Infrastructure Hardware and software One NVIDIA GeForce RTX 4090 (48 GB GPU memory; 49,140 MiB re-ported by nvidia-smi ); Intel Xeon Platinum 8470Q (208 logical CPUs); 1.0 TiB system RAM; Ubuntu 22.04.5 LTS; NVIDIA driver 580.105.08 (CUDA compatibility 13.0); Python 3.12.3; PyTorch 2.8.0+ cu128 (CUDA 12.8, cuDNN 9.10.2); Transformers 5.0.0; PEFT 0.18.1; Datasets 3.6.0; scikit-learn 1.8.0; NumPy 2.3.2. Federation Participation and budget Full participation; 20 rounds; 10 local optimizer steps per client and round. Optimization AdamW Adapter learning rate 10 −4; constant schedule; weight decay 0; gradient clipping 1.0; effective batch size 8. LoRA Shared configuration Query/value projections; scaling factor 16; dropout 0.05; rank 32 for FedIT, FFA-LoRA, and FedSA-LoRA; rank 8 per adaptively selected expert for FedLEASE and FedWeave .Router Architecture and training Two-layer MLP; hidden size 512; dropout 0; learning rate 5 × 10 −5; full softmax over the selected experts; no task-label or load-balancing loss. Discovery Local buckets Normalized frozen representations; k-means with 10 restarts; candidate count 
+
+2, . . . , min(8 , n − 1) ; Euclidean silhouette selection. Discovery Signatures and alignment 10 warmup steps per bucket with batch size 8; embedding batch size 16; LoRA-B query/value signatures; mean layer-wise cosine distance; silhouette-selected agglomerative alignment. Evaluation Sequence and decoding Maximum input length 512; greedy decoding; 64/192/4/4 new tokens for CoEdIT/GSM8K/TweetEval/ARC-C; sparse inference (Top-1 expert activa-tion). tion. For n evaluated examples or prototypes, purity is the fraction assigned consistently with the dominant reference label in each cluster: 
+
+Purity(Ω , Y) = 1
+
+n
+
+> R
+
+X
+
+> r=1
+
+max  
+
+> k
+
+|ωr ∩ yk |. (9) Normalized mutual information measures the information shared by the two partitions: 
+
+NMI(Ω , Y) = 2I(Ω; Y)
+
+H(Ω) + H(Y) . (10) For nrk = |ωr ∩ yk |, ar = P 
+
+> k
+
+nrk , and bk = P 
+
+> r
+
+nrk , the adjusted Rand index is 
+
+ARI = 
+
+P
+
+> r,k
+
+ nrk 
+
+> 2
+
+ −
+
+P
+
+> r
+
+ ar
+
+> 2
+
+ P 
+
+> k
+
+ bk
+
+> 2
+
+ n
+
+> 2
+
+
+
+12
+
+P 
+
+> r
+
+ ar
+
+> 2
+
+ + P
+
+> k
+
+ bk
+
+> 2
+
+ −
+
+P
+
+> r
+
+ ar
+
+> 2
+
+ P 
+
+> k
+
+ bk
+
+> 2
+
+ n
+
+> 2
+
+
+
+. (11) Purity emphasizes dominant-label correctness, NMI measures global information agreement, and ARI measures pairwise agree-ment after correcting for chance. 
+
+## B Cost Accounting 
+
+Prototype discovery runs once. For client i, it embeds |D i| ex-amples, clusters them, and performs 10 Ci bucket warmup steps. Federated training schedules 20 × 10 = 200 local steps per client, so warmup alone adds a Ci/20 step ratio (20% for four buckets), excluding embedding and clustering. For P = P 
+
+> i
+
+Ci uploaded pro-totypes, the server computes pairwise layer-wise cosine distances and silhouette-based agglomerative groups. For rank r over L layers, query/value outputs ol,q , o l,v give sig-nature dimension dB = r PLl=1 (ol,q + ol,v ). For Llama3.2-3B at rank 8, dB = 917 ,504 FP32 values, or 3.50 MiB per bucket; client i sends 3.50 Ci MiB once. During each communication round, 
+
+FedWeave and FedLEASE use rank 8 per adaptively selected ex-pert. For the four-expert selections on Llama3.2-3B, both instantiate 9.18M LoRA parameters, matching the total LoRA capacity of rank-32 FedIT. Including routing modules, the corresponding worst-case trainable-state payload contains 10.75M scalars for FedWeave and 15.48M for FedLEASE; Table 5 reports the backbone-specific totals for both models. Inactive expert uploads are omitted; bytes depend on precision. These counts expose deterministic overhead but do not replace end-to-end wall-clock and peak-memory profiling. 
+
+## C Theoretical Analysis 
+
+This section analyzes the two mechanisms behind FedWeave . We first analyze gradient conflict and routing-weighted expert conver-gence with the router and other experts fixed. We then fix the experts, compare persistent and reset-and-average router optimization, and transfer the bounds to sparse-inference risk. Randomized sample-count-proportional bucket sampling defines the clean router refer-ence, while an explicit order-bias term covers deterministic balanced interleaving. Task identities are used only as observable proxies for latent patterns in the analysis and diagnostics; FedWeave never observes them. Table 5: Trainable-parameter budget for the two backbones. Counts exclude the frozen backbone, optimizer state, and replicated client-local copies. “Adaptive (4)” means that silhouette selection determined the expert count and selected four in the reported runs. 
+
+Method LoRA rank Experts Router copies Trainable parameters (M) Llama3.2-3B Gemma-2-2B FedIT 32 1 – 9.18 6.39 FFA-LoRA 32 1 – 3.67 2.56 FedSA-LoRA 32 1 – 9.18 6.39 FedLEASE 8 Adaptive 4 cluster-specific 15.48 11.12 
+
+FedWeave 8 Adaptive 1 shared 10.75 7.57 
+
+Gradient Conflict under Pattern Mixtures 
+
+Let Fk (θ) be the expected loss of latent pattern k for the component under study and let gk (θ) = ∇Fk (θ). If client i contains pattern proportions pi,k , then its mixed objective and gradient are 
+
+Fi(θ) = 
+
+> K
+
+X
+
+> k=1
+
+pi,k Fk (θ), gi(θ) = 
+
+> K
+
+X
+
+> k=1
+
+pi,k gk (θ). (12) The squared norm of the mixed direction expands as 
+
+∥gi∥2 = X
+
+> k
+
+p2 
+
+> i,k
+
+∥gk ∥2 + 2 X
+
+> k<ℓ
+
+pi,k pi,ℓ ⟨gk , g ℓ⟩. (13) Thus a negative cross-pattern inner product cancels part of the usable descent direction before server aggregation. Define the cor-responding conflict measure 
+
+Γi(θ) = X
+
+> k<ℓ
+
+pi,k pi,ℓ 
+
+−⟨ gk (θ), g ℓ(θ)⟩
+
+> +
+
+. (14) The role of local purity can be stated without assuming that every pattern pair conflicts. For bucket c of client i, let qi,c,k be its pattern proportions and k(i, c ) = arg max k qi,c,k . If its off-dominant probability is at most ϵ and ∥gk ∥ ≤ G, then its conflict measure satisfies 
+
+Γbucket  
+
+> i,c
+
+:= X
+
+> k<ℓ
+
+qi,c,k qi,c,ℓ 
+
+−⟨ gk , g ℓ⟩ 
+
+> +
+
+≤
+
+
+
+ϵ + ϵ2
+
+2
+
+
+
+G2. (15) Indeed, pairs involving the dominant pattern have total probability weight at most ϵ, pairs among off-dominant patterns have weight at most ϵ2/2, and each negative inner product is at most G2 in magni-tude. Equation (15) shows that coherent buckets bound worst-case within-update cancellation through their off-dominant probability. The reported purity scores diagnose this condition but do not di-rectly measure gradient inner products. 
+
+Routing-Weighted Expert Contamination 
+
+There are K latent patterns and M ⋆ global experts. For the clean comparison, assume K = M ⋆ and a bijection ψ : {1, . . . , K } → {1, . . . , M ⋆}, and write κm = ψ−1(m). When K̸ = M ⋆, the fidelity bound still applies to experts with a designated target pat-tern after unmatched or merged pattern weight is included in the contamination term, but the one-to-one oracle-routing statements below require the clean regime. For expert m, let ρm(θm) > 0 denote its total routed contribution weight and decompose the raw expected soft-routed gradient by client i, local bucket c, and latent pattern k:
+
+hraw  
+
+> m
+
+(θm) = ρm(θm)¯hm(θm),
+
+¯hm(θm) = X
+
+> i,c,k
+
+ωi,c,k,m (θm)gi,c,k,m (θm),ωi,c,k,m ≥ 0, X
+
+> i,c,k
+
+ωi,c,k,m = 1 .
+
+(16) We condition on positive total routed weight when defining ¯hm;an inactive expert has zero raw update. Here ωi,c,k,m is the normalized nonnegative contribution weight after accounting for bucket sampling, prototype-conditioned upload weighting, and input-dependent routing gates. The conditional direction gi,c,k,m 
+
+retains the corresponding loss sensitivity, so Eq. (16) does not fac-tor a mean routing coefficient from an unweighted bucket gradient. 
+
+Assumption 1 (Bounded routed gradients and within-pattern shift) .
+
+For every i, c, k, m and iterate, 
+
+∥gi,c,k,m (θm)∥ ≤ Bg , ∥gk,m (θm)∥ ≤ Bg ,
+
+∥gi,c,k,m (θm) − gk,m (θm)∥ ≤ δpat .
+
+(17) 
+
+where gk,m = ∇Fk,m is the reference gradient for pattern k and expert m.
+
+Define the effective routed contamination of expert m as 
+
+χm(θm) = X 
+
+> i,c,k ̸=κm
+
+ωi,c,k,m (θm). (18) Let k(i, c ) be the dominant pattern of client i’s bucket c, and let 
+
+a(i, c ) be its aligned anchor expert. Using the same routed contri-bution weights, define 
+
+ϵloc  
+
+> m
+
+= X
+
+> i,c,k
+
+ωi,c,k,m 1{k̸ = k(i, c )},ϵalign  
+
+> m
+
+= X
+
+> i,c,k
+
+ωi,c,k,m 1{k(i, c )̸ = κa(i,c )},ϵleak  
+
+> m
+
+= X
+
+> i,c,k
+
+ωi,c,k,m 1{a(i, c )̸ = m}.
+
+(19) 
+
+Lemma 1 (Contamination decomposition) . In the clean one-pattern-per-expert regime, 
+
+χm ≤ ϵloc  
+
+> m
+
++ ϵalign  
+
+> m
+
++ ϵleak  
+
+> m
+
+. (20) 
+
+Proof. If k̸ = κm, then at least one of the following must hold: k̸ =
+
+k(i, c ), k(i, c )̸ = κa(i,c ), or a(i, c )̸ = m. Otherwise k = k(i, c ) = 
+
+κa(i,c ) and a(i, c ) = m, which implies k = κm. Applying this indicator union bound inside Eq. (18) proves the result. The local and global purity values in the main text diagnose the first two terms, while routing concentration qualitatively diagnoses the third. Equation (20) connects these diagnostics to χm; numerical equality would require additional assumptions. 
+
+Proposition 1 (Routing-weighted expert fidelity) . Under Assump-tion 1, 
+
+∥¯hm(θm) − gκm,m (θm)∥ ≤ 2Bg χm(θm) + δpat . (21) 
+
+Proof. Insert gk,m into Eq. (16). The weighted within-pattern shift is at most δpat . For k = κm, the remaining difference is zero; for 
+
+k̸ = κm, boundedness gives ∥gk,m − gκm,m ∥ ≤ 2Bg . Weighting the off-target terms proves Eq. (21). Combining Proposition 1 with Lemma 1 yields the interpretable bound 
+
+∥¯hm − gκm,m ∥ ≤ 2Bg
+
+ ϵloc  
+
+> m
+
++ ϵalign  
+
+> m
+
++ ϵleak 
+
+> m
+
+ + δpat . (22) For a client-level expert unit, define the analogous off-target contribution weight αclient  
+
+> m
+
+from its routing-weighted update de-composition. 
+
+Corollary 1 (Direct granularity comparison) . The client-level di-rection obeys 
+
+∥¯hclient  
+
+> m
+
+− gκm,m ∥ ≤ 2Bg αclient  
+
+> m
+
++ δpat . (23) 
+
+Consequently, prototype conditioning gives a strictly tighter worst-case target-direction bound whenever χm < α client  
+
+> m
+
+.
+
+Assumption 2 (Smooth target objective and routed stochastic direc-tion) . For expert m, Fκm,m is LE -smooth and lower bounded by 
+
+F ⋆κm,m . At active expert-update step u, let Fu contain θum, the total routed weight ρum > 0, and the routing history before stochastic gradient noise is drawn. The raw stochastic direction satisfies 
+
+E[dum | F u] = ρum
+
+ gκm,m (θum) + bum
+
+,
+
+E[∥dum − E[dum | F u]∥2 | F u] ≤ (ρum)2σ2 
+
+> E
+
+, (24) 
+
+where Proposition 1 gives ∥bum∥ ≤ 2Bg χm(θum) + δpat . Inactive steps have effective step size zero. 
+
+Theorem 3 (Per-expert convergence in stationarity under routed contamination) . Let θu+1  
+
+> m
+
+= θum − ηE dum, aum = ηE ρum ≤ 1/L E ,and Am,U = P 
+
+> u<U
+
+E[aum] > 0. Define ∆0 
+
+> E,m
+
+= Fκm,m (θ0
+
+> m
+
+) −
+
+F ⋆κm,m . Write gum = gκm,m (θum) and εum = 2 Bg χm(θum) + δpat .Then 
+
+1
+
+Am,U 
+
+X
+
+> u<U
+
+Eaum∥gum∥2 ≤ 2∆ 0
+
+> E,m
+
+Am,U 
+
++ 1
+
+Am,U 
+
+X
+
+> u<U
+
+Eaum(εum)2
+
++ LE σ2
+
+> E
+
+Am,U 
+
+X
+
+> u<U
+
+E[( aum)2].
+
+(25) 
+
+Proof. Let gu = gκm,m (θum), μu = gu + bum, and au = aum.Smoothness and the conditional variance bound give 
+
+E[Fκm,m (θu+1  
+
+> m
+
+) | F u] ≤ Fκm,m (θum) − au⟨gu, μ u⟩
+
++ LE a2
+
+> u
+
+2 (∥μu∥2 + σ2 
+
+> E
+
+).
+
+(26) Using −⟨ gu, μ u⟩ = − 12 ∥gu∥2 − 12 ∥μu∥2 + 12 ∥bum∥2 and 
+
+au ≤ 1/L E yields one-step descent with residual au∥bum∥2/2 + 
+
+LE a2
+
+> u
+
+σ2 
+
+> E
+
+/2. Taking total expectation, telescoping, and applying Proposition 1 proves Eq. (25). 
+
+Corollary 2 (Matched-effective-weight convergence comparison) .
+
+Consider prototype- and client-level expert updates with the same initialization, effective weights {aum}u<U , smoothness, and noise terms. Let their nonnegative directional-error bounds be 
+
+εum, proto = 2 Bg χum + δpat and εum, client = 2 Bg αclient ,u m + δpat .If χum ≤ αclient ,u m at every active step, the prototype-conditioned right-hand side of Eq. (25) is no larger, and is strictly smaller whenever the inequality is strict with positive probability at an active step. Proof. Under the matched quantities, only the directional-error term differs; the claim follows from (εum, proto )2 ≤
+
+(εum, client )2.Equation (25) is a fixed-context expert convergence guarantee. It separates two failure modes of the actual raw update: χm con-trols directional contamination, while Am,U records the effective optimization budget received by expert m. If an expert receives negligible routed weight, the first term remains large even when its normalized direction is pure. 
+
+Persistent and Reset-and-Average Router Optimization 
+
+Freeze the experts and write φ for the router parameters. For client 
+
+i, let πi,c = |B i,c |/|D i| be bucket c’s sample fraction and let 
+
+Ri(φ) = X
+
+> c
+
+πi,c Ri,c (φ),gi(φ) = ∇Ri(φ), gi,c (φ) = ∇Ri,c (φ).
+
+(27) The persistent router performs SGD on one shared state. Ran-domized sample-count-proportional sampling draws cs according to Pr( cs = c) = πi,c and is conditionally unbiased. For the imple-mented deterministic sample-count-balanced schedule, define its conditional order bias 
+
+qs(φs) = E[bgi,c s (φs) | φs] − gi(φs). (28) Thus qs = 0 for the randomized reference, while deterministic interleaving is covered through an explicit residual. The reset alter-native instead maintains bucket-local states, evaluates subsequent gradients at those dispersed states, and averages them after the local block. The gradient-dominance condition below is a standard route to linear SGD convergence, while the resulting dispersion term is analogous to client drift in local federated optimization; the main text provides the relevant citations. 
+
+Assumption 3 (Router smoothness, gradient dominance, and noise) . Each Ri,c is LR-smooth, and Ri satisfies the μ-Polyak– Łojasiewicz condition 
+
+∥∇ Ri(φ)∥2 ≥ 2μ(Ri(φ) − R⋆i ). (29) 
+
+Persistent gradients have conditional mean gi(φs) + qs(φs), and their centered conditional variance is at most σ2
+
+> R
+
+. For reset updates, the weighted aggregate of bucket-gradient noise has conditional second moment at most σ2
+
+> R
+
+.
+
+Theorem 4 (Persistent shared-state router convergence) . For 
+
+φs+1 = φs − ηRbgi,c s (φs) with 0 < η R ≤ 1/L R,
+
+E[Ri(φS ) − R⋆i ] ≤ E i,S + Oi,S ,
+
+Ei,S := (1 − μη R)S (Ri(φ0) − R⋆i ) + LRηRσ2
+
+> R
+
+2μ ,
+
+Oi,S := ηR
+
+2
+
+> S−1
+
+X
+
+> s=0
+
+(1 − μη R)S−1−sE∥qs(φs)∥2.
+
+(30) Proof. Let μs = gi(φs) + qs(φs). Smoothness, the centered vari-ance bound, and −⟨ gi, μ s⟩ = − 12 ∥gi∥2 − 12 ∥μs∥2 + 12 ∥qs∥2 imply 
+
+E[Ri(φs+1 ) | φs] ≤ Ri(φs) − ηR
+
+2 ∥gi(φs)∥2 + ηR
+
+2 ∥qs(φs)∥2
+
++ LRη2
+
+> R
+
+2 σ2
+
+> R
+
+.
+
+(31) Here the nonpositive coefficient of ∥μs∥2 was dropped using ηR ≤
+
+1/L R. Applying Eq. (29) and unrolling proves Eq. (30). For the clean matched-weight reset abstraction, set qs = 0 , ini-tialize every bucket state at the same router φc, 0 = ¯ φ0, and take local SGD steps φc,s +1 = φc,s − ηRbgi,c (φc,s ). This equal-depth construction isolates state fragmentation: s indexes depth along each bucket-local path, so the comparison matches depth rather than total gradient evaluations. Define the virtual weighted mean, local-model dispersion, and consensus-gradient error 
+
+¯φs = X
+
+> c
+
+πi,c φc,s ,Ds = X
+
+> c
+
+πi,c ∥φc,s − ¯φs∥2,es = X
+
+> c
+
+πi,c 
+
+ gi,c (φc,s ) − gi,c ( ¯ φs).
+
+(32) The mean reset trajectory therefore follows a biased client-objective direction: 
+
+E
+
+"X
+
+> c
+
+πi,c bgi,c (φc,s ) {φc,s }c
+
+#
+
+= gi( ¯ φs) + es. (33) 
+
+Theorem 5 (Reset-and-average router convergence with consensus error) . Under Assumption 3 and 0 < η R ≤ 1/L R,
+
+E[Ri( ¯ φS ) − R⋆i ] ≤ (1 − μη R)S (Ri( ¯ φ0) − R⋆i ) + LRηRσ2
+
+> R
+
+2μ
+
++ ηR
+
+2
+
+> S−1
+
+X
+
+> s=0
+
+(1 − μη R)S−1−sE∥es∥2,
+
+(34) 
+
+where 
+
+∥es∥2 ≤ L2
+
+> R
+
+Ds. (35) 
+
+Thus reset-and-average can incur an optimization term generated by bucket-local model dispersion; the persistent shared-state bound in Eq. (30) has no such consensus term. Proof. The weighted mean update is ¯φs+1 = ¯φs −
+
+ηR
+
+P 
+
+> c
+
+πi,c bgi,c (φc,s ). Equation (33) and the same biased-descent identity used in Theorem 4 give 
+
+E[Ri( ¯ φs+1 ) − R⋆i ] ≤ (1 − μη R)E[Ri( ¯ φs) − R⋆i ]+ ηR
+
+2 E∥es∥2 + LRη2
+
+> R
+
+2 σ2
+
+> R
+
+. (36) Unrolling proves Eq. (34). For Eq. (35), Jensen’s inequality and 
+
+LR-smoothness give 
+
+∥es∥2 ≤ X
+
+> c
+
+πi,c ∥gi,c (φc,s ) − gi,c ( ¯ φs)∥2
+
+≤ L2
+
+> R
+
+X
+
+> c
+
+πi,c ∥φc,s − ¯φs∥2 = L2
+
+> R
+
+Ds.
+
+(37) For the randomized reference qs = 0 , matched initialization, step size, depth, and noise, the certificate gap is the nonnegative consensus sum in Eq. (34), and is strict when that sum is positive. For the deterministic persistent schedule, the comparison is between 
+
+Oi,S and the reset residual; their magnitudes determine the bound ordering. The dispersion term is directly tied to heterogeneity across bucket router objectives. At a common initialization φ, define 
+
+ζ2
+
+> i, within
+
+(φ) = X
+
+> c
+
+πi,c ∥gi,c (φ) − gi(φ)∥2. (38) 
+
+Corollary 3 (First-step reset dispersion) . For deterministic full gradients and one reset step from a common initialization, 
+
+D1 = η2
+
+> R
+
+ζ2
+
+> i, within
+
+(φ). (39) 
+
+Hence heterogeneous bucket gradients create the consensus-error source that enters Eq. (34) from subsequent local steps onward. Proof. After one step, φc, 1 = φ − ηRgi,c (φ) and ¯φ1 = φ −
+
+ηRgi(φ). Substitution into D1 proves the result. Theorem 5 isolates state fragmentation under matched effective pattern weights. If reset endpoints trained for Hc steps are aggre-gated with coefficients ac, their first-order normalized direction instead uses 
+
+eπc = acHc
+
+P 
+
+> j
+
+aj Hj
+
+, bwt (φ) = X
+
+> c
+
+(eπc − πi,c )gi,c (φ). (40) This bias precedes dispersion; a multi-step error also contains a 
+
+eπ-weighted consensus term. If both Hc ∝ πi,c and ac ∝ πi,c ,then eπc ∝ π2
+
+> i,c
+
+; step-normalized endpoint deltas or any rule en-forcing eπc = πi,c restore matched weighting. More explicitly, if 
+
+∥gi,c (φ)∥ ≤ GR, then 
+
+∥bwt (φ)∥ ≤ GR∥eπ − πi∥1. (41) For an equal-depth reset using fixed weights eπ, define 
+
+¯φeπs = X
+
+> c
+
+eπcφc,s ,eeπs = X
+
+> c
+
+eπc
+
+ gi,c (φc,s ) − gi,c ( ¯ φeπs ).
+
+(42) Its expected aggregate direction is gi( ¯ φeπs ) + bwt ( ¯ φeπs ) + eeπs . Thus the biased-descent proof of Theorem 5 replaces es by bwt + eeπs , so weight mismatch enters the same geometrically weighted optimiza-tion residual before the gap-calibration transfer. In the evaluated 
+
+w/o client-router ablation, Hc is allocated approximately by bucket size (with minimum-step and rounding corrections) and endpoint coefficients are again proportional to bucket sample count. Thus the aggregation-granularity ablation in Table 2 evaluates the im-plemented reset-and-reweight procedure, whose residual includes both weight mismatch and consensus error. 
+
+Router Optimization and Sparse-Inference Risk 
+
+Let z(x) ∈ { 1, . . . , K } be the latent pattern of x, let m†(x) = 
+
+ψ(z(x)) be its oracle expert, and let ℓm(x, y ) be the loss using only expert m. Define Ri, oracle = E(x,y )∼D i [ℓm†(x)(x, y )] , let 
+
+rm(x; φ) be the router probability, and define the oracle-probability deficit 
+
+Si(φ) = Ex∼D i [1 − rm†(x)(x; φ)] . (43) Assumption 4 (Gap-calibrated task loss) . The fixed experts have an identifiable oracle assignment, and the soft-routed task objective is calibrated to that assignment: 
+
+cgap Si(φ) ≤ Ri(φ) − Ri, oracle + βmix ,cgap > 0, βmix ≥ 0. (44) 
+
+Define the nonnegative router-class approximation gap Ai := [R⋆i − Ri, oracle ]+. For a linear mixture of fixed expert losses with pointwise non-oracle loss gap at least ∆, Eq. (44) holds with 
+
+cgap = ∆ and βmix = 0 .
+
+Let sm(x; φ) denote router logits and 
+
+mar φ(x) = sm†(x)(x; φ) − max  
+
+> j̸=m†(x)
+
+sj (x; φ). (45) Define Rτ,i (φ) = Pr x∼D i [mar φ(x) ≤ τ ].
+
+Proposition 2 (Gap-calibrated margin risk) . Under Assumption 4, for every τ ∈ R,
+
+Rτ,i (φ) ≤ 1 + eτ
+
+cgap 
+
+ Ri(φ) − R⋆i + Ai + βmix 
+
+. (46) 
+
+Proof. If mar φ(x) ≤ τ , then one competing logit is at least 
+
+sm†(x)−τ , so rm†(x)(x; φ) ≤ (1+ e−τ )−1 and 1−rm†(x)(x; φ) ≥
+
+(1 + eτ )−1. Therefore 1{mar φ(x) ≤ τ } ≤ (1 + eτ )(1 −
+
+rm†(x)(x; φ)) . Taking expectation, applying Eq. (44), and using 
+
+Ri(φ) − Ri, oracle ≤ Ri(φ) − R⋆i + Ai proves the result. Let Ei,S and Oi,S be defined in Eq. (30), and define Ci,S =
+
+> ηR
+> 2
+
+PS−1 
+
+> s=0
+
+(1 − μη R)S−1−sE∥es∥2.
+
+Corollary 4 (Persistent and reset oracle-routing risk) . Under As-sumptions 3–4, a common initialization, and the matched-weight reset construction of Theorem 5, for every τ ∈ R,
+
+ERτ,i (φS ) ≤ 1 + eτ
+
+cgap 
+
+(Ei,S + Oi,S + Ai + βmix ),
+
+ERτ,i ( ¯ φS ) ≤ 1 + eτ
+
+cgap 
+
+(Ei,S + Ci,S + Ai + βmix ).
+
+(47) This follows from Proposition 2 and Theorems 4–5. Hence per-sistent shared-state SGD has low oracle-routing surrogate risk when 
+
+Ei,S , Oi,S , Ai, and βmix are small. In the randomized reference 
+
+Oi,S = 0 , whereas matched reset additionally propagates Ci,S . The weight-mismatched extension above replaces this clean consensus residual by one containing bwt + eeπs .Finally, let bm(x) = arg max m sm(x; φ) and Rsparse ,i =
+
+E(x,y )∼D i [ℓ bm(x)(x, y )] , and assume 
+
+[ℓ bm(x)(x, y ) − ℓm†(x)(x, y )] + ≤ ∆max . (48) Since the mismatch event is contained in {mar φ(x) ≤ 0},
+
+Corollary 5 (Optimization-controlled sparse-routing risk) .
+
+Rsparse ,i − Ri, oracle ≤ ∆max R0,i (φ)
+
+≤ 2∆ max 
+
+cgap 
+
+ Ri(φ) − R⋆i + Ai + βmix 
+
+.
+
+(49) For bounded metrics one may take a global ∆max ; for unbounded token-level cross-entropy, Eq. (48) applies to clipped loss or requires a finite conditional excess-loss moment. The routing heatmap and same-checkpoint sparse-inference ablation empirically probe the reliable-routing regime captured by the bound.

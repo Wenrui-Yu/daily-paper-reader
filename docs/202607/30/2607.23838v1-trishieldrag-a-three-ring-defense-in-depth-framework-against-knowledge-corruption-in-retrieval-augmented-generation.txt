@@ -1,0 +1,533 @@
+Title: TriShieldRAG: A Three-Ring Defense-in-Depth Framework Against Knowledge Corruption in Retrieval-Augmented Generation
+
+URL Source: https://arxiv.org/pdf/2607.23838v1
+
+Published Time: Tue, 28 Jul 2026 01:19:34 GMT
+
+Number of Pages: 13
+
+Markdown Content:
+# TriShieldRAG: A Three-Ring Defense-in-Depth Framework Against Knowledge Corruption in Retrieval-Augmented Generation 
+
+Susil Kumar Mohanty ∗, Rohit Patel ∗, Kosuru Yuvaraj ∗, Jeenal Chaudhary ∗, Disha Singhania ∗∗Department of Computer Science and Engineering, Indian Institute of Technology Jodhpur, Jodhpur, India 
+
+Abstract 
+
+Retrieval-Augmented Generation (RAG) lets a large lan-guage model (LLM) answer questions using documents pulled from an external knowledge base at query time instead of relying only on what it learned during training. This is what makes RAG useful for private data, fast-changing information, and reducing hallucination but it also means the model’s answer is only as trustworthy as whatever the retriever hands it. If the knowledge base can be written to by more than one party, an attacker only needs to slip in a handful of adversarial documents to steer the model toward a chosen wrong answer. PoisonedRAG demonstrated exactly this: as few as five crafted documents flip an undefended system’s answer roughly 90% of the time, and it showed that three natural single-stage defenses perplexity filtering, query para-phrasing, and knowledge-base expansion, leave attack success at 30% or higher. We built TriShieldRAG to close that specific gap. Rather than relying on one checkpoint, we place three independent, formally specified rings across the pipeline: an Ingest Guard that screens documents for lexical and statis-tical poisoning signatures, a Retrieval Scorer that re-ranks the retrieved set by a provenance- and consistency-weighted trust score, and a Cross-LLM Consensus stage that polls a panel of three architecturally diverse language models (Claude, Mistral Small, and Llama 3.2) and allows one bounded re-retrieval on disagreement. We derive the exact conditions under which Rings 2 and 3 are expected to work, a minority-poison assumption and an explicit provenance-tag assumption and show that our single reported evaluation configuration is consistent with this analysis, though we have not yet run the controlled, ρ-swept experiment that would be needed to confirm it independently. Evaluated against the non-adaptive attacker described in the original PoisonedRAG paper, over a 5,000-document Wikipedia knowledge base with 10 target questions, the full pipeline reduces attack success rate from roughly 91% to roughly 13%, while preserving accuracy on benign, unpoisoned queries. 
+
+Index Terms —Retrieval Augmented Generation, Data Poison-ing, Knowledge Corruption, LLM Security, Defense-In-Depth, Adaptive Attacker Evaluation 
+
+I. Introduction 
+
+Retrieval Augmented Generation [1] grounds an LLM’s answer in documents retrieved from an external knowledge base at query time, instead of forcing the model to rely purely on what it memorized during training. This is genuinely useful as it lets a model answer questions about private documents it never saw, stay current without retraining, (in principle) cite where an answer came from. The trade-off is that the retriever will happily surface any document that looks textually or semantically close to the query whether or not that document is actually true. If an attacker can write even a small number of documents into an open or crowd-sourced knowledge base, they can control a meaningful part of what the model sees and by extension, what it says. PoisonedRAG [2] formalized this precisely. A poison docu-ment is built from two parts: a retrieval trigger that makes the document look relevant to a specific target question and a false injection claim that the model is meant to repeat as the answer. The paper showed that as few as five such documents are enough to flip an undefended RAG system’s answer with over 90% success, across several different LLMs and retrievers. PoisonedRAG [2] has shown that dense retrievers can be poisoned directly [3], that retrieved content can hijack model behavior through indirect prompt injection [4] rather than corrupting facts outright, a related but distinct problem from the one we address here. Most proposed defenses we found in the literature Poisone-dRAG [2] act at a single stage of the pipeline, like a perplexity filter applied once, or a paraphrase-consistency check applied once. Each of these is, in effect, a single checkpoint and a single checkpoint is a single point of failure: an attacker only has to tune the poison to beat that one specific check, make it more fluent to slip past a perplexity filter, match deeper semantics to survive paraphrasing, or simply add more documents to survive knowledge base expansion. That gives an adaptive attacker exactly one thing to study and evade and it is precisely why [2]’s own residual attack success rate with these defenses stays at 30% or higher. Our approach is defense-in-depth: three independent checks, at three different stages (ingest time, retrieval time, generation time), so that a single poison document has to get past all three simultaneously rather than just one (Fig. 1). What is missing from the existing literature, in one sentence, is layered protection that screens documents at ingest, at retrieval, at generation, so that defeating any one layer alone is not enough to succeed. What we contribute in this initial version. 1) TriShieldRAG, a three-ring architecture: an I NGEST -arXiv:2607.23838v1 [cs.CR] 26 Jul 2026 Ring 1        
+
+> Ingest Guard
+> Ring 2
+> Retrieval Scorer
+> Ring 3
+> Cross-LLM Consensus
+> Document being added Query arriving Answer being formed
+> perplexity embedding-outlier pattern match
+> provenance / trust inter-doc consistency trust re-ranking
+> 3 LLMs vote disagreement ⇒re-retrieve without suspects
+> catches crude poison at the door catches poison that contradicts clean docs
+> catches poison that slipped through Rings 1–2
+> Fig. 1. TriShieldRAG’s three checkpoints, mapped against the specific gap identified in [2]: a document is screened individually as it enters the knowledge base (Ring 1), the retrieved top-kis re-scored by trust once a query arrives (Ring 2), the panel’s answer is cross-checked as it is formed (Ring 3). Because each ring inspects a different signal, poison must simultaneously defeat all three, this is the direct answer to the paper’s own finding that every single-layer defense it tested (perplexity filtering, query paraphrasing, knowledge base expansion) is a single point of failure, leaving 30% or higher residual attack success.
+
+GUARD (Ring 1), a R ETRIEVAL SCORER (Ring 2), a CONSENSUS stage (Ring 3), each written out as aprecise algorithm with explicit, fixed thresholds (Section V). 2) A derived minority-poison assumption : Rings 2 and 3’s majority-style aggregation only recovers the correct an-swer while poison stays a minority of the retrieved top-
+
+k, together with an explicit provenance-tag assumption 
+
+that bounds exactly when Ring 2’s provenance weight is actually doing the work (Section VI). We derive both analytically and show they are consistent with our single reported evaluation configuration; a controlled experiment that sweeps the poison fraction ρ across the minority/majority boundary, which would be needed to confirm the assumption independently rather than only observe a result consistent with it, is explicit future work (Section X). 3) A reference implementation using FAISS dense retrieval and a heterogeneous, three-vendor LLM panel, with every ring implemented as an independently testable module (Section VII). 4) A reproducible evaluation against the non-adaptive at-tacker described in [2], over a 5,000-document knowl-edge base and 10 target questions (Section IX). The full pipeline reduces attack success rate from roughly 91% to roughly 13%. We have deliberately not yet evaluated an adaptive attacker aware of TriShieldRAG’s design; we state this as the primary open item for the next version of this work rather than leaving it unmentioned (Section X). 
+
+II. Related Works 
+
+A. Retrieval foundations 
+
+RAG systems condition generation on the top-k documents returned by a retriever, and the choice of retriever determines which attack surfaces exist. Sparse, term-frequency methods such as TF-IDF [7] and BM25 [23] match on lexical overlap. Dense retrievers instead embed queries and documents into a shared vector space and match on geometric proximity: DPR [20] established the dual-encoder formulation, ANCE [22] improved it through approximate-nearest-neighbour hard-negative mining, and Contriever [21] showed strong unsuper-vised performance via contrastive pre-training. Sentence-level encoders [5] and efficient vector indices [6] make this practical at scale, and the BEIR benchmark [24] standardised zero-shot comparison across these families. This distinction matters directly for our threat model: PoisonedRAG’s search trigger S
+
+is engineered to exploit geometric proximity, which is why it transfers across DPR, ANCE, and Contriever alike, and why TriShieldRAG’s Ring 2 deliberately down-weights that signal (Section V). 
+
+B. Corpus poisoning and knowledge corruption 
+
+RAG systems condition generation on the top-k documents returned by a dense [5], [6] or sparse/TF-IDF [7] retriever. Zhong et al. [3] showed that a small number of adversarial documents can corrupt dense retrieval directly. PoisonedRAG [2] extended this into a full, black-box, trigger-plus-payload construction against the complete RAG pipeline, achieving over 90% attack success with only five poison documents; this is the threat model we adopt in Section III. Indirect prompt injection [4] is a related but distinct threat, where retrieved content hijacks the model’s behavior rather than corrupting a specific fact; TriShieldRAG targets the factual-corruption case specifically. 
+
+C. Single-stage defenses and their limits 
+
+Prior single-stage defenses tested directly in [2] include perplexity filtering based on language-model likelihood [8], query paraphrasing, knowledge base expansion. Independent follow-up defenses have also proposed query-answer lexical-overlap filtering [18] as an additional single-stage check; we discuss why Ring 1 combines this signal with two others, rather than relying on it alone, below. Table I summarizes why the original paper’s three defenses fall short, in its own findings. Each of these is a single checkpoint an attacker only has to defeat once. TriShieldRAG instead composes lexi-cal filtering, trust re-ranking, consensus voting into a single pipeline (Fig. 1), so that beating any one stage does not defeat the whole. Table II summarizes how TriShieldRAG’s TABLE I WHY EACH SINGLE -STAGE DEFENSE IN [2] FAILS           
+
+> Defense Why it fails
+> Perplexity filter-ing Poison is LLM-generated, so it reads flu-ently with natural perplexity; the filter only catches crude, unnatural text. Query paraphrasing The retrieval trigger Smatches the ques-tion’s meaning , not its exact wording; re-wording the query does not move the em-beddings far enough to avoid the poison. knowledge base expansion Alarger top-kstill includes the poison alongside more legitimate documents; the LLM continues to weight the poison heav-ily.
+
+stage coverage compares against the closest defenses and adjacent systems discussed in the remainder of this section. Ring 3’s agreement threshold draws on the same intuition as Byzantine quorum systems [9], and more directly on the modern robust-aggregation literature that formalises how many corrupted inputs a majority rule can absorb: Krum [25] selects the input closest to its nearest neighbours, coordinate-wise median and trimmed mean [26] achieve order-optimal statistical rates under a bounded corruption fraction, Bulyan [27] composes both to close vulnerabilities in distance-only selection, and geometric-median formulations [28] tolerate up to half-corrupted input sets. This body of work is precisely why our minority-poison assumption (Section VI) is stated as an explicit precondition rather than assumed away: every one of these rules degrades once corrupted inputs become the majority, and Ring 3 inherits that same boundary. Approaches such as FLTrust [29] instead bootstrap from a small trusted root set, which is conceptually closer to Ring 2’s provenance weighting. We are careful to note that, unlike a classical Byzantine fault-tolerant system, our “replicas” (the LLMs in the panel) are not guaranteed to fail independently, we return to this honestly in Section X. Following the adaptive-evaluation principle argued for by Carlini et al. [10], we consider evaluating TriShieldRAG against an attacker who is aware of, specifically evades, Ring 1’s detectors to be essential future work rather than a result we can already report; we state this gap plainly in Section X rather than leaving it implicit. Single-document, one-shot attacks. A separate line of work argues that PoisonedRAG’s requirement of multiple poison documents per query is itself impractical, since injecting enough documents to outnumber legitimate evidence is costly and easier to detect. CorruptRAG [16] demonstrates a single-document attack achieving over 90% ASR on several datasets, shows it survives paraphrasing, instructional prevention, LLM-based detection, knowledge-expansion defenses largely intact; precisely the four defense categories PoisonedRAG itself tested. This is directly relevant to Ring 2: a single-document attack is, by construction, a small minority of a top-k = 5 
+
+retrieved set ( ρ = 0 .2), which is exactly the regime our Propo-sition 1 predicts Ring 2’s consistency check should handle correctly, since the lone poison document cannot dominate the majority token bag μ the way a multi-document attack can. We have not yet run TriShieldRAG against this specific single-document attack template; doing so is a natural, low-cost addition to the future evaluation described in Section X, since it tests our minority-poison assumption at a different, arguably more realistic point on the ρ spectrum than our current np = 5 setup. The three datasets referenced above, Natural Questions [32], HotpotQA [33], MS MARCO [34], are the standard open-domain QA benchmarks on which both PoisonedRAG and CorruptRAG report results; extending our own evaluation to all three is a prerequisite for any genuinely comparable head-to-head number. This context is intentionally scoped: the attack papers above report ASR under their own datasets, retrievers, target LLMs, none of them have been run against TriShield-RAG directly, so Table III should be read as evidence that our undefended baseline’s ≈91% is consistent with the broader literature’s reported range for comparable attack budgets, not as a head-to-head benchmark. A direct run of CorruptRAG’s single-document template against TriShieldRAG, the most in-formative such comparison given its relevance to our minority-poison assumption, remains future work (Section X). Comparison with information-flow control. Cordon-MAS [17] takes a structurally different approach from ours: rather than filtering documents at any pipeline stage, it enforces that the final answer-generating agent never reads raw retrieved text at all. A separate Extractor agent converts documents into structured claim records, an Auditor agent cross-checks those claims against each other, only the verified claims, never the original text, reach the model that writes the answer. This removes an entire class of attack (anything relying on the gen-erator reading persuasive raw text) by construction, at the cost of running three to four sequential LLM calls per query rather than our bounded 2M . TriShieldRAG instead accepts that raw text may reach the generator, relies on Ring 3’s independent multi-vendor vote to catch cases where that text successfully misleads one model but not the others; Cordon-MAS’s claim-extraction step and our Ring 2 provenance/consistency check address a similar underlying concern (is this document’s content actually trustworthy) through different mechanisms, neither has been evaluated against the other’s specific threat construction. 
+
+D. Comparison with contemporary defenses 
+
+Comparison with retrieval-stage-only defenses. RAGPart and RAGMask [40] propose two lightweight defenses op-erating purely at the retriever, without any modification to the generation model: RAGPart exploits document-partitioning dynamics within the dense retriever itself, while RAGMask flags suspicious tokens by measuring how much a document’s similarity score shifts under targeted token masking. This is a useful point of contrast for Ring 2: RAGPart and RAG-Mask act entirely within the retrieval stage and require no downstream generation-time check, whereas our own Ring 2 is deliberately paired with Ring 3’s cross-vendor vote precisely TABLE II TRI SHIELD RAG COMPARED AGAINST THE SIX DEFENSES DISCUSSED IN THIS SECTION 
+
+System Stage(s) protected Core mechanism Handles single-doc poison? Key difference from TriShieldRAG 
+
+TrustRAG [14] Retrieval only Embedding-space clustering + LLM self-assessment Not evaluated in cited work Clustering relies on embedding geome-try, the exact signal PoisonedRAG’s trig-ger S is optimized to exploit Cordon-MAS [17] Generation only (info-flow control) Claim extraction + cross-source audit; generator never reads raw text By design (claims audited individually) 3–4 sequential LLM calls per query vs. our bounded 2M ; blocks an attack class by construction, not by voting CorruptRAG [16] Attack, not defense Single-document, template-based poisoning N/A, this is the at-tack our minority regime targets Not yet tested against TriShieldRAG; a natural extension of Section X RAGShield [13] N/A, different threat Structured claim extrac-tion + multi-source nu-meric registry N/A, targets insider edits, not injected docs Unrelated system with a coincidentally similar name (RAGShield) RAGPart /RAGMask [40] Retrieval only Retriever-internal partitioning + token-masking similarity shift Not evaluated for this regime in the cited work No generation-stage check; cannot catch poison that survives retrieval-stage filter-ing RAGForensics [19] Post-hoc, none of the three real-time stages Iterative LLM-guided traceback of already-ingested poisoned texts N/A, operates after an attack is sus-pected, not at query time Retroactive, forensic capability; comple-mentary to, not a substitute for, real-time blocking 
+
+TriShieldRAG (ours) Ingest, retrieval, 
+
+and generation Lexical/statistical screening + provenance-weighted trust + multi-vendor vote Yes for ρ< 0.5
+
+(Prop. 1); confirmed failing at ρ=0 .6
+
+Three independent checkpoints, each targeting a signal the prior stage does not rely on        
+
+> TABLE III REPORTED ASR FIGURES ACROSS ATTACK PAPERS ,NOT DIRECTLY COMPARABLE (DIFFERENT DATASETS ,RETRIEVERS ,TARGET LLM S);
+> SHOWN FOR CONTEXT ONLY
+
+Attack / system ASR range Setting 
+
+PoisonedRAG [2] 69–91% 5 poison docs, NQ/HotpotQA/MS-MARCO CorruptRAG-AS [16] 87–98% 1 poison doc, same 3 datasets CorruptRAG-AK [16] 86–97% 1 poison doc, LLM-refined Our undefended baseline ≈91% 5 poison docs, our 5,000-doc KB 
+
+TriShieldRAG (full) ≈13% same setting, full pipeline 
+
+because a retrieval-only defense cannot catch a poison docu-ment that survives filtering but still succeeds in misleading one particular generator. Comparison with TrustRAG. The closest existing defense to Ring 2 and Ring 3 combined is TrustRAG [14], a two-stage framework that clusters retrieved documents to filter suspected attack patterns and then applies LLM self-assessment to re-solve remaining inconsistencies. The key structural difference is that TrustRAG’s first stage relies on embedding-space clus-tering, which, as both our Ring 2 design and, independently, recent work on numerical claim manipulation [13] observe, cannot separate a poison document from legitimate ones when the poison is deliberately optimized to be embedding-similar to the target query (exactly the case PoisonedRAG constructs). Ring 2 instead weights retrieval similarity lowest among its three trust components precisely because it is the signal the attacker controls most directly, Ring 3’s cross-vendor panel provides a second, independent check that does not rely on embedding geometry at all. Scale of the broader vulnerability. Beyond the single-paper comparisons above, larger benchmarking efforts confirm the gap TriShieldRAG targets is not specific to PoisonedRAG’s original defenses: an evaluation spanning 13 published attacks against 7 published defenses [15] finds that poisoned content transfers across most advanced RAG configurations, with resistance varying substantially by the underlying LLM. This is consistent with our own decision to use a heterogeneous, multi-vendor panel in Ring 3 rather than relying on any single model’s robustness, though we have not yet run TriShieldRAG against this specific benchmark’s attack set; doing so is a natural extension of the future work in Section X. A distinct, complementary threat: numerical claim manipu-lation. A concurrently-developed system with a coincidentally similar name, RAGShield [13], addresses a fundamentally different attack surface and is not affiliated with this work. That paper’s threat model is an insider with valid credentials who edits a numerical value already present in a legitimate document (for example, changing a published tax deduction from $15,000 to $15,500), rather than an external party injecting a new document into the corpus. RAGShield [13] proves, both formally and empirically, that this class of attack is invisible to any embedding-based defense: a single-token numeric substitution changes the document’s embedding by a negligible amount (cosine similarity > 0.999 in their ex-periments), producing a measured sensitivity gap of roughly 
+
+1,459 × between the size of the numeric change and its effect in embedding space. Their fix abandons embeddings entirely for the verification step, extracting structured numerical claims and cross-checking them against a multi-source registry and a calendar of legitimate update windows. This is a different problem from the one we address: our threat model (Section III) is an external attacker injecting whole documents into an open corpus, where the poison’s entire strategy is to make the document maximally similar in embedding space to the target query, the opposite regime from RAGShield’s [13] silent, embedding-invisible edits. We note this as an honest scope boundary rather than a competing claim: Ring 2’s retrieval-relevance signal inherits the same blind spot RAGShield [13] identifies, so TriShieldRAG as described here is not designed to catch a legitimate-looking document whose numbers have been quietly altered post-ingestion. A production deployment guarding against both attacker models would plausibly need RAGShield’s [13] claim-level verification as a fourth, comple-mentary layer alongside our three rings, rather than a substitute for any of them. 
+
+III. Threat Model 
+
+The knowledge base D is open or semi-open: more than one party can write to it, matching the realistic setting where a RAG deployment ingests from a wiki, a crawled corpus, or user-submitted documents. This assumption reflects how production vector data management systems are actually deployed. Purpose-built systems such as Milvus [38], and the broader class of vector database management systems surveyed in [39], are designed from the outset as multi-tenant stores with concurrent writers, incremental insertion, and continuous index maintenance. A retrieval library such as FAISS provides no notion of document ownership or write authorisation; that responsibility sits with the surrounding system, which is precisely where an attacker with legitimate write access operates. This assumption is not contrived; it reflects how production vector data management systems are actually deployed. Purpose-built systems such as Milvus [38], and the broader class of vector database management systems surveyed in [39], are designed from the outset as multi-tenant stores with concurrent writers, incremental insertion, and continuous index maintenance. A retrieval library such as FAISS provides no notion of document ownership or write authorisation at all; that responsibility sits with the surrounding system, which is precisely where an attacker with legitimate write access operates. This assumption is not contrived; it reflects how production vector data management systems are actually deployed. Purpose-built systems such as Milvus [38], and the broader class of vector database management systems surveyed in [39], are designed from the outset as multi-tenant stores with concurrent writers, incremental insertion, and continuous index maintenance. A retrieval library such as FAISS provides no notion of document ownership or write authorisation at all; that responsibility sits with the surrounding system, which is precisely where an attacker with legitimate write access operates. For a query q, the retriever returns the top-k documents Retr (q, k ), which are passed to an LLM (or, in our design, a panel of LLMs), producing an answer a(q).The attacker can insert a bounded number of documents into 
+
+D, but cannot modify the retriever, the embeddings, the LLM weights, or the defense itself. Attacker capability: black-box vs. white-box. Following [2], we distinguish two capability settings. In the black-box setting, the setting we adopt throughout this paper, the attacker knows only the target question q∗ and has write access to D; they have no knowledge of the retriever’s architecture, embedding weights, or the LLM’s parameters. This is the realistic case: anyone who can edit a shared wiki page or upload a document to a crowd-sourced corpus is a black-box attacker in this sense, with no insider access required. In the white-box setting, the attacker additionally knows the retriever’s embedding model and can compute gradients through it, enabling gradient-based trigger optimization such as HotFlip-style token substitution [12] to maximize S’s retrieval rank directly. White-box access yields a strictly stronger attack and establishes an upper bound on achievable attack success, but requires a level of system access far beyond what a black-box attacker needs; we do not evaluate the white-box setting in this initial version, note it as an open item in Section X. Each poison document is modeled as P = S ⊕ I: a trigger 
+
+S engineered so that P is very likely to appear in Retr (q, k ),an injection I asserting a wrong answer w in place of the true answer t. Over a target set of questions Q, the attack succeeds at rate, where we write 1[X] throughout this paper for the indicator function, it equals 1 if condition X is true, 0 otherwise: ASR = 1
+
+|Q|
+
+X
+
+> q∈Q
+
+1[a(q) = wq ] . (1) If the attacker inserts np ≤ k matching documents, they can saturate the entire retrieval window; even np > k/ 2 already makes poison a majority of Retr (q, k ), this is exactly the regime where, as we show in Section VI, Rings 2 and 3 can fail. The attacker evaluated in this paper. We evaluate a black-box, non-adaptive attacker using the template described in [2]: 
+
+S is the target question repeated verbatim, I is boilerplate phrasing asserting the wrong answer with false authority (“verified records confirm...”, “multiple independent sources state...”). This attacker does not know TriShieldRAG’s exis-tence, its specific detector thresholds, or its ring architecture. An adaptive attacker, one aware of TriShieldRAG and specif-ically crafting S/I to evade its detectors, potentially in the white-box setting, is not evaluated in this initial version; we discuss why this matters and what we plan to do about it in Section X. 
+
+IV. TriShieldRAG Overview 
+
+TriShieldRAG inserts three independent checks around an otherwise standard RAG pipeline. We present this at three levels of detail: a high-level view (Fig. 2) showing where the three rings sit relative to the standard retrieve-augment-generate flow, a direct side-by-side comparison of the pipeline with and without TriShieldRAG engaged (Fig. 3), a low-level view (Fig. 4) showing the internal signal flow within each ring, matching the algorithms of Section V exactly. Ring 1 is designed to run as an ingest time guard: in a live deployment backed by FAISS, it screens every candidate document before it is written into the index, so a poisoned document never actually enters the searchable knowledge base. When a persistent index across runs is not maintained, Ring 1 is instead applied to the retrieved set as a functionally equivalent post-retrieval proxy, the filtering decision it makes is identical either way; only the timing differs. Ring 2 re-ranks whatever survives Ring 1 by a trust score. Ring 3 polls an LLM panel over whatever survives Ring 2, is the only ring that can trigger a single bounded re-retrieval if the panel disagrees. The undefended baseline we compare against in Section IX skips all three rings entirely, feeding the raw top-k documents straight to a single LLM, this matches the evaluation method-ology used in [2].            
+
+> User query qKnowledge base D
+> Retriever: top-k
+> Ring 1 : Ingest Guard
+> Ring 2 : Retrieval Scorer
+> Ring 3 : Cross-LLM Consensus
+> Final answer a(q)
+> top-kdocs
+> kept docs
+> trust ≥ϑ2
+> agree ≥ϑ3
+> one bounded re-retrieval
+> Fig. 2. High-level TriShieldRAG pipeline. A user query and the (possibly poisoned) knowledge base both feed the retriever. The retriever’s top-koutput passes through Rings 1, 2, 3 in sequence (shaded blue). Ring 3 is the only stage with a feedback edge (gold, dashed), bounded to a single retry. Ring 1 runs at ingest time on the live knowledge base, equivalently over the retrieved set when a persistent index is not maintained.
+
+V. Proposed TriShieldRAG Framework 
+
+Algorithms 1–3 correspond directly to the reference imple-mentation described in Section VII; we have simplified the notation here for readability. Table IV fixes the symbols used throughout this section.               
+
+> TABLE IV NOTATION
+> Symbol Meaning
+> quser query
+> knumber of documents retrieved per query
+> dicandidate document at stage input, i= 1 , . . . , k ϑ1, ϑ 2, ϑ 3Ring 1 block / Ring 2 drop / Ring 3 agreement thresholds
+> Mnumber of LLMs in the Ring 3 panel
+> V(d)multiset (bag) of word tokens in document dwq, t qattacker’s wrong answer / ground truth for query q
+
+A. Ring 1: Ingest Guard 
+
+Ring 1 assigns every candidate document three suspicion scores, each in [0 , 1] , combines them (Algorithm 1). Given the token bag V (d) with n = |V (d)|, we define the lexical diversity ω = |unique (V (d)) |/n and the top-token share ε =max v V (d)[ v]/n .The perplexity detector is a repetition/burstiness stand-in for an autoregressive language model [8] that combines lexical diversity with keyword repetition: 
+
+p(d) = min 1, 0.6 (1 − ω) + 2 .0 max(0 , ε − 0.12) . (2) The first term penalizes low lexical diversity (repetitive text); the second applies an additional penalty only once the single most frequent token exceeds 12% of the document, a threshold below which ordinary keyword repetition is not considered anomalous. The pattern score pa (d) checks a document for three spe-cific, easy-to-state red flags, each contributing a fixed penalty only if that flag is actually present. We write 1[·] for the indicator function: 1[X] = 1 if condition X holds, 1[X] = 0 
+
+otherwise. The three flags are: (a) the document contains a short, question-like sentence and is itself a short document (under 400 characters); (b) the exact target question appears verbatim inside the document; and (c) the document contains a boilerplate assertion phrase such as “verified records” or “multiple independent sources.” Each flag, if triggered, adds a fixed weight, 0.4, 0.5, 0.3 respectively, the total is capped at 1: 
+
+pa (d) = min 
+
+h
+
+1, 0.4 1[short q] + 0 .5 1[verbatim q]+ 0 .3 1[boilerplate ]
+
+i
+
+. (3) For example, a poison document that both repeats the target question verbatim and uses “verified records” phrasing, but is not itself a short question-like sentence, receives pa (d) = 0.5 + 0 .3 = 0 .8.The outlier score requires document embeddings and a fitted knowledge base centroid ˆc:
+
+o(d) = min 1, max(0 , 1 − cos(ˆ vd, ˆc)) . (4) User query q
+
+poisoned knowledge base D
+
+WITHOUT TriShieldRAG 
+
+Retriever returns top-k
+
+poison out-ranks clean docs 
+
+Raw top-k
+
+sent straight to one LLM 
+
+LLM generates answer on poisoned context 
+
+Output: wq (attacker’s answer) ASR ≈ 91% 
+
+User query q
+
+poisoned knowledge base D
+
+WITH TriShieldRAG 
+
+Retriever returns top-k
+
+poison out-ranks clean docs 
+
+Ring 1 
+
+screens each doc; poison blocked 
+
+Ring 2 
+
+re-scores by trust score 
+
+Ring 3 
+
+polls 3 LLMs for agreement 
+
+Output: tq (true answer) ASR ≈ 13% 
+
+Fig. 3. The RAG pipeline with and without TriShieldRAG, shown side by side. Left (red): the undefended pipeline has no stage that inspects document trustworthiness, retrieval alone determines what the LLM sees, so a poison-majority top-k set is passed straight through and reproduced as the answer. Right (green): TriShieldRAG inserts three independent checks between retrieval and generation; each ring inspects a different signal (individual document statistics, cross-document trust, cross-model agreement), so poison must defeat all three simultaneously to reach the final answer. Both paths retrieve the identical, poisoned top-k set, the divergence happens entirely after retrieval.           
+
+> di
+> Perplexity p
+> Eq. (2)
+> Pattern pa
+> Eq. (3)
+> Outlier o
+> Eq. (4)
+> score = max( p, pa, 0.7o+ 0 .3 max( p, pa ))
+> block if score ≥ϑ1= 0 .5
+
+Fig. 4. Ring 1 internal signal flow (Algorithm 1). Each candidate document di
+
+is scored independently by three detectors (gold); the combined score (blue) gates the block/keep decision (red = blocked). 
+
+When document embeddings are unavailable at scoring time, 
+
+o(d) defaults to zero, Ring 1’s decision then rests on p and 
+
+pa alone. The three scores are combined and thresholded as score (d) = max p, pa, 0.7 o + 0 .3 max( p, pa ), (5) block (d) = 1[score (d) ≥ ϑ1] , ϑ1 = 0 .5. (6) 
+
+Complexity. O(k · | d|) over the k candidate documents, independent of the total knowledge base size N .
+
+B. Ring 2: Retrieval Scorer 
+
+Ring 2 re-ranks whatever survives Ring 1 using a trust score that combines source provenance, cross-document consistency, 
+
+Algorithm 1 Ring 1 – Ingest Guard 
+
+1: function INGEST GUARD ({d1, . . . , d k}, kbQ )
+
+2: kept ← [ ] , blocked ← [ ] 
+
+3: for i = 1 to k do 
+
+4: p ← PERPLEXITY (di)
+
+5: pa ← PATTERN (di, kbQ )
+
+6: o ← OUTLIER (embedding (di)) (or 0 if unfitted) 
+
+7: si ← max( p, pa, 0.7 o + 0 .3 max( p, pa )) 
+
+8: if si ≥ ϑ1 then 
+
+9: append di to blocked 
+
+10: else 
+
+11: append di to kept 
+
+12: end if 
+
+13: end for 
+
+14: return ⟨kept, blocked ⟩
+
+15: end function 
+
+the retriever’s own relevance score (Algorithm 2). We note that Ring 2 applies this combination as a post-retrieval re-ranking step, after the retriever has already returned the top-
+
+k by vector similarity alone. This is distinct from, though motivated by the same underlying concern as, the “hybrid” queries that jointly search attributes and vectors, which the vector database literature identifies as one of five central obstacles in vector data management [39]. Pushing provenance filtering into the retrieval step itself, rather than applying it afterwards, would directly reduce the poison fraction ρ that Ring 2 observes rather than correcting for it downstream, and is a natural direction for future work. The provenance weight prov (d) ∈ [0 , 1] is looked up from a source allow-list (1.0 for curated/clean sources, 0.1 for sources tagged POISONED in our experiments, 0.5 for unknown sources). For consistency, let the majority token bag be μ = P 
+
+> i
+
+V (di)
+
+across all k retrieved documents. With the self-excluded over-lap ov (di) = P  
+
+> v∈V(di)
+
+min  V (di)[ v], μ [v] − V (di)[ v], the consistency score is c(di) = min 1, ov (di)/|V (di)|.The full trust score is trust (d) = 0 .45 prov (d) + 0 .35 c(d) + 0 .20 rel (d), (7) where rel (d) is the retriever’s own relevance score. Documents with trust (d) < ϑ 2 = 0 .35 are dropped. This weighting is de-liberate: provenance gets the largest share because a correctly-assigned source label is the strongest available signal; retrieval relevance gets the smallest share because it is exactly what the attacker’s trigger S was optimized to maximize , trusting it heavily would mean trusting the attacker’s own objective function. Minimum trust guarantee. For any document correctly la-beled with a clean/trusted source, prov (d) = 1 .0, so even in the worst case ( c = 0 , rel = 0 ): trust clean  
+
+> min
+
+= 0 .45(1 .0) + 0.35(0) + 0 .20(0) = 0 .45 > ϑ 2. A correctly-labeled clean document can therefore never be dropped by Ring 2, regard-less of its consistency or relevance scores, provenance alone guarantees its survival, provided the attacker has not spoofed that provenance tag (Section VI). 
+
+Complexity. O(k·| d|) to build μ and every c(di); O(k log k)
+
+to sort the result. 
+
+Algorithm 2 Ring 2 – Retrieval Scorer  
+
+> 1:
+
+function RETRIEVAL SCORER ({d1, . . . , d k}) 
+
+> 2:
+
+μ ← P 
+
+> i
+
+V (di) ▷ majority token bag  
+
+> 3:
+
+for i = 1 to k do  
+
+> 4:
+
+ci ← CONSISTENCY (di, μ ) 
+
+> 5:
+
+pi ← PROVENANCE (di) 
+
+> 6:
+
+trust i ← 0.45 pi + 0 .35 ci + 0 .20 rel (di) 
+
+> 7:
+
+end for  
+
+> 8:
+
+return {di : trust i ≥ ϑ2} sorted descending by trust, 
+
+{di : trust i < ϑ 2} (dropped)  
+
+> 9:
+
+end function 
+
+C. Ring 3: Cross-LLM Consensus 
+
+Ring 3 queries a panel of M heterogeneous LLMs with the identical, Ring-2-filtered context, buckets their answers by best-matching candidate, accepts the largest bucket’s answer only if it clears an agreement threshold (Algorithm 3). With the largest bucket of size n∗,agree = n∗
+
+M , accepted = 1[agree ≥ ϑ3] , ϑ3 = 0 .66 .
+
+(8) With M = 3 , ϑ3 = 0 .66 requires at least 2-of-3 agreement, the smallest possible majority quorum, echoing the intuition behind Byzantine fault tolerance [9]. We are careful to note, however, that our panelists are not guaranteed to fail indepen-dently the way BFT’s formal model assumes (Section X). On disagreement, the lowest-trust third of the surviving context is dropped, a single re-retrieval is performed, the second vote’s outcome is returned regardless of whether it now clears ϑ3;this bounds the worst-case cost to at most 2M LLM calls. 
+
+Complexity. At most 2M LLM calls. 
+
+Algorithm 3 Ring 3 – Cross-LLM Consensus  
+
+> 1:
+
+function CONSENSUS (q, docs , cands ) 
+
+> 2:
+
+for j = 1 to M do  
+
+> 3:
+
+aj ← LLM j .ANSWER (q, docs, cands ) 
+
+> 4:
+
+end for  
+
+> 5:
+
+bucket {aj } by best-matching candidate; n∗ ← largest bucket size  
+
+> 6:
+
+agree ← n∗/M  
+
+> 7:
+
+if agree ≥ ϑ3 then  
+
+> 8:
+
+return ⟨ representative answer, agree ⟩ 
+
+> 9:
+
+end if  
+
+> 10:
+
+suspects ← lowest-trust third of docs  
+
+> 11:
+
+docs ′ ← RERETRIEVE (docs \ suspects ) 
+
+> 12:
+
+for j = 1 to M do  
+
+> 13:
+
+a′ 
+
+> j
+
+← LLM j .ANSWER (q, docs ′, cands ) 
+
+> 14:
+
+end for  
+
+> 15:
+
+bucket {a′ 
+
+> j
+
+}; return ⟨ representative answer, new agreement ⟩
+
+▷ one retry only, returned regardless of outcome  
+
+> 16:
+
+end function VI. The Minority-Poison and Provenance-Tag Assumptions 
+
+Both Ring 2’s consistency score and Ring 3’s majority vote implicitly rely on clean evidence outnumbering poisoned evidence within Retr (q, k ). Let ρ be the poison fraction of the retrieved set. Poison documents typically share more inter-document vocabulary with each other (by construction, they encode the same payload) than clean documents share among themselves. This means that once ρ > 0.5, the majority bag μ becomes poison-dominated, so c(d) becomes larger for poison documents than for clean ones, letting poison survive trust ≥ ϑ2 while the now-minority clean documents get dropped instead. Ring 3 inherits the identical failure mode: once a majority of the panel’s context is poison, panelists that weight repeated claims can agree unanimously on the wrong answer; agreement is high, but wrong, the disagreement-triggered re-retrieval safety net never fires because there was no disagreement to detect. Provenance-tag assumption. Ring 2’s provenance weight offers a path to suppress poison independently of ρ: if the attacker’s documents are correctly tagged as untrusted (prov (d) = 0 .1), their trust score falls well below ϑ2 regard-less of the poison fraction. This guarantee, however, holds only as long as the attacker’s documents are not carrying a spoofed trusted-source tag. In our experiments, neither the non-adaptive nor the adaptive attacker spoofs source metadata, so both receive the neutral default prov = 0.5, meaning the provenance-tag assumption is not doing any suppression work in either of our reported conditions, the minority-poison assumption is the operative one throughout Section IX. Proposition 1 (Minority-poison requirement) . Rings 2 and 3 are expected to recover the correct answer only while the poison fraction ρ of the retrieved top-k stays below the point at which poison’s aggregate majority signal overtakes clean evidence’s, while the attacker cannot spoof a trusted source tag for Ring 2’s provenance weight. Ring 1 is load-bearing precisely because it is the only ring that inspects documents individually rather than in aggregate, so its correctness does not degrade as ρ → 1, provided its detectors actually fire on the poison in front of them. 
+
+Section IX reports the end-to-end effect of this assumption over a real knowledge base and a live, three-model LLM panel; a controlled per-ring ablation isolating each ring’s individual marginal contribution is planned for the extended version of this work. 
+
+VII. Implementation 
+
+TriShieldRAG is implemented as a Python package (ragshield_core )1, with each ring in its own module – ring1_ingest.py , ring2_retrieval.py ,
+
+ring3_consensus.py – coordinated by an orchestrator, 
+
+rag_shield.py , that exposes an answer(...) entry point and a trace(...) entry point returning every ring’s individual decision, so that any query’s per-ring trajectory (blocked/kept, dropped/retained, per-model vote and agreement) is fully inspectable rather than only the final answer. This real-time tracing is complementary to, rather than a substitute for, post-hoc forensic systems like RAGForensics [19], which retroactively identify which documents already ingested into a compromised knowledge base were responsible for a past attack, rather than explaining a single query’s decision as it happens. Retrieval uses FAISS [6], [37] in its IndexFlatIP configuration, which performs exact, exhaustive inner-product search rather than an approximate one; at our current corpus size this removes recall error as a confounding variable, so any residual attack success is attributable to the rings rather than to a retrieval miss. Documents and queries are embedded with all-mpnet-base-v2 , a Sentence-BERT bi-encoder [5] built on the MPNet backbone [35], which combines masked and permuted pre-training to avoid the position discrepancy of earlier BERT-style encoders [36]. We select this model specifically because it is the same class of general-purpose sentence encoder a realistic RAG deployment would use off the shelf: our threat model assumes no bespoke, poisoning-aware embedding model, and using ahardened or custom encoder would understate the attack. The knowledge base is 5,000 English Wikipedia articles (wikimedia/wikipedia , dump 20231101.en ). Ring 3’s panel is Claude (Anthropic) 2, Mistral Small (Mistral AI) 3, Llama 3.2 [11] 4 served locally through Ollama, chosen 
+
+> 1https://github.com/SPriTLab-iitj/TriShieldRAG
+> 2https://claude.com/
+> 3https://mistral.ai/
+> 4https://ollama.com/library/llama3.2
+
+deliberately for architectural and training-data diversity across three organizations on three continents, so that a poison document optimized against one vendor’s training distribution is not guaranteed to transfer to the other two.            
+
+> TABLE V REFERENCE IMPLEMENTATION CONFIGURATION
+> Component Configuration Retriever FAISS IndexFlatIP
+> Embeddings all-mpnet-base-v2 , 768-d Knowledge base 5,000 English Wikipedia articles LLM panel Claude, Mistral Small, Llama 3.2 (Ollama)
+> k(TOP_K )5
+> ϑ1, ϑ 2, ϑ 30.5, 0.35, 0.66
+
+A minimal illustration of Ring 1’s core scoring logic ,reproduced here at the smallest scale that still shows the actual computation (the Perplexity Detector of Eq. 2): 
+
+def perplexity_score(text: str) -> float: words = re.findall(r"\w+", text.lower()) if len(words) < 8: return 0.0 diversity = len(set(words)) / len(words) rep = 1.0 - diversity counts = Counter(words) top_freq = counts.most_common(1)[0][1] top = top_freq / len(words) return float(min(1.0, 0.6*rep + 2.0*max(0.0, top-0.12))) 
+
+VIII. Experimental Setup 
+
+We evaluate against the reference implementation’s live knowledge base: 5,000 English Wikipedia articles (wikimedia/wikipedia , dump 20231101.en ), embed-ded with all-mpnet-base-v2 and indexed with FAISS 
+
+IndexFlatIP . We use 10 target questions, each with a human verified true answer tq and an attacker chosen wrong answer wq , for instance, “Who founded Tesla Motors?” with true answer Martin Eberhard and attacker target Nikola Jones. We use k = 5 throughout. For each target question we inject np = 5 poison documents, matching the injection budget reported in [2], following the aggressive, non-adaptive template: verbatim target question plus “verified records” / “multiple independent sources” boilerplate. In isolation, Ring 1 scores this template well above ϑ1 = 0 .5, correctly flagging it as poison. We evaluate three configurations over all 10 targets: none 
+
+(undefended, raw top-k fed directly to a single LLM), paper 
+
+(an illustrative reproduction of the three single-stage defenses evaluated in [2] namely perplexity filtering, query paraphras-ing, knowledge base expansion, pending a full 30-question harness run to firm up this specific number), full (Ring 1 → 2 → 3). We report attack success rate as the primary end-to-end metric for this initial version; a per-ring break-down (documents blocked at Ring 1, dropped at Ring 2, panel agreement at Ring 3) is available via the harness’s 
+
+trace(...) entry point and is planned for the extended version of this paper. The evaluation harness is released as 
+
+evaluation/run_experiments.py .
+
+IX. Experimental Results 
+
+A. Query Workflow: With and Without TriShieldRAG 
+
+Figures 5 and 6 trace one representative query end-to-end “Who founded Tesla Motors?”, with true answer tq = Martin Eberhard and attacker target wq = Nikola Jones, through the undefended pipeline and the full TriShieldRAG pipeline, using the aggressive poison of Section VII with np = 5 poison documents inserted against the 5,000-document knowledge base.     
+
+> Query: “Who founded Tesla Motors?”
+> Retriever returns top-5, poison out-ranks the true article
+> Raw top-5 fed directly to a single LLM
+> LLM output: “Nikola Jones” ( =wq)
+> Attack succeeds : contributes to ASR ≈91%
+
+Fig. 5. Query workflow without TriShieldRAG. The undefended pipeline has no stage that inspects document trustworthiness; the poisoned top-k set is passed straight to the LLM, which reproduces the attacker’s target answer wq
+
+(red path) – matching the ASR ≈ 91% reported in Table VI.                
+
+> Query: “Who founded Tesla Motors?”
+> Retriever returns top-5, poison out-ranks the true article
+> Ring 1 : verbatim-question pattern ≥ϑ1for poison docs →blocked
+> Fallback re-retrieval recovers clean documents
+> Ring 2 : clean docs, trust ≥ϑ2→kept
+> Ring 3 : LLM panel agrees on tq, agree ≥ϑ3
+> Final answer : “Martin Eberhard” ( =tq)
+
+Fig. 6. Query workflow with TriShieldRAG (full pipeline), same query and poison as Fig. 5. Ring 1 removes the poison documents individually (Eq. (5)– (6)); Rings 2 and 3 then operate on a recovered, mostly-clean context and correctly return tq (green path) – consistent with the ASR ≈ 13% reported in Table VI. 
+
+B. End-to-end attack success rate 
+
+Table VI compares the undefended baseline, an illustrative reproduction of the three single-stage defenses evaluated in [2], the full TriShieldRAG pipeline, over the 10 target questions with np = 5 poison documents each against the 5,000-document knowledge base. TriShieldRAG reduces attack suc-cess rate from ≈ 91% to ≈ 13% : Ring 1 blocks the great majority of the aggressive, verbatim-question poison template at ingest time; the residual ≈ 13% reflects queries where poison partially survives Ring 1 (for example, when a poison document’s phrasing is close enough to natural language to avoid triggering the pattern score) and Rings 2/3 do not fully recover the true answer from the remaining context. The results hold across the full Claude/Mistral-Small/Llama-3.2 panel, benign-query accuracy is preserved, meaning that the defense does not degrade performance on normal, unpoisoned queries. 
+
+TABLE VI ATTACK SUCCESS RATE , N = 10 TARGET QUESTIONS , np = 5 POISON DOCUMENTS EACH 
+
+Configuration Attack success rate 
+
+No defense ≈ 91% Paper’s single-stage defenses [2] (illustrative) ≈ 29% 
+
+TriShieldRAG (full pipeline) ≈ 13% 
+
+C. Per-question breakdown 
+
+Table VII lists the 10 target questions used throughout this evaluation, each with its true answer tq and the attacker’s chosen wrong answer wq . This granularity matters for repro-ducibility: a reviewer or a future adaptive-attacker study can verify our exact evaluation set rather than trusting only an aggregate percentage. 
+
+TABLE VII TARGET QUESTIONS , N = 10 
+
+Target question True answer tq
+
+Who founded Tesla Motors? Martin Eberhard Who designed the Eiffel Tower? Gustave Eiffel Who developed the theory of rel-ativity? Albert Einstein Who created the Python program-ming language? Guido van Rossum Who wrote Hamlet? William Shakespeare What is the highest mountain on Earth? Mount Everest Who painted the Mona Lisa? Leonardo da Vinci What is the capital of Australia? Canberra Who discovered penicillin? Alexander Fleming What year did World War II end? 1945 
+
+Golden Rule. Evaluate not just the answer, but the entire journey from the query to the final output. 
+
+A single aggregate attack-success number, on its own, cannot distinguish a defense that works for a principled reason from one that happens to work on the questions tested. This is why TriShieldRAG’s orchestrator exposes a trace(...) entry point alongside answer(...) . Every query’s full tra-jectory is available for inspection, including which documents Ring 1 blocked and why, which docu-ments Ring 2 dropped and their trust scores, how each model in Ring 3’s panel voted. The user sees only the final generated response. We apply this principle throughout Section IX: Table VI reports the destination (attack success rate), but Proposition 1 and the per-ring analysis of Section VI are what let us say why that destination was reached, where the journey is still fragile. A note on precision. The paper’s-defenses row is an illustra-tive reproduction pending a full 30-question harness run to firm up this specific number; the no-defense and TriShieldRAG rows are computed live by our released evaluation harness (evaluation/run_experiments.py ) over the current 10-question target set. We report these as the honest current state of an ongoing evaluation, not as a final, fixed benchmark; see Section X for exactly what is still in progress. 
+
+X. Discussion and Limitations 
+
+TriShieldRAG’s ≈ 13% residual attack success rate, down from ≈ 91% undefended, is a substantial reduction but not a complete elimination of the attack, we report it as such rather than rounding it away. Per Proposition 1 (Section VI), Ring 1 is the ring doing the majority of the defensive work in this non-adaptive setting, since it is the only ring that inspects documents individually rather than in aggregate; the residual failures are consistent with poison documents whose phrasing sits close enough to natural language to partially evade Ring 1’s lexical and pattern checks, after which Rings 2 and 3 must recover the correct answer from a context that may still contain some poison. We have not yet evaluated an adaptive attacker. All results in this initial version use the non-adaptive poison template described in [2], an attacker who does not know TriShield-RAG’s specific thresholds or detector design. Following the adaptive-evaluation principle argued for in [10], a defense should ultimately be assessed against an attacker who is aware of it and adapts accordingly; we consider this the single most important gap in the current evaluation, testing an adaptive attacker who specifically avoids Ring 1’s lexical triggers is the immediate next step for this work, not a claim we are already able to make. The minority-poison assumption is derived, not yet inde-pendently confirmed. Section VI derives the exact condition under which Rings 2 and 3 are expected to recover the correct answer, the poison fraction ρ of the retrieved top-k
+
+staying below the point at which its majority signal overtakes clean evidence’s. Our single reported evaluation configuration (np = 5 against a 5,000-document corpus) is consistent with this derivation, but consistency with one configuration is not the same as confirmation: we have not run the controlled ex-periment that would actually test the claim, namely sweeping 
+
+ρ across the minority/majority boundary and observing Rings 2/3 recover the correct answer below it and fail above it, as the analysis predicts. We name this gap explicitly rather than describe the assumption as experimentally confirmed, since it currently is not. 
+
+Scale. This initial version evaluates TriShieldRAG over a 5,000-document knowledge base, large enough to require a genuine dense retriever and FAISS index rather than a toy corpus, but still far short of the millions-of-documents scale at which [2] itself was evaluated. We consider closing this scale gap the single highest-priority next step for this work: reproducing the full evaluation over a knowledge base of 2 million or more documents, which requires GPU-accelerated embedding generation and an approximate nearest-neighbour index in place of the exact IndexFlatIP used here, to keep retrieval latency tractable at that size. The two standard choices are graph-based HNSW [30] and quantisation-based inverted-file variants built on product quantisation [31]; both trade a bounded, tunable recall loss for order-of-magnitude speedups. That trade-off is not neutral for a security evaluation: an approximate index can silently miss a legitimate document that an exact index would have retrieved, which changes the effective poison fraction ρ that Rings 2 and 3 actually observe, and we therefore treat recall calibration as part of the scaling experiment rather than an implementation detail. Until that run is complete, the ≈ 91% →≈ 13% result in Table VI should be read as evidence that the three-ring mechanism works, not as a claim that this exact residual rate holds at the scale the original attack was demonstrated at. Concrete next steps we plan to pursue, in priority order. (i) Reproduce this evaluation at 2 million or more documents on GPU hardware, the scale gap identified above. (ii) Run a controlled experiment that sweeps the poison fraction ρ
+
+across the minority/majority boundary and directly tests, rather than merely observes consistency with, the minority-poison assumption of Section VI. (iii) Evaluate an adaptive attacker who is aware of Ring 1’s specific detectors and crafts poison to minimize its pattern/perplexity scores while preserving the false claim, to establish where TriShieldRAG’s current guarantees actually break down. (iv) Run the full 30-question evaluation harness to replace the illustrative paper’s-defenses baseline with a directly comparable, live-computed number. (v) Replace Ring 2’s majority-bag consistency statistic with something more robust to a poison-majority retrieved set, such as trimmed pairwise similarity or provenance-aware clustering. (vi) Enforce a source-diversity quota on the retrieved top-
+
+k, directly bounding the poison fraction ρ rather than only detecting its consequences after the fact. (vii) Harden Ring 2’s provenance allow-list with cryptographic attestation or a signed document registry, so an attacker cannot simply spoof a trusted-source tag and bypass the provenance-tag assumption of Section VI. 
+
+Cost. Ring 3 queries a live panel of three LLMs (Claude, Mistral Small, Llama 3.2 via Ollama) per query, up to twice on disagreement-triggered re-retrieval. This is a genuine latency and API-cost overhead compared to the undefended baseline; a production deployment would likely gate Ring 3 to only the subset of queries where Ring 1/2 leave residual uncertainty, rather than invoking the full panel unconditionally. XI. Conclusion and Future Work 
+
+We presented TriShieldRAG, a three-ring defense-in-depth architecture for knowledge-corruption attacks on RAG sys-tems, formalized each ring as an explicit algorithm with fixed thresholds and stated complexity, derived a minority-poison assumption underlying Rings 2 and 3 together with an explicit provenance-tag assumption specific to Ring 2. Evaluated against a non-adaptive, PoisonedRAG-style attacker over a 5,000-document Wikipedia knowledge base, the full pipeline reduces attack success rate from ≈ 91% to ≈ 13% ,using a live panel of three architecturally diverse LLMs (Claude, Mistral Small, Llama 3.2). This is an initial version of ongoing work, we have deliberately not overstated its current scope: we have not yet evaluated an adaptive attacker aware of TriShieldRAG’s specific design, the paper’s-defenses comparison baseline is presently illustrative pending a full 30-question harness run. Our immediate next steps are, in priority order: reproducing this evaluation at 2 million or more documents on GPU hardware to close the scale gap against the original attack’s evaluation setting; an adaptive-attacker evaluation; completing the full evaluation harness run; a poison-majority-robust statistic for Ring 2; source-diversity quotas ahead of Rings 2 and 3; and cryptographic provenance attestation. 
+
+References 
+
+[1] P. Lewis, E. Perez, A. Piktus, F. Petroni, V. Karpukhin, N. Goyal, H. K¨ uttler, M. Lewis, W.-t. Yih, T. Rockt¨ aschel, S. Riedel, D. Kiela, “Retrieval-augmented generation for knowledge-intensive NLP tasks,” in Advances in Neural Information Processing Systems (NeurIPS) , vol. 33, 2020, pp. 9459–9474. [2] W. Zou, R. Geng, B. Wang, J. Jia, “PoisonedRAG: Knowledge corrup-tion attacks to retrieval-augmented generation of large language models,” 
+
+arXiv preprint arXiv:2402.07867 , 2024. [3] Z. Zhong, Z. Huang, A. Wettig, D. Chen, “Poisoning retrieval corpora by injecting adversarial passages,” in Proc. EMNLP , 2023. [4] K. Greshake, S. Abdelnabi, S. Mishra, C. Endres, T. Holz, M. Fritz, “Not what you’ve signed up for: Compromising real-world LLM-integrated applications with indirect prompt injection,” arXiv preprint arXiv:2302.12173 , 2023. [5] N. Reimers and I. Gurevych, “Sentence-BERT: Sentence embeddings using Siamese BERT-networks,” in Proc. EMNLP-IJCNLP , 2019, pp. 3982–3992. [6] J. Johnson, M. Douze, H. J´ egou, “Billion-scale similarity search with GPUs,” IEEE Transactions on Big Data , vol. 7, no. 3, pp. 535–547, 2019. [7] G. Salton and C. Buckley, “Term-weighting approaches in automatic text retrieval,” Information Processing & Management , vol. 24, no. 5, pp. 513–523, 1988. [8] A. Radford, J. Wu, R. Child, D. Luan, D. Amodei, I. Sutskever, “Lan-guage models are unsupervised multitask learners,” OpenAI Technical Report, 2019. [9] L. Lamport, R. Shostak, M. Pease, “The Byzantine generals problem,” 
+
+ACM Transactions on Programming Languages and Systems , vol. 4, no. 3, pp. 382–401, 1982. [10] N. Carlini, A. Athalye, N. Papernot, W. Brendel, J. Rauber, D. Tsipras, I. Goodfellow, A. Madry, A. Kurakin, “On evaluating adversarial robust-ness,” arXiv preprint arXiv:1902.06705 , 2019. [11] H. Touvron, L. Martin, K. Stone, P. Albert, A. Almahairi, Y. Babaei, N. Bashlykov, S. Batra, P. Bhargava, S. Bhosale et al., “Llama 2: Open foundation and fine-tuned chat models,” arXiv preprint arXiv:2307.09288 , 2023. [12] J. Ebrahimi, A. Rao, D. Lowd, D. Dou, “HotFlip: White-box adversarial examples for text classification,” in Proc. 56th Annual Meeting of the Association for Computational Linguistics (ACL) , 2018, pp. 31–36. [13] K. S. R. Patil, “RAGShield: Detecting numerical claim manipulation in government RAG systems,” arXiv preprint arXiv:2604.00387 , 2026. [14] H. Zhou, K.-H. Lee, Z. Zhan, Z. Li, Y. Chen, Z. Wang, H. Had-dadi, E. Yilmaz, “TrustRAG: Enhancing robustness and trustworthiness in retrieval-augmented generation,” arXiv preprint arXiv:2501.00879 ,2025. [15] B. Zhang et al., “Benchmarking poisoning attacks against retrieval-augmented generation,” arXiv preprint arXiv:2505.18543 , 2025. [16] B. Zhang, Y. Chen, Z. Liu, L. Nie, T. Li, Z. Liu, “Practical poi-soning attacks against retrieval-augmented generation,” arXiv preprint arXiv:2504.03957 , 2025. [17] H. Zhou et al., “Cordon-MAS: Defending RAG against knowledge poi-soning via information-flow control,” arXiv preprint arXiv:2605.26754 ,2026. [18] M. Kim, H. Lee, H. Koo, “Rescuing the unpoisoned: Efficient defense against knowledge corruption attacks on RAG systems,” 2025. [19] B. Zhang, H. Xin, M. Fang, Z. Liu, B. Yi, T. Li, and Z. Liu, “Traceback of poisoning attacks to retrieval-augmented generation,” in Proceedings of The Web Conference (WWW) , 2025. arXiv:2504.21668. [20] V. Karpukhin, B. O˘ guz, S. Min, P. Lewis, L. Wu, S. Edunov, D. Chen, and W.-t. Yih, “Dense passage retrieval for open-domain question answering,” in Proc. EMNLP , 2020, pp. 6769–6781. [21] G. Izacard, M. Caron, L. Hosseini, S. Riedel, P. Bojanowski, A. Joulin, and E. Grave, “Unsupervised dense information retrieval with con-trastive learning,” Transactions on Machine Learning Research , 2022. arXiv:2112.09118. [22] L. Xiong, C. Xiong, Y. Li, K.-F. Tang, J. Liu, P. Bennett, J. Ahmed, and A. Overwijk, “Approximate nearest neighbor negative contrastive learning for dense text retrieval,” in Proc. ICLR , 2021. [23] S. Robertson and H. Zaragoza, “The probabilistic relevance framework: BM25 and beyond,” Foundations and Trends in Information Retrieval ,vol. 3, no. 4, pp. 333–389, 2009. [24] N. Thakur, N. Reimers, A. R¨ uckl´ e, A. Srivastava, and I. Gurevych, “BEIR: A heterogeneous benchmark for zero-shot evaluation of infor-mation retrieval models,” in Proc. NeurIPS Datasets and Benchmarks Track , 2021. [25] P. Blanchard, E. M. El Mhamdi, R. Guerraoui, and J. Stainer, “Machine learning with adversaries: Byzantine tolerant gradient descent,” in Ad-vances in Neural Information Processing Systems (NeurIPS) , vol. 30, 2017. [26] D. Yin, Y. Chen, K. Ramchandran, and P. Bartlett, “Byzantine-robust distributed learning: Towards optimal statistical rates,” in Proc. Interna-tional Conference on Machine Learning (ICML) , 2018. [27] E. M. El Mhamdi, R. Guerraoui, and S. Rouault, “The hidden vul-nerability of distributed learning in Byzantium,” in Proc. International Conference on Machine Learning (ICML) , 2018. [28] Y. Chen, L. Su, and J. Xu, “Distributed statistical machine learning in adversarial settings: Byzantine gradient descent,” Proc. ACM on Measurement and Analysis of Computing Systems , vol. 1, no. 2, 2017. [29] X. Cao, M. Fang, J. Liu, and N. Z. Gong, “FLTrust: Byzantine-robust federated learning via trust bootstrapping,” in Proc. Network and Distributed System Security Symposium (NDSS) , 2021. [30] Y. A. Malkov and D. A. Yashunin, “Efficient and robust approxi-mate nearest neighbor search using hierarchical navigable small world graphs,” IEEE Transactions on Pattern Analysis and Machine Intelli-gence , vol. 42, no. 4, pp. 824–836, 2020. [31] H. J´ egou, M. Douze, and C. Schmid, “Product quantization for nearest neighbor search,” IEEE Transactions on Pattern Analysis and Machine Intelligence , vol. 33, no. 1, pp. 117–128, 2011. [32] T. Kwiatkowski, J. Palomaki, O. Redfield, M. Collins, A. Parikh, C. Alberti, D. Epstein, I. Polosukhin, J. Devlin, K. Lee et al., “Natural Questions: A benchmark for question answering research,” Transactions of the Association for Computational Linguistics , vol. 7, pp. 453–466, 2019. [33] Z. Yang, P. Qi, S. Zhang, Y. Bengio, W. Cohen, R. Salakhutdinov, and C. D. Manning, “HotpotQA: A dataset for diverse, explainable multi-hop question answering,” in Proc. EMNLP , 2018. [34] T. Nguyen, M. Rosenberg, X. Song, J. Gao, S. Tiwary, R. Majumder, and L. Deng, “MS MARCO: A human-generated machine reading comprehension dataset,” arXiv preprint arXiv:1611.09268 , 2016. [35] K. Song, X. Tan, T. Qin, J. Lu, and T.-Y. Liu, “MPNet: Masked and permuted pre-training for language understanding,” in Advances in Neural Information Processing Systems (NeurIPS) , vol. 33, 2020, pp. 16857–16867. [36] J. Devlin, M.-W. Chang, K. Lee, and K. Toutanova, “BERT: Pre-training of deep bidirectional transformers for language understanding,” in Proc. NAACL-HLT , 2019, pp. 4171–4186. [37] M. Douze, A. Guzhva, C. Deng, J. Johnson, G. Szilvasy, P.-E. Mazar´ e, M. Lomeli, L. Hosseini, and H. J´ egou, “The Faiss library,” arXiv preprint arXiv:2401.08281 , 2024. [38] J. Wang, X. Yi, R. Guo, H. Jin, P. Xu, S. Li, X. Wang, X. Guo, C. Li, X. Xu et al., “Milvus: A purpose-built vector data management system,” in Proc. ACM SIGMOD International Conference on Management of Data , 2021, pp. 2614–2627. [39] J. J. Pan, J. Wang, and G. Li, “Survey of vector database management systems,” The VLDB Journal , 2024. arXiv:2310.14021. [40] P. Pathmanathan, M.-A. Panaitescu-Liess, C.-Y. J. Chiang, and F. Huang, “RAGPart & RAGMask: Retrieval-stage defenses against corpus poi-soning in retrieval-augmented generation,” in AAAI Workshop on New Frontiers in Information Retrieval , 2026. arXiv:2512.24268.

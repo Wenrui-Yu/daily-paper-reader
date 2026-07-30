@@ -1,0 +1,5258 @@
+Title: Function Privatization in the Local Model
+
+URL Source: https://arxiv.org/pdf/2607.27164v1
+
+Published Time: Thu, 30 Jul 2026 01:13:46 GMT
+
+Number of Pages: 49
+
+Markdown Content:
+# Function Privatization in the Local Model 
+
+Yuting Liang ∗ Tian Shu † Ke Yi ‡
+
+Abstract 
+
+We study the problem of privately releasing functions, with a particular focus on curves, which are images of continuous functions on some finite interval. Many types of data exist nat-urally as curves, such as trajectory data or 1D density curves. We shall primarily be interested in the local model setting, where the function to be privatized captures data belonging to one individual, which is the more challenging setting with limited prior work. Under the standard notion of local differential privacy (DP), any two arbitrarily different functions are required to be made indistinguishable by privatization, which is too strong to allow meaningful utility; we thus work with a generalized notion of DP known as Geo-Privacy (GP), which allows functions far apart to be distinguished more easily while providing strong protection for near functions. To demonstrate the effectiveness of our framework, we provide experimental evaluation on several datasets. 
+
+## 1 Introduction 
+
+A fundamental problem in data privatization is the following: Suppose a user possesses data in the form of a sequence, where each record can be either 1D (e.g., prices over a period or ECG data) or multi-dimensional (e.g., a trajectory). How can they privatize the data before sending it to an untrusted analyst? More abstractly, the data can be modeled as a function q : [0 , T ] → Rn, and we thus term the problem function privatization .Naively, one could privatize some subset of the function values q(t1), . . . , q (tk) separately, each using some existing privatization method. However, this solution consumes privacy linear in k. It is also not a theoretically elegant solution as it only obtains the function values at discrete points (often chosen heuristically) while f can be defined over the reals. Importantly, this naive solution ignores the correlations among the function values, which often exist in real-world data. In the extreme case, suppose we know a priori that the function is a constant. Then privatizing the function at any one point suffices. On the other hand, if q can really be an arbitrary function, then there might be little to no correlation and the naive solution is already the best one can hope for. Thus, the central technical problem to be addressed in this paper is: how to design a privatization method that automatically exploits the correlation if it exists in the data, thereby achieving good utility on typical real-world data. In our setup where each user privatizes their own data, the most popular privacy definition is the local model of differential privacy (DP), which requires the output to be ε-indistinguishable between any two different instances. However, this is inappropriate for functional data as it insists a 
+
+> ∗Department of Computer Science, University of Toronto. yliang@cs.toronto.edu
+> †Computer Science and Engineering, Hong Kong University of Science and Technology. tshu@cse.ust.hk
+> ‡Computer Science and Engineering, Hong Kong University of Science and Technology. yike@cse.ust.hk
+
+1arXiv:2607.27164v1 [cs.CR] 29 Jul 2026 uniform privacy guarantee, e.g., the level of indistuinguishability is the same between q1(t) := 2 t+3 and q2(t) := 2 .01 t + 2 .99 vs between q1(t) := 2 t + 3 and q3(t) := 2000 t − 3000. This in turn leads to a privatized output of low utility and there is no effective function privatization method in the local DP model. Therefore, we adopt the notion of generalized differential privacy (GP) [CABP13, LY23], which is often adopted in a local model setting for data in a metric space as a more attractive alternative to local DP (e.g. [ABCP13, LWX21, YTL22, LY24]). GP stipulates that the level of indistuinguishability be proportional to the distance (using an appropriate metric) between the two instances (see Section 2 for precise definitions). For functions, we will adopt the natural L2 metric. Then in the example above, GP will make q1 and q2 much more indistinguishable than q1 and q3. Such a more refined privacy definition not only results in good utility (as will be achieved by our methods), but also captures the natural privacy requirement in a metric space. 
+
+1.1 Our Contributions 
+
+In this paper, we present a series of function privatization methods, requiring different correlation assumptions on the function: We start by considering linear functions (Section 3.1), and then generalize the method to functions that can be represented as a linear combination of a fixed number m of basis functions (Section 3.2). We show that our method incurs an L2 noise to the privatized function that is proportional to m (√m for CGP, a variant of GP). Since the privacy noise grows with m, it is sometimes beneficial to use less basis functions to reduce the noise, at the expense of some approximation error. In Section 3.4, we develop a method that automatically and privately chooses a suitable number of basis functions from a possibly infinite collection, while trying to balance the two sources of error. In Section 4, we focus on curves, which are images of continuous functions on some finite interval. Curves are best approximated using piecewise basis functions. We develop algorithms to determine how the curve should be divided into pieces, approximate each piece, and then privatize. Compared with the naive solution, our methods enjoy the following advantages: (1) It captures the correlation in the data, in the sense that stronger assumptions (e.g., linear functions or functions that can be represented by a few basis functions) result in better utility. (2) If the assumption does not strictly hold, our method can approximate it while automatically balancing the approximation error and privacy noise, which allows us to extract the hidden correlations present in the data. (3) Our methods output functions defined over the reals, not only at discrete points. (4) It supports vector-valued variables as well as vector-valued functions. Finally, we conducted an extensive set of experiments to demonstrate the practical advantage of our methods using real-world functional data. 
+
+1.2 Related Work 
+
+The closest work to ours is that of Hall et al. [HRW13], who studied the function privatization problem in the central model of DP. In the central model, the trusted analyst has N functions 
+
+qi(·), i = 1 , . . . , N , where each qi depends on the private data xi and wishes to privatize their mean 
+
+> 1
+> N
+
+P 
+
+> i
+
+qi(·). They also reduce the privacy noise by exploiting the correlations in each qi(·). In particular, they study the case where qi(t) := e−(xi−t)2/2b2
+
+for fixed b > 0, which corresponds to the Gaussian kernel density estimation (KDE) function at point t, where the xi’s are assumed to have been drawn from some distribution. 2The work of [WNM23] also privatizes the Gaussian kernel function, where a factorized form 
+
+g(x) · p(t) is used to approximate κt(x) = 1
+
+> N
+
+P 
+
+> i
+
+e−∥ xi−t∥2
+
+. There, the central curator releases a privatized ˜ g(x), which can then be used by an analyst to perform further queries without further interaction with the curator. The work in [AR17] uses Bernstein polynomials to approximate a real-valued function qx parameterized by private data x = ( x1, · · · , x N ); their method builds a lattice of the function domain and privatizes the evaluations of qx(·) on all lattice points by adding Laplace noise, which requires the function qx to have small sensitivity w.r.t. changing x.The works that privatize a set of queries by approximating the query functions are also related [TUV12, WJF +16]. In [TUV12], they showed that for private data x ∈ ({0, 1}d)N , it is possible to approximate a set of k-way marginal queries by low-degree polynomials, which leads to efficient running time and requires lower sample complexity than previous works on k-way marginals. The work of [WJF +16] considers privatizing a set of queries of the form x 7 → 1
+
+> N
+
+P 
+
+> i
+
+f (xi), for private data x with xi ∈ [−1, 1] d and smooth functions f that can be approximated by trigonometric polynomials, assuming bounded derivatives of some order; there, the private data vector x ∈
+
+([ −1, 1] d)N is embedded into a basis and privatized, so that the query answer 1
+
+> N
+
+P 
+
+> i
+
+f (xi) can be approximated by a dot product of the coefficients of f and the privatized basis. The problem of privately releasing trajectory data has been considered in central DP [CAC12, HCM +15, GLT +18], where the goal is to generate a synthetic collection of trajectories that is distributionally similar to the original input collection of trajectories. In these works, a privatized empirical distribution on sequences of locations is constructed, from which the synthetic database can then be generated. For a comprehensive list of works on trajectory data privatization under central DP, we refer the reader to the SoK paper of [MPGBPA +23], which provides a detailed discussion of the works in terms of utility and limitations. This problem has also been attempted under the local model of DP, where the goal is to publish a privatized trajectory from a single input trajectory [CCFS21]; however, due to the strong requirement of local-DP, it is not possible for a local-DP mechanism on this problem to have any meaningful utility, unless the data universe is restricted to a very small space. There are a couple of works using GP for privatization of various types of queries [LY23, LY24]. In particular, [LY24] also considered privatizing the Gaussian kernel function; however, their mechanism is for privatizing a single query and loses utility quickly when many queries are asked. [LY23] considered releasing a collection of points in a trajectory under GP using basic composition; however, such an approach is not suitable when the goal is to preserve a general likeness of the curve, as we will also demonstrate in our experiments. 
+
+## 2 Preliminaries 
+
+2.1 Geo-Privacy 
+
+We briefly recall the definitions and basic properties of GP, which is defined on metric spaces. Let (U, dist) be a metric space. For Λ > 0, and x, x ′ ∈ U , we write x ∼Λ x′ if dist( x, x ′) ≤ Λ. 
+
+Definition 1 (Geo-privacy, Definition 6 in [LY23]) . Fix ε, δ ≥ 0, Λ ∈ R>0 ∪ {∞} . A randomized mechanism M : U → V satisfies ( ε, δ, Λ) geo-privacy, or simply ( ε, δ, Λ)-GP, if for all measurable 
+
+S ⊆ V and all x ∼Λ x′
+
+Pr[ M (x) ∈ S] ≤ eε dist( x,x ′) Pr M (x′) ∈ S + δ. 
+
+3The parameter ε measures privacy loss per unit distance (e.g. ε = 0 .001 per meter using the Euclidean metric). We denote by M(x) the distribution of the random variable M (x), and by m(x)( y) its pdf at y ∈ M (x). Concentrated geo-privacy (CGP) is defined in terms of the R´ enyi divergence of order α [R´ en61, VEH14], defined for distributions P, Q with pdf’s p(·), q (·), respectively: 
+
+Dα(P∥Q ) := 1
+
+α − 1 log 
+
+Z 
+
+> V
+
+p(y)αq(y)1−αdz 
+
+
+
+.
+
+Definition 2 (Concentrated Geo-privacy , Definition 3 in [LY23]) . Fix ρ ≥ 0. Λ ∈ R>0 ∪ {∞} . A mechanism M : U → V satisfies ( ρ, Λ) concentrated geo-privacy, or simply ( ρ, Λ)-CGP, if for all 
+
+x ∼Λ x′, and all α > 1
+
+Dα(M(x)∥M (x′)) ≤ αρ dist( x, x ′)2.
+
+The parameter ρ is privacy loss per unit distance squared. Note that by setting Λ = 1 in the definitions above and using the Hamming metric as dist( ·, ·), one recovers the usual ( ε, δ )-DP [DMNS06] and ρ-CDP [BS16] definitions of the central model; while setting dist( ·, ·) to be the discrete metric dist 01 (x, x ′) := 1{x̸ = x′} yields the same definitions in the local model. The main appeal of the GP model is in its flexibility to choose a metric suitable for the application and data being studied. We write ε-GP for ( ε, 0, ∞)-GP and ρ-CGP for ( ρ, ∞)-CGP. Note that one way to show that a mechanism M satisfies ε-GP, is to show that M induces distributions on all pair of inputs x, x ′ ∈ U
+
+such that M(x) and M(x′) have the same support, and the ratio of their pdf’s satisfies for all 
+
+y ∈ M (x): m(x)( y) 
+
+> m(x′)( y)
+
+≤ eε dist( x,x ′).
+
+An example of such mechanisms is the exponential mechanism .
+
+Lemma 2.1 (Exponential mechanism for ε-GP [CABP13, MT07]) . Let (V, dist V ) be a metric space. Let g : U → V be K-Lipschizt where K > 0. The mechanism that, on input x, draws a y from a distribution with pdf m(x)( y) = c(ε, K )e− εK dist V (g(x),y ), where c(ε, K ) is a constant independent of the input x, is ε-GP. 
+
+We also have the following basic mechanisms for vector-valued queries. 
+
+Lemma 2.2 (Canonical mechanisms for vector-valued queries [LY23]) . Let g : U → V ⊆ Rm be 
+
+K-Lipschitz. Let M : U → Rm be the mechanism defined by M (x) = g(x) + Kb Z, where Z is an 
+
+m-dimensional random vector. Then 1. M is ε-GP if b = ε, where Z is drawn from the standard m-dimensional spherical Laplace distribution, denoted Z ∼ SLap( m), with pdf h(z) ∝ e−∥ z∥;2. M is ρ-CGP if b = √2ρ, where Z is drawn from the standard m-dimensional Gaussian distribution, denoted Z ∼ N (0 , I m×m), with pdf h(z) ∝ e− 12 ∥z∥2
+
+.
+
+Similar to DP, GP also enjoys the following composition properties, which will be helpful for developing algorithms composed of multiple steps. 
+
+Lemma 2.3 (Basic compositions [ABCP13, LY23]) . Fix k ≥ 2, let Mj : U → Vj for j ∈ [k]. Let 
+
+M = ( M1, · · · , M k) be the k-fold composition, where the choice of Mj may depend on the outputs of previous Ml’s for l < j . Then 1. M is ε-GP, if each Mj is εj -GP, where ε := P 
+
+> j∈[k]
+
+εj ;
+
+42. M is ρ-CGP, if each Mj is ρj -CGP, where ρ := P 
+
+> j∈[k]
+
+ρj .
+
+A special case of the composition property where all but the first mechanism have ε = 0 is known as the postprocessing property, i.e., gpp (M (·)) satisfies the same GP guarantee of M for any measurable function gpp (·). The Sparse Vector Technique (SVT) [DR +14], shown in Algorithm 1, takes in a possibly infinite sequence of queries, and returns the index corresponding (approximately) to the query that first crosses some prespecified threshold T . The SVT is ε-GP [LY23] for any metric dist( ·, ·), as long as all queries are K-Lipschitz w.r.t. the same metric. 
+
+Algorithm 1 Sparse Vector Technique 
+
+Input : x ∈ U ; ( ε1, ε 2) with ε = ε1 + ε2; T ; K; g1, g 2, · · · each K-Lipschitz 
+
+Output : variable-length sequence y1, y 2, · · ·  
+
+> 1:
+
+draw W ∼ Lap( K/ε 1) 
+
+> 2:
+
+for j = 1 , · · · do  
+
+> 3:
+
+draw Vj ∼ Lap(2 K/ε 2) 
+
+> 4:
+
+if gj (x) + Vj ≥ T + W then  
+
+> 5:
+
+output yj = ⊤ and HALT  
+
+> 6:
+
+else  
+
+> 7:
+
+output yj = ⊥ 
+
+> 8:
+
+end if  
+
+> 9:
+
+end for 
+
+The SVT has the following utility guarantee, which can be verified by standard analysis (e.g. see [DY23]): 
+
+Lemma 2.4. Let ¯k be the index j when SVT( x, ( ε 
+
+> 3
+
+, 2ε 
+
+> 3
+
+), T , K, g 1, g 2, · · · ) halts. Suppose there is t
+
+such that gt(x) ≥ T + 6 K ln(2 /β )/ε . Then with probability at least 1 − β, ¯k satisfies ¯k ≤ t and 
+
+g¯k(x) ≥ T − 3Kε
+
+
+
+ln 
+
+ 2tβ
+
+
+
++ ln 
+
+ 2
+
+> β
+
+ 
+
+.
+
+2.2 The Problem of Function Privatization 
+
+We consider functions of the form q : I → Rn, where I = I1 × · · · × Id with Ii ⊆ R for 
+
+i ∈ [d] := {1, · · · , d }. A natural metric between two functions is the L2 distance dist 2(q, q ′) := 
+
+ R  
+
+> I
+
+∥q(t) − q′(t)∥2dt 1/2, where ∥ · ∥ denotes the usual Euclidean metric. Our goal is to compute, for a given function q, a privatized function ˜ q that satisfies GP (or CGP) w.r.t. the dist 2 met-ric. We assume q ∈ L2(I), where L2(I) denotes the set of square-integrable functions on I, i.e., R 
+
+> I
+
+∥q(t)∥2dt < ∞; so dist 2(q, q ′) < ∞ for every pair q, q ′.We focus primarily on the setting where d = 1 and I = [0 , T ] for T > 0. We distinguish between the restricted case I = [0 , T ] and the general case I by explicitly writing [0 , T ] in the former case. In particular, we are interested in continuous functions on [0 , T ], which correspond to curves in Rn.We use C(I) to denote the set of continuous functions on I.52.3 On the L2 Metric 
+
+The L2 metric is arguably the most natural/important metric for physical sciences and engineering; it is preferred by physicists and engineers because of its desirable properties such as completeness, rotation-invariance [SS11, AW05], relations to physical quantities such as the energy of the signal [OWN97], etc. Conceptually, the L2 metric is to functions as the ℓ2 (Euclidean) metric is to points, and the latter is commonly used for point privatization [ABCP13, LY23, LY24]. Concretely, consider a function q : [0 , 1] → R: The function q can be identified with its image f ([0 , 1]), which is a collection of infinitely many points. Recall we can approximate the L2 distance between two curves using point evaluations at t1, . . . , t n for increasingly many points; in particular, we have 
+
+Z 10
+
+(q(t) − q′(t)) 2 dt = lim 
+
+> n→∞
+
+1
+
+n
+
+> n
+
+X
+
+> j=1
+
+(q(tj ) − q′(tj )) 2.
+
+Thus, the L2 distance between two functions is essentially an average of ℓ2 distances between the collections of points ( q(t1), . . . , q (tn)) and ( q′(t1), . . . , q ′(tn)) for infinitely many points. (0,0) Start  
+
+> (1,0.8) A
+> (2,1.6) B
+> (3,2.4) C
+> (4,3.2) D
+> (4.7, 2.8) D’
+> (5,4) E
+> (4.8.4.6) E’
+> (6,4.8) F
+> (7,5.6) G
+> (8,6.4) End
+> A
+> B
+> C
+> D
+> D’
+> E
+> E’ F
+> GMembers -only club
+> Service station
+
+Figure 1: Reference locations for example trajectories. 
+
+Privacy protection via L2 metric. The L2 metric measures variations across the entire domain, it is robust against variations in small areas. An analyst observing a privatized function would not be able to infer with high confidence, whether and where the original function had a brief but otherwise distinguishing shift. For example, when applied to trajectory data, it protects against sudden and short changes in the curve. Consider the following scenario: We have three trajectories, 
+
+q1, q 2, q 3 traveling on a straight road from time 0 to time 1, see Fig. 1 for an illustration of the road and values of the locations. The trajectories are listed as (time, location) tuples, where the traveling speed between two tuples is assumed to be uniform; they are similar except q2, q 3 will briefly stop at different locations before continuing down the road: 
+
+q1 : {(0 .13 , A ), (0 .26 , B ), (0 .4, C ), (0 .53 , D ), (0 .66 , E ), (0 .8, F ), (0 .9, G )}
+
+6q2 : {(0 .12 , A ), (0 .24 , B ), (0 .35 , C ), (0 .45 , D ), (0 .52 , D ′), (0 .54 , D ′), (0 .6, D ), (0 .7, E ), (0 .8, F ), (0 .9, G )}
+
+(briefly stops at D′)
+
+q3 : {(0 .12 , A ), (0 .24 , B ), (0 .35 , C ), (0 .45 , D ), (0 .55 , E ), (0 .61 , E ′), (0 .63 , E ′), (0 .7, E ), (0 .8, F ), (0 .9, G )}
+
+(briefly stops at E′)The three trajectories have small pairwise L2 distances; thus, an analyst observing a privatized trajectory would not be able to tell whether the original trajectory had been q1, q2 or q3 with high confidence. Also, the pairwise L2 distance is smaller than the pairwise maximum ℓ2 distance at any point, for each pair: dist 2(q1, q 2) = 0 .40 < max t∈[0 ,1] ∥q1(t) − q2(t)∥ = 0 .85 dist 2(q1, q 3) = 0 .48 < max t∈[0 ,1] ∥q1(t) − q3(t)∥ = 1 .08 dist 2(q2, q 3) = 0 .50 < max t∈[0 ,1] ∥q2(t) − q3(t)∥ = 1 .54 .
+
+Thus, the distinguishability level is smaller under the L2 (i.e. the privacy protection is stronger for the same privacy parameter), compared to the maximum point-wise distance. Finally, the L2 metric provides protection for single points in a way that is consistent with (and at least as strong as) that provided by the Euclidean metric for single points. For trajectory data, the longer a curve stays at a single point, the more similar the privacy guarantee becomes to that offered by point privatization under the Euclidean metric used in previous works [ABCP13, LY23, LY24]. Concretely, consider two constant trajectories q, q ′ : [0 , 1] → Rd (e.g. if a person stays at a location for the entire duration of the trajectory) such that q(t) = p and q′(t) = p′ for some 
+
+p, p ′ ∈ Rd for all t. The L2 distance between them is 
+
+Z 10
+
+∥q(t) − q′(t)∥2 dt 
+
+1/2
+
+=  ∥p − p′∥21/2 = ∥p − p′∥,
+
+which is the same level of distinguishability required for point privatization in the aforementioned works. 
+
+## 3 Privatization of functions 
+
+3.1 Linear functions 
+
+We start by considering the simple case of linear functions, which serves as an illustrative example to demonstrate some key ideas of our framework. Let fa : [0 , T ] → R, defined by fa(t) = a1t + a2
+
+with a = ( a1, a 2) ∈ R2. Let Uf be the space consisting of all such linear functions. Restating the GP definition for this special case, a mechanism Mf on ( Uf , dist 2) satisfies ε-GP, if for all pairs fa
+
+and fa′ , and all measurable subsets Sf ⊆ V = Uf ,Pr[ Mf (fa) ∈ Sf ] ≤ eε dist 2(fa,f a′ ) Pr[ Mf (fa′ ) ∈ Sf ].
+
+Note that we can identify fa with the point a ∈ R2, so to privatize fa it would suffice to privatize 
+
+a, i.e., we want to find a mechanism M : R2 → R2 such that for all Sf ⊆ Uf , and all pairs a, a ′
+
+Pr[ M (a) ∈ S] ≤ eε dist 2(fa,f a′ ) Pr M (a′)) ∈ S (1) 7where S := {c ∈ R2 : fc ∈ Sf }. Observing also the one-to-one correspondence between S and Sf ,we may simply write that (1) is required to hold for all measurable S ⊆ R2.We first show that a natural attempt fails to solve the problem. As stated above, for linear functions the problem reduces to privatizing a point a ∈ R2. Thus, it is tempting to simply apply Lemma 2.2 on a while taking the identity function as g (thus K = 1). For concreteness, consider the GP version of Lemma 2.2 with ε = 1, which adds Z to a, where Z follows the 2-dimensional spherical Laplace distribution. This outputs a y = ( y1, y 2) with pdf ∝ e−∥ y−a∥. Now consider the following two functions on [0 , 1]: fa : t 7 → 2t + 0 .5 and fa′ : t 7 → 0.5t + 2; i.e., a = (2 , 0.5) and 
+
+a′ = (0 .5, 2). Then the ratio of the respective pdf’s at y = (3 , 1.5) is 
+
+e−√(y1−a1)2+( y2−a2)2
+
+e−√(y1−a′ 
+
+> 1)2+( y2−a′
+> 2)2
+
+= e−√2+ √2.52+0 .52
+
+= e1.135 
+
+> e 1.5/√3 = e   
+
+> qR10(( a1−a′
+> 1)t+( a2−a′
+> 2)) 2dt
+
+= edist 2(fa,f a′ ),
+
+which violates the GP requirement. Critically, this naive method fails because the L2 distance between fa and fa′ is not equal to the ℓ2 distance between a and a′: two points far apart in the Euclidean space, which this method does not protect, may correspond to two functions that are very close in the function space, which are required to be indistinguishable under GP. To fix the issue, we should apply Lemma 2.1 with the correct metric, i.e., draw y from a distribution with pdf m(a)( y) ∝ e−ε dist 2(fy ,f a). This is no longer an isotropic spherical Laplace distribution. To draw from such a distribution efficiently, we rewrite dist 2 (fy, f a)2 =
+
+Z T
+
+> 0
+
+ f(y1,y 2)(t) − f(a1,a 2)(t)2 dt 
+
+=
+
+Z T
+
+> 0
+
+(( y1 − a1)t + ( y2 − a2)) 2 dt 
+
+=
+
+Z T
+
+> 0
+
+ (y1 − a1)2t2 + 2( y1 − a1)( y2 − a2)t + ( y2 − a2)2 dt 
+
+=
+
+ 13 (y1 − a1)2t3 + ( y1 − a1)( y2 − a2)t2 + ( y2 − a2)2t
+
+Tt=0 
+
+= 13 (y1 − a1)2T 3 + ( y1 − a1)( y2 − a2)T 2 + ( y2 − a2)2T
+
+= (y1 − a) (y2 − a2)  13 T 3 12 T 212 T 2 T
+
+| {z }
+
+> Σ−1
+
+(y1 − a1)(y2 − a2)
+
+
+
+= Σ−1/2
+
+(y1 − a1)(y2 − a2)
+
+ 2
+
+. (2) The matrix Σ −1 can be shown to be positive definite, hence the distribution with pdf 
+
+m(a)( y) ∝ e−ε dist 2(fy ,f a) = e−ε∥Σ−1/2[( y1−a1), (y2−a2)] T∥ (3) precisely corresponds to outputting 1 
+
+> ε
+
+Σ1/2Z + a where Z follows the standard 2D spherical Laplace distribution. Equivalently speaking, we must add noise to a in the eigen-directions of Σ. 8It is important to note that the scaling matrix Σ depends on T ; in particular, it requires 
+
+T < ∞. This is not a restriction, though, since linear functions over [0 , ∞) is not square-integrable. In Sections 3.4 and 4.3, we will see how square-integrable functions over an unbounded domain can still be privatized. 
+
+Remark 3.1 . The mechanism given by the pdf in (3) above can be extended to piecewise linear functions. Following the derivations above, one finds that the matrix Σ −1 becomes a block matrix of size 2 k × 2k, if the function is continuous within each of the k ≥ 1 segments. We will discuss piecewise functions in more detail in Section 4 when we discuss the privatization of curves. 
+
+3.2 Multi-basis Functions 
+
+Linear functions can be considered as linear combinations of two basis functions ϕ1(t) = t, ϕ 2(t) = 1, and our method in the previous subsection can be easily extended to functions with m basis functions. Such functions are thus parameterized by points in Rm, i.e., an m-dimensional function space. Specifically, let Uf = {fa : a ∈ Rm} where each fa : I → R is defined by fa(t) = Pmj=1 aj ϕj (t), for basis functions ϕ1(·), · · · , ϕ m(·) ∈ L2(I), with each ϕj : I → R for j ∈ [m]. We assume the ϕj (·)’s are linearly independent to avoid redundancy. A common set of basis functions are 
+
+{ϕj (t) := tm−j }j∈[m], which induce the space of all polynomials of degree up to m − 1. Note that linear independence among the ϕj (·)’s implies that fa(·) = fa′ (·) ⇐⇒ a = a′, thus preserving the one-to-one correspondence between the sets Sf ⊆ Uf and S := {c ∈ Rm : fc ∈ Sf }.Next, we extend our ε-GP mechanism for linear functions to this more general function space. For y = ( y1, · · · , y m) ∈ Rm, we have dist 2(fy, f a)2 =
+
+Z
+
+> I
+
+(fy(t) − fa(t)) 2dt 
+
+=
+
+Z
+
+> I
+
+(( y1 − a1)ϕ1(t) + · · · + ( ym − am)ϕm(t)) 2 dt 
+
+=
+
+Z
+
+> I
+
+
+
+> m
+
+X
+
+> j=1
+> m
+
+X
+
+> k=1
+
+(yj − aj )ϕj (t) · (yk − ak)ϕl(t)
+
+ dt 
+
+=
+
+> m
+
+X
+
+> j=1
+> m
+
+X
+
+> k=1
+
+(yj − aj )( yk − ak) ·
+
+Z
+
+> I
+
+ϕj (t)ϕl(t)dt 
+
+= (y1 − a1) · · · (ym − am)R 
+
+> I
+
+ϕ1(t)ϕ1(t)dt · · · R 
+
+> I
+
+ϕ1(t)ϕm(t)dt 
+
+... . . . ...R 
+
+> I
+
+ϕm(t)ϕ1(t)dt · · · R 
+
+> I
+
+ϕm(t)ϕm(t)dt 
+
+| {z }
+
+> Σ−1
+
+
+
+y1 − a1
+
+...
+
+ym − am
+
+
+
+= Σ−1/2
+
+
+
+y1 − a1
+
+...
+
+ym − am
+
+
+
+> 2
+
+. (4) Thus, we can privatize fa ∈ Uf by privatizing a as M (a) := a + 1 
+
+> ε
+
+Σ1/2Z where Z is drawn from a 
+
+m-dimensional spherical Laplace distribution, and [Σ −1]j,l = R 
+
+> I
+
+ϕj (t)ϕl(t)dt . Note that Σ is positive definite, since Σ −1 has full rank and is positive semi-definite as it is an outer product of a vector of 9linearly independent functions. In particular, if {ϕj (·)}j∈[m] is a set of orthogonal basis such that R 
+
+> I
+
+ϕj (t)ϕl(t)dt = 0 for j̸ = l, then all of the off-diagonal entries in Σ vanish. We summarize this result below. 
+
+Theorem 3.2. Fix a set of linearly independent functions {ϕj }j∈[m] ⊂ L2(I), where each ϕj : I →
+
+R. Let Uf := {fa(·) := P 
+
+> j
+
+aj ϕj (·) | a ∈ Rm}, equipped with the L2 metric dist 2(·, ·). Let Σ−1 be the matrix whose (j, l )th entry is given by [Σ −1]j,l = R 
+
+> I
+
+ϕj (t)ϕl(t)dt for j, l ∈ [m]. Then for any 
+
+fa ∈ Uf , the mechanism that releases f˜a(·) where ˜a = M (a) := a + 1 
+
+> ε
+
+Σ1/2Z, and Z ∼ SLap( m), is 
+
+ε-GP. 
+
+The identity in (4) allows us to also privatize any fa ∈ Uf under CGP. In fact, the proof to the theorem below gives an alternative way to derive the GP guarantee of the mechanism mentioned above using Lemma 2.2. 
+
+Theorem 3.3. Let (Uf , dist 2) and Σ be as defined in Theorem 3.2. Then for any fa ∈ Uf , the mechanism that releases f˜a(·) where ˜a = M (a) := a + 1√2ρ Σ1/2Z, and Z ∼ N (0 , I m×m), satisfies 
+
+ρ-CGP. Proof. Let g : Uf → Rm be given by g(fa) := Σ −1/2a. Then 
+
+∥g(fa) − g(fa′ )∥ = Σ−1/2
+
+
+
+a1
+
+...
+
+am
+
+ − Σ−1/2
+
+
+
+a′
+
+> 1
+
+...
+
+a′
+
+> m
+
+ = Σ−1/2
+
+
+
+a1 − a′
+
+> 1
+
+...
+
+am − a′
+
+> m
+
+ = dist 2(fa, f a′ ),
+
+where the last equality is due to identity (4). Thus, g is 1-Lipschitz w.r.t. dist 2 and by Lemma 2.2, the mechanism g(fa) 7 → g(fa) + 1√2ρ Z for Z ∼ N (0 , I m×m) satisfies ρ-CGP. Moreover, by post-processing, we get that the mechanism M given by 
+
+M (a) := Σ 1/2
+
+
+
+g(fa) + 1
+
+√2ρ Z
+
+
+
+= Σ 1/2
+
+
+
+Σ−1/2a + 1
+
+√2ρ Z
+
+
+
+= a + 1
+
+√2ρ Σ1/2Z
+
+satisfies ρ-CGP. Below, we analyze the utility of our mechanism, i.e., the L2 error induced by the privacy noise, both in expectation and with high probability. 
+
+Lemma 3.4. Let ˜a = M (a) := a + 1 
+
+> ε
+
+Σ1/2Z, where Z ∼ SLap( m). Then M is ε-GP, and 1. E[dist 2(f˜a, f a)] = mε ;2. dist 2(f˜a, f a) ≤ η(β;m, 1)  
+
+> ε
+
+with probability at least 1 − β,where η(β; m, 1) := ee−1 (m + ln 1 
+
+> β
+
+).Proof. We have dist 2(f˜a, f a) = Σ−1/2 ˜a − a = Σ−1/2 a + 1 
+
+> ε
+
+Σ1/2Z − a = 1
+
+ε ∥Z∥ .
+
+The magnitude ∥Z∥ follows a generalized gamma distribution (see Lemma B.6), where ∥Z∥ ∼ G(1 , m, 1) for Z drawn from a spherical Laplace distribution. The rest follows from Corollary B.1 and Lemma B.7. 10 Similar arguments apply for the ρ-CGP variant. Notice that the magnitude of an m-dimensional standard Gaussian random vector has distribution G(√2, m, 2), then applying Corollary B.1 and Lemma B.8, we get: 
+
+Lemma 3.5. Let ˜a = M (a) := a + 1√2ρ Σ1/2Z, where Z ∼ N (0 , I m×m). Then M is ρ-CGP, and 1. E[dist 2(f˜a, f a)] = √2 Γ( m/ 2+1 /2) Γ( m/ 2) √2ρ ≤ 
+
+> √m√2ρ
+
+;2. dist 2(f˜a, f a) ≤ η(β;m, 2)  
+
+> √2ρ
+
+with probability at least 1 − β,where η(β; m, 2) := 
+
+q
+
+m + 2 pm ln(1 /β ) + 2 ln(1 /β ).
+
+Multivariate functions. It is easy to see that the mechanisms in Theorems 3.2 and 3.3 hold nearly verbatim for multivariate functions, or equivalently, when the variable t is a vector ( t1, · · · , t d), where ti ∈ Ii ⊆ R, with the integrals appropriately defined over I := I1 × · · · × Id. The prototypical example is the space of multivariate polynomials over the reals. Note that in this case the com-putation of the matrix Σ is the same, and Σ remains m × m, where m is the number of linearly independent functions ϕj (·)’s we choose in the basis. 
+
+Remark 3.6 . All the mechanisms described in Section 3 (above and henceforth) generalize to any metric induced by an inner product dist( u, v ) := p⟨u − v, u − v⟩. In the most general case, the entries of Σ −1 become [Σ −1]j,l = ⟨ϕj , ϕ l⟩, and the matrix Σ −1 is also called the Gram matrix of 
+
+{ϕj }j∈[m].
+
+3.3 Vector-valued Functions 
+
+In the above, we discussed privatizing functions of the form fa : t 7 → Pmj=1 aj ϕj (t) for real-valued basis functions ϕj (·), and coefficients aj ∈ R for j ∈ [m], so fa(·) is also real-valued. Next, we discuss the scenario where fa(·) is vector-valued, which arises when either the basis functions ϕj (·)’s or the coefficients aj ’s are vector-valued. 
+
+Vector-valued basis, real-valued coefficients. Suppose the basis functions ϕj (·)’s are vector-valued, with ϕj (·) = ( ϕj, 1(·), · · · , ϕ j,n (·)) for j ∈ [m]. Let Uf = span R({ϕj }j∈[m]). Then the L2
+
+distance dist 2(·, ·) in this case can be computed from dist 2(fy, f a)2 =
+
+Z
+
+> I
+
+∥fy(t) − fa(t)∥2dt 
+
+=
+
+Z
+
+> I
+
+hP 
+
+> j
+
+(yj − aj )ϕj, 1(t) · · · P
+
+> j∈[m]
+
+(yj − aj )ϕj,n (t)
+
+iT 2
+
+dt 
+
+=
+
+Z
+
+> In
+
+X
+
+> r=1
+
+ X
+
+> j,l ∈[m]
+
+(yj − aj )( yl − al)ϕj,r (t)ϕl,r (t)
+
+ dt 
+
+=
+
+> n
+
+X
+
+> r=1
+
+X
+
+> j,l ∈[m]
+
+(yj − aj )( yl − al)
+
+Z 
+
+> I
+
+ϕj,r (t)ϕl,r (t)
+
+
+
+dt 
+
+11 =
+
+> n
+
+X
+
+> r=1
+
+(y1 − a1) · · · (ym − a′
+
+> m
+
+) Σ−1( r)
+
+
+
+(y1 − a1)...(ym − am)
+
+
+
+= (y1 − a1) · · · (ym − a′
+
+> m
+
+) nX
+
+> r=1
+
+Σ−1( r)
+
+! 
+
+(y1 − a1)...(ym − am)
+
+
+
+Thus, Σ is still m × m, and can be computed from Σ −1 = Σ −1(1) + · · · Σ−1( n), where [Σ −1( r)]j,l =R 
+
+> I
+
+ϕj,r (t)ϕl,r (t)dt for r ∈ [n]. The dimension of Σ is not affected because although the basis functions are vector-valued, one coefficient is used for each basis function vector, no matter how large it is. 8 6 4 2 0 2 4
+
+> 8
+> 6
+> 4
+> 2
+> 0
+> 2
+> 4
+> 6
+> true
+> privatized
+
+(a) I = [0 , 2π], Σ = 12π I3×32 1 0 1 2 3  
+
+> 3
+> 2
+> 1
+> 0
+> 1
+> 2
+> 3true
+> privatized
+
+(b) I = [0 , 4π], Σ = 14π I2×2
+
+Figure 2: Example curves with vector-valued basis, fix ε = 1. (2a): [ x1(t), x 2(t)] T = 4 .8 · [cos( t), sin( t)] T − 2 · [1 , 0] T − 1 · [0 , 1] T.(2b): [ x1(t), x 2(t)] T = 2 · [cos( t), sin( t)] T + 1 · [cos( t/ 2) , sin( t/ 2)] T.
+
+Example 1. Consider the basis {ϕ1} where the function ϕ1 : t 7 → [cos( t), sin( t)] T with I = [0 , 2π], then a[cos( t), sin( t)] T describes a circle of radius |a| centered at the origin. Using our mechanism above, we only need to privatize the coefficient a, which is intuitive since all information about the curve is captured by the radius. If we want to account for shift, we can add the constant vectors 
+
+ϕ2(·) ≡ [1 , 0] T, ϕ 3(·) ≡ [0 , 1] T as basis functions. See Fig. 2a for an illustration of this example, and Fig. 2b for another example. 
+
+Real-valued basis, vector-valued coefficients. In some cases, a function might be described more naturally by vector coefficients, while the basis functions are real-valued. 
+
+Example 2. An ellipse can be described by a two-variable polynomial, or a parametric curve with vector coefficients as [x1(t), x 2(t)] T = a1 cos( t) + a2 sin( t) + a3
+
+where aj = [ aj, 1, a j, 2]T for j ∈ [3], and I = [0 , 2π]. See Fig 3a for a zero-centered ellipse. 
+
+Example 3. Another example is the basis {ϕ1, ϕ 2} where ϕ1 : t 7 → t, ϕ2 : t 7 → 1, and I = [0 , T ]. Then x1(t)
+
+x2(t)
+
+
+
+=
+
+a1,1
+
+a1,2
+
+
+
+· ϕ1(t) + 
+
+a2,1
+
+a2,2
+
+
+
+· ϕ2(t)12 4 2 0 2 4 
+
+> 6
+> 4
+> 2
+> 0
+> 2
+> 4
+> 6true
+> privatized
+
+(a) I = [0 , 2π], Σ = 1 
+
+> π
+
+I4×40.0 2.5 5.0 7.5 10.0   
+
+> 5.0
+> 7.5
+> 10.0
+> 12.5
+> 15.0
+> 17.5
+> 20.0
+> 22.5 true
+> privatized
+
+(b) I = [0 , 4] , Σ = 
+
+ 316  
+
+> −616
+> −616
+
+1
+
+
+
+Figure 3: Examples with vector-valued coefficients, fix ε = 1. (3a): [ x1(t), x 2(t)] T = [3 , −1] T · cos( t) + [5 , 3.5] T · sin( t). (3b): [ x1(t), x 2(t)] T = [3 , −1] T · t + [5 , 3.5] T · 1. describes a 2D linear curve (see Fig. 3b), which is useful for approximating 2D trajectories. In general, suppose each aj = [ aj, 1, · · · , a j,n ]T for j ∈ [m]. We have Uf = span Rn ({ϕj }j∈[m])where each ϕj : I → R. Then dist 2(fy, f a)2 =
+
+Z
+
+I
+
+∥fy(t) − fa(t)∥2dt 
+
+=
+
+Z
+
+I
+
+(y1,1 − a1,1) · · · (y1,n − a1,n )T ϕ1(t) + · · · 
+
++ (ym, 1 − am, 1) · · · (ym,n − am,n )T ϕm(t) 2
+
+dt 
+
+=
+
+Z
+
+InX
+
+r=1 
+
+(( y1,r − a1,r )ϕ1(t) + ( ym,r − am,r )ϕm(t)) 2 dt 
+
+=
+
+nX
+
+r=1 
+
+X
+
+j,l ∈[m]
+
+(yj,r − aj,r )( yl,r − al,r )
+
+Z
+
+I
+
+ϕj (t)ϕl(t)dt 
+
+=
+
+nX
+
+r=1 
+
+(y1,r − a1,r ) · · · (ym,r − am,r ) Σ−10
+
+
+
+(y1,r − a1,r )...(ym,r − am,r )
+
+
+
+=
+
+
+
+y1,1 − a1,1
+
+...
+
+ym, 1 − am, 1
+
+...
+
+y1,r − a1,r 
+
+...
+
+ym,r − am,r 
+
+
+
+T
+
+Σ−1
+
+
+
+y1,1 − a1,1
+
+...
+
+ym, 1 − am, 1
+
+...
+
+y1,r − a1,r 
+
+...
+
+ym,r − am,r 
+
+
+
+13 where Σ −10 is an m × m matrix with entries [Σ −10 ]j.l = R 
+
+> I
+
+ϕj (t)ϕl(t)dt , and Σ −1 is an mn × mn block matrix, with Σ −10 repeated in the diagonal. For a finite-dimensional function space Uf , let dim( Uf ) denote its dimension; i.e. dim( Uf ) is the number of columns of its associated Gram matrix. From the discussions above and Lemma 3.4, we have: 
+
+Corollary 3.1. For fa = P 
+
+> j
+
+aj ϕj ∈ Uf := span Rna ({ϕj }j∈[m]), let ˜a = M (a) := a + 1 
+
+> ε
+
+Σ1/2Z where 
+
+Z is a standard spherical Laplace random vector and dim( Uf ) = na · m. Then M is ε-GP, and 1. E[dist 2(f˜a, f a)] = dim( Uf ) 
+
+> ε
+
+;2. dist 2(f˜a, f a) ≤ η(β;dim( Uf ),1)  
+
+> ε
+
+with probability at least 1 − β.
+
+Similarly, from Lemma 3.5, we have: 
+
+Corollary 3.2. For fa, U f and dim( Uf ) as in Corollary 3.1, let ˜a = M (a) := a + 1√2ρ Σ1/2Z where 
+
+Z is a standard Gaussian random vector. Then M is ρ-CGP, and 1. E[dist 2(f˜a, f a)] = √2 Γ(dim( Uf )/2+1 /2) Γ(dim( Uf )/2) √2ρ ≤√dim( Uf ) 
+
+> √2ρ
+
+;2. dist 2(f˜a, f a) ≤ η(β;dim( Uf ),2)  
+
+> √2ρ
+
+with probability at least 1 − β.
+
+3.4 Arbitrary Functions 
+
+So far, we have focused on functions that are linear combinations of a given set of basis functions. In this subsection, we consider the most general case where the function q to be privatized is not as-sumed to take any specified form, i.e., it is taken from L2(I), the entire space of square-integrable functions. Note that this is an infinite-dimensional space. We shall focus on GP algorithms; translating such algorithms to their CGP variants is straightforward, with details deferred to Ap-pendix C. 
+
+Project-and-privatize. A natural approach to reduce this problem to the previous one would be to first project q into Uf defined with respect to some basis {ϕj }j , then privatize its projection. Specifically, let PUf : U → Uf be a function that computes the least squares projection onto Uf . We also write PUf (q) = fa(q) where a(q) denotes the coefficients of the approximation. We summarize this simple approach in Algorithm 2. 
+
+Algorithm 2 Project-and-Privatize 
+
+Input : q : I → Rn; finite-dimensional function space Uf ; ε > 0
+
+Output : privatized ˜ q 
+
+> 1:
+
+compute Σ from Uf 
+
+> 2:
+
+a ← coefficients of PUf (q) 
+
+> 3:
+
+˜a ← a + 1 
+
+> ε
+
+Σ1/2Z, Z ∼ SLap(dim( Uf ))  
+
+> 4:
+
+return f˜a
+
+To prove the privacy of Algorithm 2, we need the following standard result (e.g. see [DD01]): 14 Lemma 3.7. Let Uf be a finite-dimensional function space. Then for any pair of q, q ′ ∈ U ,
+
+dist 2(fa(q), f a(q′)) ≤ dist 2(q, q ′), where fa(q), f a(q′) denote the least squares projections of q and q′
+
+onto Uf , respectively. 
+
+Lemma 3.8. Algorithm 2 is ε-GP. Proof. Let Mf : Uf → Uf be the mechanism that privatizes PUf (q), which is ε-GP on ( Uf , dist 2)by previous discussions. Let M : U → Uf denote the mechanism in Algorithm 2. We have for any measurable Sf ⊆ Uf and any pair q, q ′ ∈ U
+
+Pr[ M (q) ∈ Sf ] = Pr Mf (PUf (q)) ∈ Sf
+
+
+
+≤ eε dist 2(fa(q),f a(q′)) Pr Mf (PUf (q′)) ∈ Sf
+
+
+
+= eε dist 2(fa(q),f a(q′)) Pr M (q′) ∈ Sf
+
+.
+
+Thus, if we can show that dist 2
+
+ fa(q), f a(q′)
+
+ ≤ dist 2(q, q ′), then M satisfies the GP requirement on 
+
+U w.r.t. dist 2. The required inequality then follows from Lemma 3.7. The detailed formulas for computing the least squares projections for both real-valued and vector-valued functions are provided in Appendix E. Next, we discuss the L2 error of Algorithm 2. By simple triangle inequality, we have E[dist 2(q, f ˜a)] ≤
+
+dist 2(q, f a) + 1 
+
+> b
+
+E[∥Z∥]. Below, we provide a tighter analysis. 
+
+Lemma 3.9. Let Uf be the subspace given by the span of {ϕj (·)}j∈[m]. For q ∈ U , let fa ∈ Uf be a projection of q in Uf . For ˜a := a + 1 
+
+> b
+
+Σ1/2Z where Z is a random vector with mean zero, we have 
+
+E[dist 2(q, f ˜a)2] = dist 2(q, f a)2 + 1
+
+b2 E[∥Z∥2].
+
+As one would expect, the simple mechanism incurs large error if q cannot be approximated well by any fa ∈ Uf . On the other hand, if Uf has large dimension, then we might still end up with a large error from the noise vector ∥Z∥ even if q is well approximated by Uf . Thus, the challenge is to select a basis {ϕj }j that strikes a balance between the two sources of error. Critically, the selection must also be done in a private manner. 
+
+A private, balanced selection. Let {ϕj (·)}j∈J be a pre-selected collection of basis functions indexed by J. We assume that q can be approximated by these basis functions to some accuracy 
+
+γ = O(1 /ε ) that the analyst is content with, absent privacy. Otherwise, a general-purpose dense basis allowing arbitrary γ > 0 can be used, where J is infinite, such as Hermite functions for L2(R), the Fourier basis {1, sin( jt ), cos( jt )}j∈N for L2([ −π, π ]), or monomials {1, t j }j∈N for L2([0 , T ]). Our algorithm (Algorithm 3) follows roughly these steps: 1. Identify a large enough basis that approximates q well; 2. Project and privatize q, obtain the first approximation ˜ q0;3. Based on the coefficients of ˜ q0, identify and eliminate the ones with (relatively) small magni-tude, as they contribute less to the approximation quality but increase the noise; 4. Project q onto the space spanned by the remaining basis functions, and privatize. 15 Algorithm 3 PrivFuncSelect 
+
+Input : q : I → Rn; {ϕj }j∈J ; β > 0; ε > 0
+
+Output : privatized ˜ q 
+
+> 1:
+
+k0 ← SVT( q, ( ε 
+
+> 12
+
+, ε 
+
+> 6
+
+), − 4 
+
+> ε
+
+, 1, g 1, g 2, . . . ), gj (·) := − dist 2(PU (j)
+
+> f
+
+(·), ·) 
+
+> 2:
+
+˜q0 ← Project-and-Privatize( q, U (k0) 
+
+> f
+
+, ε/ 4)  
+
+> 3:
+
+˜c ← coefficients of ˜ q0 in U (k0) 
+
+> f
+> 4:
+
+s(r) ← rth largest magnitude among ˜ c, r ∈ [k0] 
+
+> 5:
+
+k1 ← SVT( q, ( ε 
+
+> 12
+
+, ε 
+
+> 6
+
+), 0, 1, g ′
+
+> 1
+
+, g ′
+
+> 2
+
+, · · · ), Nr := {j : ∥˜cj ∥ ≥ s(r)}, g′
+
+> r
+
+(·) := n|Nr | 
+
+> ε/ 4
+
+− dist 2(fb(r) , ·), 
+
+b(r) 
+
+> j
+
+:= ˜ cj · 1{j ∈ Nr} 
+
+> 6:
+
+Uf ← span( {ϕj : j ∈ Nk1 }) 
+
+> 7:
+
+f˜a ← Project-and-Privatize( q, U f , ε/ 4)  
+
+> 8:
+
+return f˜a
+
+For j ≥ 1, let U (j) 
+
+> f
+
+denote the subspace spanned by the first j basis functions, Let PU (j)
+
+> f
+
+(q) denote the least-squares projection of q in U (j) 
+
+> f
+
+. In step (1) above, we want to find j such that PU (j)
+
+> f
+
+(q) is sufficiently small (e.g. O(1 /ε )). We use SVT on g1, g 2, . . . where each gj (q) := − dist 2(PU (j)
+
+> f
+
+(q), q )is 1-Lipschitz, as in line 1 of Algorithm 3. Then we apply project-and-privatize in line 2-3, where ˜c are the privatized coefficients of ˜ q0. To decide which basis functions to keep, we order the noisy coefficients in ˜ c based on their magnitude, and create candidate sets Nr := {j : ∥˜cj ∥ ≥ s(r)}, where 
+
+s(r) is the rth largest magnitude. We use b(r) 
+
+> j
+
+= ˜ cj · 1{j ∈ Nr} to approximate the projection that corresponds to muting the coefficients not in Nr. We run SVT to find which candidate set has approximately balanced noise and approximation error, by using the sequence g′
+
+> 1
+
+, g ′
+
+> 2
+
+, · · · where 
+
+g′
+
+> r
+
+(·) := n|Nr | 
+
+> ε/ 4
+
+− dist 2(fb(r) , ·), which are 1-Lipschitz, and finding where they first cross zero, as in line 5. Finally, we perform a final project-and-privatize, using the basis set Nk1 identified by the second SVT call, as in lines 6-7. 
+
+Privacy. Algorithm 3 is ε-GP by basic composition in Lemma 2.3, where ε/ 4 is used in each of lines 1, 2, 5, 7. 
+
+Utility. The goal of the first SVT is to identify a large enough subset of basis functions from a given basis that is assumed to approximate q well, while that of the second SVT is to further refine the selection by approximately balancing the privatization noise and approximation error. By the generic guarantee of SVT in Lemma 2.4, both goals are approximately achieved: In each SVT call, we might overshoot the target in value by O(log(1 /β )/ε ) resulting in an extra sub-set of basis functions of size O(log(1 /β )), or undershoot in value from the threshold by at most 
+
+O ((log(1 /β ) + log( k∗/β )) /ε ), where k∗ denotes the index of the balance point. Thus, Algorithm 3 meets our goal of providing a roughly balanced selection. While Algorithm 3 has addressed the problem of how to select a set of good basis functions from a given collection, we have not touched the issue of how to decide which collection to use. Certainly, the choice of the basis also has a large impact on the utility of the algorithm, but this is 16 largely application-dependent. For example, if the functions tend to be periodic, then the Fourier basis is preferred; for data arising from signal processing (e.g. ECG data), sinc functions can be used; if the function is a curve, then piecewise basis functions are better (see Section 4). Thus, this decision is best made at the application level. 
+
+3.5 Projecting [0 , T ]-functions onto R-functions 
+
+In previous discussions, we had assumed that both the function q and the basis {ϕj }j are functions on the same domain I. In fact, it is possible to separate the domains, in particular for the case where one is R and the other is a finite interval. In some cases, it might even be beneficial to do so, for example when it gives a matrix Σ that is easier to work with. Let sinc( t) := sin( πt ) 
+
+> πt
+
+be the normalized sinc function. The set of functions {sinc( t−k)}k∈Z is square-integrable on R (hence also on [0 , T ]); moreover, the set {sinc( t − k)}k∈Z is an orthonormal basis with R ∞−∞ sinc( t − k)2 = 1 and 
+
+R ∞−∞ sinc( t − k) · sinc( t − l)dt = 0 for k̸ = l. We would like to use this readily available orthonormal basis, which is also commonly used for approximating functions that arise in signal processing. We will show that using such a basis in L2(R) for a curve in C([0 , T ]) only requires little additional work 1, and the privacy guarantee follows similarly to the discussion above. Here, I always refers to the domain of the function q, and dist 2 is defined in terms of I.
+
+Using L2(R) for (C([0 , T ]) , dist 2). We consider the case where q ∈ U = C([0 , T ]) is a continuous function on the interval [0 , T ], but its privatization uses functions from L2(R). Define a function 
+
+L : U → L2(R) by 
+
+L(q)( t) := 
+
+(
+
+q(t) t ∈ [0 , T ]0 otherwise .
+
+I.e., L(q) is the extension of q which takes inputs from R. Let L(U ) := {L(q) : q ∈ U }. Notice R ∞−∞ L(q)( t)2dt = R  
+
+> [0 ,T ]
+
+q(t)2dt < ∞, so L(U ) ⊂ L2(R). Given an m-dimensional subspace Lf ⊆
+
+L2(R), let P : U → Lf be the function that computes the least squares projection of L(q) in Lf ,i.e. P : q 7 → fa(L(q)) . Let us write dist 2,R(u, u ′) = R ∞−∞ (u(t) − u′(t)) 2dt for u, u ′ ∈ L2(R). Now, from Section 3.2 we have a GP mechanism Mf for privatizing P(q) ∈ Lf w.r.t. dist 2,R. Define a mechanism M1 : U → Lf , where M1(q) = Mf (P(q)). Then M1 satisfies for all q, q ′, and all measurable Sf ⊆ Lf
+
+Pr[ M1(q) ∈ Sf ] = Pr[ Mf (P(q)) ∈ Sf ]
+
+≤ eε dist 2,R(P(q),P(q′)) Pr Mf (P(q′)) ∈ S
+
+= eε dist 2,R(P(q),P(q′)) Pr M1(q′) ∈ Sf
+
+.
+
+Also, since L(U ) ⊂ L2(R), Lemma 3.7 holds when we replace the metric space ( U, dist 2) with (L(U ), dist 2,R) in the statement. Thus, dist 2,R(P(q), P(q′)) = dist 2,R(fa(L(q)) , f a(L(q′)) ) Lemma 3.7
+
+≤ dist 2,R(L(q), L (q′)) = dist 2(q, q ′); i.e. M1 is ε-GP w.r.t. dist 2.
+
+> 1Note the approximation quality could be different, see discussion in Appendix E.4
+
+17 4 Privatization of Curves 
+
+A curve is a continuous function [0 , T ] → Rn. Unlike the case of arbitrary function privatization which assumes a suitable Uf is given, for privatizing curves there are well known sets of basis functions that approximate continuous functions well. Based on this fact, in this section we provide another algorithm more suitable for curves. 
+
+4.1 Privatization of piecewise functions 
+
+Before we present our algorithm for arbitrary curve privatization, we discuss how piecewise functions can be privatized using the framework developed in Section 3.2. For ease of discussion we assume the coefficients are real-valued in Sections 4.1.1 and 4.1.2 below; the discussions adapt to the vector-valued case by repeating the operations in each coordinate, as explained in Section 3.3. 
+
+4.1.1 Defining piecewise basis functions 
+
+Let 1A : I → { 0, 1} be the indicator function that checks whether a point is in the set A, i.e., 
+
+1A(t) = 1 if t ∈ A and 0 otherwise. Clearly, two indicator functions 1A(·) and 1A′ (·) are linearly independent if A̸ = A′. Let As = [ Ts−1, T s) for s ∈ [k], and 0 = T0 < T 1 < · · · < T k = T . If a set of functions {ϕj (·)}j∈[m] is linearly independent on each As, then the set {ϕs,j }s∈[k],j ∈[m], where 
+
+ϕs,j (t) := 1As (t)ϕj (t), is also linearly independent on [0 , T ] as long as each ϕs,j (·) is not identically zero. Since the latter set has size mk , the matrix Σ becomes mk × mk . In particular, ordering the coefficients as a = [ a1,1, . . . , a 1,m , a 2,1, . . . , a k,m ]T, so fa(t) := P
+
+> s
+
+P 
+
+> j
+
+as,j · 1As (t)ϕj (t), we get Σ−1 := 
+
+
+
+Σ(1) −1 0 · · · 00 Σ(2) −1 · · · 0
+
+... ... . . . ...
+
+0 0 · · · Σ(k)−1
+
+ ,
+
+where each Σ (s)−1 is m×m, with [Σ (s)−1]j,l = R 
+
+> t∈As
+
+ϕj (t)ϕl(t)dt for s ∈ [k]. For example, applying to piecewise linear functions with {ϕ1 : t 7 → t, ϕ 2 : t 7 → 1}, we get Σ (s)−1 =
+
+ 13 (T 3 
+
+> s
+
+− T 3
+
+> s−1
+
+) 12 (T 2 
+
+> s
+
+− T 2
+
+> s−1
+
+) 
+
+> 12
+
+(T 2 
+
+> s
+
+− T 2
+
+> s−1
+
+) Ts − Ts−1
+
+
+
+,which gives Σ(s) =
+
+   
+
+> 12 (Ts−Ts−1)3
+> −6( Ts+Ts−1)(Ts−Ts−1)3
+> −6( Ts+Ts−1)(Ts−Ts−1)3
+> 4( T2
+> s+TsTs−1+T2
+> s−1)(Ts−Ts−1)3
+
+ .
+
+Thus, although the matrix Σ for piecewise linear functions is 2 k × 2k, matrix multiplication can be done at each sub-matrix Σ (s) after obtaining the 2 k-dimensional random vector Z, i.e., the number of multiplications is 4 k instead of 4 k2.
+
+Remark 4.1 . N.B. Although the multiplications can happen at the sub-vector level, the noise vector 
+
+Z from the spherical Laplace distribution must be drawn together as a single vector. Drawing the noise vector together enables an effect that is reminiscent of parallel composition in DP; using separately drawn sub-vectors would require splitting the privacy budget among the component privatizations that use these sub-vectors, which would not be ideal. On the other hand, Gaussian noises can be separately drawn, as uncorrelated Gaussian random variables are also independent, a desirable property enjoyed solely by the Gaussian distribution! 18 4.1.2 Ensuring continuity 
+
+The privatization mechanism where noise is added to each segment described above might result in a privatized curve that is only continuous within each segment, and discontinuous at the segment end points Ts’s. If continuity is desired, a post-processing step may be added where the privatized curve is replaced with a continuous one that is nearest to it. That is, given privatized function f˜a,we find fˆa with lim t↑Ts fˆa(t) = fˆa(Ts) for 1 ≤ s ≤ k − 1, such that dist 2(f˜a, f ˆa) is minimized. Such a process may increase the initial error by at most two times. Indeed, let fa ∈ Uf denote the original continuous function, then dist 2(fˆa, f a) ≤ dist 2(fˆa, f ˜a) + dist 2(f˜a, f a) ≤ 2 dist 2(f˜a, f a),
+
+where the last inequality is due to fˆa being the nearest continuous curve to f˜a in Uf .Equivalently, we want to minimize dist 2(fy, f ˜a)2 = ( y − ˜a)TΣ−1(y − ˜a) = yTΣ−1y − 2˜ aTΣ−1y +˜aT˜a, and fy is continuous at Ts iff P 
+
+> j∈[m]
+
+ys,j · ϕj (Ts) = P 
+
+> j∈[m]
+
+ys+1 ,j · ϕj (Ts) ⇐⇒ P
+
+> j∈[m]
+
+(ys,j −
+
+ys+1 ,j )ϕj (Ts) = 0, for 1 ≤ s ≤ k − 1. I.e., the projection process can be formulated as the following quadratic program with linear equality constraints: minimize 
+
+> y
+
+12 yTΣ−1y − ˜aTΣ−1y
+
+subject to Cy = 0 ,
+
+where y = [ y1,1, · · · , y 1,m , · · · , y k, 1, · · · , y k,m ]T ∈ Rkm , and the matrix C ∈ R(k−1) ×(km ) is 
+
+C := 
+
+
+
+ϕ1: m(T1) −ϕ1: m(T1) 0 · · · 00 ϕ1: m(T2) −ϕ1: m(T2) · · · 0
+
+... ... ... . . . ...
+
+0 0 0 · · · −ϕ1: m(Tk−1)
+
+
+
+where ϕ1: m(Ts) = [ ϕ1(Ts), · · · , ϕ m(Ts)] ∈ Rm.
+
+4.2 Privately approximating curves via piecewise functions 
+
+In this subsection, we present an algorithm for arbitrary curve privatization using piecewise basis functions. Our algorithm tries to find a suitable finite-dimensional Uf , and performs a Project-and-Privatize of q onto Uf . The space Uf is generated from a set of sub-intervals and an input real-valued basis {ϕj }j , and has the property that the error from the approximation PUf (q) is roughly equal to dim( Uf ). The process to find Uf is composed of two parts, provided in sub-algorithms PrivFuncSeg (Algorithm 4) and ReduceSeg (Algorithm 5), which we discuss in detail below. 
+
+PrivFuncSeg. We are given a (small) set of basis functions {ϕj }j , which should provide good approximations to continuous functions when restricted to a small sub-interval. The goal of PrivFuncSeg is find the number of sub-intervals, such that when we fit {ϕj }j to each sub-interval, we get an overall curve which roughly balance the two sources of error mentioned above. We do so via SVT where we double the number of sub-intervals in each check. Let q : [0 , T ] → Rn be the input curve. For j = 0 , 1, 2, · · · , let PU (j)
+
+> f
+
+(·) compute the best approximation using 2 j sub-intervals with end points at {r T 
+
+> 2j
+
+: r = 0 , 1, 2, · · · , 2j }; i.e. PU (j)
+
+> f
+
+(q) is the least squares projection of q onto 19 Algorithm 4 PrivFuncSeg 
+
+Input : q : [0 , T ] → Rn; {ϕj }j∈[m]; β > 0; ε > 0
+
+Output : privatized ˜ q 
+
+> 1:
+
+¯k ← SVT( q, (ε/ 12 , ε/ 6) , 0, 1, g 0, g 1, g 2, · · · ), where τj = 2j mn ε/ 4 , gj (q) := τj − dist 2(PU (j)
+
+> f
+
+(q), q ), 
+
+PU (j)
+
+> f
+
+computes best approximation using 2 j sub-intervals  
+
+> 2:
+
+B ← 3ε/ 4, privacy budget for remaining steps  
+
+> 3:
+
+S ← { jT / 2¯k : j = 0 , 1, 2, · · · , 2¯k} 
+
+> 4:
+
+k1 ← min( ¯k − 2, 4)  
+
+> 5:
+
+if k1 ≥ 1 then  
+
+> 6:
+
+for i = 1 , . . . , 4 do  
+
+> 7:
+
+ˆSi ← ReduceSeg( q, (i − 1) T / 4, iT / 4, k 1, 1, S i, β, B, ε/ 16), Si := S ∩ [( i − 1) T / 4, iT / 4]  
+
+> 8:
+
+end for  
+
+> 9:
+
+end if  
+
+> 10:
+
+ˆS ← ∪ i ˆSi = {0 = T0, T 1, . . . , T N = T }; N ← | ˆS| − 1 
+
+> 11:
+
+Uf ← span( {ϕj · 1[Ts−1,T s)}s∈[N ],j ∈[m]) 
+
+> 12:
+
+f˜a ← Project-and-Privatize( q, U f , B ) 
+
+> 13:
+
+return f˜a
+
+the space U (j) 
+
+> f
+
+:= span Rn
+
+
+
+{ϕl · 1A(j)
+
+> r
+
+}l∈[m],r ∈[2 j ]
+
+
+
+, where A(j) 
+
+> r
+
+:= [( r − 1) T 
+
+> 2j
+
+, r T 
+
+> 2j
+
+). We run SVT on the queries gj (q) := τj − dist 2(PU (j)
+
+> f
+
+(q), q ) with privacy budget ε 
+
+> 4
+
+, where τj := dim( U (j)  
+
+> f)
+> ε/ 4
+
+= 2j mn ε/ 4
+
+is the expected error due to privatization of PU (j)
+
+> f
+
+(q). Note that dist 2(PU (j)
+
+> f
+
+(·), ·) is 1-Lipschitz, and so is gj (·). Moreover, the sequence gj (q) strictly increases, since τj strictly increases while dist 2(PU (j)
+
+> f
+
+(q), q ) is non-increasing with j.𝑙 = 1    
+
+> 𝑙 =2
+> 𝑙 =3
+
+Figure 4: Example illustration for sub-interval removal process in ReduceSeg. 32 sub-intervals at the start of level 1; 20 sub-intervals at level 2; 18 sub-intervals at level 3, and the process terminates here. 
+
+ReduceSeg. After we find that 2 ¯k (evenly spaced) sub-intervals suffice to roughly balance the two sources of error, the goal of ReduceSeg is to remove sub-intervals that are not needed, since the curve might be flatter in some segment of [0 , T ]. To this end, we partition the sub-intervals into 4 parts, where we then try to reduce the number of sub-intervals in each part. For each part, we perform at most 2 4 checks over at most k1 ≤ 4 levels. Let ε′ be the allocated budget for the current interval [ ts, t e]. Starting at level l = 1, we use 2l 
+
+> ε′
+
+to check whether reducing the number of segments by half results in a decrease in error. If so, we remove half of the segments and proceed to check the children intervals [ ts, (te + ts)/2] and [( te + ts)/2, t e] at level l = 2, and so on, until 20 Algorithm 5 ReduceSeg 
+
+Input : q : [0 , T ] → Rn; [ ts, t e) ⊂ [0 , T ]; k1; l ≤ k1; set S containing breakpoints to be checked; 
+
+β > 0; B ≥ ε′ > 0
+
+Output : ˆS after reducing the number of sub-intervals  
+
+> 1:
+
+if l > k 1 then  
+
+> 2:
+
+return S 
+
+> 3:
+
+end if  
+
+> 4:
+
+k ← log 2(|S| − 1);  
+
+> 5:
+
+S′ ← { 2r te−ts 
+
+> 2k
+
++ ts : r = 0 , · · · , 2k−1} {try to reduce number of sub-intervals by half } 
+
+> 6:
+
+f[ts,t e] ← best approx. of q on [ ts, t e] using break points in S′ 
+
+> 7:
+
+err ← dist 2(f[ts,t e], q · 1[ts,t e]) + 2l 
+
+> ε′
+
+Z, Z ∼ Lap(1)  
+
+> 8:
+
+B ← B − ε′ 
+
+> 2l
+> 9:
+
+if err + 2l 
+
+> ε′
+
+(k1 ln(2) + ln(1 /β )) ≤ 2k−1emn  
+
+> 2( e−1) B
+
+then  
+
+> 10:
+
+S′ 
+
+> L
+
+← S′ ∩ [ts, (ts + te)/2], S′ 
+
+> R
+
+← S′ ∩ [( ts + te)/2, t e] 
+
+> 11:
+
+ˆSL ← ReduceSeg( q, t s, (ts + te)/2, k 1, l + 1 , S ′
+
+> L
+
+, β, B,ε ′/2)  
+
+> 12:
+
+ˆSR ← ReduceSeg( q, (ts + te)/2, t e, k 1, l + 1 , S ′
+
+> R
+
+, β, B,ε ′/2)  
+
+> 13:
+
+ˆS ← ˆSL ∪ ˆSR 
+
+> 14:
+
+else  
+
+> 15:
+
+ˆS ← S 
+
+> 16:
+
+end if  
+
+> 17:
+
+return ˆS
+
+we finish level l = k1. See Fig. 4 for an example illustration of the sub-interval removal process corresponding to running ReduceSeg on all four parts together (lines 5-9 of Algorithm 4). It is straightforward to check that ReduceSeg consumes at most ε′ of the privacy budget, since at each level l there are at most 2 l−1 calls, each uses 12l of ε′ 
+
+> 2l−1
+
+, for a total of Pk1 
+
+> l=1
+
+2l−1 ε′ 
+
+> 2l−1
+> 12l
+
+= (1 − 12k1 )ε′.
+
+Privacy. The entire algorithm satisfies ε-GP, since ε/ 4 is used in the SVT call, at most ε/ 4 is used for ReduceSeg, and the remaining is used for Project-and-Privatize; the remaining budget depends on the actual number of times ReduceSeg is invoked, but the overall privacy guarantee is the same by a privacy filter argument (e.g. see [FZ21, LY26]). 
+
+Utility. In the SVT call, the potential overshoot in the target position is O(log log(1 /β )), since the queries gj increase at a rate of 2 × after the balance point. This also means the number of sub-intervals 2 ¯k is potentially O(log(1 /β )) times larger than the size at the balance point, hence the need to reduce. ReduceSeg is capable of reducing the number by a factor of 2 k1 , comparable to O(log(1 /β )) for any constant β, if every call results in a reduction. In any case, we show below that in the worst case, ReduceSeg does not increase the overall error. Let ErrBound( f˜a, ε, β ; q, 1)) := dist 2(fa, q )+ η(β;dim( Uf ),1)  
+
+> ε
+
+for Uf ∋ fa := PUf (q), and f˜a obtained from privatizing fa as in Theorem 3.2. Note that ErrBound( f˜a; q, ε, β, 1)) provides a high probability bound on dist 2(f˜a, q ), the L2 error of f˜a as an approximation for q, since dist 2(f˜a, q ) ≤ dist 2(fa, q ) + dist 2(fa, f ˜a)21 = dist 2(fa, q ) + 1
+
+ε ∥Z∥ ≤ ErrBound( f˜a, ε, β ; q, 1) where the latter holds with probability 1 − β for Z ∼ SLap(dim( Uf )). 
+
+Lemma 4.2. Let ˆS be the set of breakpoints resulting from running ReduceSeg( q, t s, t e, k 1, k, 1, S, β 
+
+> 2
+
+, B, ε ′).Let ˜q ˆS be obtained from the ε/ 2-GP privatization of the best approximation of q on the interval 
+
+[ts, t e] using breakpoints in ˆS, let ˜qS be defined similarly for the set S. Then with probability 1 − 32 β,
+
+dist 2(˜ q ˆS , q ) ≤ ErrBound(˜ qS ; q, ε/ 2, β, 1)) .
+
+Additional discussion on ReduceSeg . ReduceSeg is an optional step; its goal is remove re-dundant sub-intervals, which may happen when the curve is relatively flat on a sub-segment of the domain, as stated earlier. As such, it will not be useful for curves that do not stay flat for sufficiently long. Example curves where ReduceSeg is useful and not useful are provided in Fig. 5. By Lemma 4.2 above, however, there is no harm in choosing to run ReduceSeg (minus the privacy budget it consumes), since it will not remove sub-intervals that help with the approximation. In particular, line 9 in Algorithm 5 ensures that sub-intervals are only removed when it results in an overall decrease in the error. 0 250 500 750 1000 1250 1500 
+
+> 0
+> 500
+> 1000
+> 1500
+> 2000
+> 2500
+> true
+> privatized
+
+(a) q1 without ReduceSeg,        
+
+> N= 64 0250 500 750 1000 1250 1500
+> 0
+> 500
+> 1000
+> 1500
+> 2000
+> 2500
+> true
+> privatized
+
+(b) q1 with ReduceSeg,        
+
+> N= 42 0250 500 750 1000 1250 1500
+> 0
+> 500
+> 1000
+> 1500
+> 2000
+> 2500
+> true
+> privatized
+
+(c) q2 without ReduceSeg,        
+
+> N= 32 0250 500 750 1000 1250 1500
+> 0
+> 500
+> 1000
+> 1500
+> 2000
+> 2500
+> true
+> privatized
+
+(d) q2 with ReduceSeg,  
+
+> N= 32
+
+Figure 5: Stylized trajectories q1, q 2 privatized without and with ReduceSeg, each using total budget 
+
+ε = 1. Here, q1 benefits from ReduceSeg while q2 does not. Sub-intervals were reduced on flatter segments of q1, as shown in (b), resulting in noise reduction. The acute reader may notice that some parameters in Algorithm 5 may be left as hyper-parameters that can be further tuned. Indeed, there might be better choices for the number of partitions on which to call ReduceSeg, as well as the maximum depth k1 of the recursion tree in ReduceSeg. These two parameters might be further tuned, for example, using public data; together they determine the total number of times ReduceSeg is called. The privacy budget allocated for each such call decreases as the number of calls increases, which makes ReduceSeg less useful since it will return early at line 9 without successful reduction (due to noisier estimation of the potential utility gain). On the other hand, a small number of calls to ReduceSeg directly limits how many sub-intervals can be removed. For simplicity, we set the parameters conservatively to be 4, knowing that by Lemma 4.2 even sub-optimal parameters do not harm the utility. 22 4.3 Extending to unbounded intervals 
+
+In this subsection, we briefly describe how we can extend the previous algorithm for curve privati-zation on [0 , T ] to an unbounded interval. This is useful for when the function is defined on R, and we wish to estimate it using functions integrable on finite intervals (e.g. polynomials). 
+
+Using L2([0 , T ]) for (C(R), dist 2). Suppose U ⊆ C(R) ∩ L2(R), so q ∈ U is both continuous and square-integrable on the entire real line. In order to use Algorithm 4 above for such a function, we first find an approximate ¯T such that clipping the function to the interval [ − ¯T , ¯T ] (i.e. setting the function value to zero outside the interval) only introduces a small amount of error, say O(1 /ε ). To find such a ¯T , define a function gT : q 7 →
+
+qR T 
+
+> −T
+
+q(t)2dt −
+
+qR ∞−∞ q(t)2dt . Note that gT is 2-Lipschitz w.r.t. to the dist 2 metric. Then we can use SVT on the sequence of queries gT1 , g T2 , . . . , where 
+
+Tj = 2 j for j ≥ 1, with threshold set to −1/ε . After obtaining ¯T , we run Algorithm 4 on the function q · 1[− ¯T , ¯T ], and return the R-extension of the privatized curve as output. 
+
+## 5 Experiments 
+
+In this section, we provide experimental evaluation of our algorithms on several datasets. Here, we present the results for mechanisms in the GP model, deferring results of their CGP variants to Appendix C.3. 
+
+Baseline methods. There are no prior work for function privatization in the local model, to the best of our knowledge. However, a method for releasing (a subset of) a collection of points under GP/CGP was provided in [LY23]; since the privatized points can be connected together to form a piecewise curve, we will use this as our main baseline. The method in [LY23] samples k
+
+points for some fixed k > 1, and privatizes each sampled point under GP/CGP using Lemma 2.2; by applying basic composition to k points, the release of these points together satisfies GP w.r.t. the dist ∞ metric, where dist ∞(q, q ′) := sup [0 ,T ] ∥q(t) − q′(t)∥. The privacy definitions using the two metrics dist 2 and dist ∞ are incomparable in terms of strength and purpose, where dist 2 considers the functional data as a whole, while dist ∞ aims to provide protection for each released point. Nevertheless, the aforementioned method from [LY23] serves as a good reference for understanding the problem at hand, and for lacking a better alternative. In the privatized points, substantial fluctuations might occur between consecutive points due to the large noise injected, especially when the privacy budget is small. To mitigate such effects, we also apply smoothing in the baseline method with sliding windows (labeled as “Baseline (smoothed)”). We evaluated various combinations of the number of samples k, where the points are evenly spaced, and the sliding window size s; in each plot, the best combination with the minimum error is shown for each parameter setting. 
+
+Datasets. We conduct experiments on three datasets: 1. ECG records. The PTB-XL Electrocardiography (ECG) dataset [WSB +22, WSB +20, GAG +00] contains 21799 clinical 12-lead ECGs of 10 seconds length and 100 Hz sample frequency. We select the Lead II data of the first 100 records, scale the samples to the unit of microvolt, and perform linear interpolation on them. 23 2. Taxi trajectory. The CRAWDAD dataset [PSDG22] contains the mobility traces of approx-imately 500 cabs in San Francisco Bay Area. The GPS coordinates are converted to points in R2, with meters as the unit. We perform linear interpolation between consecutive points to convert the time series data into continuous trajectory functions from [0 , T ] to R2, for a total of 304 curves recorded over a 12-hour window. 3. Synthetic Gaussian mixtures. We randomly generate 50 synthetic curves, where each instance is a linear combination of 1 to 5 random Gaussian functions. We report both the average L2 error and the L2-squared error (the mean of which is the functional analogue of MSE). The averages are computed over all simulations of all functions in the respective dataset, where the errors are normalized by the L2 norm of the original input curve. 
+
+5.1 Evaluation on Project-and-Privatize 
+
+Some types of data are known to be approximable by certain finite-dimensional spaces, either due to public available data or expert knowledge. ECG data are one such example, and they can be well approximated by a sufficient number of sinc functions. Here, we show that the simple Project-and-Privatize method (Algorithm 2) suffices for privatization. We use the normalized sinc function basis {ϕj (t) = sinc( t − j)}j∈[m] defined in Section 3.5, and incorporate the technique discussed there where the basis functions are treated as being defined on R. Since a normal QRS length 2 is between 0 .08-0 .10 seconds (public information), we scale the time domain by 80 times (so 
+
+T = 800) to allow the central zero-crossings of a sinc function to approximately capture that length (alternatively, sinc functions with appropriately scaled non-integer zero-crossings can be used). We use m = 800 sinc functions for our algorithm. The baseline methods use the number of samples 
+
+k ∈ { 100 , 200 , 800 }, and smoothing parameter s ∈ { k/ 20 , k/ 10 }. Each method is applied on each record for 30 simulations. 0.1 0.2 0.5 1.0 2.0  
+
+> Privacy Budget
+> 10 1
+> 10 0
+> 10 1
+> Project-and-Privatize
+> Baseline
+> Baseline (smoothed)
+
+(a) L2 error 0.1 0.2 0.5 1.0 2.0    
+
+> Privacy Budget
+> 10 2
+> 10 1
+> 10 0
+> 10 1
+> 10 2
+> Project-and-Privatize
+> Baseline
+> Baseline (smoothed)
+
+(b) L2-squared error (MSE) 
+
+Figure 6: GP results on ECG dataset In Fig. 6, we evaluate the performances of the methods at various privacy levels. We see significant utility improvement in our mechanisms over the baseline methods, reaching up to an order of magnitude for the average L2 error, and up to 2 orders orders of magnitude in the MSE, for some parameter settings. Also, the utility gap gets larger as the privacy budget increases. We also present an example curve privatized by GP in Fig. 7 to see how the methods perform in terms of capturing the signals in the data. The baseline method presented uses k = 100 samples, 
+
+> 2
+
+The period of ventricular depolarization, covering the Q, R and S waves. 
+
+24 100         
+
+> 0
+> 100
+> 200
+> 300
+> 400
+> amplitude (  V)
+> True Project-and-Privatize
+> 0246810
+> time (s)
+> 200
+> 0
+> 200
+> 400
+> amplitude (  V)
+> True Baseline Baseline (smoothed)
+
+Figure 7: Example of privatizing a ECG record. ε = 1 .0with smoothing s = 5. We see that our mechanism is able to capture all the large and medium-sized peaks, thus retaining the important signals in the data. In contrast, the baseline methods struggle to capture the positions of most of the peaks, as ECG records are rich in information which are difficult to be captured with sampling. Also, even though smoothing helps with the L2 error, it also removes the important signals from the data in this case. 
+
+5.2 Evaluation on privately selecting a basis. 
+
+In this subsection, we evaluate the performance of our adaptive basis selection method (Algorithm 3) against the baseline methods, on synthetic Gaussian mixtures over the interval I = [0 , 100]. Our mechanism selects a basis from the set of monomials of degree at most 32, and the baseline methods use the number of samples k ∈ { 10 , 20 , 50 , 100 } with smoothing parameter s = k/ 10. Each method is applied on each curve for 30 simulations. 0.001 0.002 0.005 0.01 0.02 0.05 0.1 
+
+> Privacy Budget
+> 10 0
+> 10 1
+> 10 2
+> PrivFuncSelect
+> Baseline
+> Baseline (smoothed)
+
+(a) L2 error 0.001 0.002 0.005 0.01 0.02 0.05 0.1   
+
+> Privacy Budget
+> 10 1
+> 10 0
+> 10 1
+> 10 2
+> 10 3
+> 10 4
+> PrivFuncSelect
+> Baseline
+> Baseline (smoothed)
+
+(b) L2-squared error (MSE) 
+
+Figure 8: GP results on synthetic Gaussian curves We evaluate the methods at various privacy levels in Fig. 8. We see obvious improvement in our mechanisms over the baseline methods, in both the L2 and MSE error, over all parameter settings. Note that Gaussian mixtures are very smooth, so it seems reasonable to use the baseline methods for privatization on these; however, they are still outperformed by our mechanisms. Fig. 9 shows an example of privatizing a synthetic curve, which is a linear combination of two Gaussian functions. Our mechanism selects 8 monomial basis. The baseline methods uses 10 samples and smoothing parameter s = 3. 25 0 20 40 60 80 100        
+
+> 0
+> 50
+> 100
+> 150
+> 200 True
+> PrivFuncSelect
+> 020 40 60 80 100
+> 150
+> 100
+> 50
+> 0
+> 50
+> 100
+> 150
+> 200
+> 250 True
+> Baseline
+> Baseline (smoothed)
+
+Figure 9: Example of privatizing a synthetic curve. ε = 0 .1. 
+
+5.3 Evaluation on curve privatization 
+
+Finally, we evaluate the performance of our curve privatization mechanism (Algorithm 4) against the baseline methods, on the taxi trajectory dataset and on synthetic Gaussian curves. Each method is applied on each curve for 30 simulations. For a trajectory curve with N points, the number of samples k ∈ { N/ 10 , N/ 5} and smoothing parameter s ∈ { k/ 20 , k/ 10 } are used in the baseline methods. We also apply the post-processing program in Section 4.1.2 to obtain continuous versions of our privatized curves, and they are labeled as “PrivFuncSeg (continuous)”. 0.001 0.002 0.005 0.01 0.02 0.05 0.1   
+
+> Privacy Budget
+> 10 2
+> 10 1
+> 10 0
+> 10 1
+> 10 2
+> LS Approximation
+> PrivFuncSeg
+> PrivFuncSeg (continuous)
+> Baseline
+> Baseline (smoothed)
+
+(a) L2 error 0.001 0.002 0.005 0.01 0.02 0.05 0.1    
+
+> Privacy Budget
+> 10 3
+> 10 1
+> 10 1
+> 10 3
+> 10 5
+> 10 7
+> LS Approximation
+> PrivFuncSeg
+> PrivFuncSeg (continuous)
+> Baseline
+> Baseline (smoothed)
+
+(b) L2-squared error (MSE) 
+
+Figure 10: GP results on the taxi trajectory dataset 
+
+Results on trajectory dataset. We apply our PrivFuncSeg algorithm with the simple linear basis given in Example 3. The results for various privacy levels are reported in Fig. 10. We see a significant advantage in our mechanisms over the baseline methods, where our mechanisms offer a 1 to 2 orders of magnitude improvement in the L2 error, over all parameter settings. The improvement reaches up to 3 orders of magnitude in the MSE. To better understand the advantage of our mechanisms, we also plotted the errors in the (partially private) least-squares projection (labeled as “LS Approximation”) obtained from our procedure to find the best set of break points for piecewise privatization (i.e. PrivFuncSeg and ReduceSeg (Algorithms 4 and 5) without the final privatization step). An error in PrivFuncSeg that is close to that in LS Approximation indicates that the mechanism is successful in balancing the error due to approximation and that due to privatization (noise). 26 Next, we present an example trajectory curve privatized by the methods in Fig. 11, to examine how well the mechanisms are able to provide outputs with a general likeness to the original curve. The baseline method here uses k = 10 samples, with smoothing parameter s = 3. We see that 1.3622 1.3620 1.3618 1.3616 1.3614 1.3612      
+
+> 1e7
+> 4.538
+> 4.540
+> 4.542
+> 4.544
+> 4.546
+> 1e6
+> True
+> LS Approximation
+> PrivFuncSeg
+> PrivFuncSeg
+> (continuous)
+> 1.3622 1.3620 1.3618 1.3616 1.3614 1.3612
+> 1e7
+> True
+> Baseline
+> Baseline
+> (smoothed)
+
+Figure 11: Example of privatizing a taxi trajectory. ε = 0 .01. our mechanism offers a privatized trajectory that retains the overall shape and major directional turns, in both the continuous or piecewise continuous curve. In contrast, the curves provided by the baseline method (smoothed or not), are only able to retain some likeness in terms of shape. The locations of the sampled points and the noise added to the them can cause the baseline methods to miss meaningful segments of the trajectory, as demonstrated here. 10 0
+
+> 10 1
+> 10 2
+> Error
+
+Degree-1 Basis 
+
+PrivFuncSeg PrivFuncSeg (continuous) Baseline Baseline (smoothed) 
+
+Degree-4 Basis Degree-8 Basis Degree-16 Basis 
+
+> 0.001
+> 0.002
+> 0.005
+> 0.01
+> 0.02
+> 0.05
+> 0.1
+
+Privacy Budget  
+
+> 10 1
+> 10 0
+> 10 1
+> 10 2
+> 10 3
+> 10 4
+> Error MSE
+> 0.001
+> 0.002
+> 0.005
+> 0.01
+> 0.02
+> 0.05
+> 0.1
+
+Privacy Budget 
+
+> 0.001
+> 0.002
+> 0.005
+> 0.01
+> 0.02
+> 0.05
+> 0.1
+
+Privacy Budget 
+
+> 0.001
+> 0.002
+> 0.005
+> 0.01
+> 0.02
+> 0.05
+> 0.1
+
+Privacy Budget 
+
+Figure 12: GP results on synthetic Gaussian curves 
+
+Results on synthetic Gaussian curves. We apply PrivFunSeg to synthetic Gaussian curves with the monomial basis {tm−j }j∈[m] for m ∈ { 2, 5, 9, 17 }, corresponding to polynomials of degrees upto 1 , 4, 8, 16, respectively. The errors at various privacy levels are shown in Fig. 12. Our mecha-nisms outperformed the baseline methods at all parameter settings, for all selected bases, in both 27 the L2 error and MSE. Note that for small privacy parameters, it is preferable to use a smaller basis, since the privatization error (due to noise) dominates. For a sufficiently large privacy budget, it becomes preferable to use a larger basis to improve the approximation error. 
+
+## 6 Concluding Remarks 
+
+We have provided a framework for function privatization in the local model of geo-privacy, offering algorithms tailored to different types of functions. Our experimental evaluation based on multiple datasets and various parameter settings demonstrates the advantage of our methods, especially for preserving the features and signals in the functions. The privacy guarantee adopted in this work is based on similarity of functions measured by the L2 metric. Depending on the application, in some cases another metric may be preferred, where the ideas developed in this framework might be useful. In particular, our framework readily generalizes to any metric induced by an inner product, as remarked in Section 3. For trajectories, other popular choices for measuring distance include the Hausdrorff distance or Fr´ echet distance, which are interesting directions for future work. 
+
+## Acknowledgements 
+
+This work is supported in part by HKRGC under grants 16205422, 16204223, and 16203924. We thank the anonymous reviewers of CCS ’26 for their helpful feedback and valuable comments. 
+
+## References 
+
+[ABCP13] Miguel E Andr´ es, Nicol´ as E Bordenabe, Konstantinos Chatzikokolakis, and Catus-cia Palamidessi. Geo-indistinguishability: Differential privacy for location-based systems. In Proceedings of the 2013 ACM SIGSAC conference on Computer & communications security , pages 901–914, 2013. [AR17] Francesco Alda and Benjamin Rubinstein. The bernstein mechanism: Function release under differential privacy. In Proceedings of the AAAI Conference on Arti-ficial Intelligence , volume 31, 2017. [AW05] George B Arfken and Hans J Weber. Mathematical methods for physicists . Elsevier Academic Press, 6 edition, 2005. [BS16] Mark Bun and Thomas Steinke. Concentrated differential privacy: Simplifications, extensions, and lower bounds. In Theory of Cryptography Conference , pages 635– 658. Springer, 2016. [CABP13] Konstantinos Chatzikokolakis, Miguel E Andr´ es, Nicol´ as Emilio Bordenabe, and Catuscia Palamidessi. Broadening the scope of differential privacy using metrics. In Privacy Enhancing Technologies: 13th International Symposium, PETS 2013, Bloomington, IN, USA, July 10-12, 2013. Proceedings 13 , pages 82–102. Springer, 2013. 28 [CAC12] Rui Chen, Gergely Acs, and Claude Castelluccia. Differentially private sequential data publication via variable-length n-grams. In Proceedings of the 2012 ACM conference on Computer and communications security , pages 638–649, 2012. [CCFS21] Teddy Cunningham, Graham Cormode, Hakan Ferhatosmanoglu, and Divesh Sri-vastava. Real-world trajectory sharing with local differential privacy. Proc. VLDB Endow. , 14(11):2283–2295, jul 2021. [DD01] Frank Deutsch and F Deutsch. Best approximation in inner product spaces , vol-ume 7. Springer, 2001. [DMNS06] Cynthia Dwork, Frank McSherry, Kobbi Nissim, and Adam Smith. Calibrating noise to sensitivity in private data analysis. In Theory of cryptography conference ,pages 265–284. Springer, 2006. [DR +14] Cynthia Dwork, Aaron Roth, et al. The algorithmic foundations of differential privacy. Foundations and Trends ® in Theoretical Computer Science , 9(3–4):211– 407, 2014. [DY23] Wei Dong and Ke Yi. Universal private estimators. In Proceedings of the 42nd ACM SIGMOD-SIGACT-SIGAI Symposium on Principles of Database Systems ,pages 195–206, 2023. [FZ21] Vitaly Feldman and Tijana Zrnic. Individual privacy accounting via a renyi filter. 
+
+Advances in Neural Information Processing Systems , 34:28080–28091, 2021. [GAG +00] Ary L. Goldberger, Luis A. N. Amaral, Leon Glass, Jeffrey M. Hausdorff, Pla-men Ch. Ivanov, Roger G. Mark, Joseph E. Mietus, George B. Moody, Chung-Kang Peng, and H. Eugene Stanley. Physiobank, physiotoolkit, and physionet: Components of a new research resource for complex physiologic signals. Circula-tion , 101(23):e215–e220, 2000. [GLT +18] Mehmet Emre Gursoy, Ling Liu, Stacey Truex, Lei Yu, and Wenqi Wei. Utility-aware synthesis of differentially private and attack-resilient location traces. In Pro-ceedings of the 2018 ACM SIGSAC conference on computer and communications security , pages 196–211, 2018. [HCM +15] Xi He, Graham Cormode, Ashwin Machanavajjhala, Cecilia M Procopiuc, and Divesh Srivastava. Dpt: differentially private trajectory synthesis using hierarchical reference systems. Proceedings of the VLDB Endowment , 8(11):1154–1165, 2015. [HRW13] Rob Hall, Alessandro Rinaldo, and Larry Wasserman. Differential privacy for func-tions and functional data. The Journal of Machine Learning Research , 14(1):703– 727, 2013. [LM00] Beatrice Laurent and Pascal Massart. Adaptive estimation of a quadratic func-tional by model selection. Annals of Statistics , pages 1302–1338, 2000. [LWX21] Fang Liu, Dong Wang, and Zhengquan Xu. Privacy-preserving travel time predic-tion with uncertainty using gps trace data. IEEE Transactions on Mobile Com-puting , 22(1):417–428, 2021. 29 [LY23] Yuting Liang and Ke Yi. Concentrated geo-privacy. In Proceedings of the 2023 ACM SIGSAC Conference on Computer and Communications Security , pages 1934–1948, 2023. [LY24] Yuting Liang and Ke Yi. Smooth sensitivity for geo-privacy. In Proceedings of the 2024 on ACM SIGSAC Conference on Computer and Communications Security ,pages 333–347, 2024. [LY26] Yuting Liang and Ke Yi. Adaptive privacy budgeting. arXiv preprint arXiv:2601.10866 , 2026. [MPGBPA +23] `Alex Miranda-Pascual, Patricia Guerra-Balboa, Javier Parra-Arnau, Jordi Forn´ e, and Thorsten Strufe. Sok: Differentially private publication of trajectory data. 
+
+Proceedings on Privacy Enhancing Technologies , 2023. [MT07] Frank McSherry and Kunal Talwar. Mechanism design via differential privacy. In 
+
+48th Annual IEEE Symposium on Foundations of Computer Science (FOCS’07) ,pages 94–103. IEEE, 2007. [NP00] Pierpaolo Natalini and Biagio Palumbo. Inequalities for the incomplete gamma function. Math. Inequal. Appl , 3(1):69–77, 2000. [OWN97] Alan V Oppenheim, Alan S Willsky, and Syed Hamid Nawab. Signals & systems .Pearson Educaci´ on, 1997. [PSDG22] Michal Piorkowski, Natasa Sarafijanovic-Djukic, and Matthias Grossglauser. Craw-dad epfl/mobility, 2022. [R´ en61] Alfr´ ed R´ enyi. On measures of entropy and information. In Proceedings of the Fourth Berkeley Symposium on Mathematical Statistics and Probability, Volume 1: Contributions to the Theory of Statistics , volume 4, pages 547–562. University of California Press, 1961. [S´ an06] J´ ozsef S´ andor. On certain inequalities for the gamma function. RGMIA Res. Rep. Coll , 9(1), 2006. [SM65] E Webb Stacy and G Arthur Mihram. Parameter estimation for a generalized gamma distribution. Technometrics , 7(3):349–358, 1965. [SS11] Elias M Stein and Rami Shakarchi. Fourier analysis: an introduction , volume 1. Princeton University Press, 2011. [Sta62] Edney W Stacy. A generalization of the gamma distribution. The Annals of mathematical statistics , pages 1187–1192, 1962. [TUV12] Justin Thaler, Jonathan Ullman, and Salil Vadhan. Faster algorithms for privately releasing marginals. In International Colloquium on Automata, Languages, and Programming , pages 810–821. Springer, 2012. [VEH14] Tim Van Erven and Peter Harremos. R´ enyi divergence and kullback-leibler diver-gence. IEEE Transactions on Information Theory , 60(7):3797–3820, 2014. 30 [WJF +16] Ziteng Wang, Chi Jin, Kai Fan, Jiaqi Zhang, Junliang Huang, Yiqiao Zhong, and Liwei Wang. Differentially private data releasing for smooth queries. Journal of Machine Learning Research , 17(51):1–42, 2016. [WNM23] Tal Wagner, Yonatan Naamad, and Nina Mishra. Fast private kernel density esti-mation via locality sensitive quantization. In International Conference on Machine Learning , pages 35339–35367. PMLR, 2023. [WSB +20] Patrick Wagner, Nils Strodthoff, Ralf-Dieter Bousseljot, Dieter Kreiseler, Fatima I. Lunze, Wojciech Samek, and Tobias Schaeffter. Ptb-xl, a large publicly available electrocardiography dataset. Scientific Data , 7(1):154, May 2020. [WSB +22] Patrick Wagner, Nils Strodthoff, Ralf-Dieter Bousseljot, Wojciech Samek, and To-bias Schaeffter. PTB-XL, a large publicly available electrocardiography dataset, Nov 2022. [YTL22] Mengmeng Yang, Ivan Tjuawinata, and Kwok-Yan Lam. K-means clustering with local dχ-privacy for privacy-preserving data analysis. IEEE Transactions on In-formation Forensics and Security , 17:2524–2537, 2022. 
+
+## A Ethical Considerations and Open Science 
+
+In this paper, we considered privatizing functions under the local model. Compared to the central model, the local model allows stronger privacy protection; i.e. it benefits individual data owners. We have performed experimental evaluation of our methods using synthetic data, and public available datasets: taxi trajectories [PSDG22] and ECG records [WSB +22, WSB +20, GAG +00]. The public datasets had been previously sanitized. Our approach considers an input function to be privatized as a whole, and over the entire domain of the input function. This has the benefit that it allows a general likeness of the input function to be retained, thus allowing further meaningful analytics on the features/signals contained in the function. I.e. researchers can benefit from such improved utility. The code to all experiments can be found at: https://github.com/hkustDB/FuncPrivGP, where we also provide detailed information on the datasets, implementations and running the experiments. 
+
+## B Useful facts and inequalities 
+
+Fact B.1. Privatizing point set via Lemma 2.2 is not GP w.r.t dist 2.Proof. We give an example to show that privatizing and releasing a fixed set of points does not suffice to guarantee GP w.r.t. dist 2. Consider again the example in Section 3.1, where we have two linear functions fa and f ′ 
+
+> a
+
+on [0 , 1], with a = (2 , 0.5) and a′ = (0 .5, 2). Suppose we privatize the points at t1 = 0 , t 2 = 0 .5, t 3 = 1, with ε = 1, which for fa corresponds to a pdf at z = ( z1, z 2, z 3) that is 
+
+∝ e−√(z1−fa(t1)) 2+( z2−fa(t2)) 2+( z3−fa(3)) 2
+
+. Then the ratio of the respective pdf’s at z = (0 .5, 1.0, 2.0) is 
+
+e−√(z1−fa(t1)) 2+( z2−fa(t2)) 2+( z3−fa(3)) 2
+
+e−√(z1−fa(t1)) 2+( z2−fa(t2)) 2+( z3−fa(3)) 2 = e−√0.5+ √1.52+1 .25 2+0 .52
+
+> e 1.5/√3 = edist 2(fa,f a′ ),
+
+31 thus violating the GP requirement. 
+
+Theorem B.2 (Hilbert projection theorem) . Let C ⊆ H be any non-empty closed convex subset of a Hilbert space H whose inner product induces norm ∥ · ∥ H . Then for every y ∈ H, there exists a unique c(y) ∈ C such that ∥y − c(y)∥H = inf z∈C ∥y − z∥H . Moreover, if C is also a subspace of 
+
+H, then c(y) ∈ C is such that y − c(y) is orthogonal to C.
+
+Fact B.3. Fix any x, t > 0. Then   xt
+
+t ≤ ex/e .Proof. The function z 7 → ez−1 − z is convex and has minimum value 0, i.e. ez−1 − z ≥ 0 ⇐⇒ ez ≥
+
+ez =⇒ z ≥ 1 + ln z for z > 0. Choose z = xet > 0, then ln 
+
+ xt
+
+
+
+= 1 + ln 
+
+ xet 
+
+
+
+≤ xet t ln 
+
+ xt
+
+
+
+≤ xe
+
+ xt
+
+t
+
+≤ ex/e .
+
+Lemma B.4 ([S´ an06]) . For any x > 0,
+
+√x ≤ Γ( x + 1) Γ( x + 12 ) ≤
+
+r
+
+x + 12 .
+
+Lemma B.5 ([NP00]) . For any c, t > 1 and x where x > cc−1 (x − 1) ,
+
+Γ( t, x ) < cx t−1e−x.
+
+Lemma B.6 (Generalized Gamma Distribution [Sta62, SM65]) . Let G(λ, d, p ) denote the general-ized gamma distribution with parameters λ, d, p > 0, whose pdf is given by g(r) = pλdΓ( d/p ) rd−1e−(r/λ )p
+
+.Then for G ∼ G (λ, d, p ),
+
+Pr[ G ≤ r] = γ(d/p, (r/λ )p)Γ( d/p ) and E[Gk] = λk Γ( d/p + k/p )Γ( d/p ) , k ≥ 1.
+
+Let Z = [ z1, · · · , z m] be a random vector. If Z is drawn from a spherical Laplace distribution, then ∥Z∥ ∼ G (1 , m, 1); if Z ∼ N (0 , I m×m), then ∥Z∥ ∼ G (√2, m, 2) (see [LY23], Appendix A). Thus, using Lemmas B.4 and B.6 above, we have: 
+
+Corollary B.1. Let Z = [ z1, · · · , z m] be a random vector. Then 1. E[∥Z∥] = Γ( m+1) Γ( m) = m and E[∥Z∥2] = Γ( m+2) Γ( m) = m(m + 1) , if Z ∼ SLap( m);2. E[∥Z∥] = √2 Γ( m/ 2+1 /2) Γ( m/ 2) ∈ √m − 1, √m and E[∥Z∥2] = 2 Γ( m/ 2+1) Γ( m/ 2) = m, if Z ∼ N (0 , I m×m).
+
+We can derive high probability bounds for the magnitude ∥Z∥:
+
+Lemma B.7. Fix 1 < m ∈ N, let R ∼ G (1 , m, 1) . Then for any 1 > β > 0, R ≤ ee−1 (m + ln(1 /β )) 
+
+with probability at least 1 − β.
+
+32 Proof. Let r := ee−1 (m + ln(1 /β )). We will show Pr[ R ≤ r] ≥ 1 − β. We have Γ( m) = γ(m, r ) + Γ( m, r ), where Γ( m, r ) = R ∞ 
+
+> r
+
+tm−1e−tdt is the upper incomplete gamma function. By Lemma B.6, Pr[ R ≤ r] = γ(m,r )Γ( m) = Γ( m)−Γ( m,r )Γ( m) = 1 − Γ( m,r )Γ( m) , so it suffices to show Γ( m,r )Γ( m) ≤ β. To this end, we use the inequality from Lemma B.5: Γ( m, r ) < cr m−1e−r for c > 1, and r > cc−1 (m − 1). Choose 
+
+c = e, then r = ee−1 (m + ln(1 /β )) > cc−1 (m − 1), so Γ( m, r )Γ( m) < er m−1e−r
+
+Γ( m) = er m−1e−r
+
+(m − 1)! 
+
+≤ er m−1e−r
+
+p2π(m − 1)( m − 1) m−1e−(m−1) e 112( m−1)+1 
+
+(Stirling’s) 
+
+≤ 1
+
+p2π(m − 1) ·
+
+ rm − 1
+
+m−1
+
+| {z }
+
+> ≤er/e , Fact B.3 .
+
+e−(r−1)+( m−1) 
+
+≤ e−r(1 − 1 
+
+> e)+ m
+
+p2π(m − 1) = e− ee−1 (m+ln 1   
+
+> β)e−1
+> e+m
+
+p2π(m − 1) = e−(m+ln 1 
+
+> β)−m
+
+p2π(m − 1) = β
+
+p2π(m − 1) ≤ β. 
+
+Lemma B.8 ([LM00]) . Given Z ∼ N (0 , I m×m), then with probability at least 1 − β,
+
+∥Z∥ ≤ 
+
+q
+
+m + 2 pm ln(1 /β ) + 2 ln(1 /β ).
+
+Fact B.9. Fix k > 0. Let sinc k : t 7 → sin( kπt ) 
+
+> kπt
+
+. Then 1. R ∞−∞ sinc k(t − a) · sinc k(t − b)dt = sinc k(a − b)/k 
+
+2. R ∞−∞ sinc k(t − a)2dt = 1 /k 
+
+Fact B.10. For u = [ u1, · · · , u m]T , v = [ v1, · · · , v m]T ∈ Rm, and S(t) = 
+
+
+
+S1,1(t) · · · S1,m (t)
+
+... ...
+
+Sm, 1(t) · · · Sm,m (t)
+
+
+
+where Sj,l (t) = Sl,j (t) ∈ L2(I) for all j, l ∈ [m], we have 
+
+Z
+
+> I
+
+u1 · · · um
+
+ S(t)
+
+
+
+v1
+
+...
+
+vm
+
+ dt = u1 · · · um
+
+R 
+
+> t∈I
+
+S1,1(t)dt · · · R 
+
+> t∈I
+
+S1,m (t)dt 
+
+... ...R 
+
+> t∈I
+
+Sm, 1(t)dt · · · R 
+
+> t∈I
+
+Sm,m (t)dt 
+
+
+
+v1
+
+...
+
+vm
+
+ .
+
+## C Privatization under CGP 
+
+In this section, we provide the CGP variants of the algorithms provided above. For the steps that involve SVT, which is a GP mechanism, we use the following relationship to convert the privacy parameters from GP to CGP. 
+
+Lemma C.1 (GP conversion to CGP [LY23]) . Any ε-GP mechanism is also ε2 
+
+> 2
+
+-CGP. 
+
+33 C.1 Function Privatization 
+
+The CGP variant of Project-and-Privatize is provided in Algorithm 6; its expected squared error is given by Lemma 3.9, where the noise vector for CGP has magnitude proportional to pdim( Uf ). The latter is reflected in CGP variant of PrivFuncSelect (Algorithm 7), in the step where we try to balance the errors due to approximation and noise addition (line 5). We use Lemma C.1 to convert the GP privacy parameter used in the SVT call (line 1) to a CGP privacy parameter, then similar to the GP case, the privacy of Algorithm 7 follows from basic composition. 
+
+Algorithm 6 Project-and-Privatize-CGP 
+
+Input : q : I → Rn; finite-dimensional function space Uf ; ρ > 0
+
+Output : privatized ˜ q 
+
+> 1:
+
+compute Σ from Uf 
+
+> 2:
+
+a ← coefficients of PUf (q) 
+
+> 3:
+
+˜a ← a + 1√2ρ Σ1/2Z, Z ∼ N (0 , I dim( Uf )) 
+
+> 4:
+
+return f˜a
+
+Algorithm 7 PrivFuncSelectCGP 
+
+Input : q : I → Rn; {ϕj }j∈J ; β > 0; ρ > 0
+
+Output : privatized ˜ q 
+
+> 1:
+
+k0 ← SVT( q, (ε0/3, 2ε0/3) , − 1 
+
+> ε0
+
+, 1, g 1, g 2, · · · ), where ε0 = 
+
+> √ρ
+> √2
+
+, gj (·) := − dist 2(PU (j)
+
+> f
+
+(·), ·) 
+
+> 2:
+
+˜q0 ← Project-and-Privatize-CGP( q, U (k0) 
+
+> f
+
+, ρ/ 4)  
+
+> 3:
+
+˜c ← coefficients of ˜ q0 in U (k0) 
+
+> f
+> 4:
+
+s(r) ← rth largest magnitude in ˜ c, for r ∈ [k0] 
+
+> 5:
+
+k1 ← SVT( q, ( ε0 
+
+> 3
+
+, 2ε0 
+
+> 3
+
+), 0, 1, g ′
+
+> 1
+
+, g ′
+
+> 2
+
+, · · · ), Nr := {j : ∥˜cj ∥ ≥ s(r)}, g′
+
+> r
+
+(·) := 
+
+√n|Nr | 
+
+> ε0
+
+− dist 2(fb(r) , ·), 
+
+b(r) 
+
+> j
+
+:= ˜ cj 1{j ∈ Nr} 
+
+> 6:
+
+Uf ← span( {ϕj : j ∈ Nk1 }) 
+
+> 7:
+
+f˜a ← Project-and-Privatize-CGP( q, U f , ρ/ 4)  
+
+> 8:
+
+return f˜a
+
+C.2 Curve Privatization 
+
+The CGP variant of PrivFuncSeg for curve privatization is provided in Algorithm 8. The privacy guarantee follows similarly to the case of GP. The steps that use the magnitude related to noise addition reflect the p(·) relationship with that of GP: in line 1 of Algorithm 8, and line 9 of Algorithm 9. 34 Algorithm 8 PrivFuncSegCGP 
+
+Input : q : [0 , T ] → Rn; I = [0 , T ]; {ϕj }j∈[m]; β > 0; ρ > 0
+
+Output : privatized ˜ q 
+
+> 1:
+
+¯k ← SVT( q, (ε0/3, 2ε0/3) , 0, 1, g 0, g 1, g 2, · · · ), where ε0 = 
+
+> √ρ
+> √2
+
+, τj = 
+
+> √2jmn
+
+√ρ/ 2 , gj (q) := τj −
+
+dist 2(PU (j)
+
+> f
+
+(q), q ), PU (j)
+
+> f
+
+computes best approximation using 2 j sub-intervals  
+
+> 2:
+
+B ← 3ρ/ 4 
+
+> 3:
+
+S ← { jT / 2¯k : j = 0 , 1, 2, · · · , 2¯k} 
+
+> 4:
+
+k ← min( ¯k − 2, 4)  
+
+> 5:
+
+if k1 ≥ 1 then  
+
+> 6:
+
+for i = 1 , ..., 4 do  
+
+> 7:
+
+ˆSi ← ReduceSegCGP( q, (i − 1) T / 4, iT / 4, k 1, 1, S i, β, B, ρ 
+
+> 16
+
+), Si := S ∩ [( i − 1) T / 4, iT / 4]  
+
+> 8:
+
+end for  
+
+> 9:
+
+end if  
+
+> 10:
+
+ˆS ← ∪ i ˆSi = {0 = T0, T 1, · · · , T N = T }; N ← | ˆS| − 1 
+
+> 11:
+
+Uf ← span( {ϕj · 1[Ts−1,T s)}s∈[N ],j ∈[m]) 
+
+> 12:
+
+f˜a ← Project-and-Privatize-CGP( q, U f , B ) 
+
+> 13:
+
+return f˜a
+
+Algorithm 9 ReduceSegCGP 
+
+Input : q : [0 , T ] → Rn; ts < t e; k1; l; set S containing breakpoints to be checked; β > 0; B ≥ ρ′ > 0
+
+Output : ˆS after reducing the number of sub-intervals  
+
+> 1:
+
+if l > k 1 then  
+
+> 2:
+
+return S 
+
+> 3:
+
+end if  
+
+> 4:
+
+k ← log 2(|S| − 1);  
+
+> 5:
+
+S′ ← { 2r te−ts 
+
+> 2k
+
++ ts : r = 0 , · · · , 2k−1)} {try to reduce number of sub-intervals by half } 
+
+> 6:
+
+f[ts,t e] ← best approx. of q on [ ts, t e] using break points in S′ 
+
+> 7:
+
+err ← dist 2(f[ts,t e], q · 1[ts,t e]) +  
+
+> √2l
+> √2ρ′
+
+Z, Z ∼ N (0 , 1)  
+
+> 8:
+
+B ← B − ρ′ 
+
+> 2l
+> 9:
+
+if err + 
+
+> √2l
+> √2ρ′
+
+p2k1 ln(2) + 2 ln(1 /β ) ≤ 
+
+> √2−1√2
+
+· 
+
+> √2k−1mn √2B
+
+then  
+
+> 10:
+
+S′ 
+
+> L
+
+← S′ ∩ [ts, (ts + te)/2], S′ 
+
+> R
+
+← S′ ∩ [( ts + te)/2, t e] 
+
+> 11:
+
+ˆSL ← ReduceSegCGP( q, t s, (ts + te)/2, k 1, l + 1 , S ′
+
+> L
+
+, β, B, ρ′ 
+
+> 2
+
+) 
+
+> 12:
+
+ˆSR ← ReduceSegCGP( q, (ts + te)/2, t e, k 1, l + 1 , S ′
+
+> R
+
+, β, B, ρ′ 
+
+> 2
+
+) 
+
+> 13:
+
+ˆS ← ˆSL ∪ ˆSR 
+
+> 14:
+
+else  
+
+> 15:
+
+ˆS ← S 
+
+> 16:
+
+end if  
+
+> 17:
+
+return ˆS
+
+35 Let ErrBound( f˜a, ρ, β ; q, 2)) := dist 2(fa, q ) + η(β;dim( Uf ),2) 
+
+√2ρ for f˜a ∈ Uf obtained from privatizing 
+
+fa as in Theorem 3.3. Similar to the GP case, ErrBound( f˜a, ρ, β ; q, 2)) bounds dist 2(f˜a, q ) with probability 1 − β. We also have a utility guarantee similar to the GP case for Algorithm 9. 
+
+Lemma C.2. Let ˆS be the set of breakpoints resulting from running ReduceSegCGP( q, t s, t e, k 1, k, 1, S, β
+
+2 , B, ρ ′).Let ˜q ˆS be obtained from the ρ/ 2-CGP privatization of the best approximation of q on the interval 
+
+[ts, t e] using breakpoints in ˆS, let ˜qS be defined similarly for the set S. Then with probability 1 − 32 β,
+
+dist 2(˜ q ˆS , q ) ≤ ErrBound(˜ qS ; q, ρ/ 2, β, 1)) + ( √2 − 1) pln(1 /β )/ρ. 
+
+C.3 Experiments under CGP 
+
+In this section, we provide evaluations for the methods in the CGP model, on the same set of experiments as those in Section 5. We observe similar improvements in our CGP mechanisms over the baseline methods in all the experiments, for all parameter settings, as those shown for the GP mechanisms in Section 5. 8e-05 0.00032 0.002 0.008 0.032  
+
+> Privacy Budget
+> 10 1
+> 10 0
+> Project-and-Privatize
+> Baseline
+> Baseline (smoothed)
+
+(a) L2 error 8e-05 0.00032 0.002 0.008 0.032    
+
+> Privacy Budget
+> 10 2
+> 10 1
+> 10 0
+> 10 1
+> Project-and-Privatize
+> Baseline
+> Baseline (smoothed)
+
+(b) L2-squared error (MSE) 
+
+Figure 13: CGP results on ECG dataset 1e-07 4e-07 2.5e-06 1e-05 4e-05 0.00025 0.001 
+
+> Privacy Budget
+> 10 0
+> 10 1
+> PrivFuncSelect
+> Baseline
+> Baseline (smoothed)
+
+(a) L2 error 1e-07 4e-07 2.5e-06 1e-05 4e-05 0.00025 0.001   
+
+> Privacy Budget
+> 10 1
+> 10 0
+> 10 1
+> 10 2
+> 10 3
+> 10 4
+> PrivFuncSelect
+> Baseline
+> Baseline (smoothed)
+
+(b) L2-squared error (MSE) 
+
+Figure 14: GP results on synthetic Gaussian curves 36 1.25e-08 5e-08 3.125e-07 1.25e-06 5e-06 3.125e-05 0.000125 
+
+Privacy Budget 
+
+10 2
+
+10 1
+
+10 0
+
+10 1
+
+10 2
+
+LS Approximation 
+
+PrivFuncSeg 
+
+PrivFuncSeg (continuous) 
+
+Baseline 
+
+Baseline (smoothed) (a) L2 error 1.25e-08 5e-08 3.125e-07 1.25e-06 5e-06 3.125e-05 0.000125 
+
+Privacy Budget 
+
+10 3
+
+10 1
+
+10 1
+
+10 3
+
+10 5
+
+10 7
+
+LS Approximation 
+
+PrivFuncSeg 
+
+PrivFuncSeg (continuous) 
+
+Baseline 
+
+Baseline (smoothed) (b) L2-squared error (MSE) 
+
+Figure 15: CGP results on the taxi trajectory dataset 10 1
+
+10 0
+
+10 1
+
+10 2
+
+> Error
+
+Degree-1 Basis 
+
+PrivFuncSeg PrivFuncSeg (continuous) Baseline Baseline (smoothed) 
+
+Degree-4 Basis Degree-8 Basis Degree-16 Basis 
+
+> 1e-07
+> 4e-07
+> 2.5e-06
+> 1e-05
+> 4e-05
+> 0.00025
+> 0.001
+
+Privacy Budget 
+
+10 1
+
+10 0
+
+10 1
+
+10 2
+
+10 3
+
+10 4
+
+> Error MSE
+> 1e-07
+> 4e-07
+> 2.5e-06
+> 1e-05
+> 4e-05
+> 0.00025
+> 0.001
+
+Privacy Budget 
+
+> 1e-07
+> 4e-07
+> 2.5e-06
+> 1e-05
+> 4e-05
+> 0.00025
+> 0.001
+
+Privacy Budget 
+
+> 1e-07
+> 4e-07
+> 2.5e-06
+> 1e-05
+> 4e-05
+> 0.00025
+> 0.001
+
+Privacy Budget 
+
+Figure 16: GP results on synthetic Gaussian curves 37 D Deferred Proofs 
+
+D.1 Utility of SVT 
+
+The analysis on SVT below is mostly the same as that in [DY23], and re-produced here for com-pleteness. 
+
+Proof of Lemma 2.4. We will use the one-sided and two-sided Laplace tail bounds: For Z ∼ Lap( b), Pr[ Z ≤ b ln(1 /β )] ≥ 1 − β/ 2 and Pr[ |Z| ≤ b ln(1 /β )] ≥ 1 − β.Let W , Zj ∼ Lap(3 K/ε ) denote the Laplace random variables in the SVT call. The analysis requires bounding |W | and Zj for 1 ≤ j ≤ t. Notice that SVT halts at t if Zt + gt(x) ≥ T + W , i.e. 
+
+Zt − W ≥ T − gt(x). We have gt(x) − T ≥ 6K ln(2 /β )/ε by assumption, and Pr 
+
+
+
+|W | ≤ 3Kε ln(2 /β )
+
+
+
+≥ 1 − β/ 2 (5) Pr 
+
+
+
+Zt ≥ − 3Kε ln(2 /β )
+
+
+
+= Pr 
+
+
+
+−Zt ≤ 3Kε ln(2 /β )
+
+
+
+≥ 1 − β/ 4 (6) Pr [ Zt − W ≥ − (gt(x) − T )] ≥ Pr 
+
+
+
+Zt − | W | ≥ − 6Kε ln(2 /β )
+
+
+
+≥ 1 − 3β/ 4.
+
+Thus, SVT halts at or before t with probability 1 − 3β/ 4 (by a union bound over (5), (6)). We assume this holds in the remaining analysis. Pr Zj > 3Kε ln(2 t/β ) ≤ β/ (4 t) for each 1 ≤ j ≤ t.Then 
+
+Z¯k ≤ max  
+
+> 1≤j≤t
+
+Zj ≤ 3Kε ln(2 t/β ) (7) where the last inequality holds with probability at least 1 − β/ 4. Thus, with probability at least 1 − β (by union bound over (5), (6), (7)), 
+
+g¯k(x) ≥ T + W − Z¯k ≥ T − | W | − Z¯k ≥ T − 3Kε ln(2 /β ) − 3Kε ln(2 t/β ).
+
+D.2 Lipschitzness of finite-dimensional function space projection 
+
+Proof of Lemma 3.7. First, the space L2(I) of square-integrable functions is a Hilbert space whose inner product induces the L2 metric dist 2(f, g ) := 
+
+qR 
+
+> I
+
+(f (t) − g(t)) 2dt . Let U ⊆ L2(I) be any subset. Next, the span of m linearly independent functions in L2(I) forms a subspace; let Uf
+
+be any such subspace. Then for any pair q, q ′ ∈ U , by the Hilbert projection theorem 3 there are fa(q), f a(q′) ∈ Uf such that fa(q) = arg min z∈Uf dist 2(q, z ) and fa(q′) = arg min z∈Uf dist 2(q′, z ); moreover, q − fa(q), q ′ − fa(q′) are orthogonal to Uf . Denote cq,q ′ := fa(q) − fa(q′), c⊥ 
+
+> q,q ′
+
+:= ( q − fa(q)) −
+
+(q′ − fa(q′)), then cq,q ′ ∈ Uf and c⊥ 
+
+> q,q ′
+
+is orthogonal to Uf .dist 2(q, q ′)2 = dist 2
+
+ fa(q) + q − fa(q), f a(q′) + q′ − fa(q′)
+
+2
+
+> 3Technically speaking, appealing to the Hilbert projection theorem is not necessary, since the constructions in Appendix E provide the projections we need.
+
+38 =
+
+Z
+
+> I
+
+ fa(q)(t) + q(t) − fa(q)(t) − (fa(q′)(t) + q′(t) − fa(q′)(t)) 2 dt 
+
+=
+
+Z
+
+> I
+
+(cq,q ′ (t)2 + c⊥ 
+
+> q,q ′
+
+(t)2 + 2 cq,q ′ (t)c⊥ 
+
+> q,q ′
+
+(t)) dt 
+
+=
+
+Z
+
+> I
+
+cq,q ′ (t)2dt +
+
+Z
+
+> I
+
+c⊥ 
+
+> q,q ′
+
+(t)2dt 
+
+| {z }
+
+> ≥0
+
++2 
+
+Z
+
+> I
+
+cq,q ′ (t)c⊥ 
+
+> q,q ′
+
+(t)) dt 
+
+| {z }
+
+> 0
+
+≥
+
+Z
+
+> I
+
+cq,q ′ (t)2dt = dist 2(fa(q), f a(q′))2.
+
+D.3 Utility of Project -and -Privatize 
+
+Lemma D.1 (Lemma 3.9) . Let Uf be the subspace given by the span of {ϕj (·)}j∈[m]. For q ∈ U ,let fa ∈ Uf be a projection of q in Uf . For ˜a := a + 1 
+
+> b
+
+Σ1/2Z where Z is a random vector with mean zero, we have 
+
+E[dist 2(q, f ˜a)2] = dist 2(q, f a)2 + 1
+
+b2 E[∥Z∥2].
+
+Proof of Lemma 3.9. We need to discuss all three cases, though the derivations are similar. 1. Real-valued coefficients and basis functions. dist 2(q, f ˜a)2 =
+
+Z
+
+> I
+
+q(t) − X
+
+> j∈[m]
+
+˜aj ϕj (t)
+
+
+
+> 2
+
+dt =
+
+Z
+
+> I
+
+q(t) −
+
+
+
+a + 1
+
+b Σ 12 Z
+
+T
+
+
+
+ϕ1(t)...
+
+ϕm(t)
+
+
+
+> 2
+
+dt 
+
+=
+
+Z
+
+> I
+
+q(t) − a1 · · · am
+
+
+
+ϕ1(t)...
+
+ϕm(t)
+
+ − 1
+
+b
+
+z1 · · · zm
+
+ Σ 12
+
+
+
+ϕ1(t)...
+
+ϕm(t)
+
+
+
+> 2
+
+dt 
+
+=
+
+Z
+
+> I
+
+(q(t) − X
+
+> j∈[m]
+
+aj ϕj (t)) 2dt −
+
+Z
+
+> I
+
+2
+
+b
+
+q(t) − X
+
+> j∈[m]
+
+aj ϕj (t)
+
+ ϕ1(t) · · · ϕm(t) Σ 12
+
+| {z }
+
+> =:
+> h
+
+v1(t) · · · vm(t)i
+
+
+
+z1
+
+...
+
+zm
+
+ dt 
+
++
+
+Z
+
+> I
+
+1
+
+b2
+
+z1 · · · zm
+
+ Σ 12
+
+| {z }
+
+> ∈Rm
+
+
+
+ϕ1(t)...
+
+ϕm(t)
+
+ ϕ1(t) · · · ϕm(t) Σ 12
+
+
+
+z1
+
+...
+
+zm
+
+| {z }
+
+> ∈Rm
+
+dt 
+
+= dist 2(q, f a)2 − 2
+
+b
+
+R  
+
+> I
+
+v1(t)dt · · · R 
+
+> I
+
+vm(t)dt 
+
+z1
+
+...
+
+zm
+
+
+
+39 + 1
+
+b2
+
+z1 · · · zm
+
+ Σ 12
+
+R 
+
+> I
+
+ϕ1(t)2dt · · · R 
+
+> I
+
+ϕ1ϕm(t)dt 
+
+... ...R 
+
+> I
+
+ϕm(t)ϕ1(t)dt · · · R 
+
+> I
+
+ϕm(t)ϕm(t)dt 
+
+| {z }  
+
+> Σ−1,by Fact B. 10
+
+Σ 12
+
+
+
+z1
+
+...
+
+zm
+
+
+
+= dist 2(q, f a)2 − 2
+
+b
+
+R  
+
+> I
+
+v1(t)dt · · · R 
+
+> I
+
+vm(t)dt 
+
+z1
+
+...
+
+zm
+
+ + 1
+
+b2
+
+z1 · · · zm
+
+
+
+z1
+
+...
+
+zm
+
+ ,
+
+E[dist 2(q, f ˜a)2] = dist 2(q, f a)2 − 2
+
+b
+
+R  
+
+> I
+
+v1(t)dt · · · R 
+
+> I
+
+vm(t)dt  E
+
+
+
+z1
+
+...
+
+zm
+
+| {z }
+
+> 0
+
++ 1
+
+b2 E ∥Z∥2
+
+= dist 2(q, f a)2 + 1
+
+b2 E[∥Z∥2].
+
+2. Real-valued coefficients, vector-valued basis. Here ϕj = [ ϕj, 1, · · · , ϕ j,n ]T for j ∈ [m]. Let Φ( t) := 
+
+
+
+ϕ1,1(t) · · · ϕm, 1(t)... ...
+
+ϕ1,n (t) · · · ϕm,n (t)
+
+. Note that fa(t) = P 
+
+> j∈[m]
+
+aj [ϕj, 1(t), · · · , ϕ j,n (t)] T = Φ( t)a.dist 2(q, f ˜a)2 =
+
+Z
+
+> I
+
+
+
+q1(t)...
+
+qn(t)
+
+ − X
+
+> j∈[m]
+
+˜aj
+
+
+
+ϕ1(t)...
+
+ϕm(t)
+
+
+
+> 2
+
+dt 
+
+=
+
+Z
+
+> I
+
+
+
+q1(t)...
+
+qn(t)
+
+ −
+
+
+
+ϕ1,1(t) · · · ϕm, 1(t)... ...
+
+ϕ1,n (t) · · · ϕm,n (t)
+
+ (a + 1
+
+b Σ 12 Z)
+
+> 2
+
+dt 
+
+=
+
+Z
+
+> I
+
+
+
+q1(t)...
+
+qn(t)
+
+ − Φ( t)a
+
+> 2
+
+dt + 1
+
+b2
+
+Z
+
+> I
+
+Φ( t)Σ 12 Z 2
+
+dt − 2 1
+
+b
+
+Z
+
+> I
+
+(q(t) − Φ( t)a)TΦ( t)Σ 12
+
+| {z }
+
+> =:[ v1(t),...,v m(t)]
+
+Zdt 
+
+= dist 2(q, f a)2 + 1
+
+b2
+
+Z
+
+> I
+
+ZTΣ 12 Φ( t)TΦ( t)Σ 12 Zdt − 2
+
+b
+
+R  
+
+> I
+
+v1(t)dt · · · R 
+
+> I
+
+vm(t)dt  [z1, . . . , z m]T
+
+= dist 2(q, f a)2 + 1
+
+b2
+
+Z
+
+> I
+
+ZTΣ 12
+
+| {z } 
+
+> ∈Rm
+
+P 
+
+> r∈[n]
+
+ϕ1,r (t)2 · · · P 
+
+> r∈[n]
+
+ϕ1,r (t)ϕm,r (t)... · · · ...P 
+
+> r∈[n]
+
+ϕm,r (t)ϕ1,r (t) · · · P 
+
+> r∈[n]
+
+ϕm,r (t)2
+
+ Σ 12 Z| {z } 
+
+> ∈Rm
+
+dt 
+
+− 2
+
+b
+
+R 
+
+> I
+
+v1(t)dt 
+
+...R 
+
+> I
+
+vm(t)dt 
+
+ 
+
+> T
+
+
+
+z1
+
+...
+
+zm
+
+
+
+40 = dist 2(q, f a)2 + 1
+
+b2 ZTΣ 12
+
+R
+
+> I
+
+P 
+
+> r∈[n]
+
+ϕ1,r (t)2dt · · · R
+
+> I
+
+P 
+
+> r∈[n]
+
+ϕ1,r (t)ϕm,r (t)dt 
+
+... · · · ...R
+
+> I
+
+P 
+
+> r∈[n]
+
+ϕm,r (t)ϕ1,r (t)dt · · · R
+
+> I
+
+P 
+
+> r∈[n]
+
+ϕm,r (t)2dt 
+
+| {z }  
+
+> Σ−1,by Fact B. 10
+
+Σ 12 Z
+
+− 2
+
+b
+
+R 
+
+> I
+
+v1(t)dt 
+
+...R 
+
+> I
+
+vm(t)dt 
+
+ 
+
+> T
+
+
+
+z1
+
+...
+
+zm
+
+
+
+= dist 2(q, f a)2 + 1
+
+b2 ∥Z∥ − 2
+
+b
+
+R  
+
+> I
+
+v1(t)dt · · · R 
+
+> I
+
+vm(t)dt 
+
+z1
+
+...
+
+zm
+
+ ,
+
+E[dist 2(q, f ˜a)2] = dist 2(q, f a)2 + 1
+
+b2 E[∥Z∥] − 2
+
+b
+
+R  
+
+> I
+
+v1(t)dt · · · R 
+
+> I
+
+vm(t)dt  E
+
+hz1 · · · zm
+
+Ti| {z }
+
+> 0
+
+.
+
+3. Vector-valued coefficients, real-valued basis. Here aj = [ aj, 1, · · · , a j,n ] for j ∈ [n]. Write 
+
+a:r = [ a1,r , · · · , a m,r ]T and z:,r = [ z1,r , · · · , z m,r ]T for r ∈ [n]. We have the coefficient vector 
+
+a = [ a:1 , · · · , a :n]T, noise vector Z = [ z:1 , · · · , z :n]T, and privatized coefficient vector ˜ a = a + 
+
+> 1
+> b
+
+Σ1/2Z, where Σ 1/2 is a diagonal block matrix with Σ 1/20 repeated in the diagonal. Let Φ( t) := [ϕ1(t), · · · , ϕ m(t)] T.dist 2(q, f ˜a) = 
+
+Z
+
+> I
+
+
+
+q1(t)...
+
+qn(t)
+
+ −
+
+P 
+
+> j∈[m]
+
+˜aj, 1ϕj (t)...P 
+
+> j∈[m]
+
+˜aj,n ϕj (t)
+
+
+
+> 2
+
+dt 
+
+=
+
+Z
+
+> I
+
+
+
+q1(t)...
+
+qn(t)
+
+ −
+
+
+
+[ϕ1(t), · · · , ϕ m(t)] · (a:1 + 1 
+
+> b
+
+Σ1/20 z:1 )...[ϕ1(t), · · · , ϕ m(t)] · (a:n + 1 
+
+> b
+
+Σ1/20 z:n)
+
+
+
+> 2
+
+dt 
+
+=
+
+Z
+
+> I
+
+
+
+q1(t)...
+
+qn(t)
+
+ −
+
+
+
+Φ( t)Ta:1 
+
+...Φ( t)Ta:n
+
+
+
+> 2
+
+dt + 1
+
+b2
+
+Z
+
+> I
+
+
+
+Φ( t)TΣ1/20 z:1 
+
+...Φ( t)TΣ1/20 z:n
+
+
+
+> 2
+
+dt 
+
+− 2
+
+b
+
+Z
+
+> I
+
+[q1(t), · · · , q m(t)] 
+
+
+
+Φ( t)T · Σ1/20 z:1 
+
+...Φ( t)T · Σ1/20 z:n
+
+
+
+= dist 2(q, f a)2 + 1
+
+b2
+
+Z
+
+> I
+
+h
+
+zT
+
+> :1
+
+Σ1/20 Φ( t), · · · , z T
+
+> :n
+
+Σ1/20 Φ( t)
+
+i
+
+Φ( t)TΣ1/20 z:1 
+
+...Φ( t)TΣ1/20 z:n
+
+ dt 
+
+41 − 2
+
+b
+
+Z
+
+> I
+
+[q1(t), · · · , q m(t)] 
+
+
+
+Φ( t)T
+
+. . .Φ( t)T
+
+ Σ
+
+| {z }  
+
+> =:[ v1,1(t),··· ,v m, 1(t),··· ,v m,n (t)]
+
+Zdt 
+
+= dist 2(q, f a)2 + 1
+
+b2
+
+X
+
+> r∈[n]
+
+Z
+
+> I
+
+
+
+zT
+
+> :r
+
+Σ1/20 Φ( t)Φ( t)TΣ1/20 z:r
+
+
+
+dt 
+
+− 2
+
+b
+
+R  
+
+> I
+
+v1,1(t)dt · · · R 
+
+> I
+
+vm,n (t) [z1,1, · · · , z m,n ]T
+
+E[dist 2(q, f ˜a) = dist 2(q, f a)2 + 1
+
+b2 E[∥Z∥2] − 2
+
+b
+
+R  
+
+> I
+
+v1,1(t)dt · · · R 
+
+> I
+
+vm,n (t) E
+
+h
+
+[z1,1, · · · , z m,n ]Ti| {z }
+
+> 0
+
+.
+
+D.4 Utility of ReduceSeg (Algorithm 5) 
+
+Proof of Lemma 4.2. Let ˆ ts, ˆte denote the end points of the running interval in ReduceSeg. There are at most 2 k1 calls to ReduceSeg, where at most 2 k1 Lap(1) random variables are drawn, which are simultaneously lower bounded by − ln  2k1 /β  with probability at least 1 − β/ 2. Assume this holds in the remaining analysis. In each call, we have dist 2(f[ˆ ts,ˆte], q · 1[ˆ ts,ˆte]) = err − 2l
+
+ε′ Z ≤ err + 2l
+
+ε′ ln 
+
+
+
+2k1 /β 
+
+
+
+, (8) where f[ˆ ts,ˆte] is computed using S′ (i.e. half of the sub-intervals). Thus, if line 9 is true, then the approximation error dist 2(f[ˆ ts,ˆte], q · 1[ˆ ts,t e]) is dominated by 2k−1emn  
+
+> 2( e−1) B
+
+= |[ˆ ts, ˆte) ∩ S′| emn  
+
+> 2( e−1) B
+
+after removing half of the sub-intervals. Assume the number of breakpoints is reduced at least once (i.e. at level l = 1); otherwise ˆS = S
+
+and there would be nothing to prove. Starting from C = ∅, add the pair (ˆ ts, ˆte) to C whenever line 9 is false. Let par(ˆ ts, ˆte) denote the sub-interval at its parent call, so [ˆ ts, ˆte] ⊂ par(ˆ ts, ˆte); there were twice as many sub-intervals in the call on par(ˆ ts, ˆte), during which line 9 was true. We have dist 2(f[ˆ ts,ˆte], q · 1[ˆ ts,ˆte]) ≤ dist 2(fpar(ˆ ts,ˆte), q · 1par(ˆ ts,ˆte))
+
+≤ 2|[ˆ ts, ˆte) ∩ ˆS| emn 
+
+2( e − 1) B = |[ˆ ts, ˆte) ∩ ˆS| emn 
+
+(e − 1) B ,
+
+since the non-private approximation on par(ˆ ts, ˆte) has error bounded by the number of its sub-intervals times emn  
+
+> 2( e−1) B
+
+, and B ≥ ε/ 2 is non-increasing. When the recursive calls terminate, we have that the original interval is equal to the union of sub-intervals defined by the pairs in C. Let 
+
+P ˆS (q) denote the non-private best approximation of q using intervals in ˆS. We have dist 2(P ˆS (q), q ) ≤ X
+
+> (ˆ ts,ˆte)∈C
+
+dist 2(P ˆS (q · 1[ˆ ts,ˆte]), q · 1[ˆ ts,ˆte])
+
+≤ X
+
+> (ˆ ts,ˆte)∈C
+
+|[ˆ ts, ˆte) ∩ ˆS|emn 
+
+(e − 1) ε/ 2 = (| ˆS| − 1) emn 
+
+(e − 1) ε/ 2 ,
+
+42 dist 2(˜ q ˆS , q ) ≤ dist 2(P ˆS (q), q ) + dist 2(˜ q ˆS , P ˆS (q)) 
+
+≤ (| ˆS| − 1) emn 
+
+(e − 1) ε/ 2 + η(β; ( | ˆS| − 1) m, 1) 
+
+ε/ 2 (w.p. 1 − β)
+
+≤ (| ˆS| − 1) emn 
+
+(e − 1) ε/ 2 + e
+
+(e − 1) ε/ 2
+
+
+
+| ˆS| − 1) mn + ln(1 /β )
+
+
+
+= e
+
+(e − 1) ε/ 2 (2 | ˆS| − 2) mn + e
+
+(e − 1) ε/ 2 ln(1 /β )
+
+≤ η(β; ( |S| − 1) mn, 1) 
+
+ε/ 2 (since 2 | ˆS| ≤ | S|)
+
+≤ ErrBound(˜ qS ; q, ε/ 2, β, 1)) . (9) Combining (8) and (9) above, we have with probability 1 − 32 β, dist 2(˜ q ˆS , q ) ≤ ErrBound(˜ qS ; q, ε/ 2, β, 1)). 
+
+D.5 Utility of ReduceSegCGP (Algorithm 9) 
+
+Proof of Lemma C.2. The proof proceeds similarly to that for Lemma 4.2. The N (0 , 1) random variables in the (at most) 2 k1 calls are simultaneously lower bounded by −p2 ln(2 k1 /β ) with prob-ability at least 1 − β/ 2. Assume this holds. In each call, we have dist 2(f[ˆ ts,ˆte], q · 1[ˆ ts,ˆte]) = err −√2l
+
+√2ρ′ Z ≤ err + 
+
+√2l
+
+√2ρ′
+
+q
+
+2 ln(2 k1 /β ),
+
+where f[ˆ ts,ˆte] is computed using S′. If line 9 is true, then the approximation error dist 2(f[ˆ ts,ˆte], q ·
+
+1[ˆ ts,t e]) is dominated by (√2−1) √2k−1mn  
+
+> √2√2B
+
+= (√2−1) 
+
+> √2√2B
+
+q
+
+|[ˆ ts, ˆte) ∩ S′|mn after removing half of the sub-intervals . Assume the number of sub-intervals is reduced at least once. Starting from C = ∅, add the pair (ˆ ts, ˆte) to C whenever line 9 is false. Let par(ˆ ts, ˆte) denote the sub-interval at its parent call. Note that we have dist 2(f[ˆ ts,ˆte], q · 1[ˆ ts,ˆte]) ≤ dist 2(fpar(ˆ ts,ˆte), q · 1par(ˆ ts,ˆte)) ≤ (√2 − 1) 
+
+√2√2B
+
+q
+
+2|[ˆ ts, ˆte) ∩ ˆS|mn, 
+
+since the non-private approximation on par(ˆ ts, ˆte)) has error bounded by the square root of the number of its sub-intervals times (√2−1) √mn  
+
+> √2√2B
+
+, and B ≥ ρ/ 2 is non-increasing. When the recursive calls terminate, we have that the original interval is equal to the union of sub-intervals defined by the pairs in C. Let P ˆS (q) denote the non-private best approximation of q using intervals in ˆS. Then dist 2(P ˆS (q), q )2 = X
+
+> (ˆ ts,ˆte)∈C
+
+dist 2(P ˆS (q · 1[ˆ ts,ˆte]), q · 1[ˆ ts,ˆte])2
+
+≤ X
+
+> (ˆ ts,ˆte)∈C
+
+(√2 − 1) 2
+
+2ρ (2 |[ˆ ts, ˆte) ∩ ˆS|mn ) = (√2 − 1) 2
+
+ρ (| ˆS| − 1) mn, 
+
+dist 2(˜ q ˆS , q ) ≤ dist 2(P ˆS (q), q ) + dist 2(˜ q ˆS , P ˆS (q)) 43 ≤ (√2 − 1) 
+
+√ρ
+
+q
+
+(| ˆS| − 1) mn + η(β; ( | ˆS| − 1) mn, 2) 
+
+√ρ (with prob. 1 − β)= (√2 − 1) 
+
+√ρ
+
+q
+
+(| ˆS| − 1) mn + 1
+
+√ρ
+
+r
+
+(| ˆS| − 1) mn + 2 
+
+q
+
+(| ˆS| − 1) mn ln(1 /β ) + 2 ln(1 /β )
+
+| {z }
+
+> ≤
+> r
+
+√(| ˆS|− 1) mn +√2 ln(1 /β )
+
+> 2
+
+≤ 1
+
+√ρ
+
+
+
+(√2 − 1) 
+
+q
+
+(| ˆS| − 1) mn +
+
+q 
+
+(| ˆS| − 1) mn + p2 ln(1 /β )
+
+ 
+
+= 1
+
+√ρ
+
+√2
+
+q
+
+(| ˆS| − 1) mn + pln(1 /β ) + ( √2 − 1) pln(1 /β )
+
+
+
+= 1
+
+√ρ
+
+r
+
+2( | ˆS| − 1) mn + 2 
+
+q
+
+2( | ˆS| − 1) mn ln(1 /β ) + ln(1 /β ) + ( √2 − 1) pln(1 /β )
+
+!
+
+≤ 1
+
+√ρ
+
+q 
+
+(|S| − 1) mn + 2 p(|S| − 1) mn ln(1 /β ) + ln(1 /β ) + ( √2 − 1) pln(1 /β )
+
+
+
+(since 2 | ˆS| ≤ | S|)
+
+≤ η(β; ( |S| − 1) mn, 2) 
+
+√ρ + (√2 − 1) pln(1 /β )
+
+√ρ
+
+≤ ErrBound(˜ qS ; q, ρ/ 2, β, 2)) + (√2 − 1) pln(1 /β )
+
+√ρ .
+
+## E Least squares projection 
+
+E.1 Real-valued basis functions and real-valued coefficients 
+
+We discuss how the least squares projection can be computed for a 2-dimensional Uf spanned by {ϕ1(·), ϕ 2(·)}. The extension to m-dimensional spaces for m ≥ 2 follows analogously. In the least squares projection problem, given a function q ∈ U we want to find fa ∈ Uf such that dist 2(q, f a)2 = R 
+
+> I
+
+(q(t) − (a1t + a2)) 2dt is minimized; i.e., we want to solve the unconstrained program minimize 
+
+Z
+
+> I
+
+(q(t) − (a1ϕ1(t) + a2ϕ2(t))) 2dt, a = ( a1, a 2) ∈ R2.
+
+First, we show that the program is (strictly) convex. Denote the objective function as F (a1, a 2) := R 
+
+> I
+
+(q(t) − (a1t + a2)) 2dt . We have 
+
+∂F ∂a 1
+
+=
+
+Z
+
+> I
+
+∂∂a 1
+
+[q(t) − (a1ϕ1(t) + a2ϕ2(t))) 2]dt =
+
+Z
+
+> I
+
+−2ϕ1(t) ( q(t) − (a1ϕ1(t) + a2ϕ2(t))) dt 
+
+= 2 
+
+Z
+
+> I
+
+ a1ϕ1(t)2 + a2ϕ1(t)ϕ2(t) − q(t)ϕ1(t) dt, ∂F ∂a 2
+
+=
+
+Z
+
+> I
+
+∂∂a 2
+
+[q(t) − (a1ϕ1(t) + a2ϕ2(t))) 2]dt =
+
+Z
+
+> I
+
+−2ϕ2(t) ( q(t) − (a1ϕ1(t) + a2ϕ2(t))) dt 
+
+44 = 2 
+
+Z
+
+> I
+
+ a2ϕ2(t)2 + a1ϕ1(t)ϕ2(t) − q(t)ϕ2(t) dt, ∂2F∂a 21
+
+= 2 
+
+Z
+
+> I
+
+ϕ1(t)2dt, ∂2F∂a 22
+
+= 2 
+
+Z
+
+> I
+
+ϕ2(t)2dt ∂2F∂a 1∂a 2
+
+= 2 
+
+Z
+
+> I
+
+ϕ1(t)ϕ2(t)dt = ∂2F∂a 2∂a 1
+
+.
+
+Therefore, the Hessian matrix is HF =
+
+" ∂2F∂a 21
+
+> ∂2F∂a 1∂a 2
+> ∂2F∂a 2∂a 1
+> ∂2F∂a 22
+
+#
+
+= 2Σ −1, which is positive definite, and the program is strictly convex. Then, the unique minimizer of F (a1, a 2) is the point that makes  
+
+> ∂F ∂a 1
+
+= 0 = ∂F ∂a 2 . That is, 
+
+2 R
+
+> I
+
+ a1ϕ1(t)2 + a2ϕ1(t)ϕ2(t) − q(t)ϕ1(t) dt 
+
+2 R
+
+> I
+
+ a2ϕ2(t)2 + a1ϕ1(t)ϕ2(t) − q(t)ϕ2(t) dt 
+
+
+
+=
+
+00
+
+
+
+⇐⇒ 
+
+a1
+
+R 
+
+> I
+
+ϕ1(t)2dt + a2
+
+R 
+
+> I
+
+ϕ1(t)ϕ2(t)dt a1
+
+R 
+
+> I
+
+ϕ1(t)ϕ2(t)dt + a2
+
+R 
+
+> I
+
+ϕ2(t)2dt 
+
+
+
+=
+
+R  
+
+> I
+
+q(t)ϕ1(t)dt R 
+
+> I
+
+q(t)ϕ2(t)dt 
+
+
+
+⇐⇒ 
+
+ R 
+
+> I
+
+ϕ1(t)2dt R 
+
+> I
+
+ϕ1(t)ϕ2(t)dt R 
+
+> I
+
+ϕ1(t)ϕ2(t)dt R 
+
+> I
+
+ϕ2(t)2dt 
+
+| {z }
+
+> Σ−1
+
+a1
+
+a2
+
+
+
+=
+
+R  
+
+> I
+
+q(t)ϕ1(t)dt R 
+
+> I
+
+q(t)ϕ2(t)dt 
+
+
+
+⇐⇒ 
+
+a1
+
+a2
+
+
+
+= Σ 
+
+R  
+
+> I
+
+q(t)ϕ1(t)dt R 
+
+> I
+
+q(t)ϕ2(t)dt 
+
+
+
+.
+
+(10) Let a∗ =
+
+a∗
+
+> 1
+
+a∗
+
+> 2
+
+
+
+:= Σ 
+
+R  
+
+> I
+
+q(t)ϕ1(t)dt R 
+
+> I
+
+q(t)ϕ2(t)dt 
+
+
+
+. Then we can verify that 
+
+Z
+
+> I
+
+(q(t) − (a∗
+
+> 1
+
+ϕ1(t) + a∗
+
+> 2
+
+ϕ2(t)) ϕ1(t)dt = 0 = 
+
+Z
+
+> I
+
+(q(t) − (a∗
+
+> 1
+
+ϕ1(t) + a∗
+
+> 2
+
+ϕ2(t)) ϕ2(t)dt, 
+
+i.e., q − (a∗
+
+> 1
+
+ϕ1 + a∗
+
+> 2
+
+ϕ2) is orthogonal to Uf .
+
+E.2 Vector-valued basis functions and real-valued coefficients 
+
+For vector-valued functions u, v : I → Rn, consider with inner product 
+
+⟨u, v ⟩ =
+
+Z
+
+> I
+
+u(t)T v(t)dt =
+
+Z
+
+> I
+
+(u1(t)v1(t) + · · · + un(t)vn(t)) dt 
+
+where u = ( u1, · · · , u n), v = ( v1, · · · , v n). Note that the space containing vector-valued functions u
+
+such that ⟨u, u ⟩ < ∞ is complete (i.e. a Hilbert space). We have vector-valued function q = ( q1, · · · , q n) ∈ U , space Uf spanned by the set of vectors 
+
+{ϕj (·)}j∈[m] where each ϕj = ( ϕj, 1, · · · , ϕ j,n ) ∈ L2(I), and wish to minimize 
+
+F (a) := 
+
+Z
+
+> I
+
+
+
+q1(t)...
+
+qn(t)
+
+ − a1
+
+
+
+ϕ1,1
+
+...
+
+ϕ1,n 
+
+ + · · · am
+
+
+
+ϕm, 1
+
+...
+
+ϕm,n 
+
+
+
+> 2
+
+dt 
+
+45 over a = ( a1, · · · , a m) ∈ Rm.
+
+F (a) = 
+
+Z
+
+> In
+
+X
+
+> r=1
+
+(qr(t) − (a1ϕ1,r (t) + · · · + amϕm,r (t))) 2dt ∂F ∂a j
+
+=
+
+Z
+
+> In
+
+X
+
+> r=1
+
+−2ϕj,r (t) ( qr(t) − (a1ϕ1,r (t) + · · · + amϕm,r (t))) dt ∂2F∂a 2
+
+> j
+
+=
+
+Z
+
+> In
+
+X
+
+> r=1
+
+2ϕj,r (t)2dt, ∂2F∂a j ∂a k
+
+=
+
+Z
+
+> In
+
+X
+
+> r=1
+
+2ϕj,r (t)ϕk,r (t)dt for j̸ = k. 
+
+The Hessian matrix 
+
+HF =
+
+ 
+
+> ∂2F∂a 21
+> ∂2F∂a 1∂a 2
+
+· · · ∂2F∂a 1∂a m
+
+> ∂2F∂a 2∂a 1
+
+. . .... ... 
+
+> ∂2F∂a m∂a 1
+
+· · · ∂2F∂a 2
+
+> m
+
+
+
+=
+
+R
+
+> I
+
+Pnr=1 2ϕ1,r (t)2dt R
+
+> I
+
+Pnr=1 2ϕ1,r (t)ϕ2,r (t)dt · · · R
+
+> I
+
+Pnr=1 2ϕ1,r (t)ϕm,r (t)dt 
+
+R
+
+> I
+
+Pnr=1 2ϕ2,r (t)ϕ1,r (t)dt . . . ......R
+
+> I
+
+Pnr=1 2ϕm,r (t)ϕ1,r (t)dt · · · R
+
+> I
+
+Pnr=1 2ϕm,r (t)2dt 
+
+
+
+= 2 
+
+> n
+
+X
+
+> r=1
+
+R 
+
+> I
+
+ϕ1,r (t)2dt R 
+
+> I
+
+ϕ1,r (t)ϕ2,r (t)dt · · · R 
+
+> I
+
+ϕ1,r (t)ϕm,r (t)dt 
+
+R 
+
+> I
+
+ϕ2,r (t)ϕ1,r (t)dt . . . ......R 
+
+> I
+
+ϕm,r (t)ϕ1,r (t)dt · · · R 
+
+> I
+
+ϕm,r (t)2dt 
+
+| {z }
+
+> Σ−1( r)
+
+.
+
+Thus, HF = 2Σ −1 and is positive definite. For all j ∈ [m]
+
+∂F ∂a j
+
+= 0 ⇐⇒ 
+
+> n
+
+X
+
+> r=1
+
+Z
+
+> I
+
+ϕj,r (t) ( a1ϕ1,r (t) + · · · + amϕm,r (t)dt ) = 
+
+> n
+
+X
+
+> r=1
+
+Z
+
+> I
+
+ϕj,r (t)qr(t)dt 
+
+⇐⇒ a1
+
+> n
+
+X
+
+> r=1
+
+Z
+
+> I
+
+ϕj,r (t)ϕ1,r (t)dt + · · · + amnX
+
+> r=1
+
+Z
+
+> I
+
+ϕj,r (t)ϕn,r (t)dt =
+
+> n
+
+X
+
+> r=1
+
+Z
+
+> I
+
+ϕj,r (t)qr(t)dt 
+
+⇐⇒ P nr=1 
+
+R 
+
+> I
+
+ϕj,r (t)ϕ1,r (t)dt · · · Pnr=1 
+
+R 
+
+> I
+
+ϕj,r (t)ϕm,r (t)dt 
+
+a1
+
+...
+
+am
+
+ =
+
+> n
+
+X
+
+> r=1
+
+Z
+
+> I
+
+ϕj,r (t)qr(t)dt. 
+
+The minimizer is therefore given by 
+
+> n
+
+X
+
+> r=1
+
+R 
+
+> I
+
+ϕ1,r (t)2dt · · · R 
+
+> I
+
+ϕ1,r (t)ϕm,r (t)dt 
+
+...R 
+
+> I
+
+ϕm,r (t)ϕ1,r (t)dt · · · R 
+
+> I
+
+ϕm,r (t)2dt 
+
+
+
+a1
+
+...
+
+am
+
+ =
+
+Pnr=1 
+
+R 
+
+> I
+
+ϕ1,r (t)qr(t)dt 
+
+...Pnr=1 
+
+R 
+
+> I
+
+ϕm,r (t)qr(t)dt 
+
+
+
+46 ⇐⇒ 
+
+
+
+a1
+
+...
+
+am
+
+ = Σ 
+
+Pnr=1 
+
+R 
+
+> I
+
+ϕ1,r (t)qr(t)dt 
+
+...Pnr=1 
+
+R 
+
+> I
+
+ϕm,r (t)qr(t)dt 
+
+ . (11) Let a∗ =
+
+
+
+a∗
+
+> 1
+
+...
+
+a∗
+
+> m
+
+ := Σ 
+
+Pnr=1 
+
+R 
+
+> I
+
+ϕ1,r (t)qr(t)dt 
+
+...Pnr=1 
+
+R 
+
+> I
+
+ϕm,r (t)qr(t)dt 
+
+. Then a∗ is the unique minimizer of F (a) and 
+
+Z
+
+> I
+
+(q(t) − X
+
+> j∈[m]
+
+a∗ 
+
+> j
+
+ϕj (t)) T
+
+
+
+ϕl, 1(t)...
+
+ϕl,n (t)
+
+ dt = 0 for l ∈ [m]. 
+
+E.3 Real-valued basis functions and vector-valued coefficients 
+
+We have vector-valued function q = ( q1, · · · , q n) ∈ U , m-dimensional space Uf ⊂ L2(I) spanned by 
+
+{ϕj (·)}j∈[m], and wish to minimize 
+
+F (a) := 
+
+Z
+
+> I
+
+
+
+q1(t)...
+
+qn(t)
+
+ −
+
+
+
+a1,1
+
+...
+
+a1,n 
+
+ ϕ1(t) + · · · 
+
+
+
+am, 1
+
+...
+
+am,n 
+
+ ϕm(t)
+
+
+
+> 2
+
+dt 
+
+over a = ( a1,1, · · · , a m, 1, · · · , a m,n ) ∈ Rm×n. As in Section E.1 above, we show that the minimization program with objective function F (a) is convex. 
+
+F (a) = 
+
+Z
+
+> In
+
+X
+
+> r=1
+
+(qr(t) − (a1,r ϕ1(t) + · · · am,r ϕm(t))) 2dt, ∂F ∂a j,r 
+
+=
+
+Z
+
+> I
+
+−2ϕj (t)( qr(t) − (a1,r ϕ1(t) + · · · am,r ϕm(t))) dt ∂2F∂a 2
+
+> j,r
+
+= 2 
+
+Z
+
+> I
+
+ϕj (t)2dt, ∂2F∂a j,r ∂a k,r 
+
+= 2 
+
+Z
+
+> I
+
+ϕj (t)ϕk(t)dt, ∂2F∂a j,r ∂a k,s 
+
+= 0 for r̸ = s. 
+
+The Hessian matrix 
+
+HF =
+
+
+
+> ∂2F∂a 21,1
+
+· · · ∂2F∂a 1,1∂a m, 1 
+
+> ∂2F∂a 1,1∂a 1,2
+
+· · · ∂2F∂a 1,1∂a m,n 
+
+> ∂2F∂a 2,1∂a 1,1
+> ∂2F∂a 22,1
+
+· · · ∂2F∂a 2,1∂a m,n 
+
+... . . . ... 
+
+> ∂2F∂a m,n ∂a 1,1
+
+· · · · · · ∂2F∂a 2
+
+> m,n
+
+
+
+=
+
+
+
+H(0)  
+
+> F
+
+0 · · · 
+
+... . . . ...0 · · · H(0) 
+
+> F
+
+
+
+where 
+
+H(0)  
+
+> F
+
+=
+
+
+
+2 R 
+
+> I
+
+ϕ1(t)2dt · · · 2 R 
+
+> I
+
+ϕ1(t)ϕm(t)dt 
+
+... . . . ...2 R 
+
+> I
+
+ϕm(t)ϕ1(t)dt · · · 2 R 
+
+> I
+
+ϕm(t)2dt 
+
+ .
+
+47 Thus, HF = 2Σ −1 and is positive definite. We find the minimizer of F (a) by setting the gradient vector [ ∂F ∂a 1,1 , . . . , ∂F ∂a m, 1 , . . . , ∂F ∂a m,n ]T = 0. We have for all j ∈ [m], r ∈ [n]
+
+∂F ∂a j,r 
+
+= 0 ⇐⇒ 
+
+Z
+
+> I
+
+ϕj (t)( a1,r ϕ1(t) + · · · am,r ϕm(t))) dt =
+
+Z
+
+> I
+
+ϕj (t)qr(t)dt 
+
+⇐⇒ R  
+
+> I
+
+ϕj (t)ϕ1(t)dt · · · R 
+
+> I
+
+ϕj (t)ϕm(t)dt 
+
+a1,r 
+
+...
+
+am,r 
+
+ =
+
+Z
+
+> I
+
+ϕj (t)qr(t)dt, 
+
+so the minimizer of F (a) is given by 
+
+R 
+
+> I
+
+ϕ1(t)2dt · · · R 
+
+> I
+
+ϕ1(t)ϕm(t)dt 
+
+... . . . ...R 
+
+> I
+
+ϕm(t)ϕ1(t)dt · · · R 
+
+> I
+
+ϕm(t)2dt 
+
+| {z }
+
+> Σ−10
+
+
+
+a1,r 
+
+...
+
+am,r 
+
+ =
+
+R 
+
+> I
+
+ϕ1(t)qr(t)dt 
+
+...R 
+
+> I
+
+ϕm(t)qr(t)dt 
+
+
+
+for r ∈ [n]. In terms of the matrix Σ, 
+
+
+
+a1,1
+
+...
+
+am, 1
+
+a1,2
+
+...
+
+am,n 
+
+
+
+=
+
+
+
+Σ0
+
+. . .Σ0
+
+| {z }
+
+> Σ
+
+R 
+
+> I
+
+ϕ1(t)q1(t)dt 
+
+...R 
+
+> I
+
+ϕm(t)q1(t)dt R 
+
+> I
+
+ϕ1(t)q2(t)dt 
+
+...R 
+
+> I
+
+ϕm(t)qn(t)dt 
+
+
+
+. (12) 
+
+E.4 Approximations of functions in C([0 , T ]) using basis in L2(R)
+
+In Section 3.5, we discussed how a continuous function q ∈ U can be approximated using basis functions in L2(R) by treating q as a function in L2(R). In particular, we let L(q) denote the extended function that satisfies L(q)( t) = q(t) for t ∈ [0 , T ], and L(q)( t) = 0 otherwise. Let the basis functions be {ϕj }j∈[m] ⊂ L2(R). By Appendix E.1 above, the least squares projection of L(q)onto the span of {ϕj (·)}j∈[m] is given by 
+
+R ∞−∞ ϕ1(t)2dt · · · R ∞−∞ ϕ1(t)ϕm(t)dt 
+
+...R ∞−∞ ϕm(t)ϕ1(t)dt · · · R ∞−∞ ϕm(t)2dt 
+
+
+
+a1
+
+...
+
+am
+
+ =
+
+R ∞−∞ L(q)( t)ϕ1(t)dt 
+
+...R ∞−∞ L(q)( t)ϕm(t)dt 
+
+ =
+
+R T 
+
+> 0
+
+q(t)ϕ1(t)dt 
+
+...
+
+R T 
+
+> 0
+
+q(t)ϕm(t)dt 
+
+ .
+
+On the other hand, the least squares projection of q onto the span of {ϕj (·)1[0 ,T ](·)}j∈[m] is given by R T 
+
+> 0
+
+ϕ1(t)2dt · · · R T 
+
+> 0
+
+ϕ1(t)ϕm(t)dt 
+
+...
+
+R T 
+
+> 0
+
+ϕm(t)ϕ1(t)dt · · · R T 
+
+> 0
+
+ϕm(t)2dt 
+
+
+
+a1
+
+...
+
+am
+
+ =
+
+R T 
+
+> 0
+
+q(t)ϕ1(t)dt 
+
+...
+
+R T 
+
+> 0
+
+q(t)ϕm(t)dt 
+
+ .
+
+Thus, while using basis functions in L2(R) might be more convenient in some cases, the quality of the approximation could be different. 48 F Additional Statistics on Experimental Evaluation 
+
+In this section, we provide additional statistics on our experimental evaluation presented in Section 5 and Appendix C.3, for the results on the ECG and taxi trajectory datasets. Observe that for the taxi trajectory dataset, the median errors for the baseline methods are noticeably smaller than the mean errors (Fig. 18a vs. 10a, and Fig. 18b vs. 15a), indicating that there were extreme curves in the taxi trajectory dataset that severely damaged the performance of the baseline methods; on the other hand, the median and mean errors are similar in our methods, so our methods are less impacted by such curves. Overall, the advantage of our methods is clear. 0.1 0.2 0.5 1.0 2.0  
+
+> Privacy Budget
+> 10 1
+> 10 0
+> 10 1
+> Project-and-Privatize
+> Baseline
+> Baseline (smoothed)
+
+(a) GP L2 error 8e-05 0.00032 0.002 0.008 0.032   
+
+> Privacy Budget
+> 10 1
+> 10 0
+> 10 1
+> Project-and-Privatize
+> Baseline
+> Baseline (smoothed)
+
+(b) CGP L2 error 
+
+Figure 17: L2 error on the ECG dataset: median, 25th and 75th percentiles. 0.001 0.002 0.005 0.01 0.02 0.05 0.1    
+
+> Privacy Budget
+> 10 2
+> 10 1
+> 10 0
+> 10 1
+> 10 2LS Approximation
+> PrivFuncSeg
+> PrivFuncSeg (continuous)
+> Baseline
+> Baseline (smoothed)
+
+(a) GP L2 error 1.25e-08 5e-08 3.125e-07 1.25e-06 5e-06 3.125e-05 0.000125     
+
+> Privacy Budget
+> 10 3
+> 10 2
+> 10 1
+> 10 0
+> 10 1
+> LS Approximation
+> PrivFuncSeg
+> PrivFuncSeg (continuous)
+> Baseline
+> Baseline (smoothed)
+
+(b) CGP L2 error 
+
+Figure 18: L2 error on the taxi trajectory dataset: median, 25th and 75th percentiles. 49
