@@ -6,33 +6,40 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-30
-- 运行时间：2026-07-30 21:20:10 UTC
+- 最新运行日期：2026-07-31
+- 运行时间：2026-07-31 20:15:51 UTC
 - 运行状态：成功
-- 本次总论文数：4
-- 精读区：4
-- 速读区：0
+- 本次总论文数：6
+- 精读区：5
+- 速读区：1
 
 ### 今日简报（AI）
-今日精读两篇高分论文，聚焦联邦学习后门防御与本地模型函数私有化。最值得关注的是：对比联邦学习中的对齐检查可有效防御后门攻击，而本地模型下的函数私有化也为隐私保护提供了新思路。建议优先研读这两篇9.0分论文，深入理解其机制并尝试应用到实际联邦学习场景中。
-- 详情：[/202607/30/README](/202607/30/README)
+今日精读5篇、速读1篇，聚焦三阶约束优化与联邦学习隐私防御两大高价值方向。  
+最值得关注：分布式网络下的鲁棒核心集选择（9.0分）与联邦微调隐私后门零效用损失防御（9.0分），均达顶级水平。  
+建议优先精读这两篇，速读可关注开源组件隐私泄露风险，后续可扩展至实际系统验证。
+- 详情：[/202607/31/README](/202607/31/README)
 
 ### 精读区论文标签
-1. [Defending Against Backdoor Attacks via Alignment Checking in Model-Contrastive Federated Learning](/202607/30/2607.26933v1-defending-against-backdoor-attacks-via-alignment-checking-in-model-contrastive-federated-learning)  
+1. [First-order Constrained Trilevel Optimization Over Distributed Networks for Robust Coreset Selection](/202607/31/2607.27632v1-first-order-constrained-trilevel-optimization-over-distributed-networks-for-robust-coreset-selection)  
    标签：评分：9.0/10、query:daily
-   evidence：在联邦学习中防御后门攻击，涉及分布式机器学习中的隐私与安全
-2. [Function Privatization in the Local Model](/202607/30/2607.27164v1-function-privatization-in-the-local-model)  
+   evidence：边缘网络分布式优化中本地数据隐私敏感
+2. [TriShield: Zero-Utility-Loss Defense Against Privacy Backdoors in Federated Language Model Fine-Tuning via Orthogonal Gradient Projection and Optimizer State Entanglement](/202607/31/2607.27940v1-trishield-zero-utility-loss-defense-against-privacy-backdoors-in-federated-language-model-fine-tuning-via-orthogonal-gradient-projection-and-optimizer-state-entanglement)  
    标签：评分：9.0/10、query:daily
-   evidence：本地模型下的函数私有化，直接关联分布式隐私
-3. [TriShieldRAG: A Three-Ring Defense-in-Depth Framework Against Knowledge Corruption in Retrieval-Augmented Generation](/202607/30/2607.23838v1-trishieldrag-a-three-ring-defense-in-depth-framework-against-knowledge-corruption-in-retrieval-augmented-generation)  
+   evidence：针对联邦大语言模型微调隐私后门的防御，直接属于分布式机器学习隐私保护
+3. [Secure Aggregation for Privacy-Preserving Federated Learning on Clinical EEG Data](/202607/31/2607.28191v1-secure-aggregation-for-privacy-preserving-federated-learning-on-clinical-eeg-data)  
+   标签：评分：9.0/10、query:daily
+   evidence：面向临床脑电数据的隐私保护联邦学习安全聚合
+4. [Encryption-Compatible Clustered Federated Learning via Distributed Expectation-Maximization over Metadata](/202607/31/2607.28338v1-encryption-compatible-clustered-federated-learning-via-distributed-expectation-maximization-over-metadata)  
+   标签：评分：9.0/10、query:daily
+   evidence：面向联邦聚类的加密兼容隐私保护方法
+5. [Sharp Minimax Rates for Smooth Two-Sample Testing under Central Differential Privacy](/202607/31/2607.23974v1-sharp-minimax-rates-for-smooth-two-sample-testing-under-central-differential-privacy)  
    标签：评分：8.0/10、query:daily
-   evidence：针对RAG知识损坏的防御，提升安全性
-4. [FedWeave: Rethinking the Unit of Specialization in Heterogeneous Federated MoE-LoRA](/202607/30/2607.26618v1-fedweave-rethinking-the-unit-of-specialization-in-heterogeneous-federated-moe-lora)  
-   标签：评分：8.0/10、query:daily
-   evidence：联邦MoE-LoRA，处理隐私与异构客户端
+   evidence：建立了私有两样本检验的极小极大速率，是核心差分隐私理论。
 
 ### 速读区论文标签
-- 本次无速读推荐。
+1. [Don't Trust the AI Ecosystem: Analyzing Privacy Leakage in Compromised Open-Source Components](/202607/31/2607.27886v1-dont-trust-the-ai-ecosystem-analyzing-privacy-leakage-in-compromised-open-source-components)  
+   标签：评分：6.0/10、query:daily
+   evidence：通过训练时注入实现机器学习模型中的隐私泄露分析
 
 
 <div class="dpr-home-promo-card">
