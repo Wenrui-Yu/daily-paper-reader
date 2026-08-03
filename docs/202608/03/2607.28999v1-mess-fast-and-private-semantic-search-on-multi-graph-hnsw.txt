@@ -1,0 +1,999 @@
+Title: MESS: Fast and Private Semantic Search on Multi-Graph HNSW
+
+URL Source: https://arxiv.org/pdf/2607.28999v1
+
+Published Time: Mon, 03 Aug 2026 00:24:21 GMT
+
+Number of Pages: 13
+
+Markdown Content:
+# MESS : Fast and Private Semantic Search on Multi-Graph HNSW 
+
+# Haoyu Cui 
+
+cuihaoyu@mail.sdu.edu.cn Shandong University China 
+
+# Zengpeng Li 
+
+lizengpeng@sdu.edu.cn Shandong University China 
+
+# Tien Tuan Anh Dinh 
+
+anh.dinh@deakin.edu.au Deakin University Australia 
+
+# Mei Wang 
+
+wangmeiz@sdu.edu.cn Shandong University China 
+
+## Abstract 
+
+Semantic search systems map data to a high-dimensional vector space and support retrieval of similar data via approximate nearest neighbor search. When the system is hosted by a trusted cloud provider, there is no privacy for the data or the query. Our goal is to design a system with three properties: privacy, accuracy, and effi-ciency. Existing works adopt either homomorphic encryption (HE), oblivious RAM (ORAM), or a differential privacy (DP) approach. They fall short of achieving all three properties. In this paper, we present MESS , a system that realizes our goal. It maps the original vectors into binary codes, applies locality-sensitive hashing (LSH) and randomized response, and constructs a multi-graph Hierarchical Navigable Small World (HNSW) index over the perturbed codes. MESS ensures data, query, and access pat-tern privacy. It also ensures search pattern privacy via a two-phase query perturbation mechanism. The multi-graph index mitigates the impact of perturbation on result quality, thereby achieving ac-curacy. MESS is efficient because search is performed directly over perturbed codes, without the overhead of homomorphic encryption or ORAM. We give formal analysis of the system’s privacy and ex-tensive evaluation of its performance. The results show that MESS achieves up to 15 .08 × lower latency than state-of-the-art baselines. 
+
+PVLDB Reference Format: 
+
+Anonymous Authors. MESS: Fast Encrypted Semantic Search on Multi-Graph HNSW. PVLDB, 14(1): XXX-XXX, 2020. doi:XX.XX/XXX.XX 
+
+PVLDB Artifact Availability: 
+
+The source code, data, and/or other artifacts are available at https://github. com/xxxx. 
+
+## 1 Introduction 
+
+Semantic search systems support a wide range of applications, from classic information retrieval, image matching [ 30 , 37 ], and recommendation [ 34 ] to pattern recognition [ 13 , 41 ] and recent retrieval-augmented generation (RAG) applications. A typical se-mantic search system maps data and queries to high-dimensional 
+
+> This work is licensed under the Creative Commons BY-NC-ND 4.0 International License. Visit https://creativecommons.org/licenses/by-nc-nd/4.0/ to view a copy of this license. For any use beyond those covered by this license, obtain permission by emailing info@vldb.org. Copyright is held by the owner/author(s). Publication rights licensed to the VLDB Endowment. Proceedings of the VLDB Endowment, Vol. 14, No. 1 ISSN 2150-8097. doi:XX.XX/XXX.XX
+
+vectors (or embeddings). Its main operation is approximate near-est neighbor (ANN) search, which finds the closest vectors to a given search vector using a distance metric. Recent RAG appli-cations, driven by the success of large language models (LLMs), have led to renewed interest in ANN algorithms, indices, and vec-tor database systems that enable efficient and scalable semantic search [ 19 , 26 , 40 ]. As data and query volumes grow, semantic search systems are migrating to the cloud [ 1 –3]. Specifically, cloud-based semantic search services are attractive because they can be efficient, accurate, cost-effective, and scalable. However, they offer no privacy guarantees, as they operate on raw (or plaintext) em-beddings and user queries, which can reveal sensitive information about the data and the user. As a consequence, they do not support applications that process sensitive data, such as private search over personal photos and documents and personal AI agents [24]. Our goal is to design a semantic search system with three prop-erties: privacy, accuracy, and efficiency. The first property covers privacy of data, queries, access patterns, and search patterns. The second property means that the search results have high recall, while the last property means low search overhead. The main chal-lenge in realizing this goal is to achieve all three properties at the same time. Existing works on private semantic search adopt one of the following three approaches. First, the homomorphic encryption and secure-computation approach, for example, [ 11 , 27 , 28 , 33 ], computes vector distance directly on encrypted vectors. This ap-proach achieves privacy but is inefficient due to the overhead of encrypted computation with high-dimensional vectors. Even when using clustering to reduce the search space, the search cost is still significant because of the large number of candidate vectors. Sec-ond, the ORAM approach, for example [ 4, 45 ], achieves privacy by hiding the vectors being accessed during search. In particular, Com-pass [ 45 ] combines an efficient vector index, ORAM, and product quantization to protect graph-access patterns [ 45 ]. However, it still fails to achieve efficiency because adaptive graph traversal requires multiple ORAM operations, increasing communication overhead. Third, the differential privacy (DP) approach, for example [ 8, 10 , 16 ], trades privacy for efficiency by reducing strict privacy to quantified leakage and allowing distance computation on perturbed vectors. However, existing works do not consider any index, thus suffering from high search overhead. They fail to achieve accuracy because of the recall degradation caused by vector perturbations. We present MESS that achieves our goal. It addresses the above challenge via a novel combination of differential privacy and a multi-graph index. In particular, it adopts the hierarchical navigable small arXiv:2607.28999v1 [cs.CR] 31 Jul 2026 Table 1: Comparison of private keyword and semantic search solutions. 
+
+Scheme Data Setting Search Scheme Cryptographic Algorithm Search Method Privacy Accuracy Efficiency Stored Data Access Pattern Search Pattern Near-Plaintext Quality Efficient Online Search 
+
+CGKO06 [14] Encrypted DB Keyword SSE Index-Based ✓ ✗ ✗ – –CLRZ18 [10] Encrypted DB Keyword SSE, DP Index-Based ✓ ✓ ✗ – –SOPK21 [36] Encrypted DB Keyword SSE, DP Index-Based ✓ ✓ ✓ – –LZXL25 [29] Encrypted DB Embedding DCPE, DCE Graph-Based ✓ ✗ ✗ ✓ ✓
+
+PANTHER [27] Encrypted DB Embedding PIR, HE, SS, GC 𝑘 -means ✓ ✓ ✓ ✓ ✗
+
+Compass [45] Encrypted DB Embedding ORAM Graph-Based ✓ ✓ – ✓ ✗
+
+Tiptoe [17] Server-Held DB Embedding HE, PIR 𝑘 -means – ✓ – ✓ ✗
+
+Wally [7] Server-Held DB Embedding HE, PIR, DP 𝑘 -means – ✓ – ✓ ✗
+
+PACMANN [44] Server-Held DB Embedding PIR Graph-Based – ✓ – ✓ ✗
+
+Ours Encrypted DB Embedding LSHRR LSH, Graph-Based ✓ ✓ ✓ ✓ ✓    
+
+> Abbreviations: DB: database; SSE: searchable symmetric encryption; DP: differential privacy; DCPE: distance-comparison-preserving encryption; DCE: distance comparison encryption; PIR: private information retrieval; HE: homomorphic encryption; SS: secret sharing; GC: garbled circuit; ORAM: oblivious random access memory; LSH: locality-sensitive hashing; and LSHRR: LSH randomized response.
+> Notes: Encrypted DB denotes data encrypted before outsourcing, while Server-Held DB denotes data owned by the server. ✓indicates that the goal is supported; ✗indicates that it is not protected or achieved; and “–” denotes an inapplicable or unreported guarantee. Near-plaintext quality means that the reported retrieval quality approaches the corresponding plaintext ANN baseline. Efficient online search means indexed, one-round retrieval without HE-based similarity evaluation or ORAM-protected graph traversal.
+
+world (HNSW) graph index for ANN search. It applies locality-sensitive hashing (LSH), followed by an LSH randomized response mechanism, to the original embeddings before building the graph. The DP mechanism ensures privacy of data and access patterns while enabling efficient computations over perturbed vectors. MESS overcomes the accuracy challenge of the DP-based approach by building and searching over multiple graphs, which reduces rank distortion and candidate set expansion. MESS introduces a two-phase query-perturbation process that restricts leakage of search patterns. Table 1 compares MESS with other works providing private keyword and semantic search. In summary, we make the following contributions. 
+
+• We propose an efficient HNSW search over perturbed binary embeddings. The client maps data and query vectors to binary codes, then applies an LSH randomized response mechanism to them. The server builds multiple HNSW graphs over the perturbed codes. It performs Hamming-distance search on the graphs and returns the results in one round. 
+
+• We propose a multi-graph design that addresses search quality degradation caused by perturbations, and a two-stage random-ization process to protect repeated queries against averaging and direct linkage attacks. In particular, each query is routed to multiple graph indices and their results are aggregated. Fur-thermore, the client applies a permanent and a instantaneous randomization to each query. 
+
+• We provide formal analysis of the privacy bounds for the stored index, query access patterns, and repeated-query search patterns. We evaluate representative cross-shard inference methods to measure practical leakage. 
+
+• We evaluate MESS using standard datasets, and compare it against non-private, homomorphic encryption, and ORAM baselines. The results show that MESS achieves up to 15 .08 ×
+
+lower latency and 35 .28 × lower communication overhead than Compass [ 45 ]. On the SIFT100M dataset, MESS achieves 52.53 ms/query, demonstrating its scalability. The remainder of the paper is structured as follows. Section 2 presents the system model and discusses the security goals. Sec-tion 3 provides the relevant background before Section 4 describes MESS in detail. Section 5 provides security analysis, followed by performance evaluation in Section 6. Section 7 discusses related work, and Section 8 concludes. 
+
+## 2 System and Threat Models 
+
+In this section, we first outline the architecture of MESS . We then discuss the threat model, followed by the system and security goals. 
+
+## 2.1 System Overview 
+
+There are two entities in MESS : a client C and a server S. The client is the data owner and user; that is, it outsources the data to 𝑆 and issues search queries. The client’s data is modeled as 
+
+D = {( id 𝑖 , 𝒙 𝑖 )} 𝑁 𝑖 =1, where 𝑖𝑑 𝑖 is the data item 𝑖 unique identifier, and 𝒙 𝑖 ∈ X is its corresponding embedding vector. The client encrypts its data before sharing it with the server. Figure 1 shows the system architecture of MESS . It operates in two phases. In the offline phase, the client maps the original embed-dings to binary codes using locality-sensitive hashing (LSH) and perturbs them using LSH randomized response (LSHRR). The server maintains 𝑀 HNSW graph indexes (or shards ). The client encrypts each data tuple and uploads it together with the perturbed codes to a subset of 𝑀 . The server builds the HNSW indexes based on the perturbed codes. In the online phase, the client hashes and perturbs the query embedding. The server performs a Hamming-distance search for nearest neighbors of the perturbed query embedding, across all the shards. It then aggregates the shard-level candidates and returns their encrypted data. The client decrypts the results,               
+
+> 2Client
+> Server
+> Local Decryption
+> &Rerank
+> Final Top -K Results
+> LSH
+> Coding
+> LSHRR
+> -Perm
+> LSHRR
+> -Ins
+> Memorization
+> Cache
+> Search Query
+> {𝒒 𝟏 ,𝒒 𝟐 ,..,𝒒 𝑴 }
+> Candidate Set
+> Graph: 𝓖 ={𝑮 𝟏 ,𝑮 𝟐 ,..,𝑮 𝑴 }
+> Data
+> Original
+> Embedding
+> LSH Coding
+> Encrypt
+> Random
+> Route
+> 𝒕 out of 𝑴
+> OFFLINE
+> ONLINE
+> Server
+> Search in
+> 𝑮 𝟏
+> Search in
+> 𝑮 𝟐
+> Search in
+> 𝑮 𝑴
+> …
+> Aggregate
+> Data Owner (Client)
+> Binary
+> Embedding
+> Perturbed
+> Binary
+> Embedding
+> LSHRR
+
+Figure 1: System architecture of MESS. 
+
+removes duplicates using the identifiers, and reranks the candidates based on the decrypted embeddings. 
+
+Scope. MESS supports semantic search over a database of vector embeddings, as opposed to directly over raw data (e.g., documents or images). We abstract away the data pre-processing pipeline that generates embeddings from raw data, and the post-processing pipeline for retrieving the raw data based on the search results. The embedding generation can be performed by off-the-shelf embedding models for different data modality ML models [ 22 ]. MESS can be deployed in a setting where the client keeps the original data locally and only uses the server to find similar data [ 45 ]. In this setting, the client uses the unique identifiers 𝑖𝑑 𝑖 to retrieve the matching raw data from local storage. MESS can also be integrated with other PIR schemes [ 18 ] to retrieve raw data from the server without revealing which data items are being retrieved. 
+
+## 2.2 Threat Model 
+
+We consider a semi-honest server that follows the protocol but wants to learn information about the data embeddings and about the queries. It can infer any geometric and semantic information directly from the perturbed codes [ 16 ]. The server knows the LSH mapping. It can record and analyze the complete view of the out-sourced index and query execution. Specifically, during the offline phase, it can observe the encrypted data, the perturbed codes, shard assignment, and the HNSW graph structures. During the online phase, it has complete visibility into query execution, including graph traversal traces, candidate sets, response sizes, and repeated ciphertexts. We assume that cryptographic primitives are secure, and that the server does not have access to client-side states. 
+
+## 2.3 Goals 
+
+MESS aims to achieve three properties: privacy, accuracy, and ef-ficiency. We further break down privacy into stored-data, access-pattern, and search-pattern privacy. We formally analyze privacy in subsection 5.1, and provide a detailed evaluation of the other two in section 6. 
+
+• Stored-data privacy. The server should not learn the contents of the original data tuple, consisting of the identifier or embed-ding, from the outsourced representation. Encrypted payloads should hide their plaintext contents, while the index incurs only well-defined leakage about the underlying embeddings. 
+
+• Access-pattern privacy. The server’s ability to distinguish two query embeddings based on their execution traces is bounded. In other words, the query execution leakage is bounded. 
+
+• Search-pattern privacy. Across multiple queries, the server should have limited ability to determine whether different queries originate from the same query embedding value. In particular, it cannot identify repeated queries. Otherwise, it can group repeated submissions, observe their frequency and timing, and use auxiliary information to infer query values [9, 32]. 
+
+• Accuracy. The system enables high-recall similar search, despite LSH encoding and randomized perturbation. In other words, the search results are close to those of non-private ANN search. 
+
+• Efficiency. The search incurs small computation and commu-nication overhead, resulting in end-to-end latency in practice. In other words, the search is performed without scanning the full datasets, without overhead of encrypted computation, and without multi-round communications. 
+
+Discussion. Access-pattern privacy concerns leakage from a single execution, whereas search-pattern privacy concerns leakage across multiple executions. These two properties together provide a similar guarantee to query privacy in other private information retrieval (PIR) systems [5, 18]. 
+
+## 3 Preliminaries 
+
+We use calligraphic uppercase letters for sets, spaces, and random-ized mechanisms. Bold lowercase and uppercase letters denote vec-tors and matrices, respectively. Scalars are written in italic font. Let 
+
+X ⊆ R𝑑 denote the original embedding space and D = {( id 𝑖 , 𝒙 𝑖 )} 𝑁 𝑖 =1
+
+the original data, where 𝒙 𝑖 ∈ X . A query embedding is denoted by 
+
+𝒒 ∈ X . We use ∥𝒙 ∥2 for the Euclidean norm and ⟨· , ·⟩ for the inner product. 𝜃 𝒙 ,𝒙 ′ denotes the angle between two non-zero embeddings, and 𝑑 𝜃 (𝒙 , 𝒙 ′) = 𝜃 𝒙 ,𝒙 ′ /𝜋 denotes their normalized angular distance. 
+
+H represents a LSH function family, and ℎ ∈ H represents one function. Each graph index shard 𝑠 uses a fixed 𝜅 -bit mapping 
+
+𝐻 𝑠 : X → V , where V = {0, 1}𝜅 is the binary embedding space. We write 𝒗 𝑖,𝑠 = 𝐻 𝑠 (𝒙 𝑖 ) and 𝒗 (𝑠 ) 
+
+> 𝑞
+
+= 𝐻 𝑠 (𝒒 ) for the binary embeddings of a data item and query. A perturbed binary embedding is denoted by e𝒗 , and 𝑑 𝐻 (· , ·) denotes the Hamming distance. 
+
+## 3.1 Locality-Sensitive Hashing under Angular Distance 
+
+LSH [ 21 ] maps high-dimensional vectors into compact binary codes such that vectors close to each other are more likely to share hash values. In semantic search, vector similarity is commonly measured by cosine similarity: sim cos (𝒙 , 𝒙 ′) = ⟨𝒙 ,𝒙 ′ ⟩∥𝒙 ∥2 ∥𝒙 ′ ∥2 .
+
+Isotropic Hashing (IsoHash). IsoHash [ 25 ] overcomes the prob-lem of imbalanced or redundant hash bits when the vector distri-bution is anisotropic by learning an orthogonal transformation. In MESS , IsoHash is trained separately for each graph shard. The learned parameters are fixed and reused for both index construction 
+
+> 3
+
+and query generation. We define IsoHash formally as ΠIsoHash =
+
+(PCA , Rotate , Hash ).
+
+• (W, Λ) ← ΠIsoHash .PCA (X ∈ R𝑑 ×𝑛 , 𝜅 ): Randomly select 𝑛 sam-ples to form the mean-centered training matrix X, where 𝜅 
+
+denotes the hash length of each graph shard. PCA returns the projection matrix W ∈ R𝑑 ×𝜅 , formed by the eigenvec-tors corresponding to the largest 𝜅 eigenvalues, and the co-variance matrix of the projected dimensions: Λ = W𝑇 XX 𝑇 W =
+
+diag (𝜆 1, 𝜆 2, . . . , 𝜆 𝜅 ).
+
+• Q ← ΠIsoHash .Rotate (Λ ∈ R𝜅 ×𝜅 ): Given the covariance matrix of the projected dimensions Λ, output an isotropic orthogonal rota-tion matrix Q ∈ R𝜅 ×𝜅 satisfying Q𝑇 Q = 𝐼 , such that the diagonal elements of Q𝑇 ΛQ are all equal, i.e., [Q𝑇 ΛQ]11 = [Q𝑇 ΛQ]22 =
+
+· · · = [Q𝑇 ΛQ]𝜅𝜅 = ¯𝜆. Since an orthogonal transformation pre-serves the trace of a matrix, the target mean variance is nec-essarily ¯𝜆 = 1
+
+> 𝜅
+
+Í𝜅 𝑖 =1 𝜆 𝑖 . This optimization is typically solved by Lift-and-Projection (LP) or Gradient Flow (GF) algorithms. 
+
+• ℎ ← ΠIsoHash .Hash (𝒙 ∈ R𝑑 , W, Q): Given an input data point 𝒙 
+
+together with matrices W and Q, output the final 𝜅 -bit binary embedding ℎ, defined by ℎ = sgn (Q𝑇 W𝑇 𝒙 ).
+
+## 3.2 LSHRR-Based Embedding Perturbation 
+
+Traditional 𝜖 -differential privacy defines neighboring inputs through a binary adjacency relation. This is less suitable for semantic search, where the protected inputs are continuous embeddings and privacy loss should depend on their distance. We therefore use the extended differential privacy (XDP) that is based on the distance induced by a fixed binary hash mapping. Each graph shards learn an independent hash mapping. Let 
+
+𝐻 : X → { 0, 1}𝜅 , where 𝐻 (𝒙 ) =  ℎ1 (𝒙 ), . . . , ℎ 𝜅 (𝒙 ). For two em-beddings 𝒙 , 𝒙 ′ ∈ X , we define the induced Hamming pseudometric as 𝑑 𝐻 (𝒙 , 𝒙 ′) = Í𝜅 𝑖 =1 1[ℎ𝑖 (𝒙 ) ≠ ℎ𝑖 (𝒙 ′)] . LSHRR [ 16 ] applies random-ized response independently to each bit of 𝐻 (𝒙 ). Given a per-bit privacy parameter 𝜖 , the bit-flip probability is 𝑝 = 1/( 𝑒 𝜖 + 1). The resulting mechanism 𝑄 𝐻 defines a distribution over {0, 1}𝜅 . For any output 𝒚 ∈ { 0, 1}𝜅 , Pr [𝑄 𝐻 (𝒙 ) = 𝒚 ] = Î𝜅 𝑖 =1 𝑝 |𝑦 𝑖 −ℎ𝑖 (𝒙 ) | (1 −
+
+𝑝 )1− | 𝑦 𝑖 −ℎ𝑖 (𝒙 ) | . It follows that bitwise randomized response under a fixed binary hash mapping satisfies, for every 𝒙 , 𝒙 ′ ∈ X and 
+
+𝑆 ⊆ { 0, 1}𝜅 , Pr [𝑄 𝐻 (𝒙 ) ∈ 𝑆 ] ≤ 𝑒 𝜖𝑑 𝐻 (𝒙 ,𝒙 ′ ) Pr [𝑄 𝐻 (𝒙 ′) ∈ 𝑆 ]. In other words, 𝑄 𝐻 satisfies (𝜖𝑑 𝐻 , 0)-XDP under the fixed hash-induced Hamming pseudometric. As a result, embeddings that differ in a few fixed-hash coordinates induce similar output distributions. 
+
+## 3.3 Hierarchical Navigable Small World 
+
+The Hierarchical Navigable Small World (HNSW) [ 31 ] is a widely used vector index that achieves high search recall. It combines skip lists with navigable proximity graphs. Let G = {𝐺 0, 𝐺 1, . . . , 𝐺 𝐿 }
+
+denote the 𝐿 + 1 graph layers. The graph construction is guided by four parameters: 𝑀 hnsw that limits the number of connections per node, with the bottom layer typically allowing about 2𝑀 hnsw 
+
+connections; 𝑒 𝑓 construction that controls the candidate search during index construction; 𝑒 𝑓 search that determines the recall–latency trade-off during search; and 𝑚 𝐿 that controls the exponentially decreasing node distribution across layers, typically set to 1/ln (𝑀 hnsw ).The core operations are defined as follows. 
+
+• (G , 𝑒𝑝 𝐿 ) ← ΠHNSW .InitGraph () : Initialize an empty hierarchical graph, its layers, and the entry point used by insertion and search. 
+
+• G ′ ← ΠHNSW .Insert (G , 𝒗 ∈ V) : Insert 𝒗 and output the updated graph G′. The algorithm samples its maximum level, greedily routes through the upper layers, searches local candidates using 
+
+𝑒 𝑓 construction , selects neighbors bounded by 𝑀 hnsw (approximately 
+
+2𝑀 hnsw at the bottom layer), and creates bidirectional edges. 
+
+• R ← ΠHNSW .Search (G , 𝒗 𝑞 ∈ V , 𝐾 ): Given a query 𝒗 𝑞 , the al-gorithm greedily starts from the top layer, searches the bottom layer with candidate budget 𝑒 𝑓 search , and returns the approximate top-𝐾 nearest-neighbor set R.
+
+## 4 Design of MESS 
+
+In this section, we describe the design of MESS , which achieves privacy, accuracy, and efficiency. MESS adopts differential privacy, allowing it to bound the privacy leakage and avoid the overheads of other cryptographic approaches. However, searching over per-turbed codes degrades accuracy because the distances between codes do not match those between the original embeddings. The system can improve accuracy by returning larger candidate sets to the client, but doing so increases communication and computa-tional overhead. Below, we elaborate on the two challenges related to accuracy and discuss our approach. 
+
+Challenge 1: Candidate-set expansion under perturbation. 
+
+High bit-flip probabilities provide strong privacy, but distort nearest-neighbor rankings. Our experiments confirm this effect: with a sin-gle perturbed graph, SIFT achieves only 56 .65% recall using 1,500 candidates, while LAION achieves only 69 .6% recall using 700 candi-dates. To improve recall, the server can return a larger candidate set for client-side reranking, but this incurs higher communication and computational overhead. Reducing the bit-flip probability could also improve recall, but the codes expose more semantic information, thereby reducing privacy. 
+
+Our approach. MESS employs multiple index graphs (or shards) to reduce competition among candidates within each shard. Ran-domized response may cause non-target points to overtake a true neighbor in Hamming space. Let 𝑁 (𝑑 ) be the number of points at distance 𝑑 , and let 𝑃 overtake (𝑑 ) be the probability that such a point overtakes the true neighbor after perturbation. The expected over-taking count in a single graph is 𝜇 single = Í𝜅 𝑑 =0 𝑁 (𝑑 )𝑃 overtake (𝑑 ).When the codes are replicated uniformly in 𝑡 out of 𝑀 shards, 
+
+𝜇 shard = (𝑡 /𝑀 )𝜇 single . Each shard uses a small candidate set, and aggregation over all the shards gives the true neighbors multiple opportunities to be recovered. 
+
+Challenge 2: Search instability under perturbation. Random bit flipping may severely displace the true neighbors of certain embeddings. A single graph may perform well for most queries, but require a prohibitively large candidate set for queries with severely displaced neighbors. 
+
+Our approach. MESS builds multiple shards, each with an indepen-dent IsoHash mapping and independently sampled randomized-response coins. A true neighbor that is poorly positioned in one shard may remain close to the query in another. Let 𝑃 hit (𝑏 ) be the re-covery probability in one shard with local candidate budget 𝑏 , under an approximate independence assumption, the recovery probability from at least one of the 𝑡 shards is 𝑃 multi (𝑏 ) ≈ 1 − ( 1 − 𝑃 hit (𝑏 )) 𝑡 .
+
+> 4
+
+## 4.1 Multi-Graph Construction 
+
+Let D = {( id 𝑖 , 𝒙 𝑖 )} 𝑁 𝑖 =1 ⊆ X denote the original embeddings. The system maintains 𝑀 logically separated HNSW graph shards, de-noted by G = {G (1) , . . . , G (𝑀 ) }. Each shard G ( 𝑗 ) stores only the perturbed index binary embeddings (or perturbed codes) and the associated encrypted payloads. Figure 2 and ?? illustrate the multi-graph construction. For each embedding 𝑖 , the client assigns it to a set of shards S𝑖 ←
+
+Route (𝑖, 𝑀, 𝑡 ). We instantiate Route as a data-independent pseudo-random function that permutes [𝑀 ] and selects the first 𝑡 shards. For every shard 𝑗 ∈ S 𝑖 , the client computes the shard-level bi-nary embedding 𝒗 𝑖,𝑗 ← ΠIsoHash .Hash (𝒙 𝑖 , 𝝁 𝑗 , W𝑗 , Q𝑗 ), then applies LSHRR to obtain e𝒗 𝑖,𝑗 ← ΠLSHRR (𝒗 𝑖,𝑗 ; 𝑝 ). It encrypts the payload 
+
+𝑚 𝑖 = id 𝑖 ∥𝒙 𝑖 with the shard key to obtain ct 𝑖,𝑗 ← ΠEnc .Enc 𝑠𝑘 𝑗 (𝑚 𝑖 ).The client also generates a shard-local label ℓ𝑖,𝑗 , used later for dele-tion. The resulting tuple (e𝒗 𝑖,𝑗 , ℓ 𝑖,𝑗 , ct 𝑖,𝑗 ) is inserted into G ( 𝑗 ) .In an ideal setting, the 𝑀 graph shards are maintained by 𝑀 
+
+non-colluding servers. In this case, an attacker controlling a single server can observe a given embedding with probability 𝑡 /𝑀 . Its local view can therefore exhibit a subsampling effect under the standard conditions for differential-privacy amplification. MESS assumes a single-server setting, in which the attacker has the complete view of all the embeddings. Therefore, we do not use 𝑡 /𝑀 as a subsampling probability in the privacy analysis. 
+
+## 4.2 Single-Server Multi-Graph 
+
+The server maintains all graph shards. MESS employs several mech-anisms to reduce cross-shard linkage. 
+
+• Shard-specific projection functions. Each shard uses different Iso-Hash parameters. The same original embedding 𝒙 𝑖 is therefore mapped to different shard-level binary embeddings, making bit coordinates across different shards not directly comparable. 
+
+• Independent perturbation. Randomized response uses fresh coins for every shard. Even when the same embedding appears in multiple shards, its binary embeddings are independently per-turbed, preventing direct equality comparison and reducing the effectiveness of averaging attacks. 
+
+• Randomized shard assignment. Each embedding is assigned to only 𝑡 pseudorandomly selected shards instead of all 𝑀 shards. This limits the number of server-visible entries associated with the same item and avoids fixed shard co-occurrence patterns. 
+
+• Shard-level labels and encryption keys. Labels are generated in-dependently for different shards, while payloads are encrypted with shard-level keys and fresh randomness. As a result, iden-tifier or ciphertext equality cannot be used to link embeddings across different shards. These mechanisms make cross-shard linkage more difficult for the attacker, but do not eliminate it. Our formal analysis (Section 5) accounts for all 𝑡 perturbed codes originating from the same em-bedding. We also evaluate representative cross-shard attacks to measure whether the server can link embeddings across shards. 
+
+## 4.3 Processing User Queries 
+
+Repeated queries may reveal the underlying value if each query is independently perturbed. By collecting many versions of the same 
+
+Algorithmic Primitives: Isotropic hashing ΠIsoHash , locality-sensitive hashing randomized response ΠLSHRR , symmetric en-cryption ΠEnc , HNSW indexing ΠHNSW .
+
+Input: Plaintext embedding database D = {( id 𝑖 , 𝒙 𝑖 )} 𝑁 𝑖 =1 with 
+
+𝒙 𝑖 ∈ X , shard-level binary embedding length 𝜅 , total number of graph shards 𝑀 , routing multiplicity 𝑡 , randomized-response flip probability 𝑝 , and HNSW parameters. 
+
+Output: Public configuration pp , client-side state st C , and server-side multi-graph index st S .
+
+[Phase 1: Parameter Setup] 
+
+1: The client samples representative training data from D
+
+and trains shard-specific IsoHash parameters st hash =
+
+{( 𝝁 𝑗 , W𝑗 , Q𝑗 )} 𝑀 𝑗 =1. The public configuration is set as pp =
+
+(𝜅, 𝑀, 𝑡, 𝑝, params HNSW ).
+
+[Phase 2: Multi-Graph Initialization] 
+
+2: The client prepares 𝑀 independent symmetric encryption keys and forms the shard key set K = {𝑠𝑘 1, . . . , 𝑠𝑘 𝑀 }.3: The cloud server initializes 𝑀 logically separated HNSW graph shards. The outsourced multi-graph index is de-noted by G = {G (1) , . . . , G (𝑀 ) }, where each shard G ( 𝑗 ) =
+
+{𝐺 ( 𝑗 ) 
+
+> 0
+
+, . . . , 𝐺 ( 𝑗 ) 
+
+> 𝐿 𝑗
+
+} is an independent multi-layer HNSW index. 
+
+[Phase 3: Perturbation and Insertion] 
+
+4: For each data point (𝑖𝑑 𝑖 , 𝒙 𝑖 ), the client obtains its selected shard set by calling 𝑆 𝑖 ← 𝑅𝑜𝑢𝑡𝑒 (𝑖𝑑 𝑖 , 𝑀, 𝑡 ).5: For each selected shard 𝑗 ∈ S𝑖 , the client com-putes the shard-level binary embedding 𝒗 𝑖,𝑗 ←
+
+ΠIsoHash .Hash (𝒙 𝑖 , 𝝁 𝑗 , W𝑗 , Q𝑗 ), and perturbs it as 
+
+e𝒗 𝑖,𝑗 ← ΠLSHRR (𝒗 𝑖,𝑗 ; 𝑝 ).6: The client generates a shard-local label ℓ𝑖,𝑗 and forms the en-crypted payload 𝑚 𝑖 ← id 𝑖 ∥𝒙 𝑖 , where id 𝑖 is used for duplicate removal and result recovery, and 𝒙 𝑖 is used for client-side exact reranking. The client encrypts 𝑚 𝑖 under 𝑠𝑘 𝑗 with fresh encryption randomness, yielding ct 𝑖,𝑗 ← ΠEnc .Enc 𝑠𝑘 𝑗 (𝑚 𝑖 ).7: The tuple (e𝒗 𝑖,𝑗 , ℓ 𝑖,𝑗 , ct 𝑖,𝑗 ) is inserted into the HNSW graph shard G ( 𝑗 ) by running G ( 𝑗 ) ←
+
+ΠHNSW .Insert (G ( 𝑗 ) , e𝒗 𝑖,𝑗 , ℓ 𝑖,𝑗 , ct 𝑖,𝑗 ).
+
+[Phase 4: State Finalization] 
+
+8: The protocol outputs st C = (st hash , K) and st S = G.
+
+Figure 2: Multi-graph index construction protocol (ΠGraphBuild ). 
+
+query, the attacker can average out the randomness and infer the original binary embedding. To mitigate this averaging attack, MESS adopts a two-phase LSHRR mechanism, inspired by the memoiza-tion technique proposed by RAPPOR [ 15 ]. Figure 3 illustrates the query workflow. 
+
+Permanent LSHRR. For a query 𝒒 , let 𝒗 𝒒 denote its unperturbed binary embedding, and let 𝑝 PRR denote the permanent flip probabil-ity. In this phase, the client first checks its local cache. If 𝒒 is issued                            
+
+> 5𝐶 ∈𝑮 𝒊 ,
+> 𝐶 =𝐸𝑛 𝑐 𝑠 𝑘 𝑖 (𝑣 )
+> Normalization
+> &&Centered
+> 10011001
+> 𝐬𝐢𝐠𝐧 (⋅)
+> ℎ𝑣 ∈0,1𝜅
+> Hash Code
+> Raw Vector
+> ×𝑾
+> 𝐏𝐫𝐢𝐧𝐜𝐢𝐩𝐚𝐥 𝐂𝐨𝐦𝐩𝐨𝐧𝐞𝐧𝐭 𝐀𝐧𝐚𝐥𝐲𝐬𝐢𝐬
+> 𝐋𝐏 𝐚𝐧𝐝 𝐆𝐋
+> 𝐩𝐫𝐨𝐣𝐞𝐜𝐭𝐢𝐨𝐧 𝐦𝐚𝐭𝐫𝐢𝐱 𝑾
+> A sample in the database
+> 𝑑
+> 𝒗 ∈ℝ𝒅
+> 𝑮 𝒊
+> LSHRR
+> （PRR ）
+> 𝒒 ∈ℝ𝒅
+> 𝒉 (𝒒 )
+> Memorization
+> Cache
+> LSHRR
+> （PRR ）
+
+User Queries  
+
+> Candidate Pool
+
+Figure 3: The flow of a query. 
+
+for the first time, the client samples 
+
+e𝒗 (PRR ) 
+
+> 𝒒
+
+← ΠLSHRR (𝒗 𝒒 , 𝑝 PRR ),
+
+and writes e𝒗 (PRR ) 
+
+> 𝒒
+
+to the cache. If 𝒒 is in the cache, e𝒗 (PRR ) 
+
+> 𝒒
+
+is reused. As a result, repeated submissions do not have independent pertur-bations of the original query binary embedding. 
+
+Instantaneous LSHRR. Before sending the query, the client ap-plies an instantaneous perturbation 
+
+e𝒗 (IRR ) 
+
+> 𝒒
+
+← ΠLSHRR 
+
+ e𝒗 (PRR ) 
+
+> 𝒒
+
+, 𝑝 IRR 
+
+,
+
+where 𝑝 IRR is the instantaneous flip probability. The server uses 
+
+e𝒗 (IRR ) 
+
+> 𝒒
+
+as input to the search. Since e𝒗 (IRR ) 
+
+> 𝒒
+
+varies across repeated queries, the server cannot link them. 
+
+## 4.4 MESS Protocol 
+
+We now combine the graph construction and query protocol above into the complete protocol. MESS consists of four key operations: initialization, secure query generation, search, and decryption and reranking. It also supports update operations, i.e., insertion and deletion. (1) Initialization. Given D = {( id 𝑖 , 𝒙 𝑖 )} 𝑁 𝑖 =1, the client trains shard-specific hashing parameters, generates shard keys, and initial-izes G = {G (1) , . . . , G (𝑀 ) }. Each item is assigned to a set of shards S𝑖 ← Route (id 𝑖 , 𝑀, 𝑡 ). For every 𝑗 ∈ S 𝑖 , the client com-putes and perturbs the shard-level binary embedding, encrypts 
+
+𝑚 𝑖 = id 𝑖 ∥𝒙 𝑖 under 𝑠𝑘 𝑗 , and sends the resulting values to the server. The server inserts these values into the corresponding HNSW shards. The resulting states are st C = (st hash , K) and 
+
+st S = G.(2) Secure query generation. Given a query embedding 𝒒 , the client derives a query binary embedding for each shard. It applies permanent perturbation to prevent averaging across repeated submissions, followed by fresh instantaneous perturbation for each query. The resulting perturbed query embeddings are sent to the server. (3) Search. The server searches the HNSW shards using Hamming distance between the perturbed query and index nodes. It aggre-gates the shard-level candidate sets and returns their encrypted payloads. (4) Decryption and reranking. The client decrypts the returned payloads, removes duplicates using the identifiers, and reranks the remaining candidates using the original query and data embeddings. It then outputs the final top-𝐾 results. (5) Insertion. To insert a new tuple (id 𝑖 , 𝒙 𝑖 ), the client reuses the existing hashing parameters and shard keys. It selects S𝑖 , gen-erates independently perturbed binary embeddings and en-crypted payloads for the selected shards, and computes the shard-local label ℓ𝑖,𝑗 . The server inserts the entries into the cor-responding HNSW shards, while the client stores {( 𝑗, ℓ 𝑖,𝑗 )} 𝑗 ∈ S 𝑖 
+
+for future deletion. Insertion does not require rebuilding the index. (6) Deletion. The client retrieves the shard-local labels associated with id 𝑖 and sends deletion requests to the server. The server marks the corresponding index nodes as inactive and excludes them from the search. The server performs periodic index re-building to remove inactive nodes. 
+
+## 5 Theoretical Analysis 5.1 Security and Privacy of the Server View 
+
+The complete server view contains all graph shards, perturbed in-dex binary embeddings, shard-local HNSW structures, perturbed query reports, and search traces. We protect stored embedding values, submitted query values, and the reuse relation among re-peated queries, corresponding to stored-data, access-pattern, and search-pattern privacy. The term complete server view specifies the adversarial observation rather than a new privacy definition. Our security statement is hybrid. Differential privacy protects the randomized index and query reports together with information derived from them, while randomized authenticated encryption protects payload contents. These guarantees do not depend on the success of a concrete inference method. 
+
+5.1.1 Scope and Fixed ISO-LSH Mappings. For stored data, we use substitution adjacency: two databases contain the same identifiers and differ only in the embedding associated with one identifier. Thus, the guarantee protects the embedding value rather than the presence of its identifier. Each shard 𝐺 𝑠 uses a pretrained mapping 𝐻 𝑠 : X → { 0, 1}𝜅 𝑠 fixed before the protected database is instantiated. The mappings may be correlated; the proofs require fresh randomized-response coins for each record, shard, and coordinate. If ISO-LSH is trained on the protected database, its training requires a separate privacy analysis. We therefore assume that the training data are public, disjoint from the protected database, or excluded from the neighboring relation. A mechanism M satisfies (𝜉, 𝛿 )-XDP if, for every pair 𝑥, 𝑥 ′ and measurable event 𝐸 ,
+
+Pr [M ( 𝑥 ) ∈ 𝐸 ] ≤ 𝑒 𝜉 (𝑥,𝑥 ′ ) Pr [M ( 𝑥 ′) ∈ 𝐸 ] + 𝛿 (𝑥, 𝑥 ′).
+
+> 6
+
+Our guarantee uses the Hamming pseudometric induced by the fixed ISO-LSH mappings. It differs from angular-XDP averaged over freshly sampled random-LSH functions [ 16 ]; the collision distribution from that sampling is not applied to the pretrained mappings. 
+
+5.1.2 Stored Multi-Graph Index. Let 𝑝 𝐷 ∈ ( 0, 1/2) be the storage-side bit-flip probability; define 𝜂 𝐷 = ln (( 1 − 𝑝 𝐷 )/ 𝑝 𝐷 ), and let 
+
+𝑑 𝐻 𝑠 (𝒙 , 𝒙 ′) = 𝑑 𝐻 (𝐻 𝑠 (𝒙 ), 𝐻 𝑠 (𝒙 ′)) .
+
+Proposition 5.1 (Single-Shard XDP) . Conditioned on a record being assigned to 𝐺 𝑠 , bitwise randomized response satisfies 𝜂 𝐷 -XDP with respect to 𝑑 𝐻 𝑠 . A fixed pair 𝑞 = (𝒙 0, 𝒙 1) therefore has shard-level parameter 𝜀 𝑠,𝑞 = 𝜂 𝐷 𝑑 𝑠 (𝑞 ), where 𝑑 𝑠 (𝑞 ) = 𝑑 𝐻 (𝐻 𝑠 (𝒙 0), 𝐻 𝑠 (𝒙 1)) .Thus, if two embeddings differ in 𝑑 fixed-hash coordinates, the shard-local observation differs by at most a factor of 𝑒 𝜂 𝐷 𝑑 . A smaller hash distance results in a stronger privacy. 
+
+Skeched Proof. Equal clean bits induce identical output dis-tributions. For a differing bit, the likelihood ratio is at most (1 −
+
+𝑝 𝐷 )/ 𝑝 𝐷 = 𝑒 𝜂 𝐷 . Independence across coordinates gives 
+
+Pr [𝒀 𝑠 (𝒙 ) = 𝒚 ]
+
+Pr [𝒀 𝑠 (𝒙 ′) = 𝒚 ] ≤ 𝑒 𝜂 𝐷 𝑑 𝐻𝑠 (𝒙 ,𝒙 ′ ) .
+
+Summing over outputs in 𝐸 proves the claim; exchanging 𝒙 and 𝒙 ′
+
+proves the reverse direction. □
+
+Each record is assigned to exactly 𝑡 of the 𝑀 shards indepen-dently of its embedding. Let ℜ contain the 𝑡 -shard sets that may be selected; for identifier-fixed assignment, it contains only the realized set. Define 𝐷 𝐷 (𝒙 , 𝒙 ′) = max R ∈ ℜ
+
+Í𝑠 ∈ R 𝑑 𝐻 𝑠 (𝒙 , 𝒙 ′).
+
+Theorem 5.2 (Complete Stored-Index Privacy). For every measurable event 𝐸 ,
+
+Pr [V𝐷 (𝒙 ) ∈ 𝐸 ] ≤ 𝑒 𝜂 𝐷 𝐷 𝐷 (𝒙 ,𝒙 ′ ) Pr [V𝐷 (𝒙 ′) ∈ 𝐸 ],
+
+with the symmetric inequality obtained by exchanging 𝒙 and 𝒙 ′.Hence, the stored multi-graph index is 𝜂 𝐷 -XDP with respect to 
+
+𝐷 𝐷 . If every shard has 𝜅 bits, it also satisfies (𝑡𝜅𝜂 𝐷 , 0)-DP under unrestricted substitution adjacency. In other words, for two stored embeddings 𝒙 and 𝒙 ′, the complete multi-graph observation dif-fers by at most a factor of 𝑒 𝜂 𝐷 𝐷 𝐷 (𝒙 ,𝒙 ′ ) , where 𝐷 𝐷 aggregates the differing hash coordinates across the selected shards. 
+
+Skeched Proof. Condition on a selected set R. Only the 𝑡 corre-sponding shard-local entries depend on the substituted embedding. Proposition 5.1 and composition give 𝜂 𝐷 
+
+Í𝑠 ∈ R 𝑑 𝐻 𝑠 (𝒙 , 𝒙 ′). For ran-domized assignment, its distribution is identical in both worlds; averaging the conditional inequalities and bounding each sum by 
+
+𝐷 𝐷 proves the result. The fixed-assignment case follows directly. Each HNSW shard is constructed from perturbed codes, public parameters, and world-independent randomness. Its topology and subsequent inference outputs are therefore post-processing and incur no additional privacy cost. □
+
+The theorem conservatively grants the server the selected shard set and perfect association of the changed record’s shard-local entries. Subsampling amplification is not applied to the complete view: although one prespecified shard contains the record with probability 𝑡 /𝑀 , the complete server observes exactly 𝑡 releases. 
+
+Pair-Specific XDP Accounting. For pair 𝑞 = (𝒙 0, 𝒙 1) and selected set R, let 𝑢 R (𝑞 ) = Í𝑠 ∈ R 𝑑 𝑠 (𝑞 ). Its route-conditioned pure-XDP value is 𝜉 R (𝑞 ) = 𝜂 𝐷 𝑢 R (𝑞 ). For randomized assignment, define 
+
+𝑤 𝑞 (𝑢 ) = Pr R [𝑢 R (𝑞 ) = 𝑢 ]; for fixed assignment, 𝑤 𝑞 is a point mass. Conditioned on 𝑢 differing coordinates, 𝑍 ∼ Binomial (𝑢, 1 − 𝑝 𝐷 )
+
+and 𝐿 𝑢 = (2𝑍 − 𝑢 )𝜂 𝐷 . The corresponding privacy profile is 
+
+𝛿 RR  
+
+> 𝑢
+
+(𝜀 ) =
+
+> 𝑢
+
+∑︁ 
+
+> 𝑧 =0
+
+𝑢 𝑧 
+
+
+
+(1 − 𝑝 𝐷 )𝑧 𝑝 𝑢 −𝑧 𝐷 
+
+1 − 𝑒 𝜀 − ( 2𝑧 −𝑢 )𝜂 𝐷  
+
+> +
+
+.
+
+Corollary 5.3 (Pair-Specific XDP Profile and Upper Tail) . For target 𝛿 0, the evaluated pair has approximate-XDP value 𝜉 PLD  
+
+> 𝐷,𝑞
+
+(𝛿 0) =
+
+inf {𝜀 : Í𝑢 𝑤 𝑞 (𝑢 )𝛿 RR  
+
+> 𝑢
+
+(𝜀 ) ≤ 𝛿 0 }. Moreover, 
+
+Pr [𝐿 impl  
+
+> 𝐷,𝑞
+
+> 𝜀 ] ≤ min 
+
+(
+
+1, inf  
+
+> 0≤𝛼 <𝜀
+
+𝛿 PLD  
+
+> 𝐷,𝑞
+
+(𝛼 )
+
+1 − 𝑒 𝛼 −𝜀 
+
+)
+
+,
+
+where 𝛿 PLD  
+
+> 𝐷,𝑞
+
+(𝛼 ) = Í𝑢 𝑤 𝑞 (𝑢 )𝛿 RR  
+
+> 𝑢
+
+(𝛼 ).
+
+Skeched Proof. Consider an augmented release that also re-veals the challenge record, its selected shards, and their ground-truth correspondence. Conditioned on 𝑢 , the binomial expression is its exact hockey-stick profile. Assignment has the same distri-bution in both worlds, so averaging with 𝑤 𝑞 gives the augmented profile. Removing the additional correspondence information is post-processing and cannot increase hockey-stick divergence. For 0 ≤ 𝛼 < 𝜀 , 𝐿 > 𝜀 implies [1−𝑒 𝛼 −𝐿 ]+ ≥ 1−𝑒 𝛼 −𝜀 . Taking expec-tations and optimizing over 𝛼 proves the tail bound; randomized-response symmetry gives the reverse direction. □
+
+We evaluate 𝜉 PLD  
+
+> 𝐷,𝑞
+
+(𝛿 0) using the actual shard-specific distances of real neighboring pairs. The maximum over a finite challenge set applies only to those pairs; Theorem 5.2 remains the unrestricted XDP guarantee. 
+
+Cross-Shard Linkage Evaluation. The formal analysis assumes perfect association of all 𝑡 shard-local entries belonging to the changed record. Our experiments test how much of this XDP ev-idence can be organized using MDS, Topology, GSGM, and their cycle-consistent joint combination. For method A, let 𝐶 A (V) be its predicted cross-shard cluster and let 𝑣 ★ 
+
+> 𝑠
+
+denote the target entry in 𝐺 𝑠 . Ground truth is used only after inference. The distance of correctly associated target entries is 
+
+𝑈 A,𝑞 (V) =∑︁  
+
+> (𝑠,𝑣 ) ∈ 𝐶 A(V)
+
+1[𝑣 = 𝑣 ★ 
+
+> 𝑠
+
+] 𝑑 𝑠 (𝑞 ),
+
+giving recovered pure-XDP evidence 𝜉 rec  
+
+> A,𝑞
+
+= 𝜂 𝐷 𝑈 A,𝑞 . Recovering all 
+
+𝑡 target entries reaches the route-conditioned complete-view value, whereas retaining one anchor gives only its single-shard value. Failed and false matches contribute zero direct target distance. For every challenge pair, two neighboring indexes differ only in its embedding. Each method receives the server-visible view and fixed auxiliary seeds, and outputs a cross-shard cluster and distinguishing score. Because selection is data dependent, we also evaluate matching accuracy, AUC, distinguishing advantage, and empirical hockey-stick profiles. The inverted score profile gives an empirical pair-specific XDP value for the evaluated method without replacing the formal guarantee. Complete procedures, parameters, and results appear in Appendix ?? .
+
+> 7
+
+Payload Confidentiality. Identifiers and original embeddings are stored in equal-length payloads using randomized authenticated en-cryption. Under IND-CPA security, fresh nonces, and independent shard keys, ciphertext equality cannot directly associate entries of the same record across shards, assuming no common identifier or equivalent metadata is exposed. 
+
+5.1.3 Access-Pattern Privacy. For query-value privacy, the released index, client identity, submission schedule, PRR-reuse pattern, and search configuration are fixed, while one logical query value is substituted. The server observes the perturbed query reports and complete HNSW access transcript. Our goal is to bound the query information revealed by these visible accesses, rather than to pro-vide ORAM-style access-pattern obliviousness. Let 𝑎 = 𝑝 PRR and 𝑏 = 𝑝 IRR , where 𝑎, 𝑏 ∈ ( 0, 1/2). A permanent report is generated once for each logical-query coordinate and reused, whereas every submission applies fresh IRR coins. Ran-domness is independent across coordinates and shards. For one clean bit 𝑣 submitted 𝑅 times, let 𝑛 𝑣 (𝒚 ) be the number of reports in 
+
+𝒚 = (𝑦 1, . . . , 𝑦 𝑅 ) equal to 𝑣 . The sequence probability and maximum symmetric log-likelihood ratio are 
+
+𝑃 (𝑅 ) 
+
+> 𝑣
+
+(𝒚 ) = (1 − 𝑎 )( 1 − 𝑏 )𝑛 𝑣 𝑏 𝑅 −𝑛 𝑣 + 𝑎𝑏 𝑛 𝑣 (1 − 𝑏 )𝑅 −𝑛 𝑣 
+
+𝜂 𝑅 = max  
+
+> 𝒚
+
+ln 𝑃 (𝑅 ) 
+
+> 𝑣
+
+(𝒚 )
+
+𝑃 (𝑅 ) 
+
+> 1−𝑣
+
+(𝒚 ) = ln (1 − 𝑎 )( 1 − 𝑏 )𝑅 + 𝑎𝑏 𝑅 
+
+𝑎 (1 − 𝑏 )𝑅 + ( 1 − 𝑎 )𝑏 𝑅 .
+
+The maximum occurs when all 𝑅 reports agree. Hence, 𝜂 𝑅 jointly accounts for the memoized PRR state and all IRR reports, rather than applying basic composition across submissions. For a fixed contacted shard set S𝑄 , define 𝐷 𝑄 (𝒒 , 𝒒 ′) = Í𝑠 ∈ S 𝑄 𝑑 𝐻 
+
+(𝐻 𝑠 (𝒒 ), 𝐻 𝑠 (𝒒 ′)) . If the set is sampled independently of the clean query, the pure-XDP distance is the maximum of this sum over all possible contacted sets. Routing based on an unperturbed query is outside the theorem’s scope. 
+
+Theorem 5.4 (Complete Access-Transcript Privacy). For ev-ery measurable event 𝐸 ,
+
+Pr [VAP (𝒒 ) ∈ 𝐸 ] ≤ 𝑒 𝜂 𝑅 𝐷 𝑄 (𝒒 ,𝒒 ′ ) Pr [VAP (𝒒 ′) ∈ 𝐸 ],
+
+with the reverse inequality obtained by exchanging 𝒒 and 𝒒 ′. Thus, the complete access transcript is 𝜂 𝑅 -XDP with respect to 𝐷 𝑄 . There-fore, for any set of node-access traces, the probability of it being the trace of 𝒒 is at most 𝑒 𝜂 𝑅 𝐷 𝑄 (𝒒 ,𝒒 ′ ) times the probability of it being the trace of 𝒒 ′. Observing the HNSW traversal thus reveals no more about the query than wthe perturbed codes already do. 
+
+Skeched Proof. Equal clean bits induce identical sequence dis-tributions, while each differing coordinate contributes at most 𝜂 𝑅 .Composition over the differing coordinates and contacted shards gives 𝜂 𝑅 𝐷 𝑄 (𝒒 , 𝒒 ′) for the complete query reports. Given the fixed index, HNSW receives only these reports. Visited nodes, traversal order, candidate evolution, returned handles, response sizes, and cross-shard correspondences inferred from the index and traces are therefore post-processing and incur no additional privacy cost. Since the reports are included in the server view and recoverable by projection, the complete access transcript and report mechanism have the same privacy profile. □
+
+Accordingly, no separate access-pattern experiment is required: its XDP budget is computed directly as 𝜉 AP (𝒒 , 𝒒 ′) = 𝜂 𝑅 𝐷 𝑄 (𝒒 , 𝒒 ′).The guarantee requires every trace field to depend only on the perturbed reports, the fixed index, public parameters, and query-independent randomness. Clean-query routing, clean-distance cal-culations, stable query identifiers, or external side channels must be removed or analyzed separately. 
+
+5.1.4 Search-Pattern Privacy. Search-pattern adjacency compares workloads with the same number and timing of submissions, con-tacted shards, and search configuration, but different query-reuse relations. For 𝑅 ≥ 2, all submissions in 𝑊 0 = (𝒒 , . . . , 𝒒 ) share one permanent report. In 𝑊 1 = (𝒒 , . . . , 𝒒 , 𝒒 ′), the final submission be-longs to a new logical query and uses an independently sampled permanent report. For one coordinate, let 𝑟 𝑣 (𝑧 ) be the PRR probability of permanent bit 𝑧 given clean bit 𝑣 , and let 𝑖 𝑧 (𝑦 ) be the IRR probability of report 
+
+𝑦 given 𝑧 . The reuse and split distributions are 
+
+𝑃 𝑣  
+
+> reuse
+
+(𝒚 ) =∑︁ 
+
+> 𝑧
+
+𝑟 𝑣 (𝑧 )
+
+> 𝑅
+
+Ö
+
+> 𝑗 =1
+
+𝑖 𝑧 (𝑦 𝑗 ),𝑃 𝑣,𝑣 ′ 
+
+> split
+
+(𝒚 ) = ∑︁ 
+
+> 𝑧
+
+𝑟 𝑣 (𝑧 )
+
+> 𝑅 −1
+
+Ö
+
+> 𝑗 =1
+
+𝑖 𝑧 (𝑦 𝑗 )
+
+! ∑︁ 
+
+> 𝑧 ′
+
+𝑟 𝑣 ′ (𝑧 ′)𝑖 𝑧 ′ (𝑦 𝑅 )
+
+!
+
+.
+
+Let 𝛾 = be their maximum symmetric log-likelihood ratio over 𝑣 = 𝑣 ′
+
+and all 𝒚 , and define 𝛾 ≠ analogously for 𝑣 ≠ 𝑣 ′. Both values are computed exactly from 𝑎 , 𝑏 , and 𝑅 .
+
+Theorem 5.5 (Complete Search-Pattern XDP). Let 𝐾 𝑄 =
+
+Í𝑠 ∈ S 𝑄 𝜅 𝑠 and 𝑢 = 𝐷 𝑄 (𝒒 , 𝒒 ′). Define 
+
+𝜉 SP (𝑊 0,𝑊 1) = (𝐾 𝑄 − 𝑢 )𝛾 = + 𝑢𝛾 ≠.
+
+For every measurable event 𝐸 ,
+
+Pr [VSP (𝑊 0) ∈ 𝐸 ] ≤ 𝑒 𝜉 SP (𝑊 0,𝑊 1 ) Pr [VSP (𝑊 1) ∈ 𝐸 ],
+
+with the reverse inequality obtained by exchanging 𝑊 0 and 𝑊 1.Therefore, the complete transcript satisfies (𝜉 SP , 0)-XDP over the declared workload adjacency. A uniform ordinary-DP bound is  𝐾 𝑄 max {𝛾 =, 𝛾 ≠ }, 0.
+
+Skeched Proof. Each of the 𝑢 differing coordinates contributes at most 𝛾 ≠. On the remaining 𝐾 𝑄 − 𝑢 coordinates, the clean bits agree, but replacing a shared permanent state with an independent state changes cross-submission correlation by at most 𝛾 =. Indepen-dence across coordinates and composition give 𝜉 SP (𝑊 0,𝑊 1). Search trajectories, returned results, and cross-shard correspondences are post-processing of the report sequences and fixed index and incur no additional privacy cost. □
+
+The generally nonzero (𝐾 𝑄 − 𝑢 )𝛾 = term is necessary because search-pattern privacy protects the query-reuse relation, not only the query value. Thus, 𝜉 SP is an XDP parameter over the declared workload adjacency but cannot be expressed solely using 𝐷 𝑄 . Since 
+
+𝛾 = and 𝛾 ≠ are calculated directly from PRR/IRR, no separate search-pattern experiment is required. The theorem assumes that no stable query identifier or memoization key is exposed. 
+
+> 8
+
+5.1.5 Discussion. The stored-index theorem quantifies the store-data privacy. The access-pattern theorem bounds access pattern leakage from visible HNSW traversals, while the search-pattern theorem quantifies the search-pattern privacy. The stored-data the-orem assumes perfect cross-shard association. We discuss whether geometry-, topology-, and graph-signal methods can recover such correspondences in practice in the extended version of the paper [ ?
+
+]. 
+
+## 6 Evaluation 
+
+In this section, we evaluate the performance of MESS . We structure the results around two research questsion: (1) How does MESS compare with the baselines in search quality, index construction cost, latency, and communication cost? (2) How does MESS scale to support a hundred-million-vector index? 
+
+Baselines. We compare MESS with four baselines. 
+
+• Plaintext-HNSW. This baseline performs non-private semantic search. It builds an HNSW index over the original embeddings using hnswlib and answers queries directly in plaintext. We use this to evaluate the privacy overhead of MESS. 
+
+• Compass. This baseline combines HNSW search with ORAM [ 45 ]. It hides the logical graph nodes accessed during adaptive search, but requires multiple encrypted block transfers and client–server interactions. We use the Compass configurations corresponding to the evaluated datasets and apply the same network settings to its reported communication cost. 
+
+• HE-Cluster. This baseline adopts hommomorphic encryptions for semantic search. It is a variant of Tiptoe [ 17 ] and also used as baseline in Compass [ 45 ]. It partitions 𝑁 items into approxi-mately √𝑁 padded semantic clusters, computes encrypted simi-larities within the selected cluster, and returns encrypted scores for client-side ranking. 
+
+• No-Noise. This baseline is the same as MESS but without storage-and query-side LSHRR. We use this for ablation: the gap be-tween Plaintext-HNSW and No-Noise captures the effect of bi-nary multi-graph retrieval, while the gap between No-Noise and MESS captures the impact of randomized perturbation. 
+
+Datasets and metrics. We use four datasets, namely SIFT, LAION, TripClick, and MS MARCO. They represent dense vector, multi-modal, and text-retrieval workloads. For the first two datasets, we use Recall@ 𝐾 , which measures the overlap between the returned and ground-truth Top-𝐾 results, as the accuracy metric. For the other two dasets, we use MRR@10 metric that gives more weight to the the top results. We measure communication cost by the total request and response bytes, and by the message count. Dataset-specific parameters, query counts, and candidate budgets are in-cluded in the extended version of the paper ?? .
+
+Experiment settings. All experiments run on a dual-socket ma-chine with Hygon C86 7375 32-core processors at 2.0 GHz and 512 GB of memory. We use Linux traffic control to emulate a LAN with 3 Gbps bandwidth and 1 ms RTT and a WAN with 400 Mbps bandwidth and 80 ms RTT. 
+
+## 6.1 Performance Against Baselines 
+
+Figure 4 compares the search quality of MESS and the baselines. Table 2 breaks down the latency and communication cost. For graph-based methods, we report results on configurations selected for high accuracy. The results for HE-Cluster are based on the configurations used in Compass [45]. 
+
+Search quality. Figure 4 shows that MESS remains close to Plaintext-HNSW: the Recall gap is below 0.05 , and the MRR gap is below 0.03 .We can explain this gap using No-Noise’s result. Specifically, al-though No-Noise removes randomized perturbation, it still searches finite-length binary embeddings in Hamming space, distributes items over several graph shards, aggregates candidates, transfers encrypted payloads, removes duplicates, and reranks on the client. Its gap to Plaintext-HNSW represents the effect of searching binary multi-graph without privacy noise. Its gap to MESS is attributable to LSHRR and the larger candidate set needed to compensate for randomized bit flips. We can see that adding LSHRR lead to quality change of at most 0.011. This small quality change comes at the cost of effiency, because MESS must retrieve more candidates to maintain quality, increasing communication cost. 
+
+Comparison with crytographic baselines. Compass achieves accuracy close to that of non-private search, but ORAM-protected adaptive traversal require repeated encrypted block accesses. Ta-ble 2 shows that MESS is 4.0–15 .1× faster under LAN and 1.3–
+
+2.9× faster under WAN. The largest LAN improvement appears on TripClick, where the cost of interactive traversal is especially high. The WAN advantage is smaller because transfer time dominates both systems as the network becomes slower. HE-Cluster shows a different bottleneck. On the three datasets for which Compass reports results, encrypted similarity evaluation and encrypted score transfer require approximately 20 –373 seconds and 209 –783 MB per query. Although its quality is competitive on LAION, the results in-dicate significant computation and communication overhead, which are orders of magnitude higher than MESS . In summary, the two baselines that adopt cryptographic approaches suffer from high overhead: HE-Cluster with significant overhead in vector compu-tation and large ciphertexts, Compass with large communication overhead. 
+
+Impact of 𝑡 . Figure 5 evaluates the impact of 𝑡 on search quality, when 𝑀 is fixed at 64 . It can be seen that search quality improves as more shards are selected. We also note that larger 𝑡 also increases the number of shard-local entries and the associated storage cost. Increasing 𝑡 from 1 to 16 raises Recall from 57 .0% to 95 .73% on SIFT and from 57 .9% to 96 .5% on LAION. TripClick MRR increases from 
+
+0.250 to 0.290 , while MS MARCO MRR increases from 0.276 to 0.362 .This is because a larger 𝑡 places each vector in more independently perturbed graph views, increasing the probability that it retains a favorable rank in at least one shard. The gains are more pronounced for the Recall metric than for the MRR metric, because the latter considers the vector’s final position after exact reranking. 
+
+Latency breakdown. For MESS under LAN, server search remains below 7 ms and client decryption and reranking below 3 ms across the four datasets. Therefore, both Hamming graph traversal and local cryptographic processing are efficient. The remaining cost is encrypted candidate transfer, which becomes significant under WAN: on MS MARCO, this transfer accounts for 5997 .02 ms of the 
+
+> 9
+
+Figure 4: Search quality versus latency. Hollow and filled markers indicate LAN and WAN; TripClick and MS MARCO report MRR@10. HE-Cluster is included only where reported by Compass and is not always quality-matched.        
+
+> 10 −210 −110 010 110 210 310 410 5
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> 0.9
+> 1
+> Latency (ms)
+> Recall
+
+Sift        
+
+> 10 −210 −110 010 110 210 310 410 5
+> 0.6
+> 0.7
+> 0.8
+> 0.9
+> 1
+> Latency (ms)
+
+Laion         
+
+> 10 −210 −110 010 110 210 310 410 510 6
+> 0.15
+> 0.2
+> 0.25
+> 0.3
+> Latency (ms)
+
+TripClick       
+
+> 10 −210 −110 010 110 210 310 4
+> 0.3
+> 0.34
+> 0.38
+> 0.42
+> Latency (ms)
+
+MS MARCO         
+
+> ◦LAN; •WAN HNSW No-Noise HE-Cluster Compass MESS
+
+Table 2: Latency and communication cost. HNSW is non-private; No-Noise disables perturbation; HE-Cluster and Compass use HE and ORAM, respectively; Ours denotes MESS. Two messages form one request–response round. Dataset Scheme Offline Setup Phase Online Search Latency (ms/query) Messages per Query Comm. Overhead (KB/query) Build Time (s) Mode Server Eval. Trans. Lat. Client Eval. Total Time SIFT 
+
+(10K , 128 𝑑 )
+
+HNSW [31] 44 .42 WAN 0.02 0.83 – 0.85 2 0.64 
+
+LAN 0.02 0.01 – 0.03 
+
+No-Noise 435 .40 WAN 1.08 80 .73 0.97 82 .78 2 138 .07 
+
+LAN 0.99 1.52 0.89 3.40 
+
+HE-Cluster − WAN 55621 .65 24083 .69 7716 .07 87421 .42 2 744096 .35 
+
+LAN 55980 .91 4250 .11 7708 .48 67939 .52 
+
+Compass [45] ≥ 44 .42 WAN 10 .03 936 .62 11 .70 958 .35 16 .1048 11451 .86 
+
+LAN 13 .74 36 .85 14 .43 65 .02 
+
+Ours 512 .74 WAN 1.45 323 .32 1.34 326 .11 2 788 .82 
+
+LAN 1.16 6.75 1.18 9.09 
+
+LAION 
+
+(1M , 512 𝑑 )
+
+HNSW [31] 6.53 WAN 0.02 4.11 – 4.13 2 2.14 
+
+LAN 0.02 0.07 – 0.09 
+
+No-Noise 25 .64 WAN 1.20 163 .11 1.19 165 .50 2 391 .82 
+
+LAN 1.29 2.54 1.02 4.85 
+
+HE-Cluster − WAN 16408 .31 8040 .37 2217 .09 26665 .74 2 208941 .03 
+
+LAN 16408 .31 1601 .69 2228 .37 20238 .37 
+
+Compass [45] ≥ 6.53 WAN 2.74 1068 .67 11 .18 1082 .59 16 .002 45989 .36 
+
+LAN 3.12 28 .35 11 .45 42 .92 
+
+Ours 44 .33 WAN 1.12 563 .55 1.14 565 .81 2 1303 .57 
+
+LAN 0.92 9.20 0.70 10 .82 
+
+TripClick 
+
+(1.5M , 768 𝑑 )
+
+HNSW [31] 1211 .97 WAN 0.13 4.92 – 5.05 2 3.14 
+
+LAN 0.07 0.12 – 0.19 
+
+No-Noise 1137 .13 WAN 2.88 1206 .90 1.32 1211 .10 2 2914 .82 
+
+LAN 2.33 20 .82 1.10 24 .25 
+
+HE-Cluster − WAN 325800 .00 29180 .00 8620 .00 363590 .00 2 782504 .63 
+
+LAN 358757 .20 5502 .80 8897 .02 373157 .00 
+
+Compass [45] ≥ 1211 .97 WAN 134 .82 4774 .15 132 .70 5041 .67 18 .0613 133042 .91 
+
+LAN 25 .45 200 .60 114 .65 340 .70 
+
+Ours 1586 .19 WAN 6.46 3563 .14 1.59 3571 .19 2 8936 .57 
+
+LAN 2.97 18 .01 1.62 22 .60 
+
+MS MARCO 
+
+(8.8M , 768 𝑑 )
+
+HNSW [31] 10728 .84 WAN 0.22 5.05 – 5.27 2 3.15 
+
+LAN 0.18 0.23 – 0.41 
+
+No-Noise 8676 .12 WAN 4.33 1795 .45 1.53 1801 .31 2 4468 .82 
+
+LAN 3.03 32 .33 1.52 36 .88 
+
+HE-Cluster − WAN − − − − − −
+
+LAN − − − −
+
+Compass [45] ≥ 10728 .84 WAN 122 .32 7445 .57 195 .61 7763 .50 18 .0209 226657 .48 
+
+LAN 64 .01 361 .85 181 .90 607 .76 
+
+Ours 11741 .53 WAN 4.20 5997 .02 1.45 6002 .67 2 18066 .32 
+
+LAN 6.98 120 .47 2.84 130 .29            
+
+> 10 SIFT Pool=1500
+> LAION Pool=700
+> TripClick Pool=3000
+> MS MARCO Pool=7000
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Recall (%)
+> 𝑡 =1𝑡 =4𝑡 =8𝑡 =16
+> 0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> MRR
+
+Figure 5: Effect of the number of selected shards 𝑡 on search quality with 𝑀 = 64 and a fixed candidate pool for each dataset. SIFT and LAION are evaluated using Recall, while TripClick and MS MARCO are evaluated using MRR.                        
+
+> 0.00 0.08 0.10 0.12
+> 0
+> 1,000
+> 2,000
+> 3,000
+> 4,000
+> Query Perturbation Parameter 𝑝
+> WAN Latency (ms)
+> WAN
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> 120
+> LAN Latency (ms) LAN
+> (a) Total search latency.
+> 12345678910 11 12
+> 40
+> 50
+> 60
+> 70
+> 80
+> 90
+> 100
+> Candidate Pool ( ×10 3)
+> Recall (%)
+> 𝑝 =0.00
+> 𝑝 =0.08
+> 𝑝 =0.10
+> 𝑝 =0.12
+> (b) Recall under different candidate-pool sizes.
+
+Figure 6: SIFT100M performance under different query-side perturbation parameters: (a) total search latency under LAN and WAN settings; and (b) Recall@10 under different candidate-pool sizes. 
+
+6002 .67 ms end-to-end latency. Compass is also network-bound under WAN, but incurs high computation cost due to ORAM op-erations. These results suggest that optimizing candidate set and payload size are interesting future extensions for MESS. 
+
+Offline cost. The offline cost of MESS includes shard-specific hash-ing, independent perturbation, payload encryption, and construc-tion of multiple HNSW shards. It is therefore notably higher than constructing one plaintext, as shown in Table 2. However, this cost is incurred once and can be amortized over subsequent queries. 
+
+Insertion and deletion. MESS supports incremental updates with-out rebuilding the complete index. For insertion, the client computes and perturbs the new item’s shard-specific binary embeddings, en-crypts its payload, and sends it to the 𝑡 = 16 shards. The server then inserts the perturbed item into the shards. Deletion is performed lazily: the client identifies the shard-local labels, and the server marks the corresponding nodes as inactive, so they are excluded from future searches. On MS MARCO, insertion takes 96 .16 ms over LAN and 351 .29 ms over WAN, while deletion takes 1.33 ms and 
+
+80 .35 ms, respectively. Their communication costs are 3.09 KB and 
+
+0.09 KB. 
+
+## 6.2 Scalability 
+
+We evaluate the performance of MESS at scale, using a large dataset (SIFT100M) created by selecting the first 100 million vectors from SIFT1B. We note that neither Compass [ 45 ] nor iptoe [ 17 ] report results at this scale. We focus only on the online-phase performance and note that the offline phase takes 26.19 hours. Figure 6 and Table 3 show the effect of the query-side pertur-bation probability 𝑝 on Recall@10, candidate volume, latency, and communication. With 12,000 candidates, increasing 𝑝 from 0 to 0.12 
+
+reduces Recall@10 from 95 .3% to 83 .7% . It can be seen that the gap decreases with larger candidate sets. However, as the candidate sets grow from 4,000 to 20,000 candidates, the communication cost in-creases 5.0×. These results demonstrate the accuracy and efficiency trade-off. The latency breakdown in Table 3 shows that the costs of graph search and client reranking remain small compared to that of en-crypted candidate transfer. In particular, at 𝑝 = 0.08 , MESS pro-cesses SIFT100M in 52 .53 ms/query under LAN; even at 𝑝 = 0.12 ,LAN latency remains below 120 ms/query. Under WNA, the latency increases from 893 .73 ms to 4271 .17 ms due to large payloads. These results confirm that MESS is practical for large-scale datasets. They highlight the fundamental trade-off: stronger query perturbation increases rank uncertainty, therefore requires larger candiate sets and incurs higher communication overhead. The re-sults indicate that reducing encrypted payload size or improving shard-level candidate filtering is more beneficial than optimizing the relatively small graph-search and reranking costs. 
+
+## 7 Related Work 
+
+Vector Databases and ANN Search. Vector databases use ap-proximate nearest-neighbor (ANN) indexes to support large-scale, high-dimensional embedding search. HNSW provides low-latency and high-recall graph traversal, while FAISS and SPANN study GPU acceleration and memory–disk hybrid indexing at billion-vector scale [ 12 , 23 , 31 ]. Recent systems also consider database-level re-quirements: HAKES supports high-recall search under concurrent updates, while VBase integrates vector similarity search with rela-tional query processing [ 19 , 43 ]. These systems target performance and scalability of plaintext vector search, whereas MESS targets privacy. While indexes other than HNSW can be used in MESS , our current security analysis assumes graph indexes. Extending MESS to support other indexes is left as future work. 
+
+Encrypted Semantic Retrieval. Existing works reduce secure candidate-generation costs through clustering, LSH, tree indexes, 
+
+> 11
+
+Table 3: SIFT100M performance under different query-side perturbation parameters. 
+
+Dataset Build Time 𝑝 Mode Online Search Performance Candidate Communication Server Eval. Trans.Lat. Client Dec.&Rank Total Time SIFT100M 26.19 h 
+
+0.00 WAN 3.21 888.89 1.63 893.73 4000 2123.54 LAN 1.98 21.52 1.36 24.86 4000 2123.54 
+
+0.08 WAN 8.61 2031.79 2.45 2042.85 9500 5069.04 LAN 3.43 46.91 2.19 52.53 9500 5069.04 
+
+0.10 WAN 14.33 2666.87 2.86 2684.06 12500 6678.79 LAN 11.40 57.53 2.55 71.48 12500 6678.79 
+
+0.12 WAN 41.78 4225.49 3.90 4271.17 20000 10686.04 LAN 10.99 100.49 5.45 116.93 20000 10686.04 
+
+or stronger deployment assumptions. Tiptoe and Wally use cluster-ing, with Wally additionally combining epochs and differential pri-vacy [ 7, 17 ]. Preco uses LSH with two non-colluding servers, while VCC24 combines tree indexing and 𝑘 -means under information-theoretic security [ 35 , 38 ]. SANNS uses DORAM and garbled cir-cuits for secure Top-𝐾 selection [ 11 ], whereas trusted-hardware approaches introduce additional trust assumptions [ 6 , 39 ]. Other works adopt Private Information Retrieval (PIR). In particular, Preco notes that replacing its non-colluding servers with single-server PIR would increase overhead, while Panther combines PIR2A with se-cret sharing for private access and secure Top-𝐾 selection [ 27 , 35 ]. Cryptographic solutions use order or property-preserving en-cryption for distance comparison, but the ciphertext may leak met-ric relations [ 20 , 29 , 42 ]. Compass uses ORAM to hide HNSW ac-cesses [ 45 ], while PACMANN combines PIR with a secure neighbor-hood graph [ 44 ]. These solutions provide stronger obliviousness but suffer significant overhead from cryptographic operations. In con-trast, MESS searches server-visible HNSW shards over perturbed binary embeddings, with well-defined stored-data, access-pattern, and search-pattern leakage. 
+
+## 8 Conlusion 
+
+We presented MESS thats enable semantic search with privacy, accuracy and effiency. The system adopts a differential privacy approach, allowing search to be performed over pertubed vectors, while bounding stored-data, access pattern, and search pattern leakage. MESS proposes a multi-graph design that compensates for the accuracy loss from perturbation. The evalution results show the it outperform cryptographic baselines, reducing communication cost by up to 35 .28 × over Compass. The system remains practical at scale, achieving 52.53 ms/query on a dataset of 100M vectors. under LAN, demonstrating scalability to one hundred million vectors. Overall, these results establish quantified leakage as a practical design point for balancing privacy, retrieval quality, and efficiency in large-scale semantic search. 
+
+## References 
+
+[1] [n. d.]. AI Database that developers love. https://weaviate.io/. Accessed: 2026. [2] [n. d.]. Amazon OpenSearch Service. https://aws.amazon.com/opensearch-service/serverless-vector-database/. Accessed: 2026. [3] [n. d.]. Vector Search. https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/vector-search/overview. Accessed: 2026. [4] Ishtiyaque Ahmad, Laboni Sarker, Divyakant Agrawal, Amr El Abbadi, and Trinabh Gupta. 2021. Coeus: A system for oblivious document ranking and retrieval. In Proceedings of the ACM SIGOPS 28th Symposium on Operating Systems Principles . 672–690. [5] Kinan Dak Albab, Rawane Issa, Mayank Varia, and Kalman Graffi. 2022. Batched differentially private information retrieval. In 31st USENIX Security Symposium (USENIX Security 22) . 3327–3344. [6] Ghous Amjad, Seny Kamara, and Tarik Moataz. 2019. Forward and backward private searchable encryption with SGX. In Proceedings of the 12th European Workshop on Systems Security . 1–6. [7] Hilal Asi, Fabian Boemer, Nicholas Genise, Muhammad Haris Mughees, Tabitha Ogilvie, Rehan Rishi, Kunal Talwar, Karl Tarbe, Akshay Wadia, Ruiyu Zhu, et al .2024. Scalable private search with wally. arXiv preprint arXiv:2406.06761 (2024). [8] Martin Aum"uller, Anders Bourgeat, and Jana Schmurr. 2020. Differentially Private Sketches for Jaccard Similarity Estimation. In Similarity Search and Applications - 13th International Conference, SISAP 2020 . Springer, 18–32. doi:10. 1007/978-3-030-60936-8_2 [9] Laura Blackstone, Seny Kamara, and Tarik Moataz. 2019. Revisiting leakage abuse attacks. Cryptology ePrint Archive (2019). [10] Guoxing Chen, Ten-Hwang Lai, Michael K Reiter, and Yinqian Zhang. 2018. Differentially private access patterns for searchable symmetric encryption. In 
+
+IEEE INFOCOM 2018-IEEE conference on computer communications . IEEE, 810– 818. [11] Hao Chen, Ilaria Chillotti, Yihe Dong, Oxana Poburinnaya, Ilya Razenshteyn, and M Sadegh Riazi. 2020. {SANNS }: Scaling up secure approximate {k-Nearest }
+
+neighbors search. In 29th USENIX Security Symposium (USENIX Security 20) .2111–2128. [12] Qi Chen, Bing Zhao, Haidong Wang, Mingqin Li, Chuanjie Liu, Zengzhong Li, Mao Yang, and Jingdong Wang. 2021. SPANN: Highly-Efficient Billion-Scale Ap-proximate Nearest Neighbor Search. In Advances in Neural Information Processing Systems , Vol. 34. 5199–5212. [13] Thomas Cover and Peter Hart. 1967. Nearest neighbor pattern classification. 
+
+IEEE transactions on information theory 13, 1 (1967), 21–27. [14] Reza Curtmola, Juan Garay, Seny Kamara, and Rafail Ostrovsky. 2006. Search-able symmetric encryption: improved definitions and efficient constructions. In 
+
+Proceedings of the 13th ACM conference on Computer and communications security .79–88. [15] Úlfar Erlingsson, Vasyl Pihur, and Aleksandra Korolova. 2014. Rappor: Random-ized aggregatable privacy-preserving ordinal response. In Proceedings of the 2014 ACM SIGSAC conference on computer and communications security . 1054–1067. [16] Natasha Fernandes, Yusuke Kawamoto, and Takao Murakami. 2021. Locality Sensitive Hashing with Extended Differential Privacy. In Computer Security – ESORICS 2021, Part II (Lecture Notes in Computer Science, Vol. 12973) . Springer, 563–583. doi:10.1007/978-3-030-88428-4_28 [17] Alexandra Henzinger, Emma Dauterman, Henry Corrigan-Gibbs, and Nickolai Zeldovich. 2023. Private web search with tiptoe. In Proceedings of the 29th symposium on operating systems principles . 396–416. [18] Alexandra Henzinger, Matthew M. Hong, Henry Corrigan-Gibbs, Sarah Meikle-john, and Vinod Vaikuntanathan. 2023. One server for the price of two: simple and fast single-server private information retrieval. In Proceedings of the 32nd USENIX Conference on Security Symposium . USENIX Association, USA. [19] Guoyu Hu, Shaofeng Cai, Tien Tuan Anh Dinh, Zhongle Xie, Cong Yue, Gang Chen, and Beng Chin Ooi. 2025. HAKES: Scalable Vector Database for Embedding Search Service. Proceedings of the VLDB Endowment 18, 9 (2025), 3049–3062. doi:10.14778/3746405.3746427 [20] Zhengbai Huang, Meng Zhang, and Yi Zhang. 2019. Toward Efficient Encrypted Image Retrieval in Cloud Environment. IEEE Access 7 (2019), 174541–174550. doi:10.1109/ACCESS.2019.2957497 [21] Piotr Indyk and Rajeev Motwani. 1998. Approximate nearest neighbors: towards removing the curse of dimensionality. In Proceedings of the thirtieth annual ACM symposium on Theory of computing . 604–613. 
+
+> 12
+
+[22] Gautier Izacard, Mathilde Caron, Lucas Hosseini, Sebastian Riedel, Piotr Bo-janowski, Armand Joulin, and Edouard Grave. 2021. Unsupervised dense in-formation retrieval with contrastive learning. arXiv preprint arXiv:2112.09118 
+
+(2021). [23] Jeff Johnson, Matthijs Douze, and Hervé Jégou. 2021. Billion-Scale Similarity Search with GPUs. IEEE Transactions on Big Data 7, 3 (2021), 535–547. doi:10. 1109/TBDATA.2019.2921572 [24] Darya Kaviani, Alp Eren Ozdarendeli, Jinhao Zhu, Yu Ding, and Raluca Ada Popa. 2026. Opal: Private Memory for Personal AI. arXiv preprint arXiv:2604.02522 
+
+(2026). [25] Weihao Kong and Wu-Jun Li. 2012. Isotropic hashing. Advances in neural information processing systems 25 (2012). [26] Jiale Lao, Andreas Zimmerer, Olga Ovcharenko, Tianji Cong, Matthew Russo, Gerardo Vitagliano, Michael Cochez, Fatma Özcan, Gautam Gupta, Thibaud Hot-telier, H. V. Jagadish, Kris Kissel, Sebastian Schelter, Andreas Kipf, and Immanuel Trummer. 2026. SemBench: A Benchmark for Semantic Query Processing Engines. 
+
+Proc. VLDB Endow. 19, 8 (July 2026), 1754–1767. doi:10.14778/3811243.3811249 [27] Jingyu Li, Zhicong Huang, Min Zhang, Cheng Hong, Jian Liu, Tao Wei, and Wenguang Chen. 2025. Panther: Private approximate nearest neighbor search in the single server setting. In Proceedings of the 2025 ACM SIGSAC Conference on Computer and Communications Security . 365–379. [28] Yingfan Liu, Yandi Zhang, Jiadong Xie, Hui Li, Jeffrey Xu Yu, and Jiangtao Cui. 2025. Privacy-Preserving Approximate Nearest Neighbor Search on High-Dimensional Data. In Proceedings of the IEEE 41st International Conference on Data Engineering (ICDE 2025) . 3017–3029. doi:10.1109/ICDE65448.2025.00226 [29] Yingfan Liu, Yandi Zhang, Jiadong Xie, Hui Li, Jeffrey Xu Yu, and Jiangtao Cui. 2025. Privacy-preserving approximate nearest neighbor search on high-dimensional data. In 2025 IEEE 41st International Conference on Data Engineering (ICDE) . IEEE, 3017–3029. [30] David G Lowe. 2004. Distinctive image features from scale-invariant keypoints. 
+
+International journal of computer vision 60, 2 (2004), 91–110. [31] Yu A Malkov and Dmitry A Yashunin. 2018. Efficient and robust approximate nearest neighbor search using hierarchical navigable small world graphs. IEEE transactions on pattern analysis and machine intelligence 42, 4 (2018), 824–836. [32] Simon Oya and Florian Kerschbaum. 2021. Hiding the access pattern is not enough: Exploiting search pattern leakage in searchable encryption. In 30th USENIX security symposium (USENIX Security 21) . 127–142. [33] M. Sadegh Riazi, Beidi Chen, Anshumali Shrivastava, Dan Wallach, and Fari-naz Koushanfar. 2019. Sub-Linear Privacy-Preserving Near-Neighbor Search. Cryptology ePrint Archive, Paper 2019/1222. https://eprint.iacr.org/2019/1222 [34] Badrul Sarwar, George Karypis, Joseph Konstan, and John Riedl. 2001. Item-based collaborative filtering recommendation algorithms. In Proceedings of the 10th international conference on World Wide Web . 285–295. [35] Sacha Servan-Schreiber, Simon Langowski, and Srinivas Devadas. 2022. Private approximate nearest neighbor search with sublinear communication. In 2022 IEEE Symposium on Security and Privacy (SP) . IEEE, 911–929. [36] Zhiwei Shang, Simon Oya, Andreas Peter, and Florian Kerschbaum. 2021. Obfus-cated Access and Search Patterns in Searchable Encryption. In Proceedings of the 28th Annual Network and Distributed System Security Symposium (NDSS 2021) .[37] Sivic and Zisserman. 2003. Video Google: A text retrieval approach to object matching in videos. In Proceedings ninth IEEE international conference on computer vision . IEEE, 1470–1477. [38] Sajani Vithana, Martina Cardone, and Flavio P Calmon. 2024. Private approximate nearest neighbor search for vector database querying. In 2024 IEEE International Symposium on Information Theory (ISIT) . IEEE, 3666–3671. [39] Viet Vo, Shangqi Lai, Xingliang Yuan, Surya Nepal, and Joseph K Liu. 2021. Towards efficient and strong backward private searchable encryption with se-cure enclaves. In International Conference on Applied Cryptography and Network Security . Springer, 50–75. [40] Yichuan Wang, Zhifei Li, Shu Liu, Yongji Wu, Ziming Mao, Yilong Zhao, Xiao Yan, Zhiying Xu, Yang Zhou, Ion Stoica, et al . 2025. LEANN: A Low-Storage Vector Index. arXiv preprint arXiv:2506.08276 (2025). [41] Kilian Q Weinberger and Lawrence K Saul. 2009. Distance metric learning for large margin nearest neighbor classification. Journal of machine learning research 
+
+10, 2 (2009). [42] Wai Kit Wong, David Wai-lok Cheung, Ben Kao, and Nikos Mamoulis. 2009. Secure kNN computation on encrypted databases. In Proceedings of the 2009 ACM SIGMOD International Conference on Management of data . 139–152. [43] Qianxi Zhang, Shuotao Xu, Qi Chen, Guoxin Sui, Jiadong Xie, Zhizhen Cai, Yaoqi Chen, Yinxuan He, Yuqing Yang, Fan Yang, Mao Yang, and Lidong Zhou. 2023. VBASE: Unifying Online Vector Similarity Search and Relational Queries via Relaxed Monotonicity. In 17th USENIX Symposium on Operating Systems Design and Implementation (OSDI ’23) . 377–395. [44] Mingxun Zhou, Elaine Shi, and Giulia Fanti. 2024. Pacmann: Efficient private approximate nearest neighbor search. In The Thirteenth International Conference on Learning Representations .[45] Jinhao Zhu, Liana Patel, Matei Zaharia, and Raluca Ada Popa. 2025. Compass: Encrypted semantic search with high accuracy. In 19th USENIX Symposium on Operating Systems Design and Implementation (OSDI 25) . 915–938.
