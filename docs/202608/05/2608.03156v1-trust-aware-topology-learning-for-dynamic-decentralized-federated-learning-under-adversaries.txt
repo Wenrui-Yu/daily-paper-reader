@@ -1,0 +1,2829 @@
+Title: Trust-Aware Topology Learning for Dynamic Decentralized Federated Learning under Adversaries
+
+URL Source: https://arxiv.org/pdf/2608.03156v1
+
+Published Time: Wed, 05 Aug 2026 00:33:19 GMT
+
+Number of Pages: 20
+
+Markdown Content:
+> 1
+
+# Trust-Aware Topology Learning for Dynamic Decentralized Federated Learning under Adversaries 
+
+Shubham Vaishnav ∗, Murtaza Rangwala ∗, Ali Beikmohammadi, Sindri Magn´ usson, and Rajkumar Buyya 
+
+Abstract —In dynamic mobile decentralized federated learn-ing (DFL), where device connectivity varies over time with movement, failures, and adversarial behavior, an adversary can poison both the model updates and the topology information that devices use to decide whom to learn from. We present DMTT (Dynamic MURMURA with Trusted Topology), a decentralized personalized federated learning protocol built on MURMURA ,a prior framework that uses evidential deep learning to as-sess peer model compatibility and down-weight distribution-mismatched collaborators. DMTT extends this foundation to time-varying graphs under topology-manipulation attacks. Each device maintains a confidence-weighted local topology view from direct link-reliability estimates, signed topology claims, witness corroboration, and a Beta-distributed source-trust model, and then aggregates only over a trust-screened collaborator set using a composite score that fuses model compatibility, topology trust, and link reliability. We prove that the induced screened mixing matrices confine Byzantine influence to a bounded residual δmax 
+
+that vanishes under perfect screening, and we implement DMTT as a coordinator-free distributed framework in which each client runs as an independent ZeroMQ process synchronised by a shared wall-clock epoch. On UCI HAR and PAMAP2, each partitioned across 100 mobile clients with Dirichlet heterogeneity, DMTT sustains honest-node accuracy above 0.862 at every tested fraction from 10% to 80% on UCI HAR and above 0.829 on PAMAP2, essentially matching no-attack accuracy at low frac-tions and degrading gracefully to near-local-only performance at extreme fractions. Static and dynamic FedAvg collapse to chance at every fraction, and dedicated robust aggregators (Krum, BALANCE, UBAR) all fail to consistently beat a safe local-only baseline that forgoes collaboration entirely. DMTT is the only method that clears the local-only bar across both datasets at all tested fractions, demonstrating that trust-aware screening both resists poisoning and profits from honest peers. Empirically the surviving Byzantine aggregation weight is exactly zero across all runs, consistent with the δmax = 0 condition of the theoretical analysis. The same protocol runs end-to-end on a coordinator-free distributed ZeroMQ backend that reproduces these results on real nodes from the Melbourne Research Cloud. 
+
+Index Terms —Decentralized federated learning, mobile com-puting, Byzantine fault tolerance, dynamic topologies, trust management, peer-to-peer computing. 
+
+I. I NTRODUCTION 
+
+Federated learning (FL) lets many devices train a shared model together without ever sending their raw data to a central 
+
+> ∗
+
+These authors contributed equally to this work. M. Rangwala and R.Buyya are with the Quantum Cloud Comput-ing and Distributed Systems (qCLOUDS) Laboratory at the University of Melbourne, Australia (e-mail: murtaza.rangwala@student.unimelb.edu.au; rbuyya@unimelb.edu.au). S. Vaishnav, A. Beikmohammadi, and S. Magn´ usson are with the De-partment of Computer and System Science, Stockholm University, Swe-den (e-mail: shubham.vaishnav@dsv.su.se; beikmohammadi@dsv.su.se; sin-dri.magnusson@dsv.su.se). 
+
+server. It is now used in mobile keyboards, healthcare, and industrial IoT. A core difficulty in any realistic FL deployment is that no two devices see the same kind of data: a smartwatch on one wearer records different activity patterns from one on another. A hospital sees a different patient mix from its neighbour, and so on. With this kind of non-IID (non-identically-distributed) data, a single global model rarely fits every device well. Each device benefits from a personalized 
+
+model that reflects its own data, while still learning from peers whose data is related but not identical. Standard FL still relies on one central server to coordinate this, which becomes both a privacy bottleneck and a single point of failure. Decentralized federated learning (DFL) removes that server entirely: devices exchange and aggregate model updates directly with peers [1], [2], [3]. The system becomes more private and more resilient, but every device is now exposed to its peers. Without a central authority, each device must decide on its own which peers to learn from, even though any participant can in principle behave adversarially. 
+
+MURMURA [4] addresses this per-device decision problem under non-IID data. Its central observation is that not every peer is a useful collaborator. A peer trained on a very different distribution can actively hurt local performance, even if the peer is honest and well-trained. MURMURA calls this property 
+
+peer compatibility and quantifies it from each device’s local point of view. The device runs an incoming peer model on its own data and looks at how the peer model is uncertain about that data. Using evidential deep learning, it separates two kinds of uncertainty in the peer’s predictions: uncertainty because the peer has never really seen data like this (a sign of incompatibility), and uncertainty because the data is just inherently tricky (which is not the peer’s fault). Peers showing the first kind are down-weighted during aggregation. Peers showing the second kind are kept. Each round produces a fresh per-device compatibility score, so the set of useful collaborators adapts as training progresses. However, MURMURA does not solve the systems-level ques-tion of how peers discover and maintain knowledge of a changing network topology in the first place. This gap becomes particularly sharp in dynamic DFL, where connectivity varies over time due to mobility, failures, or adversarial behavior. Existing MURMURA evaluations assume fixed graph struc-tures and synchronous rounds. In contrast, dynamic topology works such as Soft-DSGD and ToLRDUL either rely on link reliability models that do not consider malicious topology reports or assume globally coordinated topology updates that are too strong for fully decentralized environments [4], [1], [5]. Therefore, there is a need for dynamic MURMURA with arXiv:2608.03156v1 [cs.DC] 4 Aug 2026 2               
+
+> TABLE I THREE -LAYER SEPARATION BETWEEN REACHABILITY ,TOPOLOGY TRUST ,
+> AND COLLABORATION
+> Layer Description Direct reachability Tracks which peers can be contacted in the current epoch based on local observations such as authen-ticated beacons and packet acknowledgments [1].
+> Topology trust Maintains confidence in topology claims using signed reports, corroboration across multiple wit-nesses, historical consistency, and path diversity [6], [7].
+> Collaboration graph Determines which reachable and trustworthy peers should influence local training, combining
+> MURMURA model trust, topology trust, and com-munication cost [4], [2], [3].
+
+adversary-aware topology trust. Beyond practicality, there are also strong theoretical reasons why this gap has persisted. Nesterenko and Tixeuil show that under Byzantine faults, weak topology discovery requires at least k + 1 -connectivity, while strong topology discovery requires more than 2k + 1 -connectivity to tolerate k Byzantine nodes [6]. These requirements make exact global topology agreement impractical for sparse wearable, IoT, or mobile FL deploy-ments. As a result, the appropriate target is not exact topology discovery, but rather a confidence-weighted topology view: exact for direct neighbors, reasonably reliable for two-hop structure, and probabilistic beyond that. This work proposes a decentralized personalized FL frame-work that extends MURMURA beyond a fixed-neighborhood setting. It maintains a confidence-weighted topology state built from direct observation, signed claims, corroboration, and uncertainty-aware source trust. It then uses this trusted graph to choose collaborators using evidential trust. The proposed system can be viewed as MURMURA augmented with a trust-worthy topology memory. The design separates the problem into three distinct layers as shown in Table I. 
+
+a) Contributions.: 
+
+1) DMTT protocol with convergence guarantees. Afour-algorithm protocol integrating link-reliability track-ing, witness-weighted signed topology claims, Beta-distributed source trust, and trust-aware collaborator se-lection. We prove that the induced mixing matrices confine Byzantine influence to a bounded residual that vanishes under perfect screening. 2) Fully distributed MURMURA framework. MURMURA is redesigned from single-process simulation into indepen-dent ZeroMQ processes synchronised by a shared wall-clock epoch, with a passive PULL-only monitor collect-ing metrics without influencing training. 3) Mobility-driven dynamic topology and topology-liar attack. A deterministic random-walk mobility model that generates Gt identically across all nodes from a shared seed, plus an oracle-free self-inclusion check: if j
+
+delivered a message to i this round, j’s topology claim must include i. We introduce an omission topology-liar attack in which Byzantine nodes claim only the Byzantine coalition, so the self-inclusion contradiction fires every round. 4) Empirical validation. On UCI HAR and PAMAP2 under combined topology-liar and Gaussian poisoning at Byzantine fractions of 10% –80% , DMTT attains the highest honest-node accuracy in every setting while non-robust baselines collapse to chance; a trust diagnostic confirms zero aggregation weight to Byzantine peers, instantiating the perfect-screening regime of the theory. II. R ELATED WORK 
+
+a) Decentralized and personalized federated learning.: 
+
+Decentralized federated learning removes the central server and allows clients to exchange model updates over a peer-to-peer graph. Decentralized FedAvg and related local-update methods show that convergence and communication cost depend on the number of local updates, the frequency of communication, and the mixing matrix [8], [9]. This design is useful for edge and mobile systems because it avoids a server bottleneck and a single point of failure. However, clients usually have non-IID data, so a fixed neighborhood is not always useful. Some decentralized personalized-learning methods therefore learn collaboration graphs or adaptive mixing weights from the relationships between clients and their local tasks [10], [11], [12]. Di-rected collaboration also allows clients with different data, computing, and communication conditions to use different peer sets [3]. MURMURA [4] follows a related model-level approach. Each client tests an incoming model on its own data and uses evidential uncertainty to identify peers whose data is too different from its own [13]. DMTT keeps this idea of client-specific model compatibility, but also considers whether the topology information used to select peers can be trusted. 
+
+b) Dynamic topologies and mobile decentralized learn-ing.: Several studies examine decentralized learning when links are unreliable or the graph changes over time. Soft-DSGD uses link-dependent mixing weights to handle packet loss and other communication problems [1]. ToLRDUL selects links by considering data differences, representation differ-ences, and unreliable D2D connections [5]. Koloskova et al. analyze local updates and changing mixing matrices in a common framework [14]. Other studies examine optimization over directed, time-varying graphs and show the importance of connectivity over time [15], [16]. For non-IID data, the choice of neighbors matters as well as the number of neighbors. Neighborhood heterogeneity can affect the convergence bound, and a carefully learned sparse graph can reduce this problem by connecting clients with complementary data [17]. Recent work has applied these ideas to mobile and asyn-chronous DFL. Lu et al. use the Metropolis–Hastings rule to update mixing weights when the communication graph changes. They also use secret sharing to protect model states. However, their threat model assumes semi-honest participants and does not cover active attacks [18]. DySTop controls update staleness and builds a changing topology for asynchronous DFL. Its topology construction considers non-IID data, delay, and communication cost [19]. Li et al. study DFL over time-varying and heterogeneous mobile computing networks. Their 3
+
+analysis links neighborhood heterogeneity with the properties of the communication graph [20]. These studies are close to DMTT because they consider changing mobile graphs. However, they assume that topology and link information are honest. They do not consider a Byzantine client that hides honest neighbors, invents links, or sends false topology reports. 
+
+c) Byzantine resilience and trusted topology.: Another line of work studies Byzantine-resilient decentralized learning. Most of these methods assume that the communication graph is already known and focus on filtering model or gradient mes-sages. BRIDGE studies Byzantine failures in directed peer-to-peer networks and gives convergence guarantees under graph connectivity conditions [21]. UBAR provides a Byzantine-resilient aggregation rule for decentralized learning. Iterative outlier scissor also shows that local robust aggregation can create disagreement and mixing errors if the resulting virtual mixing process is not properly controlled [22], [23]. Self-centered clipping shows that topology bottlenecks can make Byzantine attacks more harmful. It gives a convergence bound that depends on the remaining Byzantine influence and the graph structure [24]. BALANCE uses each client’s local model as a reference for filtering poisoned peer models and provides convergence results for decentralized FL under poisoning attacks [25]. CMFL uses rotating committees to score local gradients and select updates in a serverless FL system [26]. Other work studies Byzantine resilience under heavy-tailed data and compressed communication, but it still uses a central server for aggregation [27]. These model-level defenses usually start after a peer has already entered the communication or aggregation neighbor-hood. A Byzantine client may therefore lie about reachability, adjacency, or witness information before its model update is filtered. Work on Byzantine topology discovery shows that exact global topology recovery requires strong connectivity assumptions. Weak discovery needs connectivity greater than the number of Byzantine faults, while strong discovery needs connectivity greater than twice that number [6]. This makes a confidence-weighted local topology view more realistic than a claim of perfect global knowledge. In low-power IoT routing, TRAIL uses reachability tests to detect topological attackers without relying on heavy cryptography [28]. In mobile ad hoc networks, reputation systems combine direct observations with recommendations from other nodes while reducing the effect of stale or inconsistent information [29]. Blockchain-based FL can provide a stronger audit trail by combining malicious-gradient detection, homomorphic protection, and blockchain records, but it also adds infrastructure and coor-dination costs [30]. DMTT combines these ideas through three separate de-cisions. Direct reachability determines which peers can ex-change messages at the current time. Topology trust deter-mines whether a peer’s claims about the wider graph should affect peer selection. MURMURA model compatibility deter-mines whether that peer is useful for local personalization. Dynamic-topology methods usually assume that the graph information is honest, while Byzantine aggregators usually filter only model updates. DMTT addresses both problems by screening topology claims before building the collaborator set and then screening the models of the remaining peers. This produces a screened mixing matrix whose Byzantine influence can be bounded while keeping the implementation fully distributed. III. P ROBLEM FORMULATION 
+
+This section states the system, data, and adversary model, identifies the local state each client must maintain, and writes down the optimization problem that the protocol of Section IV solves. Concrete update rules and equations for each state variable are deferred to Section IV. 
+
+A. System and Communication Model 
+
+We consider a decentralized personalized FL system with a fixed set of clients V = {1, 2, . . . , N }. Client identities are persistent, but client positions vary over time. Let rti denote the position of client i at epoch t. Mobility induces a time-varying communication topology Gt = ( V, Et), where (i, j ) ∈Et if clients i and j are physically able to communicate at epoch t. The node set is fixed; the edge set changes due to motion, channel variation, or obstruction. This is the dynamic-topology extension beyond the fixed-neighborhood setting of 
+
+MURMURA [4], and it follows the standard time-varying graph model used in decentralized optimization [1], [5]. 
+
+B. Local Data and Personalized Objective 
+
+Each client i ∈ V holds a private dataset Di = Dtr i ∪ D val i
+
+drawn from a client-specific distribution Pi. The distributions 
+
+{Pi} are generally non-IID, so the system seeks not a sin-gle global model but a collection of personalized models 
+
+Θ = {θ1, . . . , θ N } with θi ∈ Rd, following the personalization principle of MURMURA [4]. The local population risk at client 
+
+i is 
+
+Fi(θi) = E(x,y )∼Pi
+
+ℓ(f (x; θi), y ),
+
+and the population objective is 
+
+min 
+
+> Θ
+> N
+
+X
+
+> i=1
+
+Fi(θi).
+
+Unlike conventional DFL, client i cannot safely collaborate with every other client at every epoch: communication feasi-bility and topology trust are both time-varying. 
+
+C. Adversary Model 
+
+Let H ⊆ V denote the honest clients and B = V \ H 
+
+the Byzantine clients. The Byzantine set is fixed over the training horizon, although Byzantine clients move like honest ones. Honest clients follow the prescribed protocol. Byzantine clients may behave arbitrarily, including issuing false edge-addition or edge-removal claims, replaying stale topology states, flooding the network with weak claims, or sending misleading model updates. The formulation therefore sepa-rates topology trust from model usefulness so that topology misinformation is filtered before collaboration decisions are made. 4
+
+D. Local State to Be Maintained 
+
+At every epoch t, each client i must maintain four cate-gories of local state, whose precise update rules are given in Section IV:  
+
+> •
+
+Direct reachability and link reliability. A one-hop neighbor set N dir,t i from authenticated hello beacons and acknowl-edgments, and a scalar link-reliability estimate ˆptij ∈ [0 , 1] 
+
+tracking communication quality ( not topology trust) [1].  
+
+> •
+
+Signed topology claims and witness evidence. Each lo-cally observed topology event is emitted as a signed, versioned claim; received claims are collected in per-edge support and opposition buffers W+,t i (e), W−,t i (e), which the protocol summarizes into an edge-confidence score 
+
+χti(e) ∈ [0 , 1] . 
+
+> •
+
+Source-trust state. For each peer j, a Beta-style evidence state (αtij , β tij ) tracks the long-run reliability of j as a topology reporter, from which the protocol derives a rep-utation Rtij , an epistemic uncertainty U tij , and a topology-trust score T topo,t ij ∈ [0 , 1] (the topology-side analogue of the model-side evidential trust of MURMURA [4]).  
+
+> •
+
+Trusted local topology view. By accepting an edge e only when χti(e) and corroboration are sufficient, client i main-tains a confidence-weighted local view ˆGti = ( V, ˆEti ). The target is not exact global topology discovery (which would require (2 k+1) -connectivity under k Byzantine faults [6]) but a locally sufficient view for safe collaboration. 
+
+E. Trusted Feasible Set and Effective Learning Graph 
+
+Given the local state above, the protocol must induce, at every epoch, a trusted feasible neighbor set Fti ⊆ N dir,t i
+
+restricted to peers that are simultaneously reachable (sufficient 
+
+ˆptij ) and trustworthy as topology reporters (sufficient T topo ,t ij ), and an active collaborator set Cti ⊆ F ti satisfying |Cti | ≤ B
+
+within an edge budget B, as in budgeted decentralized per-sonalized graph learning [2]. The corresponding aggregation weights {wtij } define a row-stochastic, time-varying screened mixing matrix W t = [ wtij ]Ni,j =1 with 
+
+wtij = 0 if j / ∈ Cti ∪ { i}, X
+
+> j
+
+wtij = 1 , wtij ≥ 0.
+
+Hence the effective learning graph is not the raw physical graph Gt but a client-specific, time-varying, trust-screened graph. This connects the formulation to standard analyses of decentralized learning over time-varying graphs, where topology enters through the support and spectral properties of the mixing matrices. 
+
+F. Optimization Problem 
+
+The problem addressed in this work is to jointly design four protocol rules: 1) the topology-claim processing rule, producing ˆGti ;2) the source-trust update rule, producing T topo,t ij ;3) the trusted-feasible-neighbor selection rule, producing Fti
+
+and Cti ;4) the personalized aggregation rule, producing W t and 
+
+θt+1  
+
+> i
+
+.Over a horizon of T epochs, the goal is to minimize the time-averaged aggregate personalized risk 
+
+min    
+
+> {θti},Πtopo ,Πcollab
+
+1
+
+T
+
+> T
+
+X
+
+> t=1
+> N
+
+X
+
+> i=1
+
+EFi(θti ),
+
+subject, for every epoch t and client i, to 
+
+Cti ⊆ F ti ⊆ N dir,t i , |Cti | ≤ B, 
+
+the row-stochastic mixing-matrix constraints above, and the requirement that topology information may influence col-laboration only through the screened local topology state 
+
+( ˆGti , T topo,t ij ).In words, the proposed method, Dynamic MURMURA with Trusted Topology (DMTT), must maintain a trustworthy, confidence-weighted topology view and perform personalized decentralized learning only over the resulting trusted feasible graph. Section IV specifies the four rules above and gives the equations defining ˆptij , χti(e), T topo,t ij , and W t.IV. T HE DMTT P ROTOCOL 
+
+The proposed method is a decentralized training protocol with an explicit topology-trust layer. Instead of trusting a topology claim on arrival, each node first grounds its network view in direct neighbor observations, then verifies signed claims for freshness and authenticity, accumulates corrob-orating and opposing witness evidence, updates long-term trust in each reporting source, and limits forwarding through trust thresholds, hop limits, and rate budgets. Only after this topology-filtering stage does the node invoke MURMURA -style model trust to decide which reachable peers should influence training. The protocol contains six logical steps, but for clarity they are grouped into four algorithmic modules. Algorithm 1 integrates direct reachability estimation, signed topology-claim generation, local model training, model exchange, and collaborator selection. Topology-claim processing and edge-confidence computation are handled by Algorithm 2. Con-trolled forwarding is handled by Algorithm 3. Source-trust updating is handled by Algorithm 4. 
+
+Local State at Node i: Each node i maintains local state comprising direct link quality, topology trust, witness evidence, and model-level collaboration scores. Algorithm 1 gives the overall decentralized protocol, executed locally and in parallel at every epoch. 
+
+A. Direct Reachability and Signed Topology Claims 
+
+The protocol starts from direct observations rather than an assumed global topology. As shown in Algorithm 1, each node discovers direct neighbors through authenticated hello beacons and transport-level acknowledgments. For a direct link (i, j ),node i updates a local reliability score in the spirit of unreliable link estimation in Soft-DSGD, but without assuming a global reliability matrix [1]: 
+
+ˆpt+1  
+
+> ij
+
+= (1 − ρ)ˆ ptij + ρ · ack tij . (1) Here, ρ ∈ (0 , 1) is a smoothing parameter and ack tij ∈{0, 1} records recent communication success. This quantity 5
+
+Algorithm 1 DMTT: Dynamic MURMURA with Trusted Topol-ogy  
+
+> 1:
+
+Initialize local model θ0 
+
+> i
+> 2:
+
+Initialize direct-neighbor set N dir i 
+
+> 3:
+
+Initialize trust state {αij , β ij , T topo ij }j 
+
+> 4:
+
+Initialize witness buffers Wi(e) and edge confidences 
+
+χi(e) 
+
+> 5:
+
+Initialize collaborator set Ci 
+
+> 6:
+
+for each epoch t executed in parallel at all nodes do  
+
+> 7:
+
+for each authenticated neighbor j heard in epoch t do  
+
+> 8:
+
+Add j to N dir,t i 
+
+> 9:
+
+ˆpt+1  
+
+> ij
+
+← (1 − ρ)ˆ ptij + ρ · ack tij  
+
+> 10:
+
+end for  
+
+> 11:
+
+Remove stale neighbors from N dir,t i if timeout expires  
+
+> 12:
+
+if node i observes addition or removal of edge e =(u, v ) then  
+
+> 13:
+
+Construct signed claim c ← (u, v, σ, ν, τ, π u) 
+
+> 14:
+
+Broadcast c to current direct neighbors  
+
+> 15:
+
+end if  
+
+> 16:
+
+for each received claim c about edge e do  
+
+> 17:
+
+PROCESS TOPOLOGY CLAIM (i, c, e, t ) 
+
+> 18:
+
+end for  
+
+> 19:
+
+for each source j with new evidence do  
+
+> 20:
+
+UPDATE SOURCE TRUST (i, j, t ) 
+
+> 21:
+
+end for  
+
+> 22:
+
+for each received claim c do  
+
+> 23:
+
+CONTROLLED FORWARD (i, c, t ) 
+
+> 24:
+
+end for  
+
+> 25:
+
+Perform E local SGD steps to obtain θt+ 12 
+
+> i
+> 26:
+
+Exchange candidate models or updates with currently reachable, topology-screened neighbors  
+
+> 27:
+
+Evaluate received peer models on local validation data  
+
+> 28:
+
+Compute validation accuracy atij and mean epistemic uncertainty ¯utij  
+
+> 29:
+
+Compute MURMURA -style compatibility scores 
+
+smodel,t ij  
+
+> 30:
+
+for each currently reachable and topology-screened neighbor j do  
+
+> 31:
+
+qtij ← λ1smodel,t ij + λ2T topo,t ij + λ3 ˆptij − λ4ccomm,t ij  
+
+> 32:
+
+end for  
+
+> 33:
+
+Cti ← TopB j qtij  
+
+> 34:
+
+Aggregate over Cti and update θt+1  
+
+> i
+> 35:
+
+end for 
+
+captures link quality, not trust [1]. It provides the local connectivity view on which the later filtering stages build. When a node observes a local topology event, it emits the signed claim c defined in Section III-D. For direct-neighbor claims, the preferred form is bilateral attestation, meaning both endpoints sign the same event when possible. One-sided claims are allowed but start with lower confidence. Each node may also periodically send a compact signed digest of its current neighbor list (similar to sketching [31]). 
+
+B. Topology Claim Processing and Edge Confidence 
+
+Received topology claims are not committed immediately. Instead, as shown in Algorithm 2, node i stores each claim in 
+
+Algorithm 2 Topology claim processing and edge-confidence update  
+
+> 1:
+
+Extract source j and hop count htij (e) from c 
+
+> 2:
+
+if signature invalid or version stale then  
+
+> 3:
+
+Reject c and return  
+
+> 4:
+
+end if  
+
+> 5:
+
+Add source j to witness buffer Wi(e) 
+
+> 6:
+
+ψtij (e) ← T topo,t ij exp( −ξh tij (e))  
+
+> 7:
+
+if c supports existence of edge e then  
+
+> 8:
+
+Add ψtij (e) to support pool  
+
+> 9:
+
+else  
+
+> 10:
+
+Add ψtij (e) to opposition pool  
+
+> 11:
+
+end if  
+
+> 12:
+
+S+,t i (e) ← P  
+
+> j∈W +,t i(e)
+
+ψtij (e) 
+
+> 13:
+
+S−,t i (e) ← P  
+
+> j∈W −,t i(e)
+
+ψtij (e) 
+
+> 14:
+
+χti(e) ← S+,t i (e)
+
+S+,t i (e) + S−,t i (e) + ε 
+
+> 15:
+
+if c is an edge addition then  
+
+> 16:
+
+if χti(e) ≥ τadd and witness diversity conditions hold 
+
+then  
+
+> 17:
+
+Accept edge addition  
+
+> 18:
+
+end if  
+
+> 19:
+
+else  
+
+> 20:
+
+if 1 − χti(e) ≥ τadd and witness diversity conditions hold then  
+
+> 21:
+
+Accept edge removal  
+
+> 22:
+
+end if  
+
+> 23:
+
+end if 
+
+a witness buffer and treats it as weighted evidence about the reported edge. This is the primary defense against malicious topology gossip. When node i receives a topology claim from source j, it computes the witness weight 
+
+ψtij (e) = T topo ,t ij exp  −ξh tij (e)
+
+· 1{valid signature } · 1{fresh version }. (2) Here, T topo ,t ij is trust in source j, htij (e) is the hop count traveled by the claim before reaching i, and ξ penalizes distant claims. Thus, a witness counts more if the source is trusted, the claim traveled fewer hops, the signature is valid, and the claim is fresh. Signed stale claims are ignored. For each edge e, node i maintains separate support and opposition totals: 
+
+S+,t i (e) = X 
+
+> j∈W +,t i(e)
+
+ψtij (e), (3) 
+
+S−,t i (e) = X 
+
+> j∈W −,t i(e)
+
+ψtij (e). (4) The opposition total is therefore the weighted sum of all witnesses that argue against the edge claim. From these totals, node i defines edge confidence as 
+
+χti(e) = S+,t i (e)
+
+S+,t i (e) + S−,t i (e) + ε . (5) 6
+
+Algorithm 3 Controlled forwarding  
+
+> 1:
+
+Extract source j from c 
+
+> 2:
+
+if signature invalid or version stale then  
+
+> 3:
+
+Drop c 
+
+> 4:
+
+else if T topo,t ij < τ f wd then  
+
+> 5:
+
+Drop c 
+
+> 6:
+
+else if forwarding budget for source j exhausted then  
+
+> 7:
+
+Drop c 
+
+> 8:
+
+else if hop count of c ≥ H then  
+
+> 9:
+
+Drop c 
+
+> 10:
+
+else  
+
+> 11:
+
+Forward c to eligible direct neighbors  
+
+> 12:
+
+Decrement forwarding budget for source j 
+
+> 13:
+
+end if Algorithm 4 Source-trust update  
+
+> 1:
+
+Observe evidence events dtij , c tij , f tij , x tij , q tij , z tij  
+
+> 2:
+
+αt+1  
+
+> ij
+
+← λα tij + wddtij + wcctij + wf f tij  
+
+> 3:
+
+βt+1  
+
+> ij
+
+← λβ tij + wxxtij + wq qtij + wsztij  
+
+> 4:
+
+Rt+1  
+
+> ij
+
+← αt+1 
+
+> ij
+
+αt+1  
+
+> ij
+
++ βt+1  
+
+> ij
+> 5:
+
+U t+1  
+
+> ij
+
+←
+
+s αt+1  
+
+> ij
+
+βt+1 
+
+> ij
+
+(αt+1  
+
+> ij
+
++ βt+1  
+
+> ij
+
+)2(αt+1  
+
+> ij
+
++ βt+1  
+
+> ij
+
++ 1)  
+
+> 6:
+
+T topo,t +1  
+
+> ij
+
+← Rt+1  
+
+> ij
+
+exp  −η max {0, U t+1  
+
+> ij
+
+− τU }
+
+An edge addition is accepted only if three conditions hold:  
+
+> •
+
+χti(e) ≥ τadd , where τadd ∈ (0 , 1] is the edge-acceptance threshold , 
+
+> •
+
+support comes from at least m distinct first-hop witnesses,  
+
+> •
+
+in high-assurance mode, support arrives through at least 
+
+k + 1 internally node-disjoint paths when the graph is connected enough to make that meaningful [6]. An edge removal uses the symmetric rule with 1−χti(e). Thus, a single liar may inject a claim, but that claim is not committed unless enough independent, trusted evidence accumulates. 
+
+C. Controlled Forwarding 
+
+Even a locally observed claim should not be forwarded without restriction. As shown in Algorithm 3, a node for-wards a topology claim only if the signature is valid, the version is newer than the local record, the trust score satisfies 
+
+T topo ,t ij ≥ τfwd (the forwarding trust threshold ), the forwarding budget for that source has not been exceeded [32], and the claim has not crossed a hop limit H.The forwarding budget is important. Gupta et al. [32] show that rate limiting and verification matter even before one con-siders learning quality. In the present design, repeated flooding of unconfirmed or stale claims contributes negative evidence in the trust update, so forwarding control not only limits immediate spread but also reduces the long-run influence of abusive sources. 
+
+D. Source Trust Update 
+
+The claim-processing stage in Algorithm 2 relies on the current trust score T topo ,t ij , so this quantity must be updated explicitly over time. As shown in Algorithm 4, node i main-tains trust in each source j with a Beta-style evidence tracker. Positive evidence for j comes from three events: directly observed claims from j about incident edges later match local handshakes, claims from j are corroborated by inde-pendent trusted witnesses, and claims from j remain fresh and internally consistent over time. Negative evidence comes from three events: a claim from j is contradicted by later direct observation, a claim from j is contradicted by a trusted quorum, or j floods stale or conflicting topology updates. A concrete update is 
+
+αt+1  
+
+> ij
+
+= λα tij + wddtij + wcctij + wf f tij , (6) 
+
+βt+1  
+
+> ij
+
+= λβ tij + wxxtij + wq qtij + wsztij , (7) where λ ∈ (0 , 1] is a forgetting factor, d is direct confirmation, 
+
+c is corroboration, f is freshness consistency, x is contradic-tion, q is spam or rate violation, and z is severe conflict with the eventually committed local view. The posterior mean reputation is 
+
+Rt+1  
+
+> ij
+
+= αt+1 
+
+> ij
+
+αt+1  
+
+> ij
+
++ βt+1 
+
+> ij
+
+. (8) The epistemic uncertainty of this reputation is taken from the Beta variance: 
+
+U t+1  
+
+> ij
+
+=
+
+vuut αt+1  
+
+> ij
+
+βt+1 
+
+> ij
+
+(αt+1  
+
+> ij
+
++ βt+1  
+
+> ij
+
+)2(αt+1  
+
+> ij
+
++ βt+1  
+
+> ij
+
++ 1) . (9) The final topology trust score mirrors MURMURA ’s uncertainty penalization principle [4]: the reputation mean is penalized when epistemic uncertainty is high, 
+
+T topo ,t +1  
+
+> ij
+
+= Rt+1  
+
+> ij
+
+· exp  −η max {0, U t+1  
+
+> ij
+
+− τU } . (10) A node is trusted not only when its claims are often correct, but when that correctness is established with enough evidence. A malicious node that alternates between truthful and false claims may retain a moderate mean reputation, but its uncertainty remains high, keeping its topology influence small. 
+
+E. Distributed Local Training and Trust-Aware Collaborator Selection 
+
+The previous modules determine which topology informa-tion is credible and which neighbors remain eligible for collab-oration. The learning procedure itself is decentralized and runs in parallel across nodes. As shown in Algorithm 1, each node performs local training at every epoch, exchanges models or updates only with currently reachable neighbors that survive topology filtering, and then selects a sparse collaborator set for personalized aggregation. At epoch t, node i first performs E local optimization steps on its own data to obtain an intermediate model 
+
+θt+ 12 
+
+> i
+
+= LocalUpdate( θti , Di, E ), (11) where Di is the local dataset. After topology filtering, node 
+
+i exchanges candidate models or updates only with cur-rently reachable and topology-screened neighbors. For those 7
+
+neighbors, it computes the MURMURA model compatibility score smodel ,t ij from local validation accuracy and epistemic uncertainty [4]. Let atij denote the validation accuracy of peer j’s model on node i’s local validation data, and let 
+
+¯utij denote the corresponding mean epistemic uncertainty. Following MURMURA , the epistemic uncertainty for a K-class evidential model is 
+
+u = KS , (12) where S = PKk=1 αk is the Dirichlet strength. Averaging this quantity over node i’s validation samples for peer j gives ¯utij .The base compatibility score is then defined as 
+
+stij, base =  1 − ¯utij 
+
+   waatij + (1 − wa) , (13) where wa ∈ [0 , 1] controls the contribution of validation accuracy. The final MURMURA -style compatibility score applies an uncertainty penalty when the mean uncertainty exceeds a threshold τu:
+
+smodel ,t ij =
+
+(stij, base exp  −(¯ utij − τu) , ¯utij > τ u,stij, base , ¯utij ≤ τu. (14) The final collaboration score is 
+
+qtij = λ1smodel ,t ij + λ2T topo ,t ij + λ3 ˆptij − λ4ccomm ,t ij . (15) The collaborator set is then 
+
+Cti = TopB j qtij , (16) subject to an edge budget B, as in budgeted decentralized personalized graph learning [2]. Node i aggregates only the intermediate models or updates received from neighbors in 
+
+Cti , together with its own model, using MURMURA -style trust-aware weighting: 
+
+θt+1  
+
+> i
+
+= wtii θt+ 12 
+
+> i
+
++ X
+
+> j∈Cti
+
+wtij θt+ 12 
+
+> j
+
+, X 
+
+> j∈Cti∪{ i}
+
+wtij = 1 , (17) where the aggregation weights depend on the selected col-laboration scores and the MURMURA trust-normalization rule. The collaborator set Cti in this final step is the trust-screened set: a candidate j enters Cti only if it passes the model-compatibility gate smodel ,t ij ≥ γ s model ,t ii , the topology-trust gate T topo ,t ij ≥ τtrust , and a lightweight norm-sanity check 
+
+∥θt+ 12 
+
+> j
+
+∥ ≤ κnorm ∥θt+ 12 
+
+> i
+
+∥ that rejects large-norm model-poisoning outliers; combined with the bounded-domain As-sumption 9, this gate directly enforces the bounded-Byzantine-norm condition of Assumption 8 with ΘB = κnorm R.Crucially, this screening enters the aggregation weights , not merely the choice of which peers to contact: a peer that survives contact but fails screening receives weight zero, which is what drives the surviving Byzantine weight δmax to zero in practice. This final stage keeps the topology and model layers dis-tinct: T topo ,t ij answers whether topology information from j
+
+should be believed, ˆptij whether the link is currently usable, and smodel ,t ij whether j is useful for personalization. All nodes train in parallel, but only credible, reachable, and useful neighbors influence the local model. V. D ISTRIBUTED SYSTEM IMPLEMENTATION 
+
+The theoretical protocol described in Section IV requires a concrete execution substrate: independent client processes that exchange messages, maintain local state, and synchronise rounds without any central coordinator. This section describes the system architecture constructed to run DMTT experiments on real hardware, and to serve as a reusable open-source extension of the MURMURA framework. 
+
+A. Architecture Design Principles 
+
+Three principles guided our design. 
+
+a) No coordinator in the learning path. : A central coordinator introduces a single point of failure and contradicts the DFL threat model, since a compromised coordinator could suppress or fabricate round signals, undermining the decen-tralised guarantee. To eliminate this dependency, round k at node i begins at the absolute wall-clock time 
+
+tk = tstart + k · ∆, (18) where tstart is a shared epoch announced once at experiment start and ∆ is the round budget. Each node independently sleeps until tk and then proceeds without waiting for any signal. A passive monitor, implemented as a PULL-only process, collects per-round accuracy and loss metrics without sending any messages. Because it has no send socket, it cannot influence the learning protocol, and its failure leaves training unaffected. 
+
+b) ZeroMQ P2P transport. : Model weights are ex-changed peer-to-peer using ZeroMQ PUSH/PULL socket pairs. Each node i binds one PULL socket (its receiving endpoint) and maintains one PUSH socket per current collab-orator. This design avoids the fixed process-group requirement of torch.distributed and permits the dynamic collabo-rator set Cti to change every round without re-initialisation. For single-machine experiments, all sockets use IPC transport; for multi-machine deployments, the same code switches to TCP by changing a single configuration field. 
+
+c) Deterministic shared mobility model. : The time-varying graph Gt must be consistent across all node processes without inter-process communication. This is achieved by defining Gt through a random-walk mobility model param-eterised by a shared seed: given the same seed, every process computes identical node positions and therefore identical edge sets at every round. 
+
+B. ZeroMQ Socket Layout 
+
+Each node process uses three logical channels, as shown in Fig. 1.  
+
+> •
+
+PULL (bind): Receives MODEL_STATE and 
+
+TOPO_CLAIM messages from neighbours. A single socket handles both message types, distinguished by a 1-byte type field in the header.  
+
+> •
+
+PUSH ×| Cti | (connect): Sends MODEL_STATE and 
+
+TOPO_CLAIM to each current collaborator. Sockets are created on first use so that the collaborator set can change without re-binding. 8        
+
+> Fig. 1. Updated MURMURA architecture. The unchanged simulation backend (single OS process, shared memory) and the new distributed backend, in which each client and the passive monitor run as independent OS processes. Model weights travel via MODEL_STATE PUSH/PULL pairs; DMTT nodes additionally exchange signed neighbourhood observations as TOPO_CLAIM messages. Round boundaries are set by a shared wall-clock epoch; no coordinator is involved. Byzantine nodes send both poisoned model weights and falsified topology claims.
+> •
+
+PUSH (monitor, connect): Sends METRICS to the pas-sive monitor after each round evaluation. The monitor never replies. All messages use a two-frame ZMQ multipart format: 
+
+[ msg type (1 B) ∥ sender id (4 B) ] 
+
+| {z }
+
+> frame 0 (header)
+
+[ payload ]
+
+| {z }
+
+> frame 1
+
+Three message types are defined: MODEL_STATE (serialised PyTorch state dict), METRICS (pickled evaluation dict con-taining a round_idx key for the monitor’s ordering buffer), and TOPO_CLAIM (pickled neighbourhood assertion used exclusively by DMTT nodes). 
+
+C. Mobility Model 
+
+Client mobility is modelled as a bounded random walk on a 2-D torus of side length A. At each round, the position of client i is updated as 
+
+rt+1  
+
+> i
+
+=  rti + δti
+
+ mod A, (19) where δti ∼ Uniform([ −vmax , v max ]2) is an independent per-round displacement drawn from a shared random generator initialised with the shared seed. An edge (i, j ) ∈ E t exists whenever the torus distance between rti and rtj falls below the communication range rc:
+
+(i, j ) ∈ E t ⇐⇒ dtorus (rti, rtj ) < r c. (20) An optional connectivity guarantee connects any isolated node to its nearest peer, ensuring that Assumption 4 (uniform connectivity) is not violated by unlucky mobility realisations. Because both the initial positions and the displacement sequence are derived deterministically from the shared seed, every node process reconstructs Gt locally without any out-of-band communication, at the cost of maintaining one random-generator state per round. 
+
+D. DMTTNodeProcess Round Protocol 
+
+The DMTTNodeProcess class instantiates Algorithm 1 as a concrete ZeroMQ process. Each round it: sleeps until the wall-clock deadline tk; trains locally; constructs and pushes 
+
+MODEL_STATE + TOPO_CLAIM to the previous collaborator set; collects responses until the round boundary; updates link-reliability EMAs; evaluates received models to compute 
+
+smodel ,t ij ; applies the oracle-free self-inclusion check—if j
+
+communicated with i this round then j’s claim must include 
+
+i—to accumulate dtij (confirmations) and xtij (contradictions) for the Beta trust update; applies the trust-screened aggregation rule of Section IV-E; updates Cti ; and pushes evaluation met-rics to the passive monitor. The dominant per-round overhead relative to vanilla NodeProcess is |Ct−1 
+
+> i
+
+| forward passes for foreign-model evaluation, scaling as O(|Ct−1 
+
+> i
+
+| · |D test  
+
+> i
+
+|/b ).
+
+E. Topology-Liar Attack Implementation 
+
+The TopologyLiarAttack concretises the adversary model of Section III-C. A Byzantine node b mounts an omis-sion attack : it sends a falsified TOPO CLAIM containing only other Byzantine coalition members and no honest neighbours, 
+
+bN tb = B \ { b}, (21) where B is the set of all Byzantine nodes. The omission is detectable without any shared topology knowledge. Because node i sent a MODEL_STATE to b this round, the directed link (i, b ) is established at the transport layer; consequently i9
+
+is entitled to expect its own identity in b’s claim. Since i / ∈ bN tb ,the self-inclusion check fires a contradiction xtib += 1 at every round, gradually raising βib and suppressing T topo ,t ib below the gate threshold τtrust .In addition to topology falsification, the liar option-ally applies a Gaussian model-state attack (configurable via 
+
+model_attack_type: gaussian ), matching the com-bined threat model described in Section III-C. VI. C ONVERGENCE ANALYSIS AND BYZANTINE BOUNDS 
+
+This section presents the theoretical analysis of DMTT. The goal is not to prove exact Byzantine topology discovery. Instead, the analysis focuses on the learning dynamics induced by the trusted feasible graph maintained by each client. The presented analysis is consistent with existing works on decen-tralized optimization over time-varying graphs [14], [15], [16], topology–heterogeneity coupling [17], and Byzantine-resilient decentralized learning [24], [33]. All proofs are deferred to the appendix. 
+
+A. Effective collaboration matrix 
+
+Continuing the notation of Sections III–IV: W t = [ wtij ]Ni,j =1 
+
+is the screened mixing matrix induced by the active collabo-rator sets {Cti }, with wtij = 0 whenever j / ∈ Cti ∪ { i}. DMTT is thus decentralized learning over a time-varying screened graph. In personalized FL, perfect screening severs edges between clients with highly dissimilar data, partitioning the network into disjoint components of compatible clients. To analyze convergence under perfect screening (Theorems 1 and 2), we focus on an arbitrary isolated component C; letting N = |C| we define the component-average iterate ¯θt = 1
+
+> N
+
+P 
+
+> i∈C
+
+θti and the component objective f (x) = 1
+
+> N
+
+P 
+
+> i∈C
+
+Fi(x). This correctly reflects the personalized DFL setting: the protocol filters the graph so that clients optimize their compatible component objective f rather than the true global average [14]. 
+
+B. Standing assumptions and theory-local notation 
+
+Beyond the symbols of Sections III–IV, the analysis uses 
+
+fW t (ideal honest mixing matrix), p ∈ (0 , 1] (consensus-rate parameter of the screened graph sequence [14]), τ 2scr 
+
+(screened neighborhood heterogeneity), ∆2scr (screening-error level), δmax (maximum surviving Byzantine weight after screening), G (uniform stochastic-gradient second-moment bound, introduced with Assumption 6), and ΘB (uniform Byzantine-message norm bound, introduced with Assump-tion 8), with M := G + LΘB .We collect below the four assumptions required by the consensus and descent lemmas (deferred to the appendix); Theorems and propositions later in the section introduce additional assumptions only where they are first needed. The link-reliability update, witness-weight rule, Beta trust update, edge-confidence rule, and collaborator score are treated as part of the DMTT mechanism, not as standalone assumptions. 
+
+a) Assumption 1: Smooth local objectives.: For each client i, the function Fi is L-smooth: 
+
+∥∇ Fi(x) − ∇ Fi(y)∥ ≤ L∥x − y∥, ∀x, y ∈ Rd.
+
+b) Assumption 2: Unbiased stochastic gradients with bounded variance.: Each client has access to a stochastic gradient oracle gi(x, ξ i) such that 
+
+E[gi(x, ξ i)] = ∇Fi(x), E∥gi(x, ξ i) − ∇ Fi(x)∥2 ≤ σ2.
+
+c) Assumption 3: Doubly stochastic screened mixing.: At each epoch t, the DMTT aggregation step produces a doubly stochastic matrix W t = [ wtij ] satisfying 
+
+W t1 = 1, 1⊤W t = 1⊤, wtij ≥ 0,
+
+with the screened-support property wtij = 0 if j /∈ Cti ∪{i}. In practice, this can be enforced by symmetrizing the trust-weighted scores, or by adopting a Metropolis–Hastings reweighting over the screened graph. A fully asymmetric collaboration matrix is also supported, but would require a push-sum or gradient-tracking treatment in place of the analysis below [15], [16]. 
+
+d) Assumption 4: Consensus contraction of the screened honest graph.: Let J = 1 
+
+> N
+
+11 ⊤. There exists p ∈ (0 , 1] such that for every t ≥ 0 and every X ∈ RN ×d with 1⊤X = 0 ,
+
+∥(W t − J)X∥2 
+
+> F
+
+≤ (1 − p)∥X∥2 
+
+> F
+
+.
+
+The constant p is the consensus-rate parameter of the screened graph sequence. This per-step contraction is stronger than the 
+
+Bconn -window connectivity formulation of [14]; the extension to the window case follows the same template with constants scaling as 1/p → Bconn /p .The convergence proof relies on standard structural invari-ants, a consensus contraction bound, and a descent lemma over the screened graph. These intermediate lemmas are detailed in the appendix. 
+
+C. Main theorem under perfect screening Perfect screening means that the topology layer correctly excludes all Byzantine clients ( δmax = 0) and produces the ideal honest mixing matrix (∆scr = 0). Under this condition, DMTT reduces to time-varying decentralized SGD on the screened honest graph, with one local SGD step per round ( E = 1 ). One additional assumption is needed beyond the standing ones: heterogeneity must be uniformly bounded across screened collaborators. 
+
+a) Assumption 5: Bounded screened heterogeneity.: 
+
+There exists τ 2scr ≥ 0 such that, for all x ∈ Rd,
+
+1
+
+N
+
+X
+
+> i∈C
+
+∇Fi(x) − ∇ f (x) 2 ≤ τ 2scr .
+
+The subscript “scr” indicates that this constant is measured over the population that participates in screened aggregation under DMTT. Corollary 1 discusses how MURMURA -style screening can reduce this constant relative to the heterogeneity over the raw feasible graph [17]. 
+
+Theorem 1 (Convergence under perfect screening, E = 1 ).
+
+Suppose Assumptions 1–5 hold, screening is perfect ( δmax = 0 
+
+and ∆2scr = 0 ), and the iterates are initialized at consensus (θ0 
+
+> i
+
+= ¯θ0 for all i). If the stepsize satisfies 
+
+η ≤ p
+
+8L ,10 
+
+then for any horizon T ≥ 1,
+
+1
+
+T 
+
+> T−1
+
+X
+
+> t=0
+
+E ∇f (¯θt) 2 ≤ 4 f (¯θ0) − f ⋆
+
+ηT + 2Lη σ 2
+
+N
+
++ 64 L2 η2 τ 2scr + σ2
+
+p2 ,
+
+(22) 
+
+where f ⋆ = inf x f (x). The proof is given in the appendix. Remark 1 (Interpretation of the rate) . The three terms in (22) are the optimization error from initialization ( O(1 /T )), the stochastic-noise floor (∝ σ2/N ), and the heterogeneity-and-topology term (∝ (τ 2scr + σ2)/p 2). Choosing η =min  p 
+
+> 8L
+
+,
+
+q N (f 0−f ⋆) 
+
+> Lσ 2T
+
+yields an asymptotic convergence rate of O  1√N T + N (τ 2scr +σ2)
+
+> p2T
+
+. While state-of-the-art analyses can tighten the second term to O(1 /(pT )) using complex potential functions [14], this standard analysis suffices to explicitly show how the DMTT screening filter accelerates convergence by reducing the topological heterogeneity τ 2scr .
+
+Remark 2. In the appendix, we extend this result to E ≥ 1
+
+local steps (Theorem 2) under an additional bounded-gradient assumption (E∥gi∥2 ≤ G2); local updates introduce an 
+
+O(η2L2G2/p 2) drift penalty but reduce the stochastic noise floor to σ2/(N E ).
+
+D. Why screening helps 
+
+The bound (22) shows that convergence depends heavily on the data heterogeneity τ 2scr . DMTT explicitly shrinks this constant by severing edges to model-incompatible peers (large 
+
+¯utij ). While dropping edges may reduce the graph’s consensus rate p, the reduction in heterogeneity typically dominates. 
+
+Corollary 1 (Screening improves the bound) . Let Vraw be the full, unfiltered network with objective fraw , resulting in global heterogeneity τ 2raw and consensus rate praw . Suppose the DMTT screening mechanism isolates a highly compatible component C, shifting the target objective to f as defined above. If the screening yields 
+
+τ 2scr ≤ τ 2raw and pscr ≥ praw − ϵ
+
+for some ϵ ≥ 0, then the heterogeneity-and-topology term in (22) satisfies 
+
+64 L2η2 τ 2scr + σ2
+
+p2scr 
+
+≤ 64 L2η2 τ 2raw + σ2
+
+(praw − ϵ)2 .
+
+By filtering out incompatible peers, DMTT deliberately aban-dons the global stationary point in favor of a personalized component stationary point, achieving a tighter convergence bound as long as the reduction in data heterogeneity outpaces the loss in subgraph connectivity. E. Perturbation under imperfect screening 
+
+We close the analysis with the bound that quantifies the cost of imperfect screening. The proposition makes precise the two terms that appear when (i) the screened matrix differs from the ideal honest mixing ( ∆scr > 0), and (ii) Byzantine peers retain residual aggregation weight ( δmax > 0). Three additional assumptions are needed: a bounded second moment of the stochastic gradient (which strengthens Assumption 2 and controls the local drift used in the perturbation term), a bound on the screening error and surviving Byzantine influence, and a bound on the norm of Byzantine messages. Without the last, Byzantine influence cannot be bounded in general because adversarial peers can broadcast arbitrarily large updates. 
+
+a) Assumption 6: Bounded gradient second moments.: 
+
+There exists G ≥ 0 such that for all i ∈ V , t ≥ 0, and points 
+
+x visited by the iterates, 
+
+E∥gi(x, ξ i)∥2 ≤ G2.
+
+This is stronger than Assumption 2 (bounded variance ); note 
+
+G2 ≥ σ2 + sup x ∥∇ f (x)∥2. In practice, uniform Lipschitz regularization or gradient clipping enforces it. Assumption 6 is invoked in Proposition 1 below (through ηG in the drift magnitude ρ) and in the extension to E > 1 local steps (Theorem 2, appendix). 
+
+b) Assumption 7: Bounded screening error and surviving Byzantine influence.: Let fW t denote the ideal honest mixing matrix induced by the true feasible graph, and let W t denote the actual DMTT screened matrix. Assume 
+
+E∥W t − fW t∥2 
+
+> F
+
+≤ ∆2scr .
+
+Also define 
+
+δmax = sup 
+
+> t
+
+max 
+
+> i∈H
+
+X
+
+> j∈B
+
+wtij ,
+
+and assume δmax is uniformly bounded and sufficiently small relative to the connectivity of the screened honest graph. 
+
+c) Assumption 8: Bounded Byzantine message norms.: 
+
+There exists ΘB ≥ 0 such that, for every Byzantine client 
+
+j ∈ B and every epoch t,
+
+θB,t + 12 
+
+> j
+
+≤ ΘB
+
+almost surely, where θB,t + 12 
+
+> j
+
+denotes the (possibly adversarial) value broadcast by Byzantine peer j in round t. This assump-tion is invoked only in Proposition 1. It is not a consequence of Assumptions 1–7. The norm-sanity gate of Section IV-E provides a concrete enforcement: any peer j that survives to aggregation satisfies ∥θj ∥ ≤ κnorm ∥θi∥. Under Assumption 9 (∥θi∥ ≤ R for all i, t ), every surviving Byzantine peer satisfies 
+
+∥θj ∥ ≤ κnorm R, giving ΘB = κnorm R as a hard bound for peers not dropped by the gate. 
+
+d) Assumption 9: Bounded domain.: The local iterates are confined to a bounded domain such that for all i ∈ C and 
+
+t ≥ 0, ∥θti ∥ ≤ R. In practice, this is enforced via projected SGD or ℓ2 weight decay. 
+
+Proposition 1 (Imperfect screening) . Suppose Assumptions 1– 9 hold over the screened component C of size N . Let fW t be the ideal doubly stochastic matrix over C, and let W t be the actual DMTT submatrix. Assume E∥W t −fW t∥2 
+
+> F
+
+≤ ∆2scr and let δmax 
+
+bound the total weight any honest node assigns to Byzantine peers. Define the worst-case per-step drift magnitude: 
+
+ρ := ∆ scr (R + ηG ) + δmax ΘB .11 
+
+If η ≤ p 
+
+> 24 L
+
+and E = 1 , then for any horizon T ≥ 1:
+
+1
+
+T 
+
+> T−1
+
+X
+
+> t=0
+
+E ∇f (¯θt) 2 ≤ 4( f 0 − f ⋆)
+
+ηT + 4Lησ 2
+
+N
+
++ 256 L2η2(τ 2scr + σ2/4) 
+
+p2
+
++ 48 L2
+
+p2 ρ2 +
+
+ 8
+
+η2 + 4Lη
+
+
+
+ρ2.
+
+(23) 
+
+Remark 3 (Interpretation) . The first three terms of (23) match the Byzantine-free rate of Theorem 1 up to constants; the final term, driven by ρ2, isolates the topology-screening error 
+
+∆scr and the surviving Byzantine influence δmax . Because the Byzantine message induces an additive shift in param-eter space rather than gradient space, the penalty scales as 
+
+O(ρ2/η 2): unlike standard SGD, shrinking η does not drive the error to zero — an arbitrarily small stepsize would let the unscaled Byzantine parameter drift dominate the gradient sig-nal, so a fixed stepsize floor is essential in robust decentralized learning. VII. E XPERIMENTAL EVALUATION 
+
+A. Conditions and Baselines 
+
+The controlled comparison isolates the contributions of dynamic topology and of the DMTT trust protocol through three primary conditions, all subjected to the same combined topology-liar + Gaussian attack: 
+
+C1. FedAvg (static). Fixed fully-connected topology; plain FedAvg over all neighbours; no trust. This is the threat faced by unmodified decentralized averaging when the topology is wrongly assumed static. 
+
+C2. FedAvg (dynamic). Dynamic topology Gt from the mo-bility model; each node averages over all direct neigh-bours N dir ,t i with no trust filtering. Comparing C1 and C2 isolates the effect of mobility alone. 
+
+C3. DMTT. Same mobility model as C2 with the full DMTT protocol active: link-reliability EMA, Beta source-trust with TOPO_CLAIM verification, and the trust-screened, 
+
+qij -weighted aggregation of Section IV-E. Comparing C2 and C3 isolates the benefit of trust. To position DMTT against the state of the art in Byzantine-resilient decentralized aggregation, we additionally evaluate three robust aggregators over the same dynamic graph and attack: Krum (multi-Krum distance selection) [34], BAL-ANCE (adaptive distance filtering) [25], and UBAR (two-stage distance-plus-loss filtering) [22]. We first validated the distributed ZeroMQ backend against the simulation backend at 
+
+10 nodes across three Byzantine fractions and two seeds each, running DMTT and FedAvg (dynamic) on a real Melbourne Research Cloud (MRC) testbed with wall-clock synchronisa-tion and IPC transport. The two backends produce qualitatively identical convergence trajectories across all tested conditions: DMTT converges to high accuracy in both cases, and FedAvg collapses to chance under attack in both cases. The mean final honest-node accuracy (last 5 of 20 rounds) agrees within 0.07 
+
+across all condition and Byzantine fraction pairs (convergence curves in the appendix). Having established that the simulation faithfully reproduces real distributed behaviour, we ran all main experiments at 100 nodes on the simulation backend, which executes the protocol logic in a single process, making the full sweep across 8 Byzantine fractions and 3 seeds per condition deterministic and tractable. 
+
+B. Datasets and Models a) UCI HAR.: We first evaluate on UCI HAR [35], the smartphone human-activity-recognition benchmark used in the original MURMURA study: 561 hand-crafted inertial features per window and six activity classes (walking, walking upstairs, walking downstairs, sitting, standing, lying). The 
+
+7,352 training instances are partitioned across N = 100 
+
+mobile clients with a Dirichlet distribution of concentration 
+
+α = 0 .5, producing realistic non-IID local distributions; each client holds out 20% of its partition as a local test set on which all reported accuracies are computed. Every client trains a two-hidden-layer perceptron ( 256 –128 units, dropout 
+
+0.3) with a Dirichlet (evidential) output head, optimised with the evidential loss of [4], [13]. Chance accuracy on the six balanced classes is 16 ≈ 0.167 .
+
+b) PAMAP2.: To confirm generality we additionally eval-uate on PAMAP2 [36], a body-worn sensor benchmark with richer temporal structure and finer-grained activity classes: nine subjects performed twelve physical activities (lying, sitting, standing, walking, running, cycling, Nordic walking, ascending/descending stairs, vacuuming, ironing, rope jump-ing) while wearing inertial measurement units on hand, chest, and ankle (100 Hz , 13 features per IMU after excluding invalid orientation columns) together with a wrist heart-rate monitor. Raw sensor streams are segmented into 50 -sample (0.5-second) windows with 25 -sample stride; each window is flattened to a 2,000 -dimensional feature vector ( 50 × 40 ). This representation captures within-activity dynamics while remaining computationally comparable to UCI HAR’s pre-engineered 561 -feature windows. The roughly 38 ,800 win-dows are partitioned across the same N = 100 clients using a Dirichlet α = 0 .5 split; each client trains an evidential perceptron ( 256 –128 units, dropout 0.3) of the same depth as the UCI HAR model. Because PAMAP2 has 12 balanced classes, chance accuracy is 112 ≈ 0.083 , and any method above 
+
+0.50 is meaningfully learning. The model-compatibility score 
+
+smodel  
+
+> ij
+
+is computed identically on both datasets: local valida-tion accuracy combined with epistemic vacuity uncertainty. 
+
+C. Results 1) UCI HAR: a) Trust-aware screening is decisive.: Figure 2 (top two rows) shows final honest-node accuracy for all methods across Byzantine fractions from 10% to 80% (mean ± std over three seeds, averaged over the last 10 of 50 rounds). Both non-robust baselines collapse to chance at all fractions: FedAvg (static) and FedAvg (dynamic) never exceed 0.22 , confirming that even a single σ = 10 Gaussian-poisoned model averaged into the aggregate destroys learning, regardless of graph type. 
+
+DMTT instead sustains honest accuracy above 0.862 at 10% –
+
+80% Byzantine, approximately a 5× improvement over non-robust baselines at all fractions. 12             
+
+> Fig. 2. Honest-node accuracy versus round under the combined topology-liar + Gaussian ( σ=10 ) attack (mean ±std over three seeds). Top two rows : UCI HAR ( 6classes, chance = 0 .167 ). Bottom two rows : PAMAP2 ( 12 classes, chance = 0 .083 ). FedAvg collapses to chance at all fractions on both datasets. Krum and BALANCE each fail to consistently clear the local-only bar. UBAR is competitive at low Byzantine fractions but collapses above 50% . DMTT sustains high honest-node accuracy across all 10 –80% fractions on both datasets, remaining at or above local-only throughout.
+
+b) Graceful degradation at extreme Byzantine fractions.: 
+
+At low-to-moderate fractions ( 10 –30% Byzantine), DMTT significantly outperforms Local-only (0.920 –0.923 ), demon-strating that DMTT extracts genuine collaborative benefit from honest neighbours while screening adversaries. As the Byzan-tine fraction rises above 40% , the number of reachable honest neighbours per node in the dynamic graph diminishes, so the screened aggregate converges toward the local model and the collaboration surplus over local-only narrows. Accuracy is non-monotone in the Byzantine fraction: DMTT dips to 
+
+0.862 ± 0.061 at 70% before recovering to 0.908 ± 0.031 
+
+at 80% . This reflects the fallback-to-local-only mechanism: at 80% Byzantine, trust gates exclude nearly all adversarial neighbours and the effective aggregate is almost entirely the local model; since local-only accuracy ( 0.927 ) is high, performance recovers relative to 70% . At 70% the honest-neighbour pool is still large enough that the system attempts more collaboration, but the high adversarial density makes clean peer selection harder, yielding a lower mean with higher variance ( σ=0 .061 vs. 0.031 at 80% ). At 80% Byzantine ( 80 
+
+of 100 nodes adversarial), DMTT ( 0.908 ±0.031 ) is within one standard deviation of Local-only ( 0.927 ± 0.035 ) and clearly superior to BALANCE ( 0.191 ) and UBAR ( 0.225 ), confirming the near-safety property: even when honest nodes are over-whelmed by adversaries, trust-screened DMTT degrades to approximately local-only performance rather than collapsing 13                                                                
+
+> TABLE II EXPERIMENTAL HYPERPARAMETERS . P RIMARY METRIC :MEAN HONEST -NODE ACCURACY ON EACH CLIENT ’S HELD -OUT LOCAL TEST PARTITION ,AVERAGED OVER THE FINAL 10 OF 50 ROUNDS .
+> Parameter Value
+> Number of clients N100 Datasets UCI HAR, PAMAP2 Heterogeneity Dirichlet α= 0 .5
+> Byzantine fraction 10 –80% (10–80 nodes) Attack type Topology liar +Gaussian (σ= 10 )Training rounds 50 Local epochs E2Batch size / learning rate 32 /0.01
+> Seeds {42 ,43 ,44 }
+> Mobility model (dynamic conditions)
+> Arena A100 ×100
+> Communication range rc40 Max speed vmax 8 per round
+> DMTT protocol (C3)
+> Budget B5EMA rate ρ0.1 Forgetting factor λ0.9 Trust weights (wd, w x)(1 .0,1.0)
+> Uncertainty threshold /penalty
+> (τU, η )(0 .3,5.0)
+> Score weights (λ1, λ 2, λ 3, λ 4)(0 .4,0.3,0.2,0.1)
+> Model-compat. gate γ0.6
+> Topology-trust gate τtrust 0.25
+> Norm-sanity ratio 5×
+> Self-weight ω0.5
+
+to chance. 
+
+c) Dedicated robust aggregators fail to clear the local-only bar.: By the local-only bar, all three dedicated robust baselines fail. Krum is competitive at 10 –30% Byzantine (0.768 –0.887 ) but degrades at 40 –60% (0.734 –0.819 ), below both DMTT ( 0.880 –0.907 ) and local-only ( 0.919 –0.922 ), be-cause topology-liar poisoning causes it to select compromised models that pass the distance filter. At 70% Byzantine, Krum’s performance is variable across seeds (ranging from 0.805 to 
+
+0.942 , sometimes exceeding local-only and sometimes falling below it). At 80% Byzantine, Krum’s output matches local-only exactly on every seed (mean accuracy difference: 0.000 ). With 80 of 100 nodes adversarial, Multi-Krum’s nearest-neighbour count collapses for any realistic neighbourhood size, so Krum selects only the single closest model. Under 
+
+σ = 10 Gaussian noise the honest models cluster tightly and the selected peer is invariably an honest one, but aggregating with a single peer under Dirichlet α = 0.5 non-IID data provides negligible collaborative gain, yielding accuracy sta-tistically indistinguishable from local-only. This is the same graceful degradation toward local-only that DMTT exhibits at extreme fractions, reached here through a different mechanism. 
+
+BALANCE degrades catastrophically ( 0.537 at 40% , 0.147 
+
+at 60% , 0.078 at 70% ), driven by the brittleness of adaptive distance thresholds under simultaneous topology manipulation and non-IID data. UBAR degrades more gradually but still falls below local-only above 50% Byzantine. DMTT is the only method that consistently clears the local-only bar at all fractions from 10% to 80% .
+
+d) Byzantine influence is screened to zero.: All poisoned peers are excluded by the three aggregation gates: δmax = 0 
+
+in every round, even at Byzantine fractions up to 80% .Under 30% Byzantine participation, honest-peer trust rises to 
+
+T topo  
+
+> ij
+
+≈ 0.986 by rounds 40 –50 , whereas topology liars fall to 0.012 , producing a 0.974 separation via the oracle-free self-inclusion check. 
+
+2) PAMAP2: We next evaluate on PAMAP2 to test whether DMTT’s trust mechanisms generalize to richer sensor data with finer-grained activity classes and raw temporal windows, a setting that stresses distance-based aggregators more severely than UCI HAR’s pre-engineered features. 
+
+a) Generalisation to richer sensor data.: Figure 2 (bot-tom two rows) shows the same comparison on PAMAP2 ( 12 
+
+classes, chance = 0 .083 ). Both FedAvg variants collapse to near-chance at all Byzantine fractions ( 0.064 –0.095 , indis-tinguishable from chance). DMTT sustains honest accuracy above 0.829 across all Byzantine concentrations, a 9×–13 ×
+
+lift over the non-robust baselines. Crucially, DMTT clears the local-only bar ( 0.873 –0.823 ) at every Byzantine fraction from 
+
+10% to 80% ; because PAMAP2’s twelve-class task is harder, the collaboration benefit persists even at extreme fractions. 
+
+BALANCE collapses entirely on PAMAP2 (reaching only 
+
+0.124 –0.170 across all fractions, near-chance on a 12-class task), confirming that its distance thresholds cannot tolerate simultaneous topology manipulation and raw-window feature heterogeneity. UBAR starts competitively ( 0.894 at 10% ) but collapses at 50% Byzantine (mean 0.395 ± 0.350 , highly variable) and reaches chance at 70% –80% . The Beta trust sep-aration replicates exactly: honest peers reach T topo  
+
+> ij
+
+≈ 0.997 
+
+while liars are suppressed to T topo  
+
+> ij
+
+≈ 0.022 (identical to UCI HAR), confirming that the trust layer is insensitive to the choice of feature representation. 
+
+b) Convergence.: Figure 2 (bottom two rows) shows PAMAP2 learning trajectories across all eight Byzantine frac-tions. BALANCE fails near-chance throughout at every frac-tion, confirming that its adaptive distance thresholds cannot tolerate simultaneous topology manipulation and raw-window feature heterogeneity. UBAR converges well at low Byzantine fractions but collapses above 50% , exhibiting high seed-to-seed variance at that threshold. DMTT maintains clear separa-tion from all baselines at every fraction, remaining at or above the local-only reference throughout. The same qualitative pat-tern holds as on UCI HAR, but with a sustained collaboration surplus even at extreme fractions due to PAMAP2’s twelve-class task difficulty. 
+
+D. Hyperparameter Sensitivity 
+
+A practical concern for any trust-based protocol is whether performance depends on careful parameter tuning. Table III addresses this by varying one DMTT hyperparameter at a time while holding all others at the default, across four Byzantine fractions on both datasets. The four parameters tested cover the trust dynamics ( λ,the Beta forgetting factor), the link-reliability estimator ( ρ,14 
+
+TABLE III DMTT HYPERPARAMETER SENSITIVITY (MEAN ± STD OVER 3 SEEDS , 
+
+> LAST
+
+10 OF 50 ROUNDS , α=0 .5, COMBINED TOPOLOGY -LIAR +GAUSSIAN ATTACK ). O NE PARAMETER IS VARIED AT A TIME ; ALL OTHERS REMAIN AT THE DEFAULT .                                                                                                                                  
+
+> Configuration 10% Byz 30% Byz 50% Byz 80% Byz
+> Default (λ=0 .90 , ρ =0 .10 , τ =0 .25 , B =5 )0.960 ±0.014 0.936 ±0.015 0.880 ±0.018 0.907 ±0.025
+> λ= 0 .70 (faster trust decay) 0.960 ±0.015 0.940 ±0.012 0.887 ±0.012 0.908 ±0.025
+> λ= 0 .95 (slower trust decay) 0.960 ±0.015 0.940 ±0.012 0.886 ±0.012 0.908 ±0.025
+> ρ= 0 .05 (slower link EMA) 0.959 ±0.015 0.940 ±0.012 0.885 ±0.010 0.908 ±0.025
+> ρ= 0 .30 (faster link EMA) 0.960 ±0.015 0.940 ±0.012 0.885 ±0.011 0.908 ±0.025
+> τtrust = 0 .10 (loose gate) 0.960 ±0.015 0.940 ±0.012 0.886 ±0.012 0.908 ±0.025
+> τtrust = 0 .50 (strict gate) 0.960 ±0.015 0.940 ±0.012 0.886 ±0.012 0.908 ±0.025
+> B= 3 (fewer collaborators) 0.956 ±0.018 0.936 ±0.011 0.886 ±0.012 0.908 ±0.025
+> B= 7 (more collaborators) 0.959 ±0.016 0.939 ±0.011 0.886 ±0.012 0.908 ±0.025
+
+the EMA smoothing rate), the topology-trust gate threshold (τtrust ), and the collaborator budget ( B). Across all eight variants, honest-node accuracy stays within ±0.005 of the default at every Byzantine fraction. The forgetting factor λ can be raised from 0.70 to 0.95 with no measurable effect, because topology-liar contradictions accumulate rapidly at every decay rate: even with λ = 0 .70 , a liar that falsifies two neighbours per round reaches a suppressed trust score within a handful of rounds. The EMA rate ρ is similarly irrelevant, as direct link quality is perfectly observable under the shared mobility model and does not require smoothing on any particular timescale. The trust gate threshold τtrust can be relaxed to 0.10 or tightened to 0.50 without loss: Byzantine nodes are driven to 
+
+T topo  
+
+> ij
+
+≲ 0.02 after trust convergence, well below even the loose threshold. Reducing the budget to B = 3 produces a small drop at 10% Byzantine ( 0.956 vs. 0.960 ) because the node has fewer honest collaborators available, but the difference closes entirely at higher Byzantine fractions where the feasible collaborator pool is already constrained. VIII. C ONCLUSIONS AND FUTURE WORK 
+
+We presented DMTT, a protocol that extends MURMURA 
+
+to dynamic network topologies under adversarial topology-manipulation attacks. The theoretical analysis shows that DMTT confines Byzantine influence to a bounded resid-ual δmax in the mixing matrices, which shrinks as the Beta-evidence trust mechanism accumulates observations. 
+
+MURMURA was also redesigned into a production-ready dis-tributed framework with coordinator-free wall-clock synchro-nisation (Eq. (18)), ZeroMQ peer-to-peer transport, a deter-ministic mobility model (Eqs. (19)–(20)), and an omission topology-liar attack (Eq. (21)) detectable via an oracle-free self-inclusion check. Empirically, on UCI HAR and PAMAP2 across 100 mobile clients under combined topology-liar and Gaussian attacks, DMTT sustained honest-node accuracy above 0.862 on UCI HAR and 0.829 on PAMAP2 at every Byzantine fraction from 
+
+10% to 80% , while static and dynamic FedAvg collapsed to chance. Dedicated robust aggregators (Krum, BALANCE, UBAR) all failed to consistently beat the local-only base-line: Krum degraded at 40 –60% Byzantine ( 0.734 –0.819 vs. DMTT’s 0.880 –0.910 ) as topology-liar poisoning let compro-mised models pass its distance filter; BALANCE collapsed near-chance on PAMAP2 even at 10% Byzantine ( 0.170 ); and UBAR collapsed above 50% Byzantine (mean 0.395 ±0.350 at 
+
+50% , chance by 70 –80% ). DMTT was the only method to clear the local-only bar across both datasets at all tested fractions, degrading gracefully toward near-local-only performance at extreme fractions rather than collapsing, a safety guarantee no other aggregator provides. A trust diagnostic confirmed exactly zero Byzantine aggregation weight at every fraction, consistent with the δmax = 0 condition of Theorem 1. Future work includes relaxing the doubly-stochastic as-sumption on W t to accommodate asymmetric MURMURA -style weights, extending the analysis to bounded-staleness execu-tion, and validating DMTT on real mobile deployments where neighbours are discovered via physical beacons rather than a shared mobility model, a change that would affect only the routing/discovery step, since the self-inclusion check already relies solely on transport-level delivery acknowledgements. REFERENCES [1] H. Ye, L. Liang, and G. Y. Li, “Decentralized federated learning with unreliable communications,” IEEE journal of selected topics in signal processing , vol. 16, no. 3, pp. 487–500, 2022. [2] S. Kharrat, M. Canini, and S. Horvath, “Decentralized personalized federated learning,” arXiv preprint arXiv:2406.06520 , 2024. [3] Y. Liu, Y. Shi, Q. Li, B. Wu, X. Wang, and L. Shen, “Decentralized di-rected collaboration for personalized federated learning,” in Proceedings of the IEEE/CVF conference on computer vision and pattern recognition ,2024, pp. 23 168–23 178. [4] M. Rangwala, R. O. Sinnott, and R. Buyya, “Evidential trust-aware model personalization in decentralized federated learning for wearable iot,” arXiv preprint arXiv:2512.19131 , 2025. [5] Z. Wu, Z. Xu, D. Zeng, J. Li, and J. Liu, “Topology learning for hetero-geneous decentralized federated learning over unreliable d2d networks,” 
+
+IEEE Transactions on Vehicular Technology , vol. 73, no. 8, pp. 12 201– 12 206, 2024. [6] M. Nesterenko and S. Tixeuil, “Discovering network topology in the presence of byzantine faults,” IEEE Transactions on Parallel and Dis-tributed Systems , vol. 20, no. 12, pp. 1777–1789, 2009. [7] R. Gaucher, A. Dieuleveut, and H. Hendrikx, “Unified breakdown analysis for byzantine robust gossip,” arXiv preprint arXiv:2410.10418 ,2024. [8] T. Sun, D. Li, and B. Wang, “Decentralized federated averaging,” IEEE Transactions on Pattern Analysis and Machine Intelligence , vol. 45, no. 4, pp. 4289–4301, 2023. [9] W. Liu, L. Chen, and W. Zhang, “Decentralized federated learning: Balancing communication and computing costs,” IEEE Transactions on Signal and Information Processing over Networks , vol. 8, pp. 131–143, 2022. [10] V. Zantedeschi, A. Bellet, and M. Tommasi, “Fully decentralized joint learning of personalized models and collaboration graphs,” in Proceedings of the Twenty Third International Conference on Artificial Intelligence and Statistics , ser. Proceedings of Machine Learning Research, S. Chiappa and R. Calandra, Eds., vol. 108. PMLR, 26–28 Aug 2020, pp. 864–874. [Online]. Available: https: //proceedings.mlr.press/v108/zantedeschi20a.html [11] S. Li, T. Zhou, X. Tian, and D. Tao, “Learning to collaborate in decentralized learning of personalized models,” in Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , June 2022, pp. 9766–9775. [12] R. Ye, Z. Ni, F. Wu, S. Chen, and Y. Wang, “Personalized federated learning with inferred collaboration graphs,” in International conference on machine learning . PMLR, 2023, pp. 39 801–39 817. [13] M. Sensoy, L. Kaplan, and M. Kandemir, “Evidential deep learning to quantify classification uncertainty,” Advances in Neural Information Processing Systems , vol. 31, 2018. [14] A. Koloskova, N. Loizou, S. Boreiri, M. Jaggi, and S. Stich, “A unified theory of decentralized sgd with changing topology and local updates,” in International conference on machine learning . PMLR, 2020, pp. 5381–5393. [15] A. Nedi´ c and A. Olshevsky, “Distributed optimization over time-varying directed graphs,” IEEE Transactions on Automatic Control , vol. 60, no. 3, pp. 601–615, 2014. 15 
+
+[16] A. Nedi´ c and A. Olshevsky, “Stochastic gradient-push for strongly convex functions on time-varying directed graphs,” IEEE Transactions on Automatic Control , vol. 61, no. 12, pp. 3936–3947, 2016. [17] B. Le Bars, A. Bellet, M. Tommasi, E. Lavoie, and A.-M. Kermarrec, “Refined convergence and topology learning for decentralized sgd with heterogeneous data,” in International Conference on Artificial Intelli-gence and Statistics . PMLR, 2023, pp. 1672–1702. [18] Y. Lu, Z. Yu, and N. Suri, “Privacy-preserving decentralized federated learning over time-varying communication graph,” ACM Transactions on Privacy and Security , vol. 26, no. 3, pp. 1–39, 2023. [19] Y. Shi, Q. Ma, Y. Xu, J. Zhou, M. Hu, Y. Liao, and H. Xu, “Dystop: Dynamic staleness control and topology construction for asynchronous decentralized federated learning,” IEEE Transactions on Mobile Com-puting , 2026. [20] B. Li, W. Gao, X. Deng, J. Xie, Z. Xiong, M. Siew, B. Guo, S. Mao, and Z. Han, “Decentralized federated learning over time-varying and heterogeneous mobile computing networks,” IEEE Transactions on Mobile Computing , vol. 25, no. 5, pp. 6688–6704, 2026. [21] C. Fang, Z. Yang, and W. U. Bajwa, “Bridge: Byzantine-resilient decen-tralized gradient descent,” IEEE Transactions on Signal and Information Processing over Networks , vol. 8, pp. 610–626, 2022. [22] S. Guo, T. Zhang, H. Yu, X. Xie, L. Ma, T. Xiang, and Y. Liu, “Byzantine-resilient decentralized stochastic gradient descent,” IEEE Transactions on Circuits and Systems for Video Technology , vol. 32, no. 6, pp. 4096–4106, 2021. [23] Z. Wu, T. Chen, and Q. Ling, “Byzantine-resilient decentralized stochas-tic optimization with robust aggregation rules,” IEEE transactions on signal processing , vol. 71, pp. 3179–3195, 2023. [24] L. He, S. P. Karimireddy, and M. Jaggi, “Byzantine-robust decentralized learning via clippedgossip,” arXiv preprint arXiv:2202.01545 , 2022. [25] M. Fang, Z. Zhang, Hairi, P. Khanduri, J. Liu, S. Lu, Y. Liu, and N. Gong, “Byzantine-robust decentralized federated learning,” in Pro-ceedings of the 2024 ACM SIGSAC Conference on Computer and Communications Security , 2024, pp. 2874–2888. [26] C. Che, X. Li, C. Chen, X. He, and Z. Zheng, “A decentralized federated learning framework via committee mechanism with convergence guar-antee,” IEEE Transactions on Parallel and Distributed Systems , vol. 33, no. 12, pp. 4783–4800, 2022. [27] Y. Tao, S. Cui, W. Xu, H. Yin, D. Yu, W. Liang, and X. Cheng, “Byzantine-resilient federated learning at edge,” IEEE Transactions on Computers , vol. 72, no. 9, pp. 2600–2614, 2023. [28] H. Perrey, M. Landsmann, O. Ugus, T. C. Schmidt, and M. W¨ ahlisch, “Trail: Topology authentication in rpl,” arXiv preprint arXiv:1312.0984 ,2013. [29] C. Li, M. Hurfin, and Y. Wang, “Reputation propagation and updating in mobile ad hoc networks with byzantine failures,” in 2015 IEEE Trustcom/BigDataSE/ISPA , vol. 1, 2015, pp. 111–118. [30] Y. Miao, Z. Liu, H. Li, K.-K. R. Choo, and R. H. Deng, “Privacy-preserving byzantine-robust federated learning via blockchain systems,” 
+
+IEEE Transactions on Information Forensics and Security , vol. 17, pp. 2848–2861, 2022. [31] M. Rangwala, F. Azzedin, R. O. Sinnott, and R. Buyya, “Sketchguard: Scaling byzantine-robust decentralized federated learning via sketch-based screening,” arXiv preprint arXiv:2510.07922 , 2025. [32] A. Gupta and G. Pandurangan, “Fully-distributed construction of byzantine-resilient dynamic peer-to-peer networks,” arXiv preprint arXiv:2506.04368 , 2025. [33] Z. Wu, T. Chen, and Q. Ling, “Byzantine-resilient decentralized stochas-tic optimization with robust aggregation rules,” IEEE Transactions on Signal Processing , vol. 71, pp. 3179–3195, 2023. [34] P. Blanchard, E. M. El Mhamdi, R. Guerraoui, and J. Stainer, “Ma-chine learning with adversaries: Byzantine tolerant gradient descent,” in 
+
+Advances in Neural Information Processing Systems , vol. 30, 2017. [35] D. Anguita, A. Ghio, L. Oneto, X. Parra, and J. L. Reyes-Ortiz, “A public domain dataset for human activity recognition using smartphones,” in 
+
+European Symposium on Artificial Neural Networks (ESANN) , vol. 3, 2013, p. 3. [36] A. Reiss and D. Stricker, “Introducing a new benchmarked dataset for activity monitoring,” in Proceedings of the 2012 16th Annual International Symposium on Wearable Computers (ISWC) , ser. ISWC ’12. USA: IEEE Computer Society, 2012, p. 108–109. 
+
+Shubham Vaishnav received a Ph.D. from the Department of Computer and Systems Science, Stockholm University, Sweden, in June, 2026. He received Bachelor’s and Master’s degrees in Computer Science & Engineering from IIT (ISM), Dhanbad in 2017 and 2019, respectively. His research interests include reinforcement learning, federated Learning, distributed systems, optimization, and adaptive decision-making in dynamic environments such as IoT. 
+
+Murtaza Rangwala received his B.Eng. degree (Honours) in Software Engineering from Monash University in 2022. He is currently a Ph.D. candidate with the Quantum Cloud Computing and Distributed Systems (qCLOUDS) Laboratory, School of Computing and Information Systems, University of Melbourne, Australia. His research interests include distributed privacy-preserving machine learning, Byzantine-robust distributed systems, and blockchain-enabled trust frameworks for IoT and cloud computing en-vironments. 
+
+Ali Beikmohammadi received the B.Sc. degree in electrical engineering from Bu-Ali Sina University, Hamedan, Iran, in 2017, and the M.Sc. degree in electrical engineering from the Amirkabir University of Technology, Tehran, Iran, in 2019. He is currently working toward the Ph.D. degree in computer and systems sciences at Stockholm University, Stockholm, Sweden. His research interests include reinforcement learning, deep learning, and federated learning, both in theory and applications. 
+
+Sindri Magn ´ usson is an Associate Professor in the Department of Computer and Systems Science at Stockholm University, Sweden. He received a PhD in Electrical Engineering from KTH Royal Institute of Technology, Stockholm, Sweden, in 2017. He was a postdoctoral researcher 2018-2019 at Harvard University, Cambridge, MA. His research interests include large-scale dis-tributed/parallel optimization, machine learning, and control. 
+
+Rajkumar Buyya is a Redmond Barry Distinguished Professor and Director of the Quantum Cloud Computing and Distributed Systems (qCLOUDS) Laboratory at the University of Melbourne, Australia. Recognized as one of the world’s most highly cited researchers in computer science and software engineering (h-index: 181; g-index: 394; 170,000+ citations), Dr. Buyya is a Fellow of IEEE, a Foreign Fellow of Academia Europaea, and a Fellow of ACM. He co-founded five major IEEE/ACM international conferences—CCGrid, Cluster, Grid, e-Science, and UCC—and served as the Chair of their inaugural meetings. He served as the founding Editor-in-Chief of the IEEE Transactions on Cloud Computing. He is currently serving as Co-Editor-in-Chief of the Journal of Software: Practice and Experience, which was established 55+ years ago. 16 
+
+APPENDIX 
+
+This appendix provides: (i) statements and proofs of the three lemmas (structural invariants, consensus contraction, descent) supporting the convergence analysis of Section VI in the main paper; (ii) full proofs of Theorem 1, Corollary 1, and Proposition 1 stated in Section VI; (iii) the statement and proof of Theorem 2, extending Theorem 1 to E ≥ 1
+
+local SGD steps (referenced from but not stated in the main paper); and (iv) a distributed-backend verification confirming that the coordinator-free ZeroMQ implementation reproduces the simulation-backend accuracy trajectories reported in Sec-tion VII of the main paper. References to assumptions, equations, and statements (e.g., Assumption 3, Theorem 1) refer to the main paper. Equation labels prefixed “S.” are local to this document. We use J :=  
+
+> 1
+> N
+
+11 ⊤ for the averaging matrix, U t := ( I − J)Θ t for the consensus error, Gt for the stacked stochastic gradients, and 
+
+f ⋆ := inf x f (x).
+
+Notation Note: Consistent with Section VI of the main paper, when analyzing convergence under perfect screening, 
+
+N denotes the size of the isolated compatible component C,and f (x) denotes the objective restricted to that component. 
+
+Lemma 1 (Structural invariants) . For every epoch t, the matrix 
+
+W t produced by Algorithm 1 satisfies: 1) Screened support: wtij = 0 for every j / ∈ Cti ∪ { i}.2) Row-stochasticity: wtij ≥ 0 and P 
+
+> j
+
+wtij = 1 for every i.3) Double stochasticity (under Assumption 3): P 
+
+> i
+
+wtij = 1 
+
+for every j.The proof is given in the appendix. 
+
+To state the next results, we stack the local iterates and stochastic gradients into matrices 
+
+Θt = θt
+
+> 1
+
+, . . . , θ tN
+
+⊤, Gt = g1(θt
+
+> 1
+
+, ξ t
+
+> 1
+
+), . . . , g N (θtN , ξ tN )⊤,
+
+both in RN ×d, and define the consensus error 
+
+U t = ( I − J)Θ t,
+
+which measures how far the local models drift from their mean. With ˆgt := 1
+
+> N
+
+P 
+
+> i
+
+gi(θti , ξ ti ), double stochasticity of W t
+
+implies that the average iterate ¯θt evolves according to 
+
+¯θt+1 = ¯θt − ηˆgt, (24) which is the device that lets the analysis “see” the global objective f through the local dynamics. 
+
+A. Proof of Lemma 1 (Structural invariants of W t)Proof. Item 1 (screened support) is immediate from the ag-gregation step of Algorithm 1 (main paper, line 34), which restricts the sum to j ∈ Cti ∪ { i}. Item 2 (row-stochasticity) follows from the normalization P  
+
+> j∈Cti∪{ i}
+
+wtij = 1 used in the aggregation equation of Section III, together with the nonnegativity of trust-based weights. Item 3 (double stochas-ticity) is the refinement provided by Assumption 3, which can be enforced by Metropolis–Hastings reweighting over the screened support. 
+
+Lemma 2 (Consensus contraction) . Under Assumptions 1–4, for every t ≥ 0,
+
+E∥U t+1 ∥2 
+
+> F
+
+≤
+
+
+
+1 − p
+
+> 2
+
+
+
+E∥U t∥2 
+
+> F
+
++ 2η2
+
+p E∥(I − J)Gt∥2 
+
+> F
+
+. (25) 
+
+The proof is given in the appendix. B. Proof of Lemma 2 (Consensus contraction) Proof. The local-update and aggregation steps yield Θt+1 =
+
+W t(Θ t − ηG t). By double stochasticity (Assumption 3), 
+
+W tJ = JW t = J and J2 = J, so (W t − J)J = 0.Subtracting the mean rows from Θt and Gt inside the product is therefore a no-op: 
+
+U t+1 = ( I − J) Θ t+1 
+
+= ( W t − J)(Θ t − ηG t)= ( W t − J) U t − η(I − J)Gt.
+
+Let V t := ( I − J)Gt. Both U t and V t have zero column means, so by Assumption 4 (consensus contraction), 
+
+∥(W t − J)( U t − ηV t)∥2 
+
+> F
+
+≤ (1 − p) ∥U t − ηV t∥2 
+
+> F
+
+.
+
+Apply Young’s inequality with parameter α = p 
+
+> 2(1 −p)
+
+> 0 (the case p = 1 is trivial): 
+
+∥U t − ηV t∥2 
+
+> F
+
+≤ (1 + α) ∥U t∥2 
+
+> F
+
++
+
+
+
+1 + 1
+
+> α
+
+
+
+η2∥V t∥2 
+
+> F
+
+.
+
+With this choice of α:
+
+(1 − p)(1 + α) = 1 − p 
+
+> 2
+
+, (1 − p)
+
+
+
+1 + 1
+
+> α
+
+
+
+= (1 −p)(2 −p) 
+
+> p
+
+≤ 2 
+
+> p
+
+.
+
+Combining and taking expectation yields the bound of Lemma 2. 
+
+Lemma 3 (Descent inequality) . Under Assumptions 1–3 and stepsize η ≤ 1 
+
+> L
+
+,
+
+E[f (¯θt+1 )] ≤ E[f (¯θt)] − η
+
+2 E∥∇ f (¯θt)∥2
+
++ ηL 2
+
+2N E∥U t∥2 
+
+> F
+
++ Lη 2σ2
+
+2N .
+
+(26) 
+
+The proof is given in the appendix. C. Proof of Lemma 3 (Descent inequality) Proof. L-smoothness of f applied to the average-iterate up-date ¯θt+1 = ¯θt − ηˆgt gives 
+
+f (¯θt+1 ) ≤ f (¯θt) − η⟨∇ f (¯θt), ˆgt⟩ + Lη 2
+
+2 ∥ˆgt∥2.
+
+Define the local-mean gradient ht := 1
+
+> N
+
+P 
+
+> i
+
+∇Fi(θti ), so that 
+
+E[ˆ gt | F t] = ht, where Ft is the σ-algebra of all randomness through round t. By Assumption 2 and independence of gi
+
+across clients, Var(ˆ gt | F t) ≤ σ2/N , so 
+
+E∥ˆgt∥2 | F t ≤ ∥ ht∥2 + σ2 
+
+> N
+
+.
+
+Taking conditional expectation in the smoothness inequality: 
+
+E[f (¯θt+1 ) | F t] ≤ f (¯θt) − η⟨∇ f (¯θt), h t⟩
+
++ Lη 2
+
+2 ∥ht∥2 + Lη 2σ2
+
+2N . (27) 17 
+
+Apply the polarization identity ⟨a, b ⟩ = 12 (∥a∥2 + ∥b∥2 − ∥ a −
+
+b∥2):
+
+− η⟨∇ f (¯θt), h t⟩ + Lη 2 
+
+> 2
+
+∥ht∥2
+
+= − η 
+
+> 2
+
+∥∇ f (¯θt)∥2 + η 
+
+> 2
+
+∥∇ f (¯θt) − ht∥2
+
++   Lη 2 
+
+> 2
+
+− η
+
+> 2
+
+∥ht∥2.
+
+For η ≤ 1/L , the coefficient of ∥ht∥2 is nonpositive, so that term may be dropped. Jensen’s inequality and L-smoothness of each Fi bound the bias: 
+
+∥∇ f (¯θt) − ht∥2 = 1
+
+> N
+
+X
+
+> i
+
+∇Fi(¯θt) − ∇ Fi(θti ) 2
+
+≤ L2 
+
+> N
+
+∥U t∥2 
+
+> F
+
+.
+
+Substituting back into (27) and taking total expectation yields Lemma 3. 
+
+Proof. We combine Lemmas 2 and 3 through a coupled-inequality argument. Throughout, define 
+
+at := E∥U t∥2 
+
+> F
+
+, bt := E∥(I − J)Gt∥2 
+
+> F
+
+,S :=  
+
+> T−1
+
+X
+
+> t=0
+
+E∥∇ f (¯θt)∥2.
+
+a) Step 1: Cumulative consensus error: Lemma 2 gives 
+
+at+1 ≤ (1 − p 
+
+> 2
+
+)at + 2η2 
+
+> p
+
+bt. With a0 = 0 (consensus ini-tialization), iterating yields at ≤ 2η2
+
+> p
+
+Pt−1
+
+> s=0
+
+(1 − p 
+
+> 2
+
+)t−1−sbs.Summing over t and exchanging summation order,  
+
+> T−1
+
+X
+
+> t=0
+
+at ≤ 2η2
+
+p 
+
+> T−1
+
+X
+
+> s=0
+
+bs
+
+> ∞
+
+X
+
+> k=0
+
+
+
+1 − p
+
+> 2
+
+k
+
+= 4η2
+
+p2 
+
+> T−1
+
+X
+
+> t=0
+
+bt. (28) 
+
+b) Step 2: Bound on bt: The variance identity P 
+
+> i
+
+∥gti −
+
+ˆgt∥2 ≤ P 
+
+> i
+
+∥gti ∥2 combined with Assumption 2 ( E∥gti −∇Fi(θti )∥2 ≤ σ2) gives 
+
+bt ≤
+
+> N
+
+X
+
+> i=1
+
+E∥∇ Fi(θti )∥2 + N σ 2.
+
+Apply ∥a∥2 ≤ 2∥a−b∥2+2 ∥b∥2 twice (first with b = ∇Fi(¯θt),then with b = ∇f (¯θt)), use L-smoothness, sum over i, and apply Assumption 5: 
+
+X
+
+> i
+
+∥∇ Fi(θti )∥2 ≤ 2L2∥U t∥2 
+
+> F
+
++ 4 N τ 2scr + 4 N ∥∇ f (¯θt)∥2.
+
+Taking expectation, 
+
+bt ≤ 2L2at + 4 N τ 2scr + N σ 2
+
++ 4 N E∥∇ f (¯θt)∥2. (29) 
+
+c) Step 3: Closing the recursion: Substituting (29) into (28) and collecting the P 
+
+> t
+
+at term on the left: 
+
+
+
+1 − 8η2L2
+
+> p2
+
+ X 
+
+> t
+
+at ≤ 4η2Np2
+
+ 4T τ 2scr + T σ 2 + 4 S .
+
+For η ≤ p/ (4 L), the left factor is at least 1/2, so 
+
+X
+
+> t
+
+at ≤ 32 N η 2
+
+p2
+
+ T (τ 2scr + σ2) + S . (30) 
+
+d) Step 4: Combining with the descent lemma: Summing Lemma 3 over t = 0, . . . , T − 1 and telescoping the f -difference:  
+
+> η
+> 2
+
+S ≤ f (¯θ0) − f ⋆ + ηL 2
+
+> 2N
+
+X
+
+> t
+
+at + Lη 2σ2T 
+
+> 2N
+
+.
+
+Substituting (30),  
+
+> η
+> 2
+
+S ≤ (f 0 − f ⋆) + Lη 2σ2T
+
+> 2N
+
++ 16 L2η3
+
+> p2
+
+ T (τ 2scr + σ2) + S .
+
+For η ≤ p/ (8 L), 16 L2η3 
+
+> p2
+
+≤ η 
+
+> 4
+
+, so the S-term on the right is absorbed:  
+
+> η
+> 4
+
+S ≤ (f 0 − f ⋆) + Lη 2σ2T
+
+> 2N
+
++ 16 L2η3T (τ 2scr +σ2) 
+
+> p2
+
+.
+
+Dividing both sides by ηT / 4 yields the bound stated in Theorem 1. The convergence result extends to the case where each client performs E ≥ 1 local SGD steps per round (as in Algorithm 1, line 24), at the cost of one additional assumption: the second moment of the stochastic gradient must be uniformly bounded (Assumption 6). This is a stronger condition than Assump-tion 2 (bounded variance ), and it is what controls the local drift ∥θt,k i − θti ∥ over the E local steps. The local update is parameterized by a local stepsize ηl,with θt, 0 
+
+> i
+
+= θti and 
+
+θt,k +1  
+
+> i
+
+= θt,k i − ηl gi(θt,k i , ξ t,k i ), k = 0 , . . . , E − 1,
+
+followed by aggregation θt+1  
+
+> i
+
+= P 
+
+> j
+
+wtij θt,E j . Define the effective per-round stepsize η := Eη l.
+
+e) Assumption 6: Bounded gradient second moments.: 
+
+There exists G ≥ 0 such that for all i ∈ V , t ≥ 0, and points 
+
+x visited by the iterates, 
+
+E∥gi(x, ξ i)∥2 ≤ G2.
+
+This stronger assumption is invoked only in Theorem 2 (local SGD with E > 1) and Proposition 1 (imperfect screening). It is not needed for Theorem 1. Note that G2 ≥ σ2 +sup x ∥∇ f (x)∥2, and the boundedness typically follows from a uniform Lipschitz/bounded-gradient regularization of the loss. 
+
+Theorem 2 (Convergence with E local steps, perfect screen-ing) . Suppose Assumptions 1–6 hold, screening is perfect (δmax = 0 , ∆2scr = 0 ), and the iterates are initialized at con-sensus. If the local stepsize satisfies ηl ≤ 12LE (equivalently, 
+
+η ≤ 12L ), then for any horizon T ≥ 1,
+
+1
+
+T 
+
+> T−1
+
+X
+
+> t=0
+
+E ∇f (¯θt) 2 ≤ 2 f (¯θ0) − f ⋆
+
+ηT + 2Lη σ 2
+
+N E 
+
++ (8 + 23 p2) L2 η2 G2
+
+p2 .
+
+(31) 
+
+The proof is given in the appendix. Remark 4 (Effect of E > 1 and scope) . Relative to The-orem 1, two effects are visible in (31): (i) the noise floor scales as σ2/(N E ) rather than σ2/N , reflecting the variance 18 
+
+reduction from E stochastic gradients per round; and (ii) the heterogeneity-and-drift term is now expressed via G2, which under G2 ≳ τ 2scr + σ2 is comparable to (but generally looser than) the corresponding term in Theorem 1. The bounded-gradient Assumption 6 is restrictive (it does not hold for un-regularized least-squares or logistic regression on unbounded data); a more refined analysis along the lines of [14] recovers the same O(σ/ √N ET +1 /T ) rate without bounded gradients, at the cost of more involved constants. 
+
+D. Proof of Theorem 2 (Convergence with E ≥ 1 local steps) Proof. For i ∈ V and k = 0 , . . . , E , let θt,k i denote the local iterate after k local steps in round t, with θt, 0 
+
+> i
+
+= θti . Stack the per-step stochastic gradients as eGti := PE−1 
+
+> k=0
+
+gi(θt,k i , ξ t,k i ),so the aggregation step reads Θt+1 = W t(Θ t − ηl eGt).Let ˆgt := 1
+
+> N E
+
+P 
+
+> i,k
+
+gi(θt,k i , ξ t,k i ) be the all-sample average. Double stochasticity gives the average-iterate update ¯θt+1 =¯θt − ηˆgt with η = Eη l. Define the true local-gradient average as ¯ht := 1
+
+> N E
+
+P 
+
+> i,k
+
+∇Fi(θt,k i ).
+
+a) Step 1: Variance of ˆgt: Decompose the update into the true gradient and the stochastic noise: 
+
+ˆgt = ¯ht + 1
+
+> N E
+
+X
+
+> i,k
+
+ gi(θt,k i , ξ t,k i ) − ∇ Fi(θt,k i ) | {z }
+
+> =:ˆ gt
+> noise
+
+.
+
+Let Ft,k be the filtration capturing all randomness up to local step k in round t. The noise terms gi(θt,k i , ξ t,k i ) − ∇ Fi(θt,k i )
+
+are martingale differences with respect to Ft,k and are inde-pendent across clients. Thus, their sum has variance: 
+
+E∥ˆgt
+
+> noise
+
+∥2 ≤ N E σ 2
+
+(N E )2 = σ2
+
+N E .
+
+Because the trajectory θt,k i depends on past noise, ¯ht and ˆgt
+
+> noise
+
+are not strictly orthogonal. Applying the inequality ∥a+b∥2 ≤
+
+2∥a∥2 + 2 ∥b∥2:
+
+E∥ˆgt∥2 ≤ 2E∥¯ht∥2 + 2σ2
+
+N E . (32) 
+
+b) Step 2: Local-drift bound (Assumption 6): For k ∈{0, . . . , E − 1}, the telescoping identity θt,k i − θti =
+
+−ηl
+
+Pk−1 
+
+> ℓ=0
+
+gi(θt,ℓ i , ξ t,ℓ i ) combined with Cauchy–Schwarz and Assumption 6 yields 
+
+E∥θt,k i − θti ∥2 ≤ η2 
+
+> l
+
+k
+
+> k−1
+
+X
+
+> ℓ=0
+
+E∥gt,ℓ i ∥2 ≤ η2 
+
+> l
+
+k2 G2. (33) 
+
+c) Step 3: Consensus contraction (local version): By the same algebra as Lemma 2 applied to Θt+1 = W t(Θ t − ηl eGt):
+
+E∥U t+1 ∥2 
+
+> F
+
+≤
+
+
+
+1 − p
+
+> 2
+
+
+
+E∥U t∥2 
+
+> F
+
++ 2η2 
+
+> l
+> p
+
+E∥(I − J) eGt∥2 
+
+> F
+
+.
+
+Bounding the second factor using ∥ eGti∥2 ≤ E P 
+
+> k
+
+∥gt,k i ∥2
+
+(Cauchy–Schwarz) and Assumption 6 gives E∥(I −J) eGt∥2 
+
+> F
+
+≤
+
+N E 2G2. Using η = Eη l:
+
+E∥U t+1 ∥2 
+
+> F
+
+≤
+
+
+
+1 − p
+
+> 2
+
+
+
+E∥U t∥2 
+
+> F
+
++ 2N η 2G2 
+
+> p
+
+.
+
+Iterating from U 0 = 0 and summing the geometric series:  
+
+> T−1
+
+X
+
+> t=0
+
+E∥U t∥2 
+
+> F
+
+≤ 4T N η 2G2
+
+p2 . (34) 
+
+d) Step 4: Descent inequality (local version): From L-smoothness on ¯θt+1 = ¯θt − ηˆgt and taking total expectation: 
+
+E[f (¯θt+1 )] ≤ E[f (¯θt)] − ηE⟨∇ f (¯θt), ˆgt⟩ + Lη 2
+
+2 E∥ˆgt∥2.
+
+Since E[ˆ gt] = E[¯ht], we apply (32) and the polarization identity −η⟨a, b ⟩ = − η 
+
+> 2
+
+∥a∥2 − η 
+
+> 2
+
+∥b∥2 + η 
+
+> 2
+
+∥a − b∥2:
+
+E[f (¯θt+1 )] ≤ E[f (¯θt)] − ηE⟨∇ f (¯θt), ¯ht⟩ + Lη 2E∥¯ht∥2
+
++ Lη 2σ2
+
+N E 
+
+= E[f (¯θt)] − η
+
+2 E∥∇ f (¯θt)∥2
+
++ η
+
+2 E∥∇ f (¯θt) − ¯ht∥2 −
+
+ η
+
+2 − Lη 2
+
+E∥¯ht∥2
+
++ Lη 2σ2
+
+N E .
+
+For η ≤ 12L , the term ( η 
+
+> 2
+
+− Lη 2) ≥ 0, allowing us to drop the negative ∥¯ht∥2 term. Bounding the bias via Jensen, L-smoothness, and ∥¯θt − θt,k i ∥2 ≤ 2∥U ti ∥2 + 2 ∥θti − θt,k i ∥2:
+
+E∥∇ f (¯θt) − ¯ht∥2 ≤ L2
+
+N E 
+
+X
+
+> i,k
+
+E∥¯θt − θt,k i ∥2
+
+≤ 2L2
+
+N E∥U t∥2 
+
+> F
+
++ 2L2
+
+N E 
+
+X
+
+> i,k
+
+E∥θti − θt,k i ∥2.
+
+Apply (33) and PE−1 
+
+> k=0
+
+k2 ≤ E3/3:
+
+X
+
+> i,k
+
+E∥θti − θt,k i ∥2 ≤ N η 2 
+
+> l
+
+G2E3
+
+3 .
+
+With η2 
+
+> l
+
+E2 = η2, this gives 2L2 
+
+> N E
+
+· N η 2  
+
+> lG2E3
+> 3
+
+= 2L2η2G2 
+
+> 3
+
+.Combining: 
+
+E[f (¯θt+1 )] ≤ E[f (¯θt)] − η
+
+2 E∥∇ f (¯θt)∥2
+
++ ηL 2
+
+N E∥U t∥2 
+
+> F
+
++ η3L2G2
+
+3 + Lη 2σ2
+
+N E .
+
+(35) 
+
+e) Step 5: Combine: Summing (35) over t and us-ing (34): 
+
+η
+
+2
+
+X
+
+> t
+
+E∥∇ f (¯θt)∥2 ≤ (f 0 − f ⋆) + T Lη 2σ2
+
+N E 
+
++ ηL 2
+
+N · 4T N η 2G2
+
+p2 + T η 3L2G2
+
+3= ( f 0 − f ⋆) + T Lη 2σ2
+
+N E 
+
++ T η 3L2G2 4
+
+p2 + 13
+
+
+
+.
+
+Dividing by ηT  
+
+> 2
+
+and noting that 8 
+
+> p2
+
++ 23 = 8+2 p2/3 
+
+> p2
+
+, we obtain the final bound: 
+
+1
+
+T 
+
+> T−1
+
+X
+
+> t=0
+
+E ∇f (¯θt) 2 ≤ 2 f (¯θ0) − f ⋆
+
+ηT + 2Lη σ 2
+
+N E 
+
++ (8 + 23 p2) L2 η2 G2
+
+p2 .19 
+
+Proof. The right-hand side of the bound in Theorem 1, when applied to a specific objective and communication graph, is monotone increasing in the data heterogeneity τ 2 and monotone decreasing in the consensus rate p. Substituting the stated inequalities τ 2scr ≤ τ 2raw and pscr ≥ praw − ϵ into the heterogeneity-and-topology term of Theorem 1 (applied with the screened component parameters τ 2scr and pscr ) di-rectly yields the claim. When screening preserves component connectivity ( ϵ = 0 ), the bound strictly improves whenever component isolation successfully reduces data heterogeneity (τ 2scr < τ 2raw ). 
+
+Proof. Let C be the target honest component of size N .For i ∈ C, the actual aggregation step is θt+1  
+
+> i
+
+=
+
+P 
+
+> j∈C
+
+wtij θt+1 /2 
+
+> j
+
++ βti, adv , where the adversarial injection is 
+
+βti, adv = P 
+
+> b∈B
+
+wtib θB,t +1 /2 
+
+> b
+
+. Define the matrix Bt ∈ RN ×d
+
+whose i-th row is βti, adv . By Assumption 8, ∥Bt∥F ≤√N δ max ΘB .We rewrite the global update over C by injecting and subtracting the ideal doubly stochastic matrix fW t:
+
+Θt+1 = fW t(Θ t − ηG t) + ( W t − fW t)(Θ t − ηG t) + Bt
+
+| {z }
+
+> =: Et
+
+.
+
+f) Step 1: Bounding the perturbation Et: Taking the Frobenius norm and applying the triangle inequality: 
+
+∥Et∥F ≤ ∥ W t − fW t∥F
+
+ ∥Θt∥F + η∥Gt∥F
+
+ + ∥Bt∥F .
+
+By Assumption 9 (bounded domain), ∥Θt∥F ≤ √N R . By As-sumption 6, the expected stochastic gradient norm is bounded by E[∥Gt∥F ] ≤ √N G . Taking the expectation and applying Jensen’s inequality to the screening error ( E∥W t − fW t∥F ≤
+
+∆scr ): 
+
+E∥Et∥F ≤ √N ∆scr (R + ηG ) + δmax ΘB
+
+ = √N ρ. (36) 
+
+g) Step 2: Average-iterate update and Descent Lemma: 
+
+Multiplying the update by 1 
+
+> N
+
+1⊤, and noting 1⊤ fW t = 1⊤, the average iterate evolves as: 
+
+¯θt+1 = ¯θt − ηˆgt + et,
+
+where et = 1 
+
+> N
+
+1⊤Et. By Jensen’s inequality, E∥et∥2 ≤ 
+
+> 1
+> N
+
+E∥Et∥2 
+
+> F
+
+≤ ρ2. By the L-smoothness of f :
+
+f (¯θt+1 ) ≤ f (¯θt) + ⟨∇ f (¯θt), −ηˆgt + et⟩ + L
+
+2 ∥ − ηˆgt + et∥2.
+
+Take the conditional expectation E[· | F t]. Noting E[ˆ gt] = ht:
+
+E[f t+1 ] ≤ f t − η⟨∇ f (¯θt), h t⟩ + E⟨∇ f (¯θt), e t⟩
+
++ L 
+
+> 2
+
+E∥− ηˆgt + et∥2.
+
+We bound the cross terms using Young’s inequality: 
+
+⟨∇ f (¯θt), e t⟩ ≤ η
+
+8 ∥∇ f (¯θt)∥2 + 2
+
+η ∥et∥2
+
+∥ − ηˆgt + et∥2 ≤ 2η2∥ˆgt∥2 + 2 ∥et∥2.
+
+Substituting these back yields: 
+
+E[f t+1 ] ≤f t − η⟨∇ f, h t⟩ + η
+
+8 ∥∇ f ∥2 + Lη 2E∥ˆgt∥2
+
++
+
+ 2
+
+η + L
+
+
+
+E∥et∥2.
+
+Next, we apply the polarization identity −η⟨∇ f, h t⟩ =
+
+− η 
+
+> 2
+
+∥∇ f ∥2 − η 
+
+> 2
+
+∥ht∥2 + η 
+
+> 2
+
+∥∇ f − ht∥2 and bound the stochastic variance E∥ˆgt∥2 ≤ ∥ ht∥2 + σ2 
+
+> N
+
+:
+
+E[f t+1 ] ≤ f t − 3η
+
+8 ∥∇ f ∥2 + η
+
+2 ∥∇ f − ht∥2 +
+
+ 2
+
+η + L
+
+
+
+ρ2
+
++ Lη 2σ2
+
+N + η
+
+
+
+Lη − 12
+
+
+
+∥ht∥2.
+
+For η ≤ 12L , the factor (Lη −1/2) ≤ 0, allowing us to drop the 
+
+∥ht∥2 term. Finally, we bound the gradient bias using Jensen’s inequality and L-smoothness: ∥∇ f − ht∥2 ≤ L2 
+
+> N
+
+∥U t∥2 
+
+> F
+
+.Rearranging to isolate the gradient gives: 
+
+3η
+
+8 E∥∇ f (¯θt)∥2 ≤f t − E[f t+1 ] + ηL 2
+
+2N E∥U t∥2 
+
+> F
+
++ Lη 2σ2
+
+N
+
++
+
+ 2
+
+η + L
+
+
+
+ρ2. (37) 
+
+h) Step 3: Consensus Contraction: The consensus error 
+
+U t+1 = ( I − J)Θ t+1 satisfies: 
+
+U t+1 = ( I − J)fW t(U t − ηV t) + ( I − J)Et.
+
+We apply Young’s inequality ∥A+B∥2 
+
+> F
+
+≤ (1+ α1)∥A∥2 
+
+> F
+
++(1+ 1/α 1)∥B∥2 
+
+> F
+
+with α1 = p/ 2. Since fW t contracts by (1 −p), we have ∥A∥2 
+
+> F
+
+≤ (1 −p)∥U t −ηV t∥2 
+
+> F
+
+. Observe that (1+ p/ 2)(1 −
+
+p) = 1 −p/ 2−p2/2 ≤ 1−p/ 2, and 1+1 /α 1 = 1+2 /p ≤ 3/p .Thus: 
+
+E∥U t+1 ∥2 
+
+> F
+
+≤ (1 − p 
+
+> 2
+
+)E∥U t − ηV t∥2 
+
+> F
+
++ 3
+
+p E∥Et∥2 
+
+> F
+
+.
+
+We apply Young’s inequality again to split the inner term: 
+
+∥U t −ηV t∥2 
+
+> F
+
+≤ (1+ α2)∥U t∥2 
+
+> F
+
++(1+1 /α 2)η2∥V t∥2 
+
+> F
+
+, setting 
+
+α2 = p/ 4. Observe that (1 − p/ 2)(1 + p/ 4) = 1 − p/ 4 −
+
+p2/8 ≤ 1 − p/ 4, and (1 − p/ 2)(1 + 4 /p ) ≤ 4/p . Using (36) for E∥Et∥2 
+
+> F
+
+≤ N ρ 2, we obtain: 
+
+E∥U t+1 ∥2 
+
+> F
+
+≤ (1 − p 
+
+> 4
+
+)E∥U t∥2 
+
+> F
+
++ 4η2
+
+p E∥V t∥2 
+
+> F
+
++ 3Np ρ2. (38) 
+
+i) Step 4: Combine: Summing (38) over t = 0 to T − 1
+
+bounds the cumulative consensus error:  
+
+> T−1
+
+X
+
+> t=0
+
+E∥U t∥2 
+
+> F
+
+≤ 16 η2
+
+p2 
+
+> T−1
+
+X
+
+> t=0
+
+E∥V t∥2 
+
+> F
+
++ 12 N T p2 ρ2.
+
+Recall from Step 2 of Theorem 1 that E∥V t∥2 
+
+> F
+
+≤
+
+2L2E∥U t∥2 
+
+> F
+
++ 4 N τ 2scr + N σ 2 + 4 N E∥∇ f ∥2. Substituting this into the sum:  
+
+> T−1
+
+X
+
+> t=0
+
+E∥U t∥2 
+
+> F
+
+≤ 32 η2L2
+
+p2 
+
+> T−1
+
+X
+
+> t=0
+
+E∥U t∥2
+
+> F
+
++ 16 η2Np2 
+
+> T−1
+
+X
+
+> t=0
+
+ 4τ 2scr + σ2 + 4 ∥∇ f ∥2
+
++ 12 N T p2 ρ2.20 
+
+For η ≤ p 
+
+> 8L
+
+, we have 32 η2L2 
+
+> p2
+
+≤ 12 . Moving the U t sum to the left and multiplying by 2:  
+
+> T−1
+
+X
+
+> t=0
+
+E∥U t∥2 
+
+> F
+
+≤ 32 η2Np2 
+
+> T−1
+
+X
+
+> t=0
+
+ 4τ 2scr + σ2 + 4 ∥∇ f (¯θt)∥2
+
++ 24 N T p2 ρ2.
+
+We now substitute this consensus sum into the telescoped Descent Lemma (37): 
+
+3η
+
+8 
+
+> T−1
+
+X
+
+> t=0
+
+E∥∇ f ∥2 ≤ (f 0 − f ⋆) + Lη 2σ2TN +
+
+ 2
+
+η + L
+
+
+
+ρ2T
+
++ 64 η3L2T τ 2scr 
+
+p2 + 16 η3L2T σ 2
+
+p2 +12 ηL 2Tp2 ρ2 + 64 η3L2
+
+p2 
+
+> T−1
+
+X
+
+> t=0
+
+E∥∇ f ∥2.
+
+To absorb the gradient term into the left-hand side, we require its coefficient to be ≤ η 
+
+> 8
+
+, leaving η 
+
+> 4
+
+on the left. This requires  
+
+> 64 η3L2
+> p2
+
+≤ η 
+
+> 8
+
+, which simplifies to η2 ≤ p2 
+
+> 512 L2
+
+, yielding the stepsize condition η ≤ p 
+
+> 24 L
+
+.Assuming this stepsize, subtracting the gradient term leaves 
+
+> η
+> 4
+
+P E∥∇ f ∥2 on the left. Dividing the entire inequality by ηT 
+
+> 4
+
+yields the final rigorous bound: 
+
+1
+
+T 
+
+> T−1
+
+X
+
+> t=0
+
+E∥∇ f (¯θt)∥2 ≤ 4( f 0 − f ⋆)
+
+ηT + 4Lησ 2
+
+N
+
++ 256 L2η2(τ 2scr + σ2/4) 
+
+p2 + 48 L2
+
+p2 ρ2
+
++
+
+ 8
+
+η2 + 4Lη
+
+
+
+ρ2.
+
+To confirm that the simulation backend of Section V (main paper) faithfully reproduces real distributed execution, we ran DMTT and FedAvg (dynamic) on the ZeroMQ distributed backend at 10 nodes across three Byzantine fractions ( 10% ,
+
+30% , 50% ) and two seeds each ( 20 rounds, ∆ = 10 s per round, IPC transport). Figure 3 overlays the per-round honest-node accuracy from both backends. Across all six (condition, fraction) pairs the two backends produce qualitatively identical trajectories. For DMTT, the mean final honest-node accuracy (last 5 of 20 rounds) agrees within 0.07 between the two backends across all fractions; the largest gap occurs at 30% Byzantine ( 0.845 distributed vs. 
+
+0.775 simulation), attributable to the short 20 -round window over which DMTT is still mid-convergence. For FedAvg (dynamic), both backends agree that the unprotected baseline collapses to near-chance ( 0.13 –0.18 ) regardless of Byzantine fraction. This qualitative agreement confirms that coordinator-free wall-clock synchronisation and peer-to-peer ZeroMQ transport introduce no systematic deviation from the in-process simulation, justifying the use of the simulation backend for the main 100 -node sweep in Section VII.

@@ -1,0 +1,1059 @@
+Title: DP-MemView: A Memory Interface for Attribute-Level Transcript Privacy in Long-Term LLM Agents
+
+URL Source: https://arxiv.org/pdf/2608.03130v1
+
+Published Time: Wed, 05 Aug 2026 00:31:06 GMT
+
+Number of Pages: 18
+
+Markdown Content:
+# DP-MemView: A Memory Interface for Attribute-Level Transcript Privacy in Long-Term LLM Agents 
+
+## Jong Wook Kim 1, Byoungjae Min 1, Kennedy Edemacu 2,Yoonhyuk Choi 3, Sae-Hong Cho 4, Beakcheol Jang 5
+
+> 1
+
+Department of Computer Science, Sangmyung University, Seoul, Republic of Korea 
+
+> 2
+
+College of Staten Island, The City University of New York, New York, NY, USA 
+
+> 3
+
+Sookmyung Women’s University, Seoul, Republic of Korea 
+
+> 4
+
+School of Computer Engineering, Hansung University, Seoul, Republic of Korea 
+
+> 5
+
+Graduate School of Information, Yonsei University, Seoul, Republic of Korea jkim@smu.ac.kr 
+
+Abstract 
+
+Long-term memory enables persistent personalization in LLM agents, but repeated memory-conditioned responses can cu-mulatively reveal protected attributes even when they are never stated explicitly. We formalize this threat as adaptive transcript privacy and introduce DP-MemView , a differentially private interface that privately selects public response-conditioning views and exposes those views—rather than raw memory—to the response LLM. Each private selection is charged to every protected attribute whose memory group intersects the read set. Per-attribute ledgers block any selection that would ex-ceed its cap and return a fixed generic view instead. Under an explicit interface contract, we prove pure Ba-DP for the entire adaptive transcript. We also extend the result to stores that differ across multiple protected groups and bound how much observing the transcript can change an adversary’s prior odds. We evaluate the online and preallocated modes with three re-sponse LLMs on a controlled adjacent-store benchmark and a public-corpus transfer track. Both modes keep transcript dis-tinguishability near chance while preserving target-required personalization and overall response quality. Further diagnos-tics show that removing key safeguards causes mismatched output support, missing ledger charges, revealing side chan-nels, or growing long-horizon leakage. 
+
+## Introduction 
+
+Long-term memory now lets LLM agents store, retrieve, summarize, and update user-specific context across ses-sions, enabling persistent personalization and coherent in-teraction (Park et al. 2023; Packer et al. 2023; Zhong et al. 2024; Du et al. 2026; Huang et al. 2026; Tan et al. 2025; Dai et al. 2026; Li et al. 2025; Kang et al. 2025; Xu et al. 2025; Liu et al. 2025). This persistence, however, changes the privacy problem: a sensitive attribute need not appear in any single answer, but may become inferable from many benign-looking, memory-conditioned responses. This risk is becoming practically relevant as assistants connect persis-tent personal context to third-party applications: ChatGPT exposes applications through its Apps SDK (OpenAI 2025), while Gemini’s Personal Intelligence uses data from con-nected Google apps to personalize responses (Google 2026). Recent work likewise shows that LLM agents may violate contextual privacy not only through explicit disclosure, but Personal LLM Agent (long-term memory) Private memory Sensitive fact: User has type-2 diabetes LLM / Agent    
+
+> Response generation
+> Ordinary task queries (many turns) Personalized responses (many turns) External Application ( semi-trusted )
+> ✕Cannot access raw memory Observed transcript at the application Cumulative over turns
+> User has type-2 diabetes
+> ✕Direct diagnosis query blocked
+
+Figure 1: Cumulative attribute leakage through benign per-sonalization: although direct memory access is blocked, re-peated responses can jointly reveal the protected attribute. also through action trajectories, tool-mediated workflows, and task-conditioned information flows (Mireshghallah et al. 2024; Shao et al. 2024; Bagdasarian et al. 2024; Wang et al. 2025b). In this setting, an external application need not read the raw memory store; it can submit task queries and observe the agent’s memory-conditioned responses over time. Thus, long-term memory privacy becomes an app-facing transcript problem rather than a single-output filtering problem. Figure 1 illustrates this risk. A meal-planning applica-tion uses the user’s personal LLM agent to obtain person-alized meal advice. The application may be blocked from directly asking whether the user has diabetes and may have no access to the raw memory store. Nevertheless, by issuing ordinary meal-planning queries, it can repeatedly observe blood-sugar-conscious recommendations produced from the agent’s long-term memory. No individual response need state the diagnosis, yet the transcript can reveal it. Such leakage is a form of indirect disclosure: the sensitive attribute is not necessarily stated, but becomes inferable from repeated, task-relevant personalization signals. arXiv:2608.03130v1 [cs.CR] 4 Aug 2026 Existing work addresses related risks: extracting agent memories through black-box or adaptive queries (Wang et al. 2025a; Lyu et al. 2026), masking sensitive spans (Chen et al. 2026; Wu et al. 2026), and protecting retrieved documents or RAG outputs (Choi et al. 2025; Koga et al. 2024; Tang et al. 2026). These defenses limit what is directly exposed, but they do not provide a composable, prior-independent guar-antee for privacy loss accumulated across repeated memory-conditioned releases. We ask whether the memory interface itself can make such releases compose into a single differen-tial privacy (DP) guarantee for the full adaptive transcript. We introduce DP-MemView , a differentially private memory-view interface. Instead of sending raw memories along the application-facing generation path, it privately se-lects response-conditioning views from fixed public vocab-ularies shared across adjacent memory stores and passes only those views to the response-generating LLM. Views encode response-conditioning modes, not user facts, so the application-facing response is post-processing of the private view selections. The view selector alone cannot ensure transcript privacy: failures arise from store-dependent view support, incomplete charging of overlapping attributes, raw-memory-dependent orchestration or side channels, and unbounded repetition of locally private releases. DP-MemView enforces privacy at the memory-interface boundary. Its interface contract fixes view support; keeps raw memory and internal scores within the trusted interface; and requires every observable release ei-ther to have the same conditional distribution across adjacent stores or to be produced by a private selection mechanism, with its cost charged to every affected attribute; restricts orchestration and controls to store-independent policy and released state; enforces pathwise caps with a fixed generic fallback; and confines LLM responses to post-processing of public inputs and released state. Thus, the interface—not the view selector alone—is the unit of privacy enforcement. This paper makes three contributions. 
+
+• We formulate long-term-memory privacy as an adaptive transcript-privacy problem, requiring protection for the complete sequence of memory-conditioned interactions rather than for each response in isolation. 
+
+• We introduce DP-MemView , which privately selects pub-lic slot-level views, charges every affected attribute, and enforces per-attribute caps with a fixed generic fallback. By restricting routing and observable controls to public inputs and released history, while keeping raw memory and internal scores out of downstream generation, we prove pure Ba-DP for the full adaptive transcript. 
+
+• We evaluate online and preallocated budget modes with three response LLMs on a controlled adjacent-store benchmark and a public-corpus transfer track. Against memory-independent controls, raw-memory references, and adapted state-of-the-art defenses, both modes keep transcript distinguishability near chance while preserv-ing personalization and response quality. Ablations and diagnostics expose distinct accounting, release, channel, and cumulative-budget failures. 
+
+## Related Work 
+
+Long-term memory and memory leakage in LLM agents. 
+
+Recent work treats memory as a core agent capability, evalu-ating accurate retrieval, test-time learning, long-range under-standing, and selective forgetting (Hu, Wang, and McAuley 2025). Persistent memory, however, also creates a new pri-vacy surface. MEXTRA and ADAM show that stored agent memories can be elicited through black-box prompting and adaptively selected natural-language queries (Wang et al. 2025a; Lyu et al. 2026). These attacks expose direct extrac-tion of stored content, but do not bound the cumulative influ-ence of protected attributes encoded in memory on repeated, task-conditioned outputs. DP-MemView instead defines an accounting boundary at the memory interface so that such releases compose into a single DP guarantee for the full adaptive transcript. 
+
+Privacy-preserving memory and retrieval. Prior work lim-its direct exposure of sensitive content before storage, re-trieval, or transmission across trust boundaries. MemPrivacy replaces detected privacy spans with type-aware placehold-ers for cloud-side processing and restores their values locally (Chen et al. 2026), while the Agent-Memory Protocol stores placeholder-redacted memories, supplies only task-relevant redacted context to the model, and restores the original values locally after inference (Wu et al. 2026). In RAG, prior work either detects and hides documents targeted by membership-inference queries or provides document-level DP for gener-ated answers (Choi et al. 2025; Koga et al. 2024; Tang et al. 2026). Contextual-integrity work evaluates whether disclo-sures fit the task and recipient, while AirGapAgent addresses a closely related app-facing threat by minimizing the user data made available to an untrusted third party (Mireshghal-lah et al. 2024; Bagdasarian et al. 2024). These approaches protect values, documents, or task-scoped disclosures, but do not define an attribute-level accounting boundary for re-peated memory-conditioned releases to an adaptive appli-cation. DP-MemView places this boundary at the memory interface, composing repeated releases into an attribute-level DP guarantee for the full adaptive transcript. 
+
+Leakage metrics and differential privacy. Quantitative in-formation flow, min-entropy leakage, and g-leakage quantify how observations change an adversary’s ability to infer a secret (Smith 2009; Alvim et al. 2012). Such metrics charac-terize risk under a specified prior, guessing objective, or gain function. DP instead bounds changes in output distributions between neighboring inputs, independently of any particular adversary’s prior or inference rule (Dwork and Roth 2014). 
+
+DP-MemView uses standard DP primitives—the exponen-tial mechanism (EM) and adaptive composition (McSherry and Talwar 2007; Dwork and Roth 2014; Kairouz, Oh, and Viswanath 2015; Rogers et al. 2016). Its contribution is an enforceable memory-interface contract that composes adap-tive memory-conditioned releases into an attribute-level DP guarantee for the full transcript, not a new privacy primitive. 
+
+## Problem Definition 
+
+We model long-term memory as an indexed store M =(m1, . . . , m n), where each mi is the content at a fixed mem-ory position assigned to a policy-defined slot such as health, food, finance, work, or schedule. A protected attribute is a user property, such as a health condition or financial hard-ship, whose inference the protection policy seeks to limit. Adjacent stores share the same memory layout: the same positions, identifiers, and non-sensitive slot metadata. At turn t, an adaptive semi-trusted application issues a query qt. The trusted memory interface selects a memory-view output vt for the response-generating LLM, which re-turns yt; when multiple slots are active, vt denotes the tuple of selected slot-level views. Let ct denote any observable control-flow signal, such as a fallback or public budget-status signal. We define 
+
+τT =  (qt, c t, y t)Tt=1 , ˜τT =  (qt, v t, c t, y t)Tt=1 . (1) The application observes the ordinary transcript τT , whereas the augmented transcript ˜τT additionally reveals the selected views to a stronger analytical adversary. The adversary may adapt queries to the released history, hold arbitrary auxiliary information, and observe all signals in ct.
+
+Protected attributes and adjacency. A protected attribute may be implied by several memories rather than by one ex-plicit record. For each attribute a ∈ A , the protection policy specifies an index set Ia ⊆ { 1, . . . , n } containing all memory positions whose contents may individually or jointly imply a.We denote the corresponding attribute-level memory group by MIa = ( mi)i∈Ia . These groups may overlap because one memory may provide evidence about multiple attributes. Fig-ure 2 makes this notation concrete: in the running example, 
+
+aD denotes type-2 diabetes with IaD = {1, 2, 3}, whereas 
+
+aB denotes debt with IaB = {3, 4, 5}; thus, position m3
+
+belongs to both protected-attribute groups. The guarantee is conditional on complete grouping: if a position that may im-ply a is omitted from Ia, changes to that position fall outside 
+
+∼a and hence outside the guarantee. We use symmetric attribute-level group-replacement ad-jacency. Two memory stores M and M ′ are adjacent with respect to attribute a, written M ∼a M ′, if they share the same memory layout and agree at every position outside 
+
+Ia, while positions within Ia may contain different but slot-compatible contents under the same structural metadata. The attribute-presence case compares a store in which MIa pro-vides evidence for a with a store in which M ′ 
+
+> Ia
+
+is a-neutral. 
+
+Privacy and trust boundary. Only the trusted memory in-terface may access raw memory. It performs all memory-dependent scoring and view selection internally, while the response-generating LLM receives qt, vt, and τ<t , but not 
+
+M . We model the LLM as a fixed, store-independent condi-tional channel: 
+
+P (yt | qt, v t, τ <t , M ) = KLLM (yt | qt, v t, τ <t ). (2) 
+
+KLLM denotes the fixed conditional response distribution mapping (qt, v t, τ <t ) to yt, shared across adjacent memory stores. Thus, conditioned on (qt, v t, τ <t ), yt is independent of M and is post-processing of these released inputs. 
+
+Pure-DP transcript privacy. For each a ∈ A , let Ba ≥ 0
+
+denote the precommitted total pure-DP budget for the inter-action. The interface satisfies pure Ba-DP with respect to 
+
+∼a if, for every adjacent pair M ∼a M ′, every adaptive query strategy, and every transcript event O, the following condition holds: 
+
+Pr[˜ τT ∈ O | M ] ≤ eBa Pr[˜ τT ∈ O | M ′]. (3) By symmetry, the same bound holds with M and M ′ ex-changed. Moreover, since τT is a projection of ˜τT , it inherits the same guarantee by post-processing. 
+
+## DP-MemView 
+
+DP-MemView places the privacy boundary between private memory and the response-generating LLM. Raw memory is used only inside the trusted interface to select response-conditioning views; the LLM receives only the selected views, and privacy cost is tracked by attribute-level pure-DP ledgers. Figure 2 summarizes this interface flow. 
+
+Slot-Level View Selection and Attribute Accounting 
+
+Each memory position mi ∈ M belongs to a policy-defined slot g ∈ G (e.g., health, food, finance, or work). For each slot, 
+
+DP-MemView fixes a public view vocabulary Vg , shared across adjacent stores. The vocabulary includes a fixed generic view vgen  
+
+> g
+
+, which provides store-independent slot-level conditioning. A view specifies how the LLM should answer rather than a raw user fact; for instance, a health view may request blood-sugar-conscious advice without asserting a diagnosis. At turn t, the router maps the public query and released his-tory to active slots, Gt = Slot( qt, ˜τ<t ). For each active slot 
+
+g ∈ Gt, the read policy returns memory positions Rt,g , with contents MRt,g = ( mi)i∈R t,g . In our implementation, Rt,g 
+
+is determined by qt, g, the fixed memory layout, and ˜τ<t , and does not depend on memory contents. Content-dependent retrieval is not covered by the transcript-privacy theorem; it would need to be adjacency-invariant or separately private, with any retrieval cost charged to every affected attribute. A read affects every attribute whose protected group in-tersects the read set: 
+
+Γ⋆(Rt,g ) = {a ∈ A : Rt,g ∩ Ia̸ = ∅} . (4) Intuitively, Γ⋆(Rt,g ) lists every protected attribute whose memory group is touched by the read. These are the ledgers that must be checked and, if the private selection is admitted, charged. For example, in Figure 2, Rt, food = {2, 3} intersects both IaD and IaB , so Γ⋆(Rt, food ) = {aD , a B }. The declared charge set Γt,g ⊆ A must satisfy Γt,g ⊇ Γ⋆(Rt,g ). Over-charging is allowed, but no affected attribute may be omitted. Then, the internal scorer assigns a score to each candidate view using the public query and selected read-set memories: 
+
+ut,g (qt, v ; MRt,g ) ∈ [0 , 1] . (5) Let ut,g (M ) =  ut,g (qt, v ; MRt,g )
+
+> v∈V g
+
+denote the inter-nal score vector. For a charged selection, holding the public inputs and released history fixed, we use a bound satisfying 
+
+∆ut,g ≥ sup    
+
+> a∈Γt,g , M ∼aM′
+
+∥ut,g (M ) − ut,g (M ′)∥∞ . (6) The score vector remains internal, since releasing it could reveal which views the memory supports. If a / ∈ Γt,g , then Trusted DP-MemView Memory Interface Private memory M Pos. Topic Memory item           
+
+> m₁ health type-2 diabetes
+> m₂ food low-sugar meals
+> m₃ food low-sugar budget meals
+> m₄ finance tight food budget
+> m₅ finance credit-card debt
+> External Application
+> “Suggest three affordable dinners for next week.”
+
+qₜ m6 education holds an MS degree                                                                   
+
+> Pos. Topic Memory item 𝑰 𝒂 𝑫 = {1, 2, 3} 𝒂 𝑫 (diabetes)
+> 𝑰 𝒂 𝑩 = {3, 4, 5} 𝒂 𝑩 (debt)
+> 𝑰 𝒂 𝑬 = {6} 𝒂 𝑬 (education)
+> Protected attribute groups Food Slot
+> Generic Dinner Low-sugar
+> 𝑅 ௧,௙௢௢ௗ ൌ2,3 ,𝑀 ோ೟,೑೚೚೏ ൌ𝑚 ଶ, 𝑚 ଷ, Γ ௧,௙௢௢ௗ ൌ𝑎 ஽, 𝑎 ஻𝑉 ௙௢௢ௗ Low-sugar + Affordable
+> View Selection (Exponential Mechanism) Finance Slot
+> 𝑅 ௧,௙௜௡௔௡௖௘ ൌ4,5 ,𝑀 ோ೟,೑೔೙ೌ೙೎೐ ൌ𝑚 ସ, 𝑚 ହ, Γ ௧,௙௜௡௔௡௖௘ ൌ𝑎 ஻
+> Generic cost-saving
+> 𝑉 ௙௜௡௔௡௖௘ Avoid-new-debt Guidance
+> Strict-budget Guidance
+> ✓
+> 𝑳 𝑫 ൅ 𝜺 𝒕,𝒇𝒐𝒐𝒅 ൐ 𝑩 𝑫 𝑳 𝑩 ൅ 𝜺 𝒕,𝒇𝒐𝒐𝒅 ൑ 𝑩 𝑩
+> Food
+> CAP Fail (Release generic fallback)
+> Finance
+> 𝑳 𝑩 ൅ 𝜺 𝒕,𝒇𝒊𝒏𝒂𝒏𝒄𝒆 ൑ 𝑩 𝑩
+> ✓
+> Pass (Release selected private view)
+> 𝑳 𝑩 ൌ 𝑳 𝑩 ൅ 𝜺 𝒕,𝒇𝒊𝒏𝒂𝒏𝒄𝒆
+> (Debt-ledger update)
+> Cap check / Fallback / Ledger update Response LLM
+> Receives only
+
+vₜ 
+
+> Generic Dinner
+> Strict-budget Guidance
+
+qₜ          
+
+> ✓✓Selected view by Exponential Mechanism
+> Active-slot Selection 𝑆𝑙𝑜𝑡 𝑞 ௧, 𝜏̃ ழ௧ → 𝐺 ௧ൌ ሼ𝑔 ௙௢௢ௗ , 𝑔 ௙௜௡௔௡௖௘ ሽ𝝉 ழ𝒕
+
+Figure 2: Running example of DP-MemView for an affordable-dinner query. The interface activates the food and finance slots, maps each read set to the affected attributes, and applies the corresponding privacy-budget checks. The food slot releases the fixed generic fallback, while the finance slot releases the selected strict-budget view and charges the debt ledger. Only qt, the released view tuple vt, and τ<t are passed to the response LLM; raw memory remains inside the trusted interface. 
+
+Rt,g ∩Ia = ∅; hence, under M ∼a M ′, the read-set contents and score vectors are identical, and the selection has zero privacy cost for a (Lemma 1 in Appendix B.1). Let εt,g be the local privacy parameter set by the budget rule. For each charged selection, the interface samples a view using the EM: 
+
+Pr[ vt,g = v | M ] = exp 
+
+ εt,g ut,g (qt, v ; MRt,g )2∆ ut,g 
+
+X
+
+> v′∈V g
+
+exp 
+
+ εt,g ut,g (qt, v ′; MRt,g )2∆ ut,g 
+
+ . (7) 
+
+The EM favors useful views while bounding selection-probability variation between adjacent stores. For each protected attribute a, let La denote the privacy cost accumulated so far and Ba its precommitted cap. A charged selection at (t, g ) is admitted only if La + εt,g ≤ Ba
+
+for every a ∈ Γt,g . If any check fails, the interface returns the fixed generic view at zero additional cost and leaves the ledgers unchanged. Otherwise, it performs the private selection and updates La ← La + εt,g for every a ∈ Γt,g .Thus, La ≤ Ba on every execution path. Full pseudocode appears in Appendix A. 
+
+End-to-End Transcript Privacy 
+
+The preceding subsection defines the slot-level release mech-anism and its pathwise budget rule. We now show that re-peated adaptive applications of that mechanism protect the complete transcript. The key issue is state dependence: later slot operations may depend on previously released views, but adjacent executions conditioned on the same released prefix must use the same next operation and budget branch. Raw memory may affect only the private view distribution. Enumerate the active slots in Gt = Slot( qt, ˜τ<t ) accord-ing to the fixed slot policy as (gt,j )|Gt|
+
+j=1 . Before processing 
+
+gt,j , define ht,j =  ˜τ<t , q t, (vt,g t,i )i<j 
+
+. Thus, ht,j contains the completed history, the current query, and the views re-leased by the preceding slots, but neither raw memory nor internal scores. 
+
+Definition 1 (Interface invariants for transcript privacy) . An interface with precommitted caps {Ba} satisfies the invari-ants if every slot-level operation obeys the following. 
+
+Local release. (C1) Every view vocabulary, including its fixed generic view, is shared across adjacent stores. (C2) 
+
+Every read is charged to all affected attributes, Γt,g ⊇
+
+Γ⋆(Rt,g ). (C3) Every released view is either adjacency-invariant or, for an admitted charged selection, sampled by Eq. (7) ; raw memory and internal scores remain inside the trusted interface. 
+
+Adaptive execution. (C4) The active slots Gt and their processing order are determined from (qt, ˜τ<t ). Conditional on the same prefix ht,j , the read set, charge set, local pri-vacy parameter, and sensitivity bound for gt,j are identical across adjacent stores and use neither raw memory nor un-released scores. (C5) The prospective cap check, generic fallback, and ledger update are applied on every execution path, maintaining La ≤ Ba for every a ∈ A .
+
+Downstream release. (C6) Conditioned on the public in-puts, released history, selected views, and the ledger state induced by that history, the response LLM and all observ-able controls are independent of raw memory. 
+
+We refer to Conditions (C1) –(C6) collectively as the DP-MemView interface contract. Conditions (C1) –(C3) bound the privacy loss of each slot-level release, Conditions (C4) –
+
+(C5) make these bounds compose along the released execu-tion path, and Condition (C6) extends the guarantee to the application-facing transcript. 
+
+Theorem 1 (Adaptive transcript privacy of DP-MemView ).
+
+If the interface satisfies Definition 1, then, for every pro-tected attribute a, every adaptive query strategy, and every adjacent pair M ∼a M ′, the augmented transcript ˜τT sat-isfies pure Ba-DP with respect to ∼a, as defined in Eq. (3) .The ordinary transcript τT satisfies the same guarantee by post-processing. 
+
+Equation (7) protects a single slot-level view selection, whereas Theorem 1 protects the complete adaptive interac-tion. If every slot-level operation satisfies Conditions (C1) –
+
+(C6) , then the queries, released views, observable controls, and LLM responses accumulated over multiple turns jointly satisfy Ba-DP for each protected attribute a. The guarantee holds even when the application chooses each query adap-tively from the observed history. Because it is established for the augmented transcript, which additionally reveals the selected views, the application-facing transcript inherits the same bound. The full proof is in Appendix B.2. Because the prospective check maintains La ≤ Ba on every execution path, every finite transcript prefix satisfies 
+
+Ba-DP. If a later selection would exceed the cap, the interface returns vgen  
+
+> g
+
+at zero additional privacy cost, so the cumulative privacy loss of the transcript remains bounded by Ba and the transcript-level Ba-DP guarantee continues to hold. Theorem 1 protects two stores that differ within one pro-tected group. We next consider two stores that may dif-fer across several groups. Let M = (m1, . . . , m n) and 
+
+M ′ = ( m′
+
+> 1
+
+, . . . , m ′
+
+> n
+
+) be two same-scaffold stores, and let 
+
+D = {i : mi̸ = m′
+
+> i
+
+} denote the memory positions whose contents differ between them. A set of protected attributes 
+
+C ⊆ A covers these differences if every position in D be-longs to at least one protected group Ia with a ∈ C , that is, 
+
+D ⊆ S 
+
+> a∈C
+
+Ia. Chaining Theorem 1 over the attributes in C
+
+gives the composite privacy cost P 
+
+> a∈C
+
+Ba.
+
+Corollary 1 (Composite-store transcript privacy) . For same-scaffold stores M and M ′, define the minimum cover cost 
+
+κ(M, M ′) = min   
+
+> C⊆A ,D⊆S
+> a∈C Ia
+
+X
+
+> a∈C
+
+Ba, (8) 
+
+with κ(M, M ′) = ∞ if no protected-group cover exists. If 
+
+κ(M, M ′) < ∞ and the interface satisfies Definition 1, then, for every adaptive query strategy and transcript event O,
+
+Pr[˜ τT ∈ O | M ] ≤ eκ(M,M ′) Pr[˜ τT ∈ O | M ′]. (9) 
+
+The same bound holds for the ordinary transcript. 
+
+Thus, Corollary 1 extends the per-attribute guarantee of Theorem 1 to stores differing across multiple protected groups, using the minimum total budget of groups covering all differing memory positions. This completes the transcript-level privacy guarantee for composite store differences. The proof is in Appendix B.3. 
+
+Inference interpretation. The transcript-level guarantee also bounds attribute inference: for any prior odds between adjacent stores M and M ′, observing a transcript event with positive probability under both hypotheses can multiply or divide those odds by at most eBa . This bound is independent of the prior; see Appendix B.4. 
+
+Why the full contract is needed. The transcript guaran-tees above do not follow from the private selector alone. Conditions (C1) –(C3) secure each slot-level release, Con-ditions (C4) –(C5) make its privacy cost compose along the realized execution path, and Condition (C6) prevents downstream channels from bypassing the interface. Within this architecture and absent additional safeguards, violating common support, complete charging, control of memory-dependent channels, or pathwise cap enforcement can break transcript-level Ba-DP and therefore the inference bound above. Appendix B.5 gives isolating counterexamples. Table 1: Compared memory interfaces.         
+
+> Method Response-LLM input; protection Memory-independent
+> GenericOnly Fixed generic view; memory-independent
+> Memory text
+> RawReadSet Raw read-set text; non-private reference TypedMask Item-masked read set; MemPrivacy adaptation TaskMin Fixed task-family subset; AirGapAgent adaptation OutputFilter Raw read-set text; post-generation deletion filter
+> Proposed modes DP-MemView (on) EM-sampled public view or generic fallback; Online allo-cation + ledger/cap
+> DP-MemView (pre) EM-sampled public view or generic fallback; Planned al-location + ledger/cap
+
+## Experiments 
+
+Research Questions 
+
+• (RQ1) Privacy–utility. Across repeated interactions, does the DP-MemView reduce observed transcript-level at-tribute distinguishability while preserving supported per-sonalization and limiting unsupported personalization, relative to memory-independent controls, raw-memory references, and adapted state-of-the-art privacy defenses? 
+
+• (RQ2) Interface safeguards. Is private view selection alone sufficient, or do violations of the surrounding in-terface contract produce distinct privacy, accounting, and personalization failures? 
+
+Experimental Setup 
+
+We briefly summarize the experimental setup below; full details are provided in Appendix C. 
+
+Evaluation data. No public long-term-memory corpus provides matched stores with the same scaffold and non-target memories while differing only within Ia. We addition-ally hold the query trajectory fixed across each pair. Thus, we use two complementary paired tracks. 
+
+Synthetic controlled track (PairedMem). PairedMem pro-vides exact counterfactual control through 320 pairs span-ning four protected attributes. Paired stores share their struc-ture and non-target content and differ only at 4–6 slot-compatible positions in Ia; each pair carries a 32-turn tra-jectory (10,240 gold-annotated turns in total). Structure and gold annotations are fixed programmatically, while language models generate only the surface wording. 
+
+Public-corpus transfer track. To test whether the findings depend on the wording and templates of our synthetic Paired-Mem construction, we construct 80 pairs whose memory text is adapted from publicly released corpora—LoCoMo persona and event histories (Maharana et al. 2024), medical-question text from the Medical Question Answering Datasets collection (Malikeh1375 2023), and empathetic-dialogue ev-idence (Rashkin et al. 2019)—while the PairedMem skele-ton, queries, policy, scorer, and gold rules remain fixed. 
+
+Compared interfaces. All methods use the same query trajectory and response model and differ only in the memory Table 2: RQ1 results at T = 16 and Ba = 2 , with K = 3 for DP-MemView (on). Privacy: AUC closer to 0.5 and TPR@5 closer to 0.05 indicate lower distinguishability. Utility: Higher tRec and U are better, whereas lower Unsup is better. † denotes identical conditioning under M and M ′, yielding chance-level distinguishability by construction.                                                                                                                                                                                                                                    
+
+> Method Qwen2.5-7B Llama-3.1-8B Gemma-2-9B
+> AUC TPR@5 ↓tRec ↑U↑Unsup ↓AUC TPR@5 ↓tRec ↑U↑Unsup ↓AUC TPR@5 ↓tRec ↑U↑Unsup ↓
+> PairedMem (synthetic)
+> GenericOnly 0.500 †0.050 †0.426 0.877 0.044 0.500 †0.050 †0.429 0.854 0.065 0.500 †0.050 †0.378 0.882 0.025 RawReadSet 0.842 0.547 0.521 0.775 0.136 0.942 0.688 0.525 0.665 0.271 0.925 0.609 0.490 0.700 0.237 TypedMask 0.500 †0.050 †0.386 0.846 0.109 0.500 †0.050 †0.296 0.678 0.233 0.500 †0.050 †0.309 0.750 0.195 TaskMin 0.832 0.406 0.524 0.772 0.129 0.963 0.719 0.532 0.650 0.229 0.919 0.641 0.468 0.729 0.202 OutputFilter 0.793 0.438 0.517 0.786 0.136 0.885 0.562 0.509 0.666 0.266 0.866 0.469 0.475 0.712 0.238
+> DP-MemView (on) 0.490 0.016 0.506 0.877 0.119 0.535 0.031 0.513 0.861 0.135 0.490 0.062 0.508 0.878 0.115
+> DP-MemView (pre) 0.476 0.062 0.559 0.877 0.175 0.474 0.016 0.559 0.857 0.174 0.464 0.016 0.571 0.870 0.170
+> Public-corpus transfer
+> GenericOnly 0.500 †0.050 †0.427 0.884 0.045 0.500 †0.050 †0.372 0.858 0.043 0.500 †0.050 †0.370 0.880 0.020 RawReadSet 0.730 0.350 0.470 0.727 0.190 0.723 0.425 0.351 0.555 0.339 0.680 0.275 0.393 0.730 0.208 TypedMask 0.500 †0.050 †0.369 0.815 0.139 0.500 †0.050 †0.289 0.603 0.270 0.500 †0.050 †0.304 0.782 0.131 TaskMin 0.751 0.450 0.449 0.752 0.163 0.742 0.475 0.355 0.540 0.352 0.630 0.250 0.371 0.724 0.192 OutputFilter 0.701 0.300 0.448 0.728 0.175 0.669 0.288 0.350 0.550 0.316 0.647 0.237 0.370 0.722 0.201
+> DP-MemView (on) 0.562 0.113 0.513 0.883 0.105 0.563 0.100 0.503 0.862 0.114 0.535 0.100 0.507 0.878 0.089
+> DP-MemView (pre) 0.523 0.062 0.566 0.878 0.172 0.490 0.113 0.565 0.856 0.179 0.486 0.088 0.573 0.873 0.160
+
+conditioning supplied at each turn and its protection (Ta-ble 1). TypedMask and TaskMin are setting-specific adap-tations of MemPrivacy (Chen et al. 2026) and AirGapA-gent (Bagdasarian et al. 2024), respectively, while Output-Filter is a generic post-generation control. We evaluate DP-MemView under two budget policies: the online mode ad-mits fixed local charges through a running ledger, whereas the preallocated mode distributes each budget across known planned charges. 
+
+Query and budget protocol. Each pair is evaluated with 32 benign queries arranged as two nonoverlapping 16-turn blocks. Each block contains 8 target-relevant, 4 same-domain attribute-neutral, and 4 distractor queries; protected-attribute names and direct synonyms are excluded. The same query sequence is used for both stores and all interfaces. Main results use T = 16 . We evaluate per-attribute caps 
+
+Ba ∈ { 1, 2, 4, 8}. DP-MemView (on) uses budget granu-larities K ∈ { 2, 3, 4} and sets εt,g = min a∈Γt,g Ba/K .DP-MemView (pre) instead distributes each budget over the planned number Ca of charged selections for attribute a,setting εt,g = min a∈Γt,g Ba/C a. Both modes use the same prospective cap check and generic fallback. 
+
+Models, metrics, and statistics. Responses are gener-ated by Qwen2.5-7B-Instruct, Llama-3.1-8B-Instruct, and Gemma-2-9B-it. For each response model, privacy is mea-sured by a frozen sentence encoder and separate calibrated logistic-regression classifiers for each attribute and prefix length, trained on PairedMem training transcripts, calibrated on validation transcripts, and evaluated on held-out test tran-scripts. The resulting auditors are then applied without refit-ting to the corresponding public-corpus transfer transcripts. We report macro-AUC and TPR at 5% FPR. A blinded Claude Sonnet 4.6 judge evaluates response utility using a frozen rubric. It scores each 16-turn transcript against a side-specific checklist of required and unsupported response behaviors, without seeing the method or store label. The judge assigns 0–4 scores to relevance, correctness, ac-tionability, and personalization. The normalized average of these four scores defines U . tRec averages the normalized scores for target-required behaviors on M , whereas Unsup 
+
+averages those for unsupported target-specific behaviors on 
+
+M ′. Thus, U reflects overall response quality, tRec reflects how well supported target-specific information is used for personalization, and Unsup reflects the extent of unsup-ported target-specific personalization. 
+
+RQ1: Privacy–Utility 
+
+Table 2 compares DP-MemView with memory-independent and raw-memory references and with setting-specific adap-tations of state-of-the-art privacy defenses. GenericOnly ex-cludes private memory, whereas RawReadSet directly sup-plies the read-set memory text to the response model. Type-dMask and TaskMin respectively evaluate masking and task-based minimization, while OutputFilter is a generic post-generation control. 
+
+Privacy close to the memory-independent reference. 
+
+GenericOnly yields chance-level distinguishability because its conditioning is independent of the store. TypedMask also yields chance-level distinguishability because it replaces the protected items that differ between M and M ′ with iden-tical placeholders, removing the target-dependent signal. In contrast, RawReadSet, TaskMin, and OutputFilter remain distinguishable across all models and both tracks. Supplying read-set text, restricting memory to a task-specific subset, or filtering the generated response does not prevent protected at-tributes from influencing the transcript. Both DP-MemView modes remain much closer to the memory-independent ref-erence than these memory-text methods while retaining memory-dependent conditioning. TPR@5 shows the same separation at a 5% false-positive rate. 
+
+Useful personalization without raw-memory exposure. 
+
+GenericOnly attains high overall response quality but low 
+
+tRec because its fixed conditioning cannot provide memory-grounded personalization. TypedMask also has low tRec 
+
+because its placeholders remove the target-specific infor-Table 3: Budget sensitivity of DP-MemView (on) on Qwen2.5-7B and PairedMem at T = 16 , with εt,g = Ba/K .                                         
+
+> Setting εt,g AUC tRec ↑Unsup ↓
+> Cap magnitude
+> (K= 3)
+> Ba= 1 0.333 0.541 0.508 0.115
+> Ba= 2 0.667 0.490 0.506 0.119
+> Ba= 4 1.333 0.508 0.513 0.113
+> Ba= 8 2.667 0.608 0.534 0.105
+> Budget granularity
+> (Ba= 2)
+> K= 2 1.000 0.510 0.487 0.088
+> K= 3 0.667 0.490 0.506 0.119
+> K= 4 0.500 0.525 0.527 0.129
+
+mation needed for personalization. Providing more mem-ory text does not produce higher overall response quality: across all model–track combinations, both DP-MemView modes achieve higher U than RawReadSet, TaskMin, and OutputFilter. This suggests that task-specific views guide the response model more effectively than raw or filtered memory text. DP-MemView (pre) achieves the highest tRec in every model–track combination while remaining close to chance in distinguishability. DP-MemView (on) achieves comparable 
+
+U but lower Unsup than the preallocated mode, RawRead-Set, TaskMin, and OutputFilter. The two modes therefore serve different settings: preallocation sustains more target-required personalization when planned charge counts are known, whereas online accounting limits unsupported per-sonalization without future charge information. 
+
+Model and corpus robustness. The same privacy–utility separation holds across Qwen, Llama, and Gemma and trans-fers to corpus-sourced memory text without auditor refitting. 
+
+Budget sensitivity. Table 3 separates the roles of Ba and K.At fixed K = 3 , AUC, tRec , and Unsup change little for 
+
+Ba ≤ 4, whereas Ba = 8 increases distinguishability. At fixed Ba = 2 , increasing K permits more charged releases at smaller εt,g , increasing both tRec and Unsup . Thus, Ba
+
+scales the local EM parameter, whereas K determines how many equal charges each attribute budget supports. 
+
+RQ1 summary. Across all three response models and both data tracks, both DP-MemView modes remain much less dis-tinguishable than RawReadSet, TaskMin, and OutputFilter and achieve higher U than these methods. Relative to Gener-icOnly and TypedMask, both modes recover more target-required personalization. The preallocated mode provides the highest tRec when planned charge counts are known, whereas the online mode yields lower Unsup without future charge information. 
+
+RQ2: Interface Safeguards 
+
+Table 4 isolates C2, C3, and C5 while holding the remain-ing interface components fixed. We report the reconstructed target-attribute pure-DP bound and response-level measure-ments at T = 16 .
+
+IncompleteCharge violates C2 by charging only one of the affected attributes when a read intersects multiple pro-tected groups. The table reconstructs the target attribute’s cumulative privacy cost by including the charges omitted from its ledger. CappedArgmax violates C3 by replacing EM sampling with deterministic selection of the highest-Table 4: End-to-end safeguard ablations on Qwen2.5-7B and PairedMem at T = 16 , with Ba = 2 and K = 3 .                                     
+
+> Variant Violated DP bound AUC tRec ↑U↑Unsup ↓
+> DP-MemView (on) —2.0≤Ba0.490 0.506 0.877 0.119 IncompleteCharge C2 4.0> B a0.554 0.565 0.879 0.160 CappedArgmax C3 ∞0.754 0.597 0.876 0.047 NoCap C5 5.33 > B a0.599 0.583 0.876 0.161
+
+scoring view. The ledger update and generic fallback are left unchanged so that only the selection rule differs from DP-MemView. If adjacent stores have different highest-scoring views, one selected view can have probability 1 under one store and 0 under the other; hence no finite pure-DP bound exists, and we report ε = ∞. NoCap violates C5: it retains valid EM releases and complete charging but removes the prospective cap check and generic fallback, allowing cumu-lative charges to exceed Ba.
+
+Personalization gains outside the Ba-DP guarantee. All three ablations increase tRec over DP-MemView, but none preserves its Ba = 2 transcript guarantee. IncompleteCharge retains valid EM releases but omits affected target charges: its ledger reports 2.0, whereas the reconstructed charge is 4.0.CappedArgmax retains the operational ledger and fallback only as controls, but deterministic highest-score selection has no finite per-release DP bound. NoCap uses valid, fully charged EM releases, but their cumulative charge already reaches 5.33 at T = 16 .These violations also increase transcript distinguishabil-ity: AUC rises from 0.490 for DP-MemView to 0.554, 0.754, and 0.599. The charge analysis shows why the Ba-DP certifi-cate fails, while AUC shows the resulting empirical leakage. Because U changes by at most 0.002, the apparent gain is mainly higher personalization obtained after invalidating or exceeding the privacy guarantee. CappedArgmax’s low Un-sup is not evidence of privacy; it accompanies the highest AUC. 
+
+Direct support and side-channel failures. C1 is categor-ical: if a view is available under only one of two adjacent stores, releasing that view has positive probability on one side and zero on the other, so no finite pure-DP bound exists. For the C3/C6 channel-isolation case, exposing the top in-ternal score yields a score-channel AUC of 0.976, although the compliant view-selection and response paths remain un-changed. Because our evaluation activates one slot per turn, it does not isolate the slot-order subcase of C4; this case is covered by the interface contract and its counterexample. 
+
+RQ2 summary. Removing the safeguards causes failures at different layers: incomplete charging makes the attribute ledger incorrect, deterministic selection invalidates the lo-cal privacy bound, and removing the cap allows valid local charges to accumulate beyond Ba. Common support, safe orchestration, and downstream isolation prevent one-sided outputs and direct side channels. Thus, private view selec-tion alone is insufficient; the interface contract is required for transcript-level privacy. Conclusion 
+
+We formulated long-term-memory privacy as an adaptive transcript problem and introduced DP-MemView , which keeps raw memory inside a trusted interface, passes only public views to the response LLM, and enforces attribute-level pathwise caps. Under the interface contract, the full adaptive transcript satisfies pure Ba-DP for each protected attribute. Across three response LLMs and two evaluation tracks, DP-MemView kept transcript distinguishability near chance while retaining target-required personalization and response quality. Safeguard ablations and diagnostics fur-ther showed that private selection alone is insufficient and that the complete interface contract is necessary. 
+
+## References 
+
+Alvim, M. S.; Chatzikokolakis, K.; Palamidessi, C.; and Smith, G. 2012. Measuring Information Leakage Using Generalized Gain Functions. In Proceedings of the IEEE Computer Security Foundations Symposium , 265–279. Bagdasarian, E.; Yi, R.; Ghalebikesabi, S.; Kairouz, P.; Gruteser, M.; Oh, S.; Balle, B.; and Ramage, D. 2024. AirGapAgent: Protecting Privacy-Conscious Conversational Agents. In Proceedings of the ACM SIGSAC Conference on Computer and Communications Security , 3868–3882. Chen, Y.; Zhao, J.; Tang, B.; Wang, H.; Zhang, Y.; Huang, F.; Xiong, F.; and Li, Z. 2026. MemPrivacy: Privacy-Preserving Personalized Memory Management for Edge-Cloud Agents. 
+
+arXiv preprint arXiv:2605.09530 .Choi, Y.; Park, Y.; Byun, J.; Lee, J.; and Park, J. 2025. Safe-guarding Privacy of Retrieval Data against Membership In-ference Attacks: Is This Query Too Close to Home? In 
+
+Findings of the Association for Computational Linguistics: EMNLP 2025 , 8241–8258. Dai, R.; Hu, H.; Zhang, J.; Kang, Y.; and Tan, A.-H. 2026. MemoryART: Enhancing LLMs via Multi-Memory Models with Adaptive Resonance Theory for Healthcare Agents. In 
+
+Proceedings of the AAAI Conference on Artificial Intelli-gence , 20676–20683. Du, Y.; Wang, B.; He, Y.; Liang, B.; Wang, B.; Li, Z.; Gui, L.; Pan, J. Z.; Xu, R.; and Wong, K.-F. 2026. MemGuide: Intent-Driven Memory Selection for Goal-Oriented Multi-Session LLM Agents. In Proceedings of the AAAI Conference on Artificial Intelligence , 30584–30592. Dwork, C.; and Roth, A. 2014. The Algorithmic Foundations of Differential Privacy. Foundations and Trends in Theoret-ical Computer Science , 9(3–4): 211–407. Google. 2026. About Personalization with Connected Apps. Gemini Apps Help. https://support.google.com/ gemini/answer/16836988. Accessed: 2026-07-19. Hu, Y.; Wang, Y.; and McAuley, J. 2025. Evaluating Mem-ory in LLM Agents via Incremental Multi-Turn Interactions. 
+
+arXiv preprint arXiv:2507.05257 .Huang, Z.; Dai, Q.; Wu, G.; Wu, X.; Li, X.; Ge, T.; Wang, W.; and Jin, Q. 2026. Mem-PAL: Towards Memory-based Personalized Dialogue Assistants for Long-term User-Agent Interaction. In Proceedings of the AAAI Conference on Arti-ficial Intelligence , 31229–31237. Kairouz, P.; Oh, S.; and Viswanath, P. 2015. The Composi-tion Theorem for Differential Privacy. In Proceedings of the International Conference on Machine Learning , 1376–1385. Kang, J.; Ji, M.; Zhao, Z.; and Bai, T. 2025. Memory OS of AI Agent. In Proceedings of the Conference on Empirical Methods in Natural Language Processing , 25961–25970. Koga, T.; Wu, R.; Zhang, Z.; and Chaudhuri, K. 2024. Privacy-Preserving Retrieval Augmented Generation with Differential Privacy. arXiv preprint arXiv:2412.04697 .Li, H.; Yang, C.; Zhang, A.; Deng, Y.; Wang, X.; and Chua, T.-S. 2025. Hello Again! LLM-Powered Personalized Agent for Long-Term Dialogue. In Proceedings of the Conference of the Nations of the Americas Chapter of the Association for Computational Linguistics: Human Language Technologies ,5259–5276. Liu, D.; Wu, Z.; Song, D.; and Huang, H. 2025. A Persona-Aware LLM-Enhanced Framework for Multi-Session Per-sonalized Dialogue Generation. In Findings of the Associa-tion for Computational Linguistics: ACL 2025 , 103–123. Lyu, X.; He, J.; Wang, N.; Hu, Y.; Li, T.; Chen, D.; Li, S.; and Chen, Y. 2026. ADAM: A Systematic Data Extraction Attack on Agent Memory via Adaptive Querying. arXiv preprint arXiv:2604.09747 .Maharana, A.; Lee, D.-H.; Tulyakov, S.; Bansal, M.; Bar-bieri, F.; and Fang, Y. 2024. Evaluating Very Long-Term Conversational Memory of LLM Agents. In Proceedings of the Annual Meeting of the Association for Computational Linguistics , 13851–13870. Malikeh1375. 2023. Medical Question An-swering Datasets. Hugging Face Datasets. Https://huggingface.co/datasets/Malikeh1375/medical-question-answering-datasets. McSherry, F.; and Talwar, K. 2007. Mechanism Design via Differential Privacy. In Proceedings of the Annual IEEE Symposium on Foundations of Computer Science , 94–103. Mireshghallah, N.; Kim, H.; Zhou, X.; Tsvetkov, Y.; Sap, M.; Shokri, R.; and Choi, Y. 2024. Can LLMs Keep a Se-cret? Testing Privacy Implications of Language Models via Contextual Integrity Theory. In International Conference on Learning Representations .OpenAI. 2025. Introducing Apps in ChatGPT and the New Apps SDK. https://openai.com/index/introducing-apps-in-chatgpt/. Accessed: 2026-06-14. Packer, C.; Wooders, S.; Lin, K.; Fang, V.; Patil, S. G.; Stoica, I.; and Gonzalez, J. E. 2023. MemGPT: Towards LLMs as Operating Systems. arXiv preprint arXiv:2310.08560 .Park, J. S.; O’Brien, J. C.; Cai, C. J.; Morris, M. R.; Liang, P.; and Bernstein, M. S. 2023. Generative Agents: Interac-tive Simulacra of Human Behavior. In Proceedings of the Annual ACM Symposium on User Interface Software and Technology , 1–22. Rashkin, H.; Smith, E. M.; Li, M.; and Boureau, Y.-L. 2019. Towards Empathetic Open-domain Conversation Models: a New Benchmark and Dataset. In Proceedings of the Annual Meeting of the Association for Computational Linguistics ,5370–5381. Rogers, R.; Roth, A.; Ullman, J.; and Vadhan, S. 2016. Pri-vacy Odometers and Filters: Pay-as-You-Go Composition. In Proceedings of the International Conference on Neural Information Processing Systems , 1929–1937. Shao, Y.; Li, T.; Shi, W.; Liu, Y.; and Yang, D. 2024. Priva-cyLens: Evaluating Privacy Norm Awareness of Language Models in Action. In Proceedings of the International Con-ference on Neural Information Processing Systems , 89373– 89407. Smith, G. 2009. On the Foundations of Quantitative Informa-tion Flow. In Proceedings of the International Conference on Foundations of Software Science and Computational Struc-tures , 288–302. Tan, Z.; Yan, J.; Hsu, I.-H.; Han, R.; Wang, Z.; Le, L.; Song, Y.; Chen, Y.; Palangi, H.; Lee, G.; Iyer, A. R.; Chen, T.; Liu, H.; Lee, C.-Y.; and Pfister, T. 2025. In Prospect and Retrospect: Reflective Memory Management for Long-term Personalized Dialogue Agents. In Proceedings of the Annual Meeting of the Association for Computational Linguistics ,8416–8439. Tang, T.; Flemings, J.; Wang, Y.; and Annavaram, M. 2026. Differentially Private Retrieval-Augmented Genera-tion. arXiv preprint arXiv:2602.14374 .Wang, B.; He, W.; Zeng, S.; Xiang, Z.; Xing, Y.; Tang, J.; and He, P. 2025a. Unveiling Privacy Risks in LLM Agent Mem-ory. In Proceedings of the Annual Meeting of the Association for Computational Linguistics , 25241–25260. Wang, S.; Yu, F.; Liu, X.; Qin, X.; Zhang, J.; Lin, Q.; Zhang, D.; and Rajmohan, S. 2025b. Privacy in Action: Towards Re-alistic Privacy Mitigation and Evaluation for LLM-Powered Agents. In Findings of the Association for Computational Linguistics: EMNLP 2025 , 17055–17074. Wu, J.; Hu, M.; Zhu, J.; Wang, J.; and Jin, Y. 2026. Agent-Memory Protocol: A Privacy-Focused Protocol for LLM Agents and User Memory Interaction. In Proceedings of The Second AAAI Bridge Program on AI for Medicine and Healthcare , 293–301. Xu, W.; Liang, Z.; Mei, K.; Gao, H.; Tan, J.; and Zhang, Y. 2025. A-MEM: Agentic Memory for LLM Agents. arXiv preprint arXiv:2502.12110 .Zhong, W.; Guo, L.; Gao, Q.; Ye, H.; and Wang, Y. 2024. MemoryBank: Enhancing Large Language Models with Long-Term Memory. In Proceedings of the AAAI Confer-ence on Artificial Intelligence , 19724–19731. A Supplementary Method Details 
+
+At the start of an interaction, La = 0 for every a ∈ A . In our implementation, Gt contains only memory-conditioned slots whose fixed read sets are nonempty and intersect at least one protected group; hence, for every g ∈ Gt, Rt,g ̸ = ∅ and Γ⋆(Rt,g )̸ = ∅.Algorithm 1 gives the complete one-turn procedure used in our implementation. Our implementation uses the minimal sound charge set Γt,g = Γ ⋆(Rt,g ), while Definition 1 also permits conservative supersets. All orchestration rules use only public inputs, policy-fixed structure, and previously released outputs, as required by Condition (C4); cap checks and ledger updates follow Condition (C5). Below, τ<t denotes the ordinary-transcript projection of ˜τ<t .
+
+Algorithm 1 DP-MemView at turn t
+
+Require: Query qt, memory M , released history ˜τ<t , ledgers and caps {(La, B a)}a∈A , fixed policies, scorer, sensitivity-bound rule, and view vocabularies {V g }
+
+1: Gt ← Slot( qt, ˜τ<t )
+
+2: enumerate Gt in the policy-fixed order as (gt,j )|Gt|
+
+> j=1
+
+3: for j = 1 , . . . , |Gt| do 
+
+4: g ← gt,j 
+
+5: ht,j ←  ˜τ<t , q t, (vt,g t,i )i<j 
+
+
+
+6: Rt,g ← ReadPolicy( qt, g, h t,j )
+
+7: Γt,g ← Γ⋆(Rt,g )
+
+8: εt,g ← BudgetRule  qt, g, h t,j , Γt,g , {(La, B a)}a∈Γt,g 
+
+
+
+9: if ∃a ∈ Γt,g : La + εt,g > B a then 
+
+10: vt,g ← vgen 
+
+> g
+
+11: else 
+
+12: compute the internal score vector ut,g (M )
+
+13: obtain the policy-fixed valid sensitivity bound ∆ut,g > 0
+
+14: sample vt,g according to Eq. (7) 15: La ← La + εt,g , ∀a ∈ Γt,g 
+
+16: end if 
+
+17: end for 
+
+18: vt ← (vt,g t,j )|Gt|
+
+> j=1
+
+19: ct ← ObservableControl  qt, v t, ˜τ<t , {(La, B a)}a∈A 
+
+
+
+20: yt ∼ KLLM (· | qt, v t, τ <t )
+
+21: append (qt, v t, c t, y t) to the augmented history 22: return (ct, y t) to the application 
+
+## B Proofs 
+
+B.1 Zero Privacy Cost for an Uncharged Attribute 
+
+Lemma 1 (Zero cost for an uncharged attribute) . Assume Conditions (C1) –(C4) . Assume that the scorer uses only the read-set memories, as specified in Eq. (5) , and that ∆ut,g is fixed by the interface policy. Fix the same prefix h under adjacent stores M ∼a M ′, and consider an admitted charged selection at (t, g ). If a / ∈ Γt,g ,then, for every v ∈ V g ,
+
+Pr[ vt,g = v | h, M ] = Pr[ vt,g = v | h, M ′].
+
+Thus, the selection adds zero privacy loss for attribute a.Proof. Under the same prefix h, Condition (C4) gives the same read set Rt,g , charge set Γt,g , and local privacy parameter εt,g 
+
+under M and M ′.By Condition (C2), 
+
+Γt,g ⊇ Γ⋆(Rt,g ).
+
+Hence, a / ∈ Γt,g implies 
+
+Rt,g ∩ Ia = ∅.
+
+Because M ∼a M ′, the two stores agree at every position outside Ia. Since Rt,g ∩ Ia = ∅, every position in Rt,g lies outside 
+
+Ia. Therefore, mi = m′ 
+
+> i
+
+for every i ∈ R t,g , and hence 
+
+MRt,g = M ′Rt,g .
+
+Because the scorer uses only qt and the read-set memories, Eq. (5) therefore gives 
+
+ut,g (M ) = ut,g (M ′).Condition (C1) gives the same view vocabulary Vg , and the fixed sensitivity rule gives the same ∆ut,g . By Condition (C3), the admitted charged selection uses the EM in Eq. (7). Since the view vocabulary, score vector, εt,g , and ∆ut,g are the same under both stores, the EM gives the same probability to every v ∈ V g . Thus, 
+
+Pr[ vt,g = v | h, M ] = Pr[ vt,g = v | h, M ′].
+
+Therefore, the conditional likelihood ratio is one, and the selection adds zero privacy loss for attribute a.
+
+B.2 Proof of Theorem 1 
+
+Proof. Fix a protected attribute a, adjacent stores M ∼a M ′, an adaptive query strategy, and any fixed value of its auxiliary information. We first prove the claim for the augmented transcript ˜τT .Fix any possible augmented transcript value 
+
+ω =  (qt, v t, c t, y t)Tt=1 .
+
+We compare the probability of producing this same transcript under M and M ′:
+
+Pr[˜ τT = ω | M ] and Pr[˜ τT = ω | M ′].
+
+For each slot-level operation gt,j along this transcript, let ht,j denote the operation-level prefix immediately before processing 
+
+gt,j , as defined in the main text. Because both probabilities concern the same transcript ω, they use the same prefix ht,j at the corresponding operation. Initially, all ledgers are zero. Suppose that the ledger values are the same immediately before a slot-level operation. Under the same ht,j , Condition (C4) gives the same read set, charge set, and local privacy parameter under M and M ′. Because the ledger values and caps are also the same, Condition (C5) gives the same cap-check result. If the selection is admitted, both executions add the same εt,g to the same ledgers; otherwise, neither execution changes the ledgers. Thus, the ledger values are also the same immediately after the operation. By induction, they are the same immediately before every slot-level operation along ω.We now compare the view released at one slot-level operation g = gt,j , conditional on the same prefix ht,j . There are three cases. 
+
+• Case 1: The released view has the same conditional distribution under M and M ′.Condition (C3) directly gives, for every v ∈ V g ,
+
+Pr[ vt,g = v | ht,j , M ] = Pr[ vt,g = v | ht,j , M ′].
+
+This case includes a failed cap check: by the preceding ledger argument and Condition (C5), both executions return the same fixed generic view vgen  
+
+> g
+
+. Thus, this release adds zero privacy loss for attribute a.
+
+• Case 2: The EM is admitted and a / ∈ Γt,g .Lemma 1, which relies on Condition (C2), gives, for every v ∈ V g ,
+
+Pr[ vt,g = v | ht,j , M ] = Pr[ vt,g = v | ht,j , M ′].
+
+Thus, this release also adds zero privacy loss for attribute a.
+
+• Case 3: The EM is admitted and a ∈ Γt,g .Write 
+
+uM (v) = ut,g (qt, v ; MRt,g ), uM ′ (v) = ut,g (qt, v ; M ′Rt,g ).
+
+Condition (C1) gives the same view vocabulary, Condition (C4) gives the same read set and εt,g , and both executions use the same policy-fixed positive bound ∆ut,g . Because a ∈ Γt,g and M ∼a M ′, Eq. (6) gives 
+
+|uM (v) − uM ′ (v)| ≤ ∆ut,g for every v ∈ V g .
+
+Let 
+
+ZM = X
+
+> v′∈V g
+
+exp 
+
+ εt,g uM (v′)2∆ ut,g 
+
+
+
+, ZM ′ = X
+
+> v′∈V g
+
+exp 
+
+ εt,g uM ′ (v′)2∆ ut,g 
+
+
+
+.
+
+The sensitivity bound gives 
+
+uM (v) − uM ′ (v) ≤ ∆ut,g =⇒ exp 
+
+ εt,g (uM (v) − uM ′ (v)) 2∆ ut,g 
+
+
+
+≤ eεt,g /2.
+
+It also gives, for every v′ ∈ V g ,
+
+uM ′ (v′) ≤ uM (v′)+∆ ut,g =⇒ ZM ′ = X
+
+> v′∈V g
+
+exp 
+
+ εt,g uM ′ (v′)2∆ ut,g 
+
+
+
+≤ X
+
+> v′∈V g
+
+exp 
+
+ εt,g (uM (v′) + ∆ ut,g )2∆ ut,g 
+
+
+
+= eεt,g /2ZM .The EM assigns positive probability to every view in the common vocabulary. Therefore, Eq. (7) gives 
+
+Pr[ vt,g = v | ht,j , M ]Pr[ vt,g = v | ht,j , M ′] = exp 
+
+ εt,g (uM (v) − uM ′ (v)) 2∆ ut,g 
+
+ ZM ′
+
+ZM
+
+≤ eεt,g /2eεt,g /2 = eεt,g .
+
+Thus, this release adds at most εt,g privacy loss for attribute a.The remaining transcript components add no privacy loss. Because the same transcript ω fixes the same released history, the adaptive query strategy gives 
+
+Pr[ qt | ˜τ<t , M ] = Pr[ qt | ˜τ<t , M ′].
+
+The preceding induction also gives the same ledger values under the two stores. Condition (C6) therefore gives the same conditional distribution for the observable control: 
+
+Pr[ ct | qt, v t, ˜τ<t , {Lb}b∈A , M ] = Pr[ ct | qt, v t, ˜τ<t , {Lb}b∈A , M ′].
+
+Equation (2) likewise gives 
+
+Pr[ yt | qt, v t, τ <t , M ] = Pr[ yt | qt, v t, τ <t , M ′].
+
+Hence, the conditional likelihood ratios of qt, ct, and yt are all one. Therefore, in the likelihood ratio for the fixed transcript ω,the factors corresponding to qt, ct, and yt cancel, and only the slot-level view probabilities remain. Among them, only admitted EM selections with a ∈ Γt,g can contribute a factor greater than one. Applying the chain rule in chronological order and multiplying the bounds above gives 
+
+Pr[˜ τT = ω | M ] ≤
+
+Y 
+
+> (t,g )with an admitted EM
+> a∈Γt,g
+
+eεt,g 
+
+ Pr[˜ τT = ω | M ′] = exp 
+
+X 
+
+> (t,g )with an admitted EM
+> a∈Γt,g
+
+εt,g 
+
+ Pr[˜ τT = ω | M ′].
+
+Let La(ω) be the final value of the ledger for attribute a along the execution path producing ω. Every term in the preceding sum is added to La. Since the ledger starts at zero and never decreases, 
+
+X 
+
+> (t,g )with an admitted EM
+> a∈Γt,g
+
+εt,g ≤ La(ω).
+
+Condition (C5) maintains La(ω) ≤ Ba. Therefore, 
+
+Pr[˜ τT = ω | M ] ≤ eLa(ω) Pr[˜ τT = ω | M ′] ≤ eBa Pr[˜ τT = ω | M ′].
+
+Now let O be any set of possible augmented transcripts. Summing the preceding inequality over all ω ∈ O gives 
+
+Pr[˜ τT ∈ O | M ] = X
+
+> ω∈O
+
+Pr[˜ τT = ω | M ] ≤ eBa
+
+X
+
+> ω∈O
+
+Pr[˜ τT = ω | M ′] = eBa Pr[˜ τT ∈ O | M ′].
+
+Thus, the augmented transcript ˜τT satisfies Eq. (3) for attribute a.Finally, the ordinary transcript τT is obtained from ˜τT by removing the selected views. Therefore, τT satisfies the same Ba-DP bound by post-processing. 
+
+B.3 Proof of Corollary 1 
+
+Proof. Fix an adaptive query strategy and a transcript event O. If D = ∅, then M = M ′. Moreover, the empty set is a valid cover of D with cost zero, so κ(M, M ′) = 0 , and the claimed inequality holds with equality. Assume D̸ = ∅. Since κ(M, M ′) < ∞, at least one protected-group cover of D exists. Let C be a cover attaining the minimum in Eq. (8), and list its elements as 
+
+C = {a1, . . . , a k}.
+
+Then 
+
+D ⊆
+
+> k
+
+[
+
+> r=1
+
+Iar ,
+
+> k
+
+X
+
+> r=1
+
+Bar = κ(M, M ′).
+
+Set U0 = ∅, and for r = 1 , . . . , k , define 
+
+Ur =
+
+> r
+
+[
+
+> s=1
+
+Ias .For r = 0 , . . . , k , let M (r) = ( m(r) 
+
+> i
+
+)ni=1 , where 
+
+m(r) 
+
+> i
+
+=
+
+m′
+
+> i
+
+, i ∈ Ur ,mi, i / ∈ Ur .
+
+Because U0 = ∅, we have M (0) = M . At every position i, M (r) uses either mi or m′
+
+> i
+
+. Since M and M ′ have the same scaffold and both values are slot-compatible at position i, each M (r) is a valid same-scaffold store. For r = 1 , . . . , k , we have 
+
+Ur = Ur−1 ∪ Iar .
+
+Positions in Ur−1 have value m′ 
+
+> i
+
+in both M (r−1) and M (r), while positions outside Ur have value mi in both stores. Hence, the two stores can differ only at positions in 
+
+Ur \ Ur−1 = Iar \ Ur−1 ⊆ Iar .
+
+Together with their common scaffold and slot-compatible contents, this gives 
+
+M (r−1) ∼ar M (r).
+
+Because C covers D, we have D ⊆ Uk. If i ∈ Uk, then m(k) 
+
+> i
+
+= m′ 
+
+> i
+
+by construction. If i / ∈ Uk, then i / ∈ D, so mi = m′
+
+> i
+
+, and therefore 
+
+m(k) 
+
+> i
+
+= mi = m′
+
+> i
+
+.
+
+Thus, 
+
+M (k) = M ′.
+
+Applying Theorem 1 to each adjacent pair gives 
+
+Pr[˜ τT ∈ O | M (r−1) ] ≤ eBar Pr[˜ τT ∈ O | M (r)]
+
+for r = 1 , . . . , k . Chaining these inequalities gives 
+
+Pr[˜ τT ∈ O | M (0) ] ≤
+
+> k
+
+Y
+
+> r=1
+
+eBar 
+
+!
+
+Pr[˜ τT ∈ O | M (k)] = exp 
+
+> k
+
+X
+
+> r=1
+
+Bar
+
+!
+
+Pr[˜ τT ∈ O | M (k)].
+
+Using M (0) = M , M (k) = M ′, and Pkr=1 Bar = κ(M, M ′), we obtain 
+
+Pr[˜ τT ∈ O | M ] ≤ eκ(M,M ′) Pr[˜ τT ∈ O | M ′].
+
+This proves Eq. (9). The same bound holds for the ordinary transcript because it is obtained from ˜τT by removing the selected views. 
+
+B.4 Posterior-Odds Interpretation 
+
+Let H ∈ { 0, 1} indicate which adjacent store is used, with H = 1 corresponding to M and H = 0 corresponding to M ′.Assume 0 < Pr[ H = 1] < 1. For any augmented-transcript event O having positive probability under both stores, Bayes’ rule gives 
+
+Pr[ H = 1 | ˜τT ∈ O ] = Pr[˜ τT ∈ O | M ] Pr[ H = 1] Pr[˜ τT ∈ O ] , Pr[ H = 0 | ˜τT ∈ O ] = Pr[˜ τT ∈ O | M ′] Pr[ H = 0] Pr[˜ τT ∈ O ] .
+
+Taking the ratio of these two expressions gives 
+
+Pr[ H = 1 | ˜τT ∈ O ]Pr[ H = 0 | ˜τT ∈ O ] = Pr[˜ τT ∈ O | M ] Pr[ H = 1] Pr[˜ τT ∈ O | M ′] Pr[ H = 0] .
+
+Dividing both sides by the prior odds Pr[ H = 1] / Pr[ H = 0] yields 
+
+Pr[ H = 1 | ˜τT ∈ O ]/ Pr[ H = 0 | ˜τT ∈ O ]Pr[ H = 1] / Pr[ H = 0] = Pr[˜ τT ∈ O | M ]Pr[˜ τT ∈ O | M ′] .
+
+Theorem 1 gives the upper bound eBa . Since ∼a is symmetric, applying the theorem with M and M ′ exchanged gives the lower bound e−Ba . Therefore, 
+
+e−Ba ≤ Pr[ H = 1 | ˜τT ∈ O ]/ Pr[ H = 0 | ˜τT ∈ O ]Pr[ H = 1] / Pr[ H = 0] ≤ eBa .
+
+Thus, observing any transcript event can change the prior odds by at most a factor eBa in either direction. The same statement holds for the ordinary transcript. B.5 Failure Modes under Omitted Interface Invariants 
+
+Proposition 1 (Failure modes under omitted interface invariants) . Within the DP-MemView architecture and without additional safeguards, each of the following four categories is necessary: common view support, complete attribute charging, exclusion or privatization of raw-memory-dependent observable releases, and pathwise budget enforcement. For each category, there exists an interface that satisfies the other three categories but violates Ba-DP. Proof. We give one counterexample for each category. All policies and interface components not mentioned in a construction remain fixed and store-independent. 
+
+Common view support (C1). Consider a fixed admitted operation for which the read set, charge set, local privacy parameter, cap decision, and all downstream channels satisfy the remaining contract categories. Let only the view vocabulary depend on the store. Suppose that 
+
+v⋆ ∈ V g (M ), v⋆ /∈ V g (M ′)
+
+for adjacent stores M ∼a M ′, and run the EM over the respective vocabularies. Since the EM assigns positive probability to every candidate view, the transcript event 
+
+O = {˜τT : vt,g = v⋆}
+
+satisfies 
+
+Pr[˜ τT ∈ O | M ] = γ > 0, Pr[˜ τT ∈ O | M ′] = 0 .
+
+Any finite Ba would require 
+
+γ ≤ eBa Pr[˜ τT ∈ O | M ′] = 0 ,
+
+which is impossible. Thus, store-dependent view support precludes any finite pure-DP guarantee. 
+
+Complete attribute charging (C2). Keep the same view vocabulary under both stores, use the valid EM in Eq. (7), keep the routing and downstream outputs store-independent, and retain the pathwise cap check. We change only the charge set. Choose two overlapping protected groups Ia and Ib, where b̸ = a, and a position i⋆ ∈ R t,g ∩ Ia ∩ Ib. Choose adjacent stores 
+
+M ∼a M ′ that differ only at i⋆. Since the read set touches both groups, 
+
+{a, b } ⊆ Γ⋆(Rt,g ).
+
+Nevertheless, declare 
+
+Γt,g = {b},
+
+so the operation checks and charges only b, while omitting the affected attribute a.Fix a local parameter ε0 > 0. Choose an integer N > 2Ba/ε 0, and choose Bb ≥ N ε 0. For each n = 1 , . . . , N , suppose that the first n − 1 repetitions have been admitted. Then Lb = ( n − 1) ε0, and the n-th cap check gives 
+
+Lb + ε0 = nε 0 ≤ N ε 0 ≤ Bb.
+
+Thus, by induction, all N repetitions are admitted. After the final repetition, 
+
+Lb = N ε 0 ≤ Bb, La = 0 .
+
+Let Vg = {v0, v 1}. Write a generic store as X = ( xi)ni=1 , and choose a binary function ϕ such that ϕ(mi⋆ ) = 1 and 
+
+ϕ(m′ 
+
+> i⋆
+
+) = 0 . Define 
+
+u(v1; X) = ϕ(xi⋆ ), u(v0; X) = 1 − ϕ(xi⋆ ).
+
+The resulting scores are 
+
+u(v1; M ) = 1 , u(v0; M ) = 0 , u(v1; M ′) = 0 , u(v0; M ′) = 1 .
+
+Since all scores lie in [0 , 1] , the bound ∆ut,g = 1 is valid. Suppressing the common operation prefix, Eq. (7) gives 
+
+Pr[ vt,g = v1 | M ] = eε0/2
+
+1 + eε0/2 , Pr[ vt,g = v1 | M ′] = 11 + eε0/2 .
+
+Hence, Pr[ vt,g = v1 | M ]Pr[ vt,g = v1 | M ′] = eε0/2.
+
+Let ON be the augmented-transcript event that all N repetitions release v1. Keep the read set, scores, and local privacy parameter fixed across repetitions, and use fresh EM randomness at each repetition. All other transcript components are the same under M and M ′. Therefore, 
+
+Pr[˜ τT ∈ O N | M ]Pr[˜ τT ∈ O N | M ′] =
+
+ Pr[ vt,g = v1 | M ]Pr[ vt,g = v1 | M ′]
+
+N
+
+= eN ε 0/2.Because N > 2Ba/ε 0,
+
+eN ε 0/2 > e Ba .
+
+Thus, the transcript violates Ba-DP even though La remains zero throughout the execution. Omitting the affected attribute a
+
+from Γt,g therefore invalidates the claimed Ba-DP guarantee. 
+
+Raw-memory-dependent observable releases (C3–C4/C6). First, keep the common vocabulary Vg = {v0, v 1}, but replace the EM with deterministic argmax selection. Use the reversed scores from the preceding construction. Then 
+
+Pr[ vt,g = v1 | M ] = 1 , Pr[ vt,g = v1 | M ′] = 0 .
+
+Hence, no finite Ba can satisfy DP. This is the failure used by the CappedArgmax ablation. A raw-memory-dependent control signal causes the same problem. Choose an adjacent pair in which MIa contains evidence for a and M ′ 
+
+> Ia
+
+is a-neutral, and release 
+
+c = 1{MIa contains evidence for a}.
+
+Then 
+
+Pr[ c = 1 | M ] = 1 , Pr[ c = 1 | M ′] = 0 .
+
+The same one-sided event can be created by a memory-dependent slot activation, fallback decision, ledger-status signal, or released score. Therefore, every raw-memory-dependent observable output must either have the same distribution under adjacent stores or be released by a valid private mechanism. 
+
+Pathwise cumulative cap (C5). Keep the common vocabulary, complete charging, and the EM, but remove the cumulative cap. For every operation, set 
+
+Γt,g = {a}.
+
+Use the same two-view scores as in the C2 construction, with local parameter ε0, and repeat the operation N times. Each release is correctly charged to a, but no cap prevents the repetitions. For the transcript event ON that every operation releases v1,
+
+Pr[˜ τT ∈ O N | M ]Pr[˜ τT ∈ O N | M ′] = eN ε 0/2.
+
+Choosing 
+
+N > 2Ba
+
+ε0
+
+makes this ratio larger than eBa . Thus, valid and correctly charged local EM releases do not provide a fixed Ba-DP guarantee unless their cumulative cost is capped on every execution path. 
+
+## C Supplementary Experimental Details 
+
+C.1 Evaluation Data Construction 
+
+We use two paired evaluation tracks. PairedMem provides exact M/M ′ control, while the corpus-sourced track tests whether the results persist with memory text adapted from public corpora. Table 5 summarizes the two tracks. Across both tracks, we keep the queries, router, read and charge policies, scorer, view vocabularies, and gold rules fixed. Table 5: Summary and scale of the two paired evaluation tracks.                           
+
+> Track Memory text M/M ′construction Scale PairedMem Synthetic memory text gener-ated from fixed specifications Same 28-position scaffold; Mand M′differ only within Ia; 25% of pairs contain overlapping pro-tected groups 320 M/M ′pairs ×32 queries
+> = 10 ,240 paired query turns
+> Corpus-sourced transfer
+> Public dialogue histories con-taining first-person disclosures Same PairedMem scaffold and shared background;
+> M′removes only the target signal 80 M/M ′pairs ×32 queries
+> = 2 ,560 paired query turns
+
+C.2 PairedMem: Controlled Synthetic Track 
+
+PairedMem contains 320 adjacent-store pairs generated from fixed specifications. Table 6 summarizes the four construction steps. Table 6: PairedMem construction.              
+
+> Step What is done Generation / validation S1
+> Pair design Define paired-store specifications with the same 28-position scaf-fold. Each pair may differ only within one protected group Ia.Code creates the specifications and pair-level split
+> S2
+> Memory writing Convert each specification into natural-language memory sentences for Mand M′.Mistral-7B writes the sentence wording
+> S3
+> Pair validation Verify that Mcontains the target evidence, M′removes it, the stores agree outside Ia, and non-target evidence is preserved. Claude Sonnet 4.6 checks whether the text matches the specification and reads naturally
+> S4
+> Queries and gold Create one 32-query trajectory and deterministic gold response behaviors for each pair. Mistral-7B writes the queries, and Claude Sonnet 4.6 checks each trajectory
+
+Why paired synthetic stores? No public corpus provides two stores with the same scaffold, non-target memories, and query trajectory while differing only within one protected group Ia. Comparing unrelated users would also change writing style and background facts. We therefore generated the paired stores directly. 
+
+S1: Pair design. We created 384 pair specifications, with 96 for each of four protected attributes: type-2 diabetes, pregnancy, severe unsecured debt, and recent involuntary job loss. Each store has 28 fixed positions in six slots, and each Ia contains 4–6 positions. The paired stores agree outside Ia. In 25% of the specifications, protected groups overlap. 
+
+S2: Text realization. Each specification fixes the memory positions, slots, target evidence, and non-target clauses that must remain unchanged. Mistral-7B converts the specification into natural-language memory sentences. All resulting text is synthetic and contains no real personal information. 
+
+S3: Validation and selection. Code checks that M and M ′ have the same scaffold, differ only within Ia, contain the required target evidence on the correct side, and preserve non-target evidence at overlapping positions. Claude Sonnet 4.6 separately checks whether each sentence matches its specification and reads naturally. Of the 384 candidate pairs, 381 passed validation. We selected 320 using fixed attribute, template, and overlap quotas and retained the remaining 61 as reserves. 
+
+S4: Queries and deterministic gold. Each selected pair has a 32-query trajectory consisting of two disjoint 16-query blocks. Each block contains eight target-relevant, four same-domain neutral, and four distractor queries. The query generator receives the query type, slot, and public intent, but not M or M ′. Code determines the read sets, charge sets, applicable view vocabularies, and gold response constraints from the fixed policy. The same trajectory is used for M , M ′, and every compared interface. 
+
+C.3 Controlled Corpus-Sourced Transfer 
+
+The transfer track contains 80 adjacent-store pairs built from public corpus text. We keep the PairedMem scaffold, paired difference, queries, and gold rules fixed and replace only the memory sentences. Table 7 summarizes the four construction steps. Table 7: Controlled corpus-sourced transfer construction.              
+
+> Step What is done Generation / validation T1
+> Pair skeleton Copy a matching PairedMem scaffold for each history– attribute combination. Keep the positions, slots, protected groups, and target positions fixed. Code creates 80 pair specifications and assigns the same background to Mand M′
+> T2
+> Memory sourcing Replace the synthetic memory sentences with corpus-sourced background and target evidence. Create M′by removing only the target signal. Memory text is drawn from public corpora; M′is formed by minimally editing the corresponding evi-dence sentences
+> T3
+> Pair validation Verify the shared scaffold, equality outside Ia, target removal, slot compatibility, and preservation of non-target evidence. Each sentence and its edited counterpart are manually screened; code checks the pair structure and gold con-sistency
+> T4
+> Frozen evaluation Reuse the PairedMem queries, router, read and charge poli-cies, scorer, view vocabularies, and gold rules. Code applies the fixed protocol
+
+T1: Pair skeleton. We form 80 pair specifications by combining 20 background histories with four protected attributes. Each specification copies the 28-position, six-slot scaffold and target positions from a matching PairedMem pair. The background is identical in M and M ′, and the two stores differ only within Ia.T2: Memory sourcing. Memory text comes from three public datasets. LoCoMo persona and event histories provide the background text (Maharana et al. 2024). The all-processed configuration of the Medical Question Answering Datasets collection provides first-person evidence for diabetes and pregnancy, as well as some debt and job-loss evidence (Malikeh1375 2023). EmpatheticDialogues provides additional debt and job-loss evidence (Rashkin et al. 2019). For each evidence sentence in M , the corresponding sentence in M ′ is a minimal edit that removes only the target-attribute signal while preserving the topic, sentence structure, and any non-target evidence. Thus, the paired sentences retain similar wording while differing in the target signal. 
+
+T3: Pair validation. We retain only first-person statements about the speaker’s current state. We exclude resolved past states, hypothetical statements, metaphors, and statements about other people. Each pair is checked for the shared scaffold, equality outside Ia, target removal, slot compatibility, and preservation of non-target evidence. All 80 pairs pass these checks. 
+
+T4: Frozen evaluation. Each pair reuses the 32-query trajectory of its matching PairedMem pair, yielding 2,560 paired query turns. The router, read and charge policies, scorer, view vocabularies, response models, and deterministic gold rules remain unchanged. 
+
+C.4 Compared Interface Implementations 
+
+Table 8 summarizes the input passed to the response LLM, how each method constructs that input, and whether it uses a DP mechanism. All methods use the same queries, response model, router, and output limit. Table 8: Implementation of the compared interfaces and whether each uses a DP mechanism. K is the online budget granularity, and Ca is the planned number of charged selections for attribute a.                               
+
+> Method Response-LLM input How the input is formed Uses DP Memory-independent
+> GenericOnly Fixed generic view Uses the same fixed slot-level generic string under Mand M′.No
+> Memory text
+> RawReadSet Raw read-set text Passes the memory items at Rt,g , ordered by position. No TypedMask
+> (adaptation of MemPrivacy)
+> Item-masked read set Replaces protected read items with slot-typed placeholders and passes the remaining items unchanged. No TaskMin
+> (adaptation of AirGapAgent)
+> Fixed task-family subset Passes the fixed union of positions used by target-relevant and same-domain query families; distractor-only positions are excluded. No OutputFilter Raw read-set text during generation Generates from the RawReadSet input and then deletes explicit protected labels and sensitive-state phrases. No
+> Proposed modes DP-MemView (on) EM-sampled public view or generic fallback Uses the shared view vocabulary and scorer, with εt,g =min a∈Γt,g Ba/K , complete charging, ledgers, and a prospective cap check. Yes
+> DP-MemView (pre) EM-sampled public view or generic fallback Uses the same view vocabulary, scorer, charging, ledgers, and cap check, with εt,g =min a∈Γt,g Ba/C a.Yes
+
+C.5 Evaluation Protocol 
+
+Models and execution environment. Table 9 lists the models used for response generation and evaluation. For each response model, all compared interfaces use the same decoding configuration. Table 9: Models used for response generation and evaluation.      
+
+> Role Model
+> Response generation Qwen2.5-7B-Instruct, Llama-3.1-8B-Instruct, and Gemma-2-9B-it Embedding auditor Frozen sentence-transformers/all-mpnet-base-v2 encoder with calibrated logistic regression Pairwise privacy auditor Mistral-Small-24B-Instruct-2501 Utility judge Claude Sonnet 4.6
+
+Response generation, embedding auditing, and the pairwise LLM audit were run in Google Colab using an NVIDIA A100 GPU. Claude Sonnet 4.6 was accessed through its API for utility judging. 
+
+Embedding privacy auditing. Our primary privacy auditor uses frozen response embeddings. For each response model and transcript prefix, we embed each assistant response, average the turn embeddings, and L2-normalize the resulting prefix vector. For each protected attribute and prefix length, we train a separate logistic-regression auditor to distinguish transcripts from Mand M ′. The auditor is fitted on PairedMem training pairs, sigmoid-calibrated on validation pairs, and evaluated on held-out test pairs. The same fitted auditor is applied to the corpus-sourced transfer track without refitting or recalibration. We report macro-AUC across the four protected attributes and TPR at 5% FPR. 
+
+Utility judging. At T = 16 , the blinded judge receives the query–response transcript and a rubric generated from the fixed gold constraints for that store side. The rubric is fixed before response evaluation and is shared across all compared interfaces for the same pair and store side. The judge does not receive the method name or the M/M ′ label. The judge assigns 0–4 scores for relevance, correctness, actionability, and personalization. It also scores each applicable gold behavior on the same 0–4 scale. All scores are normalized by dividing by 4. The mean of the four normalized holistic scores defines U .For M , tRec is the mean normalized score over target-required behaviors. For M ′, Unsup is the mean normalized score over target-specific behaviors that are unsupported by that store. Thus, higher tRec indicates better use of supported target information, whereas lower Unsup indicates less unsupported target-specific personalization. 
+
+Experimental view scorer and sensitivity. DP-MemView does not require a particular score function. Any scorer with values in [0 , 1] may be used if it has a valid sensitivity bound satisfying Eq. (6). The experiments use the following fixed scorer: 
+
+ut,g (qt, v ; MRt,g ) = 0 .4 r(qt, v ) + 0 .4 c(v; MRt,g ) + 0 .2 s(v; MRt,g ).
+
+Here, r, c, s ∈ [0 , 1] . The relevance term r depends only on the public query and candidate view. The compatibility term c
+
+measures whether the view matches the read-set memory, and the specificity term s measures whether the read-set memory supports the specificity of the view. The scorer uses only the current read-set memory and does not access the paired store. For adjacent stores M ∼a M ′, fix the same query and candidate view. The relevance term is then identical under both stores. Writing uM (v) and uM ′ (v) for the two scores, 
+
+|uM (v) − uM ′ (v)| ≤ 0.4 |cM (v) − cM ′ (v)| + 0 .2 |sM (v) − sM ′ (v)|≤ 0.4 + 0 .2 = 0 .6.
+
+Therefore, 
+
+∥ut,g (M ) − ut,g (M ′)∥∞ ≤ 0.6,
+
+and the experiments set ∆ut,g = 0 .6.
+
+Runs and aggregation. GenericOnly, RawReadSet, TypedMask, TaskMin, OutputFilter, and CappedArgmax are deterministic and are run once per response model. DP-MemView (on), DP-MemView (pre), IncompleteCharge, and NoCap use EM seeds 
+
+{0, 1, 2}. For stochastic methods, measurements are averaged across seeds within each adjacent pair before aggregation over pairs.

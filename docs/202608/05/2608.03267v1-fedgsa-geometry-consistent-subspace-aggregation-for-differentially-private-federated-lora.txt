@@ -1,0 +1,496 @@
+Title: FedGSA: Geometry-Consistent Subspace Aggregation for Differentially Private Federated LoRA
+
+URL Source: https://arxiv.org/pdf/2608.03267v1
+
+Published Time: Wed, 05 Aug 2026 00:40:28 GMT
+
+Number of Pages: 9
+
+Markdown Content:
+# FedGSA: Geometry-Consistent Subspace Aggregation for Differentially Private Federated LoRA 
+
+## Lele Zheng, Ruijie Hu, Tao Zhang, Ke Cheng, Yulong Shen 
+
+Xidian University, China 
+
+Abstract 
+
+Low-Rank Adaptation (LoRA) enables communication-efficient federated fine-tuning of pretrained language mod-els. However, integrating differential privacy (DP) into fed-erated LoRA remains challenging: independently perturbing and aggregating its two low-rank matrices can cause aggrega-tion mismatch and the quadratic noise term. Existing methods mitigate these issues by freezing one low-rank matrix but still rely on Euclidean aggregation, which is basis-dependent and may distort the global update. To address this limitation, we propose FedGSA, a geometry-consistent aggregation frame-work for differentially private federated LoRA. FedGSA rep-resents each privatized client update as a basis-invariant sub-space on the Grassmann manifold. In each communication round, clients extract low-dimensional subspaces capturing dominant update directions and encode them as projection matrices. The server aggregates these representations to esti-mate a geometry-consistent global update subspace and recon-structs the global LoRA factors within it, reducing distortion caused by basis misalignment, privacy noise, and heteroge-neous client updates. We prove that FedGSA incurs no addi-tional privacy loss beyond client-side DP training and estab-lish its convergence under standard assumptions. Experiments on four GLUE tasks and a language generation benchmark demonstrate consistent improvements across privacy budgets and degrees of data heterogeneity. In particular, FedGSA im-proves average accuracy over the strongest baseline by 2.17% and 2.27% under ϵ = 6 and ϵ = 3 , respectively. 
+
+## Introduction 
+
+Pretrained language models often require task-specific fine-tuning to adapt to downstream tasks (Yin, Zhu, and Hu 2021; Zhang et al. 2023). When training data are distributed across clients, centralizing them may be infeasible due to privacy and regulatory constraints (Li et al. 2020). Federated learning (FL) enables collaborative model adaptation without directly sharing local data, but full-parameter fine-tuning imposes substantial computation, storage, and communication costs on clients. Parameter-Efficient Fine-Tuning (PEFT) meth-ods (Han et al. 2024) offer a viable path by freezing most pre-trained parameters and optimizing only a small set of trainable ones, greatly reducing training and communication costs. Among these, LoRA enables efficient model adapta-tion by keeping the pre-trained model weights W0 frozen and training only two low-rank matrices, A ∈ Rr×n and 
+
+B ∈ Rm×r . The update ∆W = BA dramatically reduces the number of trainable parameters, making it a representa-tive solution for federated fine-tuning of large models. Although federated LoRA keeps raw training data local, this alone does not eliminate privacy risks, as client updates may still reveal sensitive information about individual train-ing records (Zhu, Liu, and Han 2019). An honest-but-curious server may exploit these updates to infer record membership or sensitive attributes, or even reconstruct portions of the un-derlying training data (Huang et al. 2021; Geng et al. 2023). Differential privacy (DP) provides a formal privacy guaran-tee by limiting the influence of each record on the training outcome (Dwork, Roth et al. 2014). A widely adopted im-plementation is DP-SGD (Abadi et al. 2016), which clips per-example gradients to bound their sensitivity and injects calibrated Gaussian noise during local optimization. In fed-erated LoRA, clients can apply DP-SGD before transmit-ting their updates, thereby providing record-level protection against leakage through communicated model parameters. However, directly integrating DP-SGD with federated LoRA introduces challenges specific to its two-factor pa-rameterization. First, directly averaging local LoRA factors is not equivalent to averaging the corresponding model updates, leading to aggregation mismatch and undesirable cross-client interaction terms, particularly under non-IID data distribu-tions. Second, when DP noise is injected into both LoRA factors, the noise components interact through the matrix product, producing a quadratic term that can substantially amplify the effective noise and degrade model utility (Kang et al. 2024; Sun et al. 2024). Existing methods address aggre-gation mismatch and quadratic noise amplification through structural modifications to LoRA optimization and aggrega-tion. FFA-LoRA (Sun et al. 2024) addresses both issues by freezing one factor and optimizing only the other, but at the cost of reduced adaptation capacity. RoLoRA (Chen et al. 2024), LA-LoRA (Liu et al. 2026), and AS-LoRA (Kim et al. 2026) alternately or adaptively update the factors; FedSVD (Lee et al. 2025), FedASK (Wen et al. 2025), and FLoRA (Wang et al. 2024) instead employ SVD reparam-eterization, two-stage sketching, or matrix stacking to im-prove aggregation consistency. However, these designs ei-ther restrict adaptation capacity or introduce additional com-munication, computation, or estimation overhead. FedRot-LoRA (Zhang et al. 2026) attributes the discrepancy between arXiv:2608.03267v1 [cs.CR] 4 Aug 2026 factor-wise averaging and correct update aggregation primar-ily to rotational ambiguity. Since, for any invertible matrix 
+
+Q, ∆W = BA = ( BQ )( Q−1A). Consequently, different clients may represent the same semantic update while em-bedding it in inconsistent latent subspaces. Under conditions of statistical heterogeneity, such uncertainty further interacts with client drift, thereby amplifying aggregation errors and degrading both training stability and global performance. We further observe that the ambiguity of low-rank fac-torization arises from the coordinate-dependent treatment of LoRA factors in Euclidean space. To eliminate this basis de-pendence, it is necessary to move beyond factor-wise repre-sentations and adopt a basis-invariant subspace perspective, where equivalent low-rank updates are modeled as the same geometric object. Low-dimensional subspaces thus form a more fundamental aggregation target, with the Grassmann manifold providing their proper geometry and enabling con-sistent, invariant subspace-level aggregation. Based on this insight, we propose FedGSA, a subspace ag-gregation method for differentially private federated LoRA. Instead of treating client LoRA updates as matrix repre-sentations in Euclidean space, FedGSA represents them as low-dimensional subspaces induced by their low-rank struc-ture and aggregates them geometrically on the server. In each round, clients extract subspace representations reflect-ing principal update directions from their local LoRA up-dates. The server then aggregates these at the subspace level to estimate a globally consistent direction. The resulting con-sensus subspace further guides global-factor reconstruction, filtering inconsistent components before the reconstructed LoRA factors are broadcast to clients for subsequent local optimization. By operating at the subspace level, FedGSA avoids the basis dependency of direct averaging in coordi-nate space, making the aggregation invariant to basis trans-formations and more robust under differential privacy noise and data heterogeneity. Our main contributions are summarized as follows: 
+
+• We identify the representation dependence of factor-wise Euclidean aggregation in federated LoRA and introduce a geometric perspective that characterizes the dominant directions of client updates as basis-invariant subspaces on the Grassmann manifold. 
+
+• We propose FedGSA, a geometry-consistent aggrega-tion framework for differentially private federated LoRA. FedGSA maps privatized client updates to projection rep-resentations, aggregates their dominant subspaces in a basis-invariant manner, and reconstructs the global LoRA factors within the resulting consensus subspace, reducing aggregation distortion under privacy noise and data het-erogeneity. 
+
+• We theoretically show that FedGSA does not incur ad-ditional privacy loss and establish its convergence under standard assumptions. Experiments on four GLUE tasks and a language generation benchmark demonstrate con-sistent improvements across privacy budgets and degrees of data heterogeneity. 
+
+## Related Work 
+
+LoRA is particularly suitable for differentially private fed-erated learning, as privacy mechanisms can be applied to compact low-rank adapters rather than the full model, sub-stantially reducing computation and communication over-head. DP-LoRA (Guo et al. 2024; Liu et al. 2025) pro-vides a straightforward solution by separately computing, clipping, and perturbing the per-sample gradients of the two factors, A and B, before averaging the privatized updates at the server. However, this approach exposes two funda-mental challenges (Sun et al. 2024). First, aggregating local weight updates is generally not equivalent to independently averaging their low-rank factors, resulting in an aggregation mismatch under naive factor-wise averaging (Zhang et al. 2024). Second, independently injected DP noise in A and B
+
+produces quadratic cross-noise terms when constructing the LoRA update ∆W = BA , thereby amplifying the effective perturbation. FFA-LoRA (Sun et al. 2024) mitigates both issues by freezing one factor, but limits adaptation capacity. To re-tain dual-factor expressiveness, FLoRA (Wang et al. 2024) stacks client updates, FedSVD (Lee et al. 2025) privately updates B and periodically reparameterizes the aggre-gated BA via server-side SVD, and FedASK (Wen et al. 2025) approximates both factors through two-stage sketch-ing, all at increased communication or computational cost. RoLoRA (Chen et al. 2024) alternates factor optimiza-tion and aggregation across rounds, but suffers from stale-block errors and does not explicitly suppress DP noise. LA-LoRA (Liu et al. 2026) instead alternates factors at each local step and low-pass filters privatized gradients, reducing DP perturbation and model sharpness. AS-LoRA (Kim et al. 2026) adaptively selects A or B across layers and rounds us-ing curvature, but incurs estimation overhead and overlooks inter-layer dependencies. Despite these advances, DP-oriented methods address multiplicative cross-noise, factor coupling, or approximate reconstruction, but overlook basis ambiguity in privatized low-rank factors and cross-client subspace misalignment. FedRot-LoRA (Zhang et al. 2026) identifies rotational invari-ance as causing aggregation error and aligns local factors to a global reference via orthogonal Procrustes transformations. However, it is limited to orthogonal reparameterizations, while the server still averages aligned A and B separately in Euclidean space; thus, general basis non-uniqueness and residual cross-client interactions remain. Moreover, FedRot-LoRA is not designed for differential privacy, where per-turbations destabilize factor coordinates. These limitations motivate a basis-invariant geometric formulation. We repre-sent each privatized LoRA update by its dominant subspace, aggregate these subspaces on the Grassmann manifold, and reconstruct global factors at the matrix level. This avoids coordinate-dependent factor averaging and mitigates factor misalignment, client heterogeneity, and privacy-induced dis-tortion, while allowing both global factors to evolve across communication rounds. Preliminaries 
+
+The preceding discussion shows that the difficulty of differ-entially private federated LoRA arises not only from privacy noise, but also from applying coordinate-wise Euclidean ag-gregation to low-rank updates whose factorized representa-tions are inherently non-unique. To formalize this mismatch and motivate a basis-invariant subspace perspective, we next review averaging in the ambient Euclidean matrix space and on the Grassmann manifold of r-dimensional subspaces. 
+
+Definition 1 (Euclidean space) . A Euclidean space is typi-cally a finite-dimensional real vector space Rn equipped with the standard inner product ⟨x, y ⟩ = x⊤y, which induces the norm and distance ∥x∥2 = √x⊤x, d (x, y ) = ∥x − y∥2.
+
+For matrices, Rm×n is algebraically and metrically equiva-lent to the standard Euclidean space Rmn (Horn and Johnson 2012; Golub and Van Loan 2013). In such a geometry, the set of points forms a real vector space, and the operations of vector addition and scalar multiplication are well-defined. Meanwhile, the Euclidean inner product induces the canon-ical metric, under which the geodesic connecting two points is the straight line segment between them. Given a collection 
+
+{Xi}Ni=1 , its arithmetic mean ¯X = 1
+
+> N
+
+PNi=1 Xi is exactly the minimizer of the sum of squared Frobenius distances (Boyd and Vandenberghe 2004): 
+
+¯X = arg min 
+
+> ZN
+
+X
+
+> i=1
+
+∥Xi − Z∥2 
+
+> F
+
+. (1) 
+
+Definition 2 (Grassmann manifold) . The Grassmann man-ifold (Grassmannian), denoted by Gr( k, n ), is defined as the set of all k-dimensional linear subspaces of Rn. This set admits a natural smooth manifold structure and can be equipped with a canonical Riemannian metric, thereby form-ing a compact Riemannian manifold. 
+
+The Grassmannian Gr( k, n ) admits multiple equivalent mathematical characterizations (Edelman, Arias, and Smith 1998; Absil, Mahony, and Sepulchre 2008). One common quotient representation is 
+
+Gr( k, n ) ≃ St( k, n )/O( k), (2) where St( k, n ) denotes the Stiefel manifold , i.e., the set of matrices U ∈ Rn×k satisfying U ⊤U = Ik, and O( k) is the k-dimensional orthogonal group, corresponding to basis changes within the same subspace. Equivalently, Gr( k, n )
+
+can be expressed as a quotient of orthogonal groups: 
+
+Gr( k, n ) ≃ O( n)/(O( k) × O( n − k)) . (3) Another widely used representation is via projection ma-trices:                 
+
+> Gr( k, n )≃P∈Rn×n:P2=P, P ⊤=P, tr( P) = k,
+
+(4) namely the set of rank-k symmetric orthogonal projectors. In practical computations, a subspace S ∈ Gr( k, n ) is typ-ically represented by an orthonormal basis matrix U ∈ Rn×k
+
+with U ⊤U = Ik. Importantly, a point on the Grassmann manifold is not a specific basis U , but rather the subspace 
+
+span( U ). Therefore, for any orthogonal matrix Q ∈ O( k),the matrices U and U Q represent the same point on Gr( k, n ).𝜽   
+
+> 𝜽
+> 𝜽
+> 𝜽
+> Client 1
+> Client 1
+> Client 2
+> Client 2
+> Averaging on Euclidean space
+> Averaging on Grassmann manifold
+
+Figure 1: Illustration of Euclidean averaging versus Grass-mann aggregation. Applying any nonzero scaling to a repre-sentative vector does not change the underlying subspace, but can substantially alter the direction of the Euclidean average. 
+
+## Method 
+
+Design Rationale 
+
+FedGSA is grounded in the observation that the LoRA update 
+
+∆W = BA has an intrinsically low-rank structure, yet its factorized representation is non-unique. For any invertible matrix Q, we have 
+
+∆W = BA = ( BQ )( Q−1A). (5) As a result, different clients may encode identical or simi-lar update directions using different scales, signs, or bases. Direct Euclidean averaging therefore aggregates coordinate-dependent representations rather than the intrinsic low-rank structure, which may introduce basis-dependent bias. This issue can be illustrated by a one-dimensional subspace. In a two-dimensional plane, u and −u represent the same line passing through the origin, and hence the same subspace. However, their direct Euclidean average cancels out and yields the zero vector. Similarly, applying any nonzero scal-ing to a representative vector does not change the underlying subspace, but can substantially alter the direction of the Eu-clidean average as shown in Fig. 1. This shows that Euclidean averaging is highly sensitive to sign, scale, and basis choices, making it inadequate for stably characterizing the subspace consensus among client updates. This issue becomes more pronounced in federated settings, where client drift under non-IID data further interacts with stochastic perturbations introduced by DP-SGD. To remove this representation dependence, FedGSA treats each privatized LoRA update as a subspace-valued object. Specifically, the dominant column space of the local update matrix is regarded as an r-dimensional point on the Grass-mann manifold, where different bases spanning the same subspace correspond to the same geometric object. Aggre-gating such subspaces enables the server to estimate a global directional consensus that is invariant to equivalent low-rank reparameterizations, rather than being sensitive to arbitrary factor coordinates. This rationale leads to a three-stage design. First, each client maps its privatized local LoRA update to a projec-tion representation of its dominant update subspace. Second, the server performs geometry-consistent aggregation over these projection representations to estimate a global output-direction subspace. Third, the global LoRA factors are re-constructed within the aggregated subspace and broadcast to clients for the next communication round. Meanwhile, FedGSA mitigates aggregation bias and noise amplification by keeping A fixed on each client and applying DP-SGD only to update B. Since subspace extraction, geometric ag-gregation, and low-rank reconstruction are all performed on already privatized client updates, they are post-processing operations and introduce no additional privacy loss. We out-line our complete method in Fig. 2. 
+
+From LoRA Updates to Grassmann Points 
+
+Given the representation ambiguity of low-rank factors, FedGSA does not directly aggregate the raw LoRA coor-dinates. Instead, it first converts each privatized local up-date into a basis-invariant subspace representation. Con-sider the t-th communication round. The server broadcasts the global LoRA factors from the previous round, where 
+
+A(t−1) ∈ Rr×din is fixed during local training. Each selected client k locally optimizes B(t) 
+
+> k
+
+∈ Rdout ×r using DP-SGD, where per-sample gradients are clipped and perturbed with Gaussian noise before being used for local updates. After local training, client k forms the privatized low-rank update matrix 
+
+M (t) 
+
+> k
+
+= B(t) 
+
+> k
+
+A(t−1) ∈ Rdout ×din , rank  M (t)
+
+> k
+
+ ≤ r. (6) While the entries of M (t) 
+
+> k
+
+may be affected by local data het-erogeneity and DP noise, its dominant column space captures the output-side update direction of client k. Therefore, rather than aggregating M (t) 
+
+> k
+
+element-wise, FedGSA extracts its rank-r subspace through a truncated singular value decom-position: 
+
+M (t) 
+
+> k
+
+= UkΣkV ⊤ 
+
+> k
+
+, Uk ∈ Rdout ×r , U ⊤ 
+
+> k
+
+Uk = I. (7) The corresponding orthogonal projection matrix is then de-fined as 
+
+Pk = UkU ⊤ 
+
+> k
+
+. (8) The matrix Pk satisfies P ⊤ 
+
+> k
+
+= Pk, P 2 
+
+> k
+
+= Pk, and 
+
+rank( Pk) = r, and thus provides a canonical representation of an r-dimensional subspace in Rdout . Since Pk depends only on span( Uk) rather than the specific basis Uk, it is invariant to sign changes, rotations, and other equivalent ba-sis transformations within the same subspace. Consequently, each privatized client update is represented as a point on the Grassmann manifold Gr( r, d out ), which serves as the geometric object to be aggregated by the server. 
+
+Geometry-Consistent Subspace Aggregation 
+
+Given the Grassmann representations {Pk}Kk=1 of client up-dates, the server aims to estimate a global subspace that captures their shared update direction. Ideally, this can be formulated as a weighted Fréchet mean on the Grassmann manifold: 
+
+P ⋆ = arg min  
+
+> P∈P r
+> K
+
+X
+
+> k=1
+
+wkdG(P, P k)2, (9) where Pr denotes the set of rank-r orthogonal projection matrices in Rdout ×dout , namely matrices satisfying P ⊤ = P ,
+
+P 2 = P , and rank( P ) = r; dG(·, ·) denotes the geodesic distance on the Grassmann manifold, and wk ≥ 0 is the aggregation weight of client k.Directly solving this intrinsic Fréchet mean generally re-quires iterative manifold optimization. To obtain an efficient and stable alternative, FedGSA adopts an extrinsic approxi-mation based on the projection-matrix embedding. Specifi-cally, the server first computes the weighted average of client projection matrices: 
+
+¯P =
+
+> K
+
+X
+
+> k=1
+
+wkPk. (10) Although ¯P is not necessarily a rank-r projector, its dominant eigenspace provides a compact estimate of the global update subspace. We therefore perform eigenvalue decomposition (EVD) 
+
+¯P = U ΛU ⊤, Λ = diag( λ1 ≥ · · · ≥ λdout ), (11) and take the leading r eigenvectors as 
+
+Ug = U[: ,1: r]. (12) The resulting subspace span( Ug ) serves as the geometry-consistent global output-direction subspace. Since the ag-gregation is performed over projection representations rather than raw factor coordinates, it depends only on the subspaces encoded by clients and is invariant to sign changes, rotations, and basis choices within each local update. This makes the global direction estimate more robust to representation mis-match, client heterogeneity, and stochastic perturbations in-troduced by differential privacy. 
+
+Preconditioned Reconstruction of Global LoRA 
+
+The aggregated Grassmann subspace provides a geometry-consistent estimate of the global output direction, but fed-erated LoRA still requires explicit factors to be broadcast for the next communication round. FedGSA therefore re-constructs the global LoRA factors within the aggregated subspace, rather than directly factorizing a purely Euclidean average. Given the global output subspace basis Ug ∈ Rdout ×r , the server first forms the weighted matrix-level update 
+
+¯M (t) =
+
+> K
+
+X
+
+> k=1
+
+wkM (t) 
+
+> k
+
+=
+
+> K
+
+X
+
+> k=1
+
+wkB(t) 
+
+> k
+
+A(t−1) . (13) Then, ¯M (t) is projected onto the aggregated output subspace: 
+
+fM (t) = U ⊤ 
+
+> g
+
+¯M (t) ∈ Rr×din . (14) This projection acts as a subspace preconditioner: it filters the aggregated update along the geometry-consistent global direction, thereby suppressing components induced by het-erogeneous drift, basis mismatch, or privacy noise. We next perform a thin singular value decomposition on the reduced matrix: 
+
+fM (t) = eU ΣV ⊤. (15) 𝐵 𝑡 , 𝐴 𝑡 
+
+𝐵 𝑖 
+
+> 𝑡
+
+, 𝑃 𝑖 
+
+ത𝐵 = ෍ 𝜔 𝑖 𝐵 𝑖 
+
+> 𝑡
+
+ത𝑃 = ෍ 𝜔 𝑖 𝑃 𝑖 
+
+ഥ𝑀 = ത𝐵 𝐴 𝑡 −1 Global output -direction basis 
+
+𝑈 𝑔 = ෡𝑈 [: ,1:𝑟 ]
+
+෩𝑈 
+
+Σ
+
+෨𝑉 ⊤ ෨𝑉 ⊤
+
+෩𝑈  Σ𝑈 𝑔 
+
+𝐴 𝑡 
+
+𝐵 𝑡  =
+
+= 
+
+> EVD
+> SVD
+> Reconstruction
+> Grassmann aggregation
+> Local training
+
+𝐵 𝑖 
+
+> 𝑡
+
+𝐴 𝑡 −1
+
+𝐵 𝑡 −1
+
+𝐴 𝑡 −1 𝑉 𝑖 ⊤
+
+Σ𝑖 𝑈 𝑖   
+
+> SVD
+> Grassmann manifold Orthogonal
+> projection matrix
+
+𝑃 𝑖 = 𝑈 𝑖 𝑈 𝑖  
+
+> ⊤
+> Client i
+> Local training
+
+𝐵 2
+
+> 𝑡
+
+𝐴 𝑡 −1
+
+𝐵 𝑡 −1
+
+𝐴 𝑡 −1 𝑉 2
+
+> ⊤
+
+Σ2𝑈 2  
+
+> SVD
+> Grassmann manifold Orthogonal
+> projection matrix
+
+𝑃 2 = 𝑈 2𝑈 2 
+
+> ⊤
+> Client 2
+> Local training
+
+𝐵 1
+
+> 𝑡
+
+𝐴 𝑡 −1
+
+𝐵 𝑡 −1
+
+𝐴 𝑡 −1 𝑉 1
+
+> ⊤
+
+Σ1𝑈 1  
+
+> SVD
+> Grassmann manifold Orthogonal
+> projection matrix
+
+𝑃 1 = 𝑈 1𝑈 1 
+
+> ⊤
+> Client 1
+
+Clients -side  Server -side 
+
+> Projection onto global 11111111111111
+> subspace coordinates 11111111111111
+
+𝑈 𝑔  
+
+> ⊤
+
+ഥ𝑀 Figure 2: Overview of FedGSA. Each client maps its privatized LoRA update to a Grassmann point via orthogonal projection, while the server performs geometry-consistent subspace aggregation and reconstructs the global LoRA factors. The global LoRA factors are then updated as 
+
+A(t) = V ⊤, B(t) = Ug eU Σ. (16) Consequently, 
+
+B(t)A(t) = Ug eU ΣV ⊤ (17) gives a rank-r reconstruction of the aggregated update con-strained to the global Grassmann subspace. This design pre-serves the intrinsic subspace consensus learned from client updates while producing standard LoRA factors for subse-quent local optimization. Moreover, the orthogonal structure induced by Ug and V improves numerical conditioning and stabilizes the next round of federated training. 
+
+Theorem 1 (Privacy Guarantee of FedGSA) . Assume that the ℓ2-sensitivity of the gradient computed in each local up-date is clipped to a constant C = 1 . In the t-th communi-cation round, each sampled client performs DP-SGD during its local optimization, which is perturbed by Gaussian noise. If the variance of the injected Gaussian noise σ2 satisfies 
+
+σ2 = O  q2    
+
+> D·m·qK·T·log(2 /δ )·log(2 T q K/δ )
+> ϵ2·K
+
+, (18) 
+
+where qK denotes the client sampling ratio in each commu-nication round, T is the total number of rounds, and qD is the data sampling ratio per local update, and where each client performs m local updates per round, then over the joint client dataset D = SKk=1 Dk, the final global LoRA factors A(T ) and B(T ) satisfy (ϵ, δ )-differential privacy. 
+
+## Experiments 
+
+Experimental Setups 
+
+Datasets and Models. For natural language understanding tasks, we use the pretrained RoBERTa-base (Liu et al. 2019) model and conduct experiments on four datasets from the GLUE benchmark (Wang et al. 2018): MNLI (Williams, Nangia, and Bowman 2018), SST-2 (Socher et al. 2013), QQP (Sharma et al. 2019) and QNLI. For generative tasks, We fine-tune GPT-2 (Radford et al. 2019) on the E2E NLG Challenge dataset (Novikova, Dušek, and Rieser 2017). 
+
+Baselines. We compare our proposed method FedGSA with the following six baselines: 1. FedAvg (Zhang et al. 2024; Liu et al. 2025): Each client locally fine-tunes the LoRA matrices A and B, and the server aggregates them via independent element-wise av-eraging. 2. FFA-LoRA (Sun et al. 2024): The matrix A is initialized using Kaiming Uniform in the range (−d, d ) and kept fixed throughout training; only the matrix B is locally fine-tuned and aggregated. 3. FedSVD (Lee et al. 2025): Each client locally updates and uploads B. The server multiplies the aggregated B
+
+with the previous-round A to form BA , and then performs SVD-based reparameterization. 4. FedASK (Wen et al. 2025): FedASK proposes a two-stage sketching-based aggregation, achieving an accurate high-rank approximation of the aggregation target P 
+
+> k
+
+BkAk
+
+in a communication-efficient manner. 5. LA-LoRA (Liu et al. 2026): Each client alternately up-dates A and B within each local round and applies low-pass smoothing to mitigate gradient coupling, DP noise amplification and aggregation instability. 6. AS-LoRA (Kim et al. 2026): Each layer adaptively selects 
+
+A or B across communication rounds using a curvature-aware score, without incurring additional privacy cost. 
+
+Natural Language Understanding 
+
+Experiments with DP-SGD. We evaluate all methods un-der (ϵ, δ )-DP with ϵ ∈ { 3, 6} and δ = 10 −5. As shown in DP Budget Method MNLI SST-2 QQP QNLI Average Matched Mismatched 
+
+ϵ = 6 
+
+FedAvg 72.85 ± 6.98 74.09 ± 5.14 76.15 ± 2.56 78.27 ± 5.11 54.11 ± 5.23 71.10 ± 2.08 
+
+FFA-LoRA 64.30 ± 8.63 66.55 ± 8.91 90.71 ± 0.79 79.32 ± 3.26 78.35 ± 4.96 75.85 ± 3.23 
+
+FedSVD 75.20 ± 2.31 76.52 ± 3.95 88.42 ± 0.85 80.02 ± 2.51 80.51 ± 4.20 80.13 ± 1.21 
+
+FedASK 73.99 ± 4.85 75.46 ± 5.96 84.40 ± 1.78 79.25 ± 3.54 67.51 ± 5.77 76.12 ± 1.95 
+
+LA-LoRA 59.93 ± 2.53 62.35 ± 3.49 88.30 ± 1.35 75.56 ± 2.02 75.32 ± 4.43 72.29 ± 1.18 
+
+AS-LoRA 73.81 ± 6.77 74.96 ± 5.53 85.67 ± 1.93 78.90 ± 3.54 73.06 ± 5.41 77.28 ± 1.71 
+
+FedGSA (ours) 77.36 ± 3.07 77.96 ± 4.03 91.98 ± 0.15 82.13 ± 2.76 82.06 ± 3.21 82.30 ± 2.25 
+
+ϵ = 3 
+
+FedAvg 71.97 ± 12.98 73.54 ± 12.16 69.61 ± 6.91 77.64 ± 7.89 53.29 ± 1.36 69.21 ± 3.97 
+
+FFA-LoRA 50.73 ± 7.62 52.25 ± 7.09 89.56 ± 1.22 78.48 ± 4.62 77.50 ± 8.67 69.70 ± 3.52 
+
+FedSVD 72.95 ± 3.97 74.06 ± 3.96 86.01 ± 1.86 78.58 ± 2.61 79.75 ± 1.87 78.27 ± 2.03 
+
+FedASK 73.21 ± 1.92 74.26 ± 4.38 76.95 ± 0.55 79.91 ± 2.59 68.00 ± 5.84 74.47 ± 1.91 
+
+LA-LoRA 49.75 ± 2.01 51.54 ± 3.19 86.47 ± 1.02 74.15 ± 2.31 72.36 ± 3.25 66.85 ± 1.24 
+
+AS-LoRA 70.51 ± 3.95 72.63 ± 5.67 68.92 ± 1.89 77.97 ± 2.91 74.10 ± 5.07 72.83 ± 1.96 
+
+FedGSA (ours) 74.54 ± 2.73 75.22 ± 3.05 90.93 ± 1.02 80.98 ± 4.45 81.03 ± 3.99 80.54 ± 2.54 
+
+Table 1: Results on five GLUE tasks with DP ( ϵ ∈ { 3, 6}, δ = 10 −5) under a non-IID Dirichlet split ( α = 0 .5). We report the average accuracy and 95% confidence interval over three runs. The best and second-best results are highlighted in bold and underline, respectively. Table 1, FedGSA achieves the highest average accuracy un-der both privacy budgets, reaching 82 .30% at ϵ = 6 and 
+
+80 .54% at ϵ = 3 , outperforming the strongest baseline, FedSVD, by 2.17% and 2.27% , respectively. FedGSA also ranks first across all five evaluation tasks in both settings, demonstrating consistent robustness as the privacy constraint becomes stricter. We attribute these gains to single-factor pri-vate optimization, which avoids multiplicative cross-noise, and geometry-consistent Grassmann aggregation, which ex-tracts basis-invariant directional consensus from noisy and heterogeneous client updates. 
+
+Experiments without privacy constraints. We further evaluate all methods on GLUE without differential pri-vacy using RoBERTa-base under a non-IID Dirichlet split (α = 0 .5). As shown in Table 2, FedGSA achieves the high-est average accuracy of 88 .81% , outperforming the strongest baseline, FedSVD, by 2.02% . It also ranks first on both MNLI splits and QNLI, while remaining competitive on QQP and SST-2. These results demonstrate that geometry-consistent subspace aggregation improves robustness to heterogeneous client updates even in the absence of privacy noise. 
+
+Heterogeneity of the Data Distribution ( α). We evaluate robustness to statistical heterogeneity on MNLI using Dirich-let splits with α ∈ { 0.1, 0.2, 0.3, 0.4, 0.5}, where smaller α
+
+indicates stronger non-IID skew. All methods are trained with DP-SGD under (ϵ, δ ) = (6 , 10 −5), and the mean accuracy with 95% confidence intervals over five runs is reported. As shown in Fig. 3, FedGSA achieves the highest accuracy across all settings, outperforming the strongest baseline by 
+
+2.16% –11 .82% . Its advantage is particularly pronounced at smaller α, demonstrating that geometry-consistent subspace aggregation better preserves shared update directions under severe client heterogeneity.                          
+
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Accuracy
+> MNLI_matched
+> FedAvg
+> FFA-LoRA
+> FedSVD
+> FedASK
+> LA-LoRA
+> AS-LoRA
+> FedGSA
+
+Figure 3: Results of varying α ∈ { 0.1, 0.2, 0.3, 0.4, 0.5} for a Dirichlet distribution on the MNLI dataset. 
+
+Natural Language Generation 
+
+We evaluate FedGSA on GPT-2 using the E2E NLG Chal-lenge under the private federated setting. As shown in Table 2, FedGSA achieves the best performance on four of five met-rics at rank r = 4 , reaching 30.32 BLEU, 54.56 METEOR, 53.45 ROUGE-L, and 2.40 CIDEr, while remaining com-petitive on NIST. The consistent gains across lexical-overlap and semantic-adequacy metrics indicate that subspace ag-gregation retains informative generation directions despite privacy perturbations and heterogeneous client updates dur-ing training. These results demonstrate that FedGSA gener-alizes beyond discriminative NLU tasks and preserves strong generation utility under differential privacy. 
+
+Ablation Study 
+
+Effect of Grassmann Aggregation. We construct FedGSA w/o Grassmann, which retains single-factor DP-NLU: GLUE NLG: E2E NLG Challenge Method MNLI SST-2 QQP QNLI Average BLEU ↑ NIST ↑ MET ↑ ROUGE-L ↑ CIDEr ↑                                                                                                                                                                   
+
+> Matched Mismatched
+> FedAvg 85.33 ±13.97 85.29 ±15.22 93.46 ±13.12 87.28 ±10.32 57.72 ±12.51 81.82 ±7.18 23.04 1.87 47.56 49.81 2.21 FFA-LoRA 82.07 ±1.82 82.50 ±1.84 93.69 ±0.17 84.78 ±3.11 89.69 ±1.08 86.55 ±1.01 27.51 2.67 52.21 52.36 2.32 FedSVD 82.73 ±2.13 82.79 ±2.25 93.12 ±0.53 85.35 ±2.35 89.97 ±1.43 86.79 ±1.62 26.32 2.18 50.91 52.58 2.31 FedASK 85.25 ±3.36 85.39 ±2.91 67.66 ±1.09 87.09 ±2.66 50.54 ±2.64 75.19 ±2.17 29.61 3.98 54.05 50.01 2.17 LA-LoRA 80.06 ±2.21 80.33 ±1.52 91.28 ±0.56 82.78 ±2.54 86.91 ±1.40 84.27 ±1.66 28.43 4.46 53.67 46.96 1.83 AS-LoRA 81.34 ±3.76 82.00 ±3.01 90.48 ±0.99 84.44 ±2.40 88.17 ±2.75 85.29 ±2.23 27.69 2.60 52.34 52.79 2.32
+> FedGSA (ours) 87.01 ±2.95 87.57 ±2.52 92.01 ±0.21 87.12 ±3.59 90.33 ±1.73 88.81 ±1.85 30.32 3.08 54.56 53.45 2.40
+
+Table 2: NLU results on five GLUE tasks without privacy constraints under a non-IID Dirichlet split ( α = 0 .5). NLG results are obtained using GPT-2 on the E2E NLG Challenge with DP ( ϵ ∈ { 3, 6}, δ = 10 −5) under the same data split. 020 40 60 80 100 120 140 0.3 0.4 0.5 0.6 0.7 0.8 Accuracy Round FedGSA FedGSA w/o Grassmann 
+
+Figure 4: Ablation study of Grassmann aggregation on MNLI with RoBERTa-base under DP ( ϵ = 6 , δ = 10 −5) and a non-IID Dirichlet split ( α = 0 .5). 
+
+Euclidean Aggregation Grassmann Aggregation 
+
+A and B 72.85 73.97 Freeze A 64.30 77.36 
+
+Table 3: Ablation of client optimization and server aggrega-tion on MNLI-matched under DP ( ϵ = 6 , δ = 10 −5) and a non-IID Dirichlet split ( α = 0 .5). SGD but replaces projection-based subspace aggregation with truncated SVD of the Euclidean-averaged update. All other settings remain unchanged. As shown in Fig. 4, FedGSA reaches 70% accuracy by round 14, whereas the ablated variant requires 96 rounds. At round 150, FedGSA achieves 78 .61% , outperforming the variant by 3.43% ; over the final 20 rounds, their average accuracies are 78 .55% 
+
+and 74 .68% , respectively. These results demonstrate that Grassmann aggregation better preserves basis-invariant di-rectional consensus under privacy noise and client hetero-geneity, thereby improving convergence and final utility. 
+
+Interaction between Local Optimization and Aggrega-tion. We conduct a 2 × 2 ablation study to examine the in-teraction between client-side LoRA optimization and server-side aggregation. As shown in Table 3, Grassmann aggrega-tion improves accuracy by 1.12% when both A and B are updated, but yields a substantially larger gain of 13 .06 points when A is frozen. Moreover, freezing A decreases accu-racy by 8.55 points under Euclidean aggregation, whereas it improves accuracy by 3.39 points under Grassmann aggrega-tion. The complete FedGSA configuration therefore achieves the best accuracy of 77 .36% . These results reveal a strong interaction between the two components: single-factor pri-vate optimization suppresses multiplicative DP noise, while geometry-consistent aggregation preserves directional con-sensus and alleviates the expressiveness loss induced by fix-ing one LoRA factor. 
+
+## Conclusion 
+
+In this work, we studied differentially private federated LoRA from a basis-invariant geometric perspective. We identified that factor-wise Euclidean aggregation is sensitive to the non-uniqueness of low-rank representations, causing cross-client subspace misalignment under privacy noise and data hetero-geneity. To address this issue, we proposed FedGSA, which combines single-factor private optimization with geometry-consistent aggregation on the Grassmann manifold. FedGSA maps privatized client updates to projection representations, estimates a consensus update subspace, and reconstructs global LoRA factors within that subspace. We proved that these server-side operations introduce no additional privacy loss and established convergence under standard assump-tions. Experiments on GLUE and E2E NLG demonstrate consistent gains across privacy budgets and heterogeneity levels, while ablations confirm the complementary roles of noise suppression and subspace aggregation for robust fed-erated adaptation. References 
+
+Abadi, M.; Chu, A.; Goodfellow, I.; McMahan, H. B.; Mironov, I.; Talwar, K.; and Zhang, L. 2016. Deep learn-ing with differential privacy. In Proceedings of the 2016 ACM SIGSAC conference on computer and communications security , 308–318. Absil, P.-A.; Mahony, R.; and Sepulchre, R. 2008. Optimiza-tion algorithms on matrix manifolds . Princeton University Press. Boyd, S.; and Vandenberghe, L. 2004. Convex optimization .Cambridge university press. Chen, S.; Ju, Y.; Dalal, H.; Zhu, Z.; and Khisti, A. 2024. Ro-bust federated finetuning of foundation models via alternat-ing minimization of lora. arXiv preprint arXiv:2409.02346 .Dwork, C.; Roth, A.; et al. 2014. The algorithmic founda-tions of differential privacy. Foundations and trends ® in theoretical computer science , 9(3–4): 211–407. Edelman, A.; Arias, T. A.; and Smith, S. T. 1998. The geometry of algorithms with orthogonality constraints. SIAM journal on Matrix Analysis and Applications , 20(2): 303– 353. Geng, J.; Mou, Y.; Li, Q.; Li, F.; Beyan, O.; Decker, S.; and Rong, C. 2023. Improved gradient inversion attacks and defenses in federated learning. IEEE Transactions on Big Data , 10(6): 839–850. Golub, G. H.; and Van Loan, C. F. 2013. Matrix computa-tions . JHU press. Guo, Z.; Zhang, Y.; Zhang, Z.; Xu, Z.; and King, I. 2024. Fedlfc: Towards efficient federated multilingual modeling with lora-based language family clustering. In Findings of the Association for Computational Linguistics: NAACL 2024 ,1519–1528. Han, Z.; Gao, C.; Liu, J.; Zhang, J.; and Zhang, S. Q. 2024. Parameter-efficient fine-tuning for large models: A compre-hensive survey. arXiv preprint arXiv:2403.14608 .Horn, R. A.; and Johnson, C. R. 2012. Matrix analysis .Cambridge university press. Huang, Y.; Gupta, S.; Song, Z.; Li, K.; and Arora, S. 2021. Evaluating gradient inversion attacks and defenses in feder-ated learning. Advances in neural information processing systems , 34: 7232–7241. Kang, T.; Wang, Z.; He, H.; Zhang, J.; Song, S.; and Letaief, K. B. 2024. Federated Low-Rank Adaptation with Dif-ferential Privacy over Wireless Networks. arXiv preprint arXiv:2411.07806 .Kim, M.; Park, S.; Han, Y.; and Ahn, J.-H. 2026. Adap-tive Selection of LoRA Components in Privacy-Preserving Federated Learning. arXiv preprint arXiv:2605.05769 .Lee, S.; Park, S.; Lee, D. B.; Wagner, D.; Seong, H.; Bocklet, T.; Lee, J.; and Hwang, S. J. 2025. FedSVD: Adaptive Or-thogonalization for Private Federated Learning with LoRA. 
+
+arXiv preprint arXiv:2505.12805 .Li, T.; Sahu, A. K.; Talwalkar, A.; and Smith, V. 2020. Fed-erated learning: Challenges, methods, and future directions. 
+
+IEEE signal processing magazine , 37(3): 50–60. Liu, J.; Miao, Y.; Xi, N.; and Liu, J. 2026. Rethinking LoRA for Privacy-Preserving Federated Learning in Large Models. 
+
+arXiv preprint arXiv:2602.19926 .Liu, X.-Y.; Zhu, R.; Zha, D.; Gao, J.; Zhong, S.; White, M.; and Qiu, M. 2025. Differentially private low-rank adapta-tion of large language model using federated learning. ACM Transactions on Management Information Systems , 16(2): 1–24. Liu, Y.; Ott, M.; Goyal, N.; Du, J.; Joshi, M.; Chen, D.; Levy, O.; Lewis, M.; Zettlemoyer, L.; and Stoyanov, V. 2019. Roberta: A robustly optimized bert pretraining approach. 
+
+arXiv preprint arXiv:1907.11692 .Novikova, J.; Dušek, O.; and Rieser, V. 2017. The E2E dataset: New challenges for end-to-end generation. In Pro-ceedings of the 18th annual SIGdial meeting on discourse and dialogue , 201–206. Radford, A.; Wu, J.; Child, R.; Luan, D.; Amodei, D.; Sutskever, I.; et al. 2019. Language models are unsuper-vised multitask learners. OpenAI blog , 1(8): 9. Sharma, L.; Graesser, L.; Nangia, N.; and Evci, U. 2019. Natural language understanding with the quora question pairs dataset. arXiv preprint arXiv:1907.01041 .Socher, R.; Perelygin, A.; Wu, J.; Chuang, J.; Manning, C. D.; Ng, A. Y.; and Potts, C. 2013. Recursive deep models for semantic compositionality over a sentiment treebank. In 
+
+Proceedings of the 2013 conference on empirical methods in natural language processing , 1631–1642. Sun, Y.; Li, Z.; Li, Y.; and Ding, B. 2024. Improving lora in privacy-preserving federated learning. arXiv preprint arXiv:2403.12313 .Wang, A.; Singh, A.; Michael, J.; Hill, F.; Levy, O.; and Bowman, S. 2018. GLUE: A multi-task benchmark and analysis platform for natural language understanding. In 
+
+Proceedings of the 2018 EMNLP workshop BlackboxNLP: Analyzing and interpreting neural networks for NLP , 353– 355. Wang, Z.; Shen, Z.; He, Y.; Sun, G.; Wang, H.; Lyu, L.; and Li, A. 2024. Flora: Federated fine-tuning large lan-guage models with heterogeneous low-rank adaptations. 
+
+Advances in Neural Information Processing Systems , 37: 22513–22533. Wen, M.; Zhu, J.; Xu, Y.; Zhou, Y.; and Han, D. 2025. Dif-ferentially Private Federated Low Rank Adaptation Beyond Fixed-Matrix. arXiv preprint arXiv:2507.09990 .Williams, A.; Nangia, N.; and Bowman, S. 2018. Abroad-coverage challenge corpus for sentence understanding through inference. In Proceedings of the 2018 conference of the North American chapter of the association for compu-tational linguistics: human language technologies, volume 1 (long papers) , 1112–1122. Yin, X.; Zhu, Y.; and Hu, J. 2021. A comprehensive survey of privacy-preserving federated learning: A taxonomy, review, and future directions. ACM Computing Surveys (CSUR) ,54(6): 1–36. Zhang, H.; Kim, D.; Cha, S.; and Vikalo, H. 2026. FedRot-LoRA: Mitigating Rotational Misalignment in Federated LoRA. arXiv preprint arXiv:2602.23638 .Zhang, J.; Vahidian, S.; Kuo, M.; Li, C.; Zhang, R.; Yu, T.; Wang, G.; and Chen, Y. 2024. Towards building the federatedgpt: Federated instruction tuning. In ICASSP 2024-2024 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP) , 6915–6919. IEEE. Zhang, S.; Dong, L.; Li, X.; Zhang, S.; Sun, X.; Wang, S.; Li, J.; Hu, R.; Zhang, T.; Wang, G.; et al. 2023. Instruction tuning for large language models: A survey. ACM Computing Surveys .Zhu, L.; Liu, Z.; and Han, S. 2019. Deep leakage from gra-dients. Advances in neural information processing systems ,32.

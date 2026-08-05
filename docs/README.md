@@ -6,47 +6,47 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-04
-- 运行时间：2026-08-04 21:58:54 UTC
+- 最新运行日期：2026-08-05
+- 运行时间：2026-08-05 21:15:51 UTC
 - 运行状态：成功
-- 本次总论文数：9
-- 精读区：6
+- 本次总论文数：8
+- 精读区：5
 - 速读区：3
 
 ### 今日简报（AI）
-今日9篇论文聚焦联邦学习安全与隐私保护，重点覆盖拜占庭鲁棒审计及脑病变分割场景。最值得精读《FL-OA》的联邦学习外包审计框架，以及《相似度加权聚合+全局差分隐私》的实用方案。建议普通读者优先关注联邦学习中的聚合安全与差分隐私权衡，速读方向可留意隐私保护向量检索与RAG。
-- 详情：[/202608/04/README](/202608/04/README)
+- 今日共生成 8 篇推荐（精读 5 篇，速读 3 篇）
+- 精读：《FedGSA: Geometry-Consistent Subspace Aggregation for Differentially Private Federated LoRA》（10.0/10）, 《Noise-Aware Shrinkage for Differentially Private Zeroth-Order Fine-Tuning of Large Language Models》（9.0/10）
+- 速读：《Dependency Triad: A Metric to Quantify the Dependencies Between Attributes for Local Differential Privacy》（7.0/10）, 《MESS: Fast and Private Semantic Search on Multi-Graph HNSW》（6.0/10）, 《RH-RAG: Trustworthy Long-Form Generation for Privacy-Constrained Settings》（6.0/10）
+- 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
+- 详情：[/202608/05/README](/202608/05/README)
 
 ### 精读区论文标签
-1. [FL-OA: A Byzantine-Robust Federated Learning Framework with Outsourced Auditing for Intelligent Devices](/202608/04/2608.01095v1-fl-oa-a-byzantine-robust-federated-learning-framework-with-outsourced-auditing-for-intelligent-devices)  
+1. [FedGSA: Geometry-Consistent Subspace Aggregation for Differentially Private Federated LoRA](/202608/05/2608.03267v1-fedgsa-geometry-consistent-subspace-aggregation-for-differentially-private-federated-lora)  
    标签：评分：10.0/10、query:daily
-   evidence：联邦学习、拜占庭鲁棒性、不共享原始数据的隐私保护
-2. [Similarity Weighted Aggregation with Global Differential Privacy for Federated Brain Lesion Segmentation](/202608/04/2608.00872v1-similarity-weighted-aggregation-with-global-differential-privacy-for-federated-brain-lesion-segmentation)  
+   evidence：差分隐私联邦LoRA聚合，直接针对分布式机器学习中的隐私问题
+2. [Noise-Aware Shrinkage for Differentially Private Zeroth-Order Fine-Tuning of Large Language Models](/202608/05/2608.03277v1-noise-aware-shrinkage-for-differentially-private-zeroth-order-fine-tuning-of-large-language-models)  
    标签：评分：9.0/10、query:daily
-   evidence：联邦学习结合全局差分隐私与相似性加权聚合的脑病灶分割方法，直接面向分布式机器学习的隐私保护
-3. [Inverting the Hidden: Unveiling Multimodal Privacy Leakage in Collaborative LVLM Inference](/202608/04/2608.01020v1-inverting-the-hidden-unveiling-multimodal-privacy-leakage-in-collaborative-lvlm-inference)  
-   标签：评分：9.0/10、query:daily
-   evidence：协同大视觉语言模型推理中的隐私泄漏
-4. [Cluster-Aware Over-the-Air Federated Learning with Energy-Harvesting Devices: From Global Training to Model Personalization](/202608/04/2608.01426v1-cluster-aware-over-the-air-federated-learning-with-energy-harvesting-devices-from-global-training-to-model-personalization)  
-   标签：评分：9.0/10、query:daily
-   evidence：联邦学习在分布式机器学习中保护隐私
-5. [StraightDP: Geometry-Aware Differential Privacy for Rectified-Flow Transformers](/202608/04/2607.29100v1-straightdp-geometry-aware-differential-privacy-for-rectified-flow-transformers)  
+   evidence：将差分隐私融入大模型微调的零阶优化，直接对应分布式机器学习中的隐私保护
+3. [A Unified Benchmark for Privacy-preserving Vector Search](/202608/05/2608.01192v1-a-unified-benchmark-for-privacy-preserving-vector-search)  
    标签：评分：8.0/10、query:daily
-   evidence：生成模型训练中的差分隐私
-6. [Differentially Private Nonparametric Modal Learning with Applications to Regression and Clustering](/202608/04/2607.29675v1-differentially-private-nonparametric-modal-learning-with-applications-to-regression-and-clustering)  
+   evidence：隐私保护向量检索基准
+4. [DP-MemView: A Memory Interface for Attribute-Level Transcript Privacy in Long-Term LLM Agents](/202608/05/2608.03130v1-dp-memview-a-memory-interface-for-attribute-level-transcript-privacy-in-long-term-llm-agents)  
    标签：评分：8.0/10、query:daily
-   evidence：差分隐私众数学习，采用梯度裁剪与高斯噪声
+   evidence：LLM记忆接口的差分隐私
+5. [Trust-Aware Topology Learning for Dynamic Decentralized Federated Learning under Adversaries](/202608/05/2608.03156v1-trust-aware-topology-learning-for-dynamic-decentralized-federated-learning-under-adversaries)  
+   标签：评分：8.0/10、query:daily
+   evidence：对抗投毒下动态去中心化联邦学习的信任感知拓扑学习
 
 ### 速读区论文标签
-1. [GoldenRetriever: Non-Interactive Homomorphic Encrypted Retrieval for Privacy-Preserving RAG](/202608/04/2607.29019v1-goldenretriever-non-interactive-homomorphic-encrypted-retrieval-for-privacy-preserving-rag)  
+1. [Dependency Triad: A Metric to Quantify the Dependencies Between Attributes for Local Differential Privacy](/202608/05/2608.03737v1-dependency-triad-a-metric-to-quantify-the-dependencies-between-attributes-for-local-differential-privacy)  
    标签：评分：7.0/10、query:daily
-   evidence：面向隐私保护RAG的同态加密检索
-2. [A Unified Benchmark for Privacy-preserving Vector Search](/202608/04/2608.01192v1-a-unified-benchmark-for-privacy-preserving-vector-search)  
-   标签：评分：7.0/10、query:daily
-   evidence：面向机器学习基础设施的隐私保护向量搜索基准
-3. [Bridging Differential Privacy and Random Triangles](/202608/04/2608.01412v1-bridging-differential-privacy-and-random-triangles)  
-   标签：评分：7.0/10、query:daily
-   evidence：差分隐私是分布式机器学习隐私保护的基础技术
+   evidence：面向分布数据收集的局部差分隐私属性依赖度量，量化关联引发的隐私泄露
+2. [MESS: Fast and Private Semantic Search on Multi-Graph HNSW](/202608/05/2607.28999v2-mess-fast-and-private-semantic-search-on-multi-graph-hnsw)  
+   标签：评分：6.0/10、query:daily
+   evidence：基于LSH和随机响应的多图HNSW私有语义搜索
+3. [RH-RAG: Trustworthy Long-Form Generation for Privacy-Constrained Settings](/202608/05/2608.01311v1-rh-rag-trustworthy-long-form-generation-for-privacy-constrained-settings)  
+   标签：评分：6.0/10、query:daily
+   evidence：隐私受限环境下的可信长文本生成
 
 
 <div class="dpr-home-promo-card">
